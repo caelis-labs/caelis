@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"iter"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -93,20 +92,7 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			grants, err := NewMCPGrantStore(filepath.Join(t.TempDir(), "mcp-grants.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !deny {
-				grant, err := mcpGrantFor(late.Definition(), active)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := grants.Grant(grant, "session", active.SessionID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			runtime, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", MCPGrants: grants})
+			runtime, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test"})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -70,7 +70,6 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	def := fixtureMCPDefinition("v1")
 	def.Name = "fixture__exec"
 	def.InputSchema = map[string]any{"type": "object", "properties": map[string]any{"script": map[string]any{"type": "string", "enum": []string{"observe"}}}, "required": []string{"script"}, "additionalProperties": false}
-	def.Metadata[tool.MetadataMCPSourceTrusted] = true
 	def.Metadata[tool.MetadataMCPServer] = "desktop-world"
 	def.Metadata[tool.MetadataMCPTool] = "exec"
 	var bitmap bytes.Buffer

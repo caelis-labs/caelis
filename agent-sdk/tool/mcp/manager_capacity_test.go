@@ -78,7 +78,7 @@ func TestManagerMCPSourceFingerprintChangesWithConnectionAndSchema(t *testing.T)
 	base := ServerSpec{PluginID: "fixture", Name: "docs", Transport: TransportStreamableHTTP, URL: "https://mcp.test/v1"}
 	first := definition(base, map[string]any{"type": "object"})
 	trusted := base
-	trusted.SourceTrusted = true
+	trusted.IntegrationID = "host-selected-integration"
 	if first != definition(trusted, map[string]any{"type": "object"}) {
 		t.Fatal("Host approval policy changed remote source fingerprint")
 	}

@@ -376,49 +376,39 @@ paired under the outer call ID and `mcp_call` name. MCP schemas never join model
 describes refresh and final dispatch. The stable-tools contract does not promise
 that the entire model request prefix is unchanged.
 
-Every MCP invocation reaches Runtime policy admission, including tools loaded
-through ToolSearch, plugins, and injected MCP sources. A ready connection,
-discovery, or `readOnlyHint` is not execution approval. The default MCP approval
-offers Allow Once, Allow this session, Allow Always, and Cancel. Session grants
-bind the current canonical Session ID and creation time across Turns. Always
-grants bind the trusted configuration owner, workspace, plugin, server,
-projected and remote tool names, and fingerprint of the accepted server
-configuration, declared server version, and tool definition across Sessions and
-restarts. Ordinary and explicitly profiled Sessions share the authenticated Host
-configuration owner. An Always grant is reusable only when its workspace and
-exact MCP source match; a profile or Surface does not create another permission
-namespace. For stdio, the source
-fingerprint includes a digest of the effective environment frozen when the
-process transport is created, without exposing environment values in metadata.
-A changed source or schema needs new approval. A cached MCP grant only satisfies
-the source gate; a custom policy's per-call approval still applies to that call.
-Trusted Host assembly may instead mark a source `SourceTrusted`; Manager projects
-that assertion in tool metadata, independently of remote metadata and the source
-fingerprint. It skips only ordinary source approval for all of that source's
-tools, including after version or schema changes. Explicit per-call Ask and Deny
-still apply. `SourceTrustedTools` limits that assertion to exact remote tool
-names. Ordinary MCP configuration and remote tool metadata cannot set these
-Host-only assertions.
+Every tool invocation reaches the same Runtime Policy admission, whether called
+directly, through deferred MCP discovery, or from Code Mode. Policy is the sole
+Allow/Deny/Ask authority. SDK embedders can supply their own final policy;
+Runtime adds no MCP-specific approval gate. Discovery and server annotations do
+not themselves authorize execution.
 
-Host assembly may set `ServerSpec.ToolResourceParameters` to require Session
-approval for one top-level string argument of an exact remote tool. Manager
-projects the parameter through `MetadataMCPResourceParameter`; Runtime validates
-the argument and extends the existing grant identity with its exact parameter
-name and value. It never parses the script or infers scope from display text.
-Resource grants offer only Allow this session and Cancel. Broad tool/Always
-grants cannot cover a resource call. The same Host grant store coordinates
-concurrent first calls for that exact resource and Session; approval failure,
-denial, cancellation, or revocation prevents dispatch. A cached resource grant
-still leaves explicit per-call policy Ask/Deny in force. Product-specific tool
-and parameter mappings belong in Control, not in the SDK or the tool server.
+The product's `control/toolpolicy` mode combines native per-call restrictions
+with source consent into one decision and approval request. Ordinary MCP offers
+Once, Session, Always, and Cancel. Scope uses the authenticated configuration
+owner, workspace, exact tool binding and source revision. Session consent also
+binds Session ID and creation time. Always writes an exact rule to the existing
+AppConfig through the configuration CAS and command ledger, using the original
+approval decision identity. Ordinary and application Sessions use that same
+owner. Revoked rule identities cannot be recreated by a late approval retry.
+A failed or uncertain settlement stops the pending invocation; a committed
+configuration mutation is not permission to replay its tool effect.
 
-The Host keeps grants in
-`control/mcp-grants.json`; stopping the Host and deleting that file revokes all
-grants. The Host-owned `MCPGrantStore.Revoke` API removes an individual grant
-while running. For sources requiring approval, only a selected matching option
-authorizes the remote call; approval failure, cancellation, and invalid responses
-fail closed. Explicit full-access policy does not itself satisfy the MCP source
-gate; its existing built-in tool behavior is unchanged.
+Session consent is projected from typed resolved approval facts. Legacy pause
+tokens and `control/mcp-grants.json` are never imported as permission. The old
+file is inert and may be removed after preserving any desired audit copy.
+Resource-wide approvals cannot become permanent rules. Policy consumes detached
+Session evidence; it never writes a second grants store. Source facts supplied
+by trusted Host assembly are separate from remote tool metadata. For stdio,
+revision includes the frozen effective environment without exposing its values.
+
+Desktop World integration details belong to [Plugins](plugins.md). Runtime only
+understands typed approval scope and choice persistence. It shares a pending
+pure resource approval among current waiters; per-call risks remain separate.
+Leader cancellation leaves surviving waiters active, and the last waiter
+cancels the request. Before dispatch, after existing unsafe-target serialization,
+a single-use permit checks cancellation, revocation and current Policy validity
+under a short owner lock. No permission lock spans MCP I/O. A newer revocation
+or source revision invalidates the old consent; a late response cannot restore it.
 
 ToolSearch defaults to a private model selector. Every ready tool's name and
 description in the current scope is considered, with no initial tool schemas or

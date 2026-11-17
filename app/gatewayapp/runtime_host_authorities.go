@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -34,6 +33,7 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
+	policyRuleCommands      appserver.PolicyRuleCommandService
 	sessionProfiles         *sessionprofile.Store
 	applicationChildClients *applicationChildClientFactory
 	collaboration           *collaboration.Service
@@ -56,7 +56,6 @@ type runtimeHostAuthorities struct {
 	controlFeeds            appserver.FeedRegistry
 	controlFeedLifecycle    appserver.FeedRegistryLifecycle
 	approvalRecovery        *appserver.ApprovalRecoveryGate
-	mcpGrants               *runtime.MCPGrantStore
 	codexAuth               *codexauth.Manager
 	grokAuth                *grokauth.Manager
 	apiKeyCredentials       *credentialstore.Store

@@ -38,12 +38,8 @@ type Config struct {
 	DefaultPolicyMode   string
 	SandboxPolicy       sandbox.PolicySnapshot
 	DefaultApprovalMode string
-	// MCPGrants is shared by all Session Runtime activations in one Host.
-	MCPGrants *MCPGrantStore
-	// MCPGrantOwner is a trusted configuration owner for durable MCP grants.
-	// Empty uses the ordinary Host owner; applications bind their authenticated
-	// connection scope here so independent configurations never share grants.
-	MCPGrantOwner            string
+	// PersistPolicyConsent uses the embedding's existing configuration owner.
+	PersistPolicyConsent     PolicyConsentWriter
 	Controllers              controller.Backend
 	ControllerContextRouter  controller.ContextRouter
 	ControllerRecovery       controller.RecoveryCoordinator
@@ -89,8 +85,9 @@ type Runtime struct {
 	defaultPolicyMode        string
 	sandboxPolicy            sandbox.PolicySnapshot
 	defaultApprovalMode      approval.Mode
-	mcpGrants                *MCPGrantStore
-	mcpGrantOwner            string
+	persistPolicyConsent     PolicyConsentWriter
+	authorizationMu          sync.Mutex
+	authorizationFlights     map[string]*authorizationFlight
 	controllers              controller.Backend
 	controllerContextRouter  controller.ContextRouter
 	controllerRecovery       controller.RecoveryCoordinator
@@ -107,7 +104,7 @@ type Runtime struct {
 	mu                      sync.RWMutex
 	runStates               map[string]agent.RunState
 	activeRunners           map[string]activeRun
-	approvalWaiters         map[string]chan agent.ApprovalResponse
+	approvalWaiters         map[string]approvalWaiter
 	tasks                   *taskRuntime
 	taskOutput              output.Binder
 	terminals               *terminalService
@@ -141,8 +138,7 @@ func New(cfg Config) (*Runtime, error) {
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
-		mcpGrants:                cfg.MCPGrants,
-		mcpGrantOwner:            strings.TrimSpace(cfg.MCPGrantOwner),
+		persistPolicyConsent:     cfg.PersistPolicyConsent,
 		controllers:              cfg.Controllers,
 		controllerContextRouter:  cfg.ControllerContextRouter,
 		controllerRecovery:       cfg.ControllerRecovery,
@@ -152,7 +148,7 @@ func New(cfg Config) (*Runtime, error) {
 		taskOutput:               cfg.TaskOutput,
 		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},
-		approvalWaiters:          map[string]chan agent.ApprovalResponse{},
+		approvalWaiters:          map[string]approvalWaiter{},
 		participantPromptClaims:  map[participantPromptKey]struct{}{},
 		lifecycle: agent.LifecycleOptions{
 			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),

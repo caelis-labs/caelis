@@ -26,6 +26,7 @@ import (
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/control/toolpolicy"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
@@ -155,10 +156,10 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
-		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
-		MCPGrants:     a.deps.authorities.mcpGrants,
-		SandboxPolicy: sandboxPolicy,
-		TaskStore:     a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,
+		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules}, DefaultPolicyMode: mode,
+		PersistPolicyConsent: instance.persistPolicyConsent,
+		SandboxPolicy:        sandboxPolicy,
+		TaskStore:            a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,
 		TaskActivityChanged: activity.taskChanged, TaskCommitted: activity.taskCommitted,
 		ChildApprovalRequester:  backgroundChildApprovalRequester{composition: &instance.runtimeComposition},
 		ControllerContextRouter: contextRouter, ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),

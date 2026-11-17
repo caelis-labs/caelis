@@ -328,9 +328,7 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 		} else if args["app"] != executable {
 			return agent.ApprovalResponse{}, fmt.Errorf("approval escaped fixture")
 		}
-		if r.Tool.Metadata[tool.MetadataMCPSourceTrusted] == true {
-			return agent.ApprovalResponse{}, fmt.Errorf("source unexpectedly trusted")
-		}
+
 		mu.Lock()
 		approvals = append(approvals, map[string]any{"target": r.Tool.Name, "remote": remote, "args": args, "approval": r.Approval, "response": "allow_once"})
 		mu.Unlock()
@@ -423,7 +421,7 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 		}
 		save("model-requests.json", driver.requests)
 	}()
-	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: executor}}, DeferredTools: manager}, nil, requester)
+	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: executor}}, DeferredTools: manager}, mcpAskFixturePolicy(), requester)
 	events, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)

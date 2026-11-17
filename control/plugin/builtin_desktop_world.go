@@ -264,7 +264,7 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if err == nil {
 		out.Sources[0].Status = "builtin"
 	}
-	return out, err
+	return selectDesktopToolset(out), err
 }
 
 // IsProductPlugin reports the fixed capability's stable identity, including
@@ -289,7 +289,10 @@ func IsProductPlugin(config Config) bool {
 func WithProductContributions(optional Contributions, paths RuntimePaths, defaults ...Config) (Contributions, error) {
 	for _, source := range optional.Sources {
 		if source.ID == "desktop-world" {
-			return optional, validateProductPair(optional)
+			if err := validateProductPair(optional); err != nil {
+				return Contributions{}, err
+			}
+			return selectDesktopToolset(optional), nil
 		}
 	}
 	fixed, selected, err := productOverride(defaults, paths)
@@ -299,6 +302,7 @@ func WithProductContributions(optional Contributions, paths RuntimePaths, defaul
 	if err != nil {
 		return Contributions{}, err
 	}
+	fixed = selectDesktopToolset(fixed)
 	optional.Sources = append(fixed.Sources, optional.Sources...)
 	optional.SkillBundles = append(fixed.SkillBundles, optional.SkillBundles...)
 	optional.MCPServerSpecs = append(fixed.MCPServerSpecs, optional.MCPServerSpecs...)

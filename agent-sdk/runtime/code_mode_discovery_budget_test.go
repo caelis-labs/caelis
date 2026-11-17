@@ -26,7 +26,6 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 				def.Name = name
 				def.Metadata[tool.MetadataMCPTool] = strings.TrimPrefix(name, "fixture__")
 				def.Description = "fixture schema budget lookup"
-				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 				def.InputSchema = map[string]any{"type": "object"}
 				if strings.HasSuffix(name, "huge") {
 					def.InputSchema["description"] = strings.Repeat("complete schema data ", 10000)

@@ -61,7 +61,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	if _, err := client.AddPluginPath(ctx, appserver.AddPluginPathRequest{WriteBase: appserver.WriteBase{OperationID: "standalone-source", ExpectedRevision: &status.Configuration.Revision}, Path: installed}); err != nil {
 		t.Fatal(err)
 	}
-	selected := nativeProfilePackageHTTP(t, "0.3.3")
+	selected := nativeProfilePackageHTTP(t, "0.5.2")
 	plugins := []sessionprofile.Plugin{{Root: selected, MCPServers: []sessionprofile.MCPServer{{Name: "desktop-world", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestNativeProfilePluginMCPHelper$", "--", "native-profile-plugin-helper", audit}, WorkDir: selected}}}}
 	request := appserver.UpdateSessionConfigurationRequest{WriteBase: appserver.WriteBase{OperationID: "worker-plugin-original", SessionID: created.SessionID}, ExpectedConfigurationRevision: 1, Patch: sessionprofile.ConfigurationPatch{Plugins: &plugins}}
 	if _, err := foreign.UpdateSessionConfiguration(ctx, request); errorcode.CodeOf(err) != errorcode.PermissionDenied {
@@ -112,7 +112,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("native worker app approvals=%d", n)
 	}
 	health, err := client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != selected || health.Plugins[0].Version != "0.3.3" || len(health.Servers) != 1 || health.Servers[0].PluginID != "desktop-world" || len(health.Skills) != 1 || health.Skills[0].Name != "desktop-world:desktop-world" {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != selected || health.Plugins[0].Version != "0.5.2" || len(health.Servers) != 1 || health.Servers[0].PluginID != "desktop-world" || len(health.Skills) != 1 || health.Skills[0].Name != "desktop-world:desktop-world" {
 		t.Fatalf("native assembly: %+v %v", health, err)
 	}
 	// Replaying the exact command returns the saved receipt, not another update.
@@ -146,7 +146,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	for _, event := range loaded.Events {
 		if event.Journal != nil && event.Journal.ToolExecution != nil {
 			r := event.Journal.ToolExecution
-			if r.ToolName == "desktop_world__exec" && r.Status == session.ToolExecutionSucceeded {
+			if r.ToolName == "desktop_world__look" && r.Status == session.ToolExecutionSucceeded {
 				if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.ID == "" || r.Binding == nil || r.Binding.Identity == "" {
 					t.Fatal("native worker result lost original JS child identity")
 				}
@@ -158,7 +158,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	if err != nil || executions != 2 || len(strings.Fields(string(remote))) != 2 {
 		t.Fatalf("native exec counts local=%d remote=%d err=%v", executions, len(strings.Fields(string(remote))), err)
 	}
-	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.3.3") || !strings.Contains(provider.snapshot(), `"RunCommand"`) {
+	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.5.2") || !strings.Contains(provider.snapshot(), `"RunCommand"`) {
 		t.Fatal("paired native Skill or native tools lost")
 	}
 	clear := request

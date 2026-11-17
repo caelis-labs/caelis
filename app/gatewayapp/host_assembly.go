@@ -109,6 +109,7 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	}
 	stack.controlClient = controlClient
 	stack.configurationCommands = controlCommands
+	stack.composition.authorities.policyRuleCommands = controlCommands
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
 	stack.sessionProfiles, err = appserver.NewSessionProfileService(appserver.SessionProfileServiceConfig{

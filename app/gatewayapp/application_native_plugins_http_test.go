@@ -34,17 +34,16 @@ func TestNativeProfilePluginMCPHelper(t *testing.T) {
 		t.Fatal("missing synthetic remote audit path")
 	}
 	audit := os.Args[marker+1]
-	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "native-profile-plugin", Version: "0.3.3"}, nil)
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "native-profile-plugin", Version: "0.5.2"}, nil)
 	for _, name := range []string{"apps"} {
 		mcpsdk.AddTool[map[string]any, any](server, &mcpsdk.Tool{Name: name, Description: "Synthetic read."}, func(context.Context, *mcpsdk.CallToolRequest, map[string]any) (*mcpsdk.CallToolResult, any, error) {
 			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "SYNTHETIC_READ"}}}, nil, nil
 		})
 	}
-	type execInput struct {
-		App    string `json:"app"`
-		Source string `json:"source"`
+	type appInput struct {
+		App string `json:"app"`
 	}
-	mcpsdk.AddTool[execInput, any](server, &mcpsdk.Tool{Name: "exec", Description: "Synthetic app effect."}, func(_ context.Context, _ *mcpsdk.CallToolRequest, in execInput) (*mcpsdk.CallToolResult, any, error) {
+	mcpsdk.AddTool[appInput, any](server, &mcpsdk.Tool{Name: "look", Description: "Synthetic app effect."}, func(_ context.Context, _ *mcpsdk.CallToolRequest, in appInput) (*mcpsdk.CallToolResult, any, error) {
 		file, err := os.OpenFile(audit, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, nil, err
@@ -99,7 +98,7 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 	message := map[string]any{"role": "assistant", "content": "NATIVE_PLUGIN_DONE"}
 	finish := "stop"
 	if len(payload.Tools) == 1 && payload.Tools[0].Function.Name == "InspectToolSchema" {
-		message["content"] = `{"tools":["desktop_world__apps","desktop_world__exec"]}`
+		message["content"] = `{"tools":["desktop_world__apps","desktop_world__look"]}`
 	} else {
 		phase := 0
 		app := "fixture.app.one"
@@ -132,7 +131,7 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 		case 2:
 			args = map[string]any{"tool_name": "desktop_world__apps", "arguments": map[string]any{}}
 		case 3, 4:
-			args = map[string]any{"tool_name": "desktop_world__exec", "arguments": map[string]any{"app": app, "source": "return 'synthetic';"}}
+			args = map[string]any{"tool_name": "desktop_world__look", "arguments": map[string]any{"app": app}}
 		default:
 			name = ""
 		}
@@ -196,7 +195,7 @@ func settleNativeProfileHTTPBeforeApproval(t *testing.T, ctx context.Context, cl
 				before()
 				before = nil
 			}
-			if active.Permission == nil || active.Permission.ToolCall.Name != "desktop_world__exec" || len(active.Permission.Options) != 2 {
+			if active.Permission == nil || active.Permission.ToolCall.Name != "desktop_world__look" || len(active.Permission.Options) != 2 {
 				t.Fatalf("native app approval lost its identity/scope: %+v", active)
 			}
 			approvals++
@@ -247,7 +246,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if _, err := client.AddPluginPath(ctx, appserver.AddPluginPathRequest{WriteBase: appserver.WriteBase{OperationID: "standalone-plugin", ExpectedRevision: &status.Configuration.Revision}, Path: installed}); err != nil {
 		t.Fatal(err)
 	}
-	selected := nativeProfilePackageHTTP(t, "0.3.2")
+	selected := nativeProfilePackageHTTP(t, "0.5.1")
 	profile := applicationHTTPProfile()
 	profile.Instructions = "Use the selected synthetic plugin."
 	profile.Tools = nil
@@ -287,7 +286,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatalf("first app approvals=%d", n)
 	}
 	observed, err := client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != selected || observed.Plugins[0].Version != "0.3.2" || len(observed.Servers) != 1 || observed.Servers[0].PluginID != "desktop-world" || len(observed.Servers[0].Tools) != 2 || len(observed.Skills) != 1 || observed.Skills[0].Name != "desktop-world:desktop-world" {
+	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != selected || observed.Plugins[0].Version != "0.5.1" || len(observed.Servers) != 1 || observed.Servers[0].PluginID != "desktop-world" || len(observed.Servers[0].Tools) != 2 || len(observed.Skills) != 1 || observed.Skills[0].Name != "desktop-world:desktop-world" {
 		t.Fatalf("unpaired/duplicate native capability: %+v %v", observed, err)
 	}
 	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-parent-reuse", "FIRST_APP"); n != 0 {
@@ -301,7 +300,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatalf("another Session inherited app grant: %d", n)
 	}
 	// The same app and remote schema cannot reuse a grant across package sources.
-	replacement := nativeProfilePackageHTTP(t, "0.3.3")
+	replacement := nativeProfilePackageHTTP(t, "0.5.2")
 	selection := []sessionprofile.Plugin{{Root: replacement, MCPServers: []sessionprofile.MCPServer{{Name: "desktop-world", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestNativeProfilePluginMCPHelper$", "--", "native-profile-plugin-helper", audit}, WorkDir: replacement}}}}
 	current, err := client.SessionConfiguration(ctx, parent)
 	if err != nil {
@@ -336,7 +335,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 			}
 		}
 	}
-	if childApproval.ScopeID != task || childApproval.Permission == nil || childApproval.Permission.ToolCall.Name != "desktop_world__exec" || len(childApproval.Permission.Options) != 2 {
+	if childApproval.ScopeID != task || childApproval.Permission == nil || childApproval.Permission.ToolCall.Name != "desktop_world__look" || len(childApproval.Permission.Options) != 2 {
 		t.Fatalf("child approval escaped original owner: %+v", childApproval)
 	}
 	loadedChild, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: child}, IncludeTransient: true})
@@ -349,13 +348,13 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 			originalInput = event.Tool.Input
 		}
 	}
-	if originalInput["app"] == nil || originalInput["source"] == nil {
-		t.Fatal("child real tool event lacks original exec identity/arguments")
+	if originalInput["app"] == nil {
+		t.Fatal("child real tool event lacks original atomic identity/arguments")
 	}
 	wantInput, _ := json.Marshal(originalInput)
 	gotInput, _ := json.Marshal(childApproval.Permission.ToolCall.RawInput)
-	if string(wantInput) != string(gotInput) || childApproval.Subject == nil || !childApproval.Subject.Reported || childApproval.Subject.OpaqueInput || childApproval.Subject.Targets[0].Text != "desktop-world/desktop-world/exec" || childApproval.Permission.Options[0].ID != "allow_session" || childApproval.Permission.Options[0].Kind != "allow_once" || childApproval.Permission.Options[1].ID != "cancel" || childApproval.Permission.Options[1].Kind != "reject_once" {
-		t.Fatal("native child forwarding changed actual arguments, source display or original choices")
+	if string(wantInput) != string(gotInput) || childApproval.Subject == nil || !childApproval.Subject.Reported || childApproval.Subject.OpaqueInput || childApproval.Subject.Targets[0].Text != "desktop-world/desktop-world/look" || childApproval.Permission.Options[0].ID != "allow_session" || childApproval.Permission.Options[0].Kind != "allow_once" || childApproval.Permission.Options[1].ID != "cancel" || childApproval.Permission.Options[1].Kind != "reject_once" {
+		t.Fatalf("native child forwarding changed arguments or host-owned scope: want=%s got=%s subject=%+v options=%+v", wantInput, gotInput, childApproval.Subject, childApproval.Permission.Options)
 	}
 	reconnected, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: parent})
 	if err != nil {
@@ -401,7 +400,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		for _, e := range loaded.Events {
 			if e.Journal != nil && e.Journal.ToolExecution != nil {
 				r := e.Journal.ToolExecution
-				if r.ToolName == "desktop_world__exec" && r.Status == session.ToolExecutionSucceeded {
+				if r.ToolName == "desktop_world__look" && r.Status == session.ToolExecutionSucceeded {
 					if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.ID == "" || r.Binding == nil || r.Binding.Identity == "" {
 						t.Fatalf("nested exec lost original identity: %+v", r)
 					}
@@ -419,10 +418,10 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 					t.Logf("session_index=%d event=%s name=%s status=%s", index, e.Type, e.Tool.Name, e.Tool.Status)
 				}
 			}
-			t.Fatalf("Session index=%d %s real exec results=%d want=%d event_count=%d", index, sid, executions, want, len(loaded.Events))
+			t.Fatalf("Session index=%d %s real atomic results=%d want=%d event_count=%d", index, sid, executions, want, len(loaded.Events))
 		}
 	}
-	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.3.2") || !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.3.3") || !strings.Contains(provider.snapshot(), "desktop-world:desktop-world") {
+	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.5.1") || !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.5.2") || !strings.Contains(provider.snapshot(), "desktop-world:desktop-world") {
 		t.Fatal("selected MCP package did not carry its paired Skill")
 	}
 	if data, err := os.ReadFile(audit); err != nil || len(strings.Fields(string(data))) != 12 {

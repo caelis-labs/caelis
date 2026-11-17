@@ -185,3 +185,22 @@ func TestRuntimeResponseFromReviewInvalidOptionFallsBackToOutcome(t *testing.T) 
 		t.Fatalf("response = %#v, want fallback selected allow_once", resp)
 	}
 }
+
+func TestTypedApprovalDisplayPreservesEffectiveInput(t *testing.T) {
+	req := agentsdk.ApprovalRequest{Authorization: &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion}, Tool: tool.Definition{Name: "dtw__look"}, Call: tool.Call{ID: "actual-call", Name: "dtw__look", Input: json.RawMessage(`{"app":"fixture.app"}`)}, Metadata: map[string]any{"approval_reason": "APP Session access"}}
+	frozen := CloneRuntimeRequest(req)
+	frozen.Authorization.Schema++
+	if req.Authorization.Schema != session.AuthorizationSchemaVersion {
+		t.Fatal("queued request aliased originating authorization")
+	}
+	payload := DisplayPayloadFromRuntimeRequest(req)
+	protocol := ProtocolApprovalFromPayload(payload)
+	if len(protocol.ToolCall.RawInput) != 1 || protocol.ToolCall.RawInput["app"] != "fixture.app" || payload.Reason != "APP Session access" {
+		t.Fatalf("display changed effective arguments: %+v", protocol)
+	}
+	clone := ClonePayload(payload)
+	clone.PolicyAuthorization.Schema++
+	if payload.PolicyAuthorization.Schema != session.AuthorizationSchemaVersion {
+		t.Fatal("presentation aliased originating authorization")
+	}
+}

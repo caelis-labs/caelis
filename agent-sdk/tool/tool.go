@@ -28,6 +28,8 @@ type NamedSource interface {
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {
+	// Source is trusted callable provenance, independent of display metadata.
+	Source      *SourceFacts   `json:"source,omitempty"`
 	Name        string         `json:"name,omitempty"`
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"input_schema,omitempty"`
@@ -99,13 +101,6 @@ const (
 	MetadataMCPServer            = "caelis.mcp.server"
 	MetadataMCPTool              = "caelis.mcp.tool"
 	MetadataMCPSourceFingerprint = "caelis.mcp.source_fingerprint"
-	// MetadataMCPSourceTrusted is a Host-assembly assertion that skips ordinary
-	// MCP source approval, never an explicit per-call policy Ask or Deny.
-	MetadataMCPSourceTrusted = "caelis.mcp.source_trusted"
-	// MetadataMCPResourceParameter is the Host-selected top-level string
-	// argument whose exact value requires a Session-only resource grant.
-	// It is independent of source trust and never comes from remote metadata.
-	MetadataMCPResourceParameter = "caelis.mcp.resource_parameter"
 	MetadataExternalCapability   = "caelis.external.capability"
 	MetadataDescriptionAuthority = "caelis.description.authority"
 	MetadataReplayAliases        = "caelis.tool.replay_aliases"
@@ -485,6 +480,10 @@ func primaryTypeFromStrings(values []string) string {
 // CloneDefinition returns one deep copy of one definition.
 func CloneDefinition(in Definition) Definition {
 	out := in
+	if in.Source != nil {
+		source := *in.Source
+		out.Source = &source
+	}
 	out.Name = strings.TrimSpace(in.Name)
 	out.Description = strings.TrimSpace(in.Description)
 	out.InputSchema = jsonvalue.CloneMap(in.InputSchema)

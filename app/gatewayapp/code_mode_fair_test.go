@@ -587,10 +587,6 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 			writeLiveJSON(t, filepath.Join(root, "tasks.json"), tasks)
 		}
 	}()
-	grants, err := runtime.NewMCPGrantStore(filepath.Join(root, "mcp-grants.json"))
-	if err != nil {
-		return err
-	}
 	registry, err := policy.NewMemory(policy.NamedMode{ID: "fair-local", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
 		deny := func(reason string) (policy.Decision, error) {
 			return policy.Decision{Action: policy.ActionDeny, Reason: reason}, nil
@@ -646,7 +642,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 		return err
 	}
 	trace := &fairTrace{LLM: resolved.Model, root: root, turnCalls: map[int]int{}}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "fair-local", MCPGrants: grants})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "fair-local"})
 	if err != nil {
 		return err
 	}

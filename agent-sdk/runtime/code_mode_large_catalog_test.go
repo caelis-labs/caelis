@@ -30,7 +30,6 @@ func TestCodeModeLargeCatalogStartup(t *testing.T) {
 				def.Metadata[tool.MetadataMCPServer] = server
 				def.Metadata[tool.MetadataMCPTool] = remote
 				def.Metadata[tool.MetadataPluginID] = plugin
-				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 				routes = append(routes, codeModeToolRoute(def))
 				source.items = append(source.items, tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 					calls = append(calls, call.Name)

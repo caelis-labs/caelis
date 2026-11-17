@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -131,8 +130,6 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, on
 		spec.ReplaySourceIDs = append([]string(nil), spec.ReplaySourceIDs...)
 		spec.Env = maps.Clone(spec.Env)
 		spec.Headers = maps.Clone(spec.Headers)
-		spec.SourceTrustedTools = slices.Clone(spec.SourceTrustedTools)
-		spec.ToolResourceParameters = maps.Clone(spec.ToolResourceParameters)
 		mgr.servers = append(mgr.servers, &managedServer{spec: spec, refreshGate: make(chan struct{}, 1)})
 	}
 	var workers sync.WaitGroup
@@ -239,6 +236,32 @@ func (mgr *Manager) rebuildToolsLocked() {
 			}
 			return toolInfos[i].Name < toolInfos[j].Name
 		})
+		var implementation *mcpsdk.Implementation
+		var protocolVersion string
+		if client.session != nil {
+			if initialized := client.session.InitializeResult(); initialized != nil {
+				implementation, protocolVersion = initialized.ServerInfo, initialized.ProtocolVersion
+			}
+		}
+		identitySpec := spec
+		if client.transport == TransportStdio && client.launchIdentity != "" {
+			// The effective startup snapshot, not the pre-merge Env map or
+			// clean/inherit flag, identifies the environment the child saw.
+			identitySpec.Env = nil
+			identitySpec.CleanEnvironment = false
+		}
+		groupBytes, groupErr := json.Marshal(struct {
+			Server          ServerSpec
+			LaunchIdentity  string
+			Implementation  *mcpsdk.Implementation
+			ProtocolVersion string
+		}{identitySpec, client.launchIdentity, implementation, protocolVersion})
+		catalogBytes, catalogErr := json.Marshal(toolInfos)
+		if groupErr != nil || catalogErr != nil {
+			mgr.addWarning(key, "cannot identify MCP source catalog")
+			continue
+		}
+		groupHash, catalogHash := sha256.Sum256(groupBytes), sha256.Sum256(catalogBytes)
 		for _, info := range toolInfos {
 			if info == nil || strings.TrimSpace(info.Name) == "" {
 				continue
@@ -261,20 +284,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 					}
 					continue
 				}
-			}
-			var implementation *mcpsdk.Implementation
-			var protocolVersion string
-			if client.session != nil {
-				if initialized := client.session.InitializeResult(); initialized != nil {
-					implementation, protocolVersion = initialized.ServerInfo, initialized.ProtocolVersion
-				}
-			}
-			identitySpec := spec
-			if client.transport == TransportStdio && client.launchIdentity != "" {
-				// The effective startup snapshot, not the pre-merge Env map or
-				// clean/inherit flag, identifies the environment the child saw.
-				identitySpec.Env = nil
-				identitySpec.CleanEnvironment = false
 			}
 			sourceBytes, err := json.Marshal(struct {
 				Server          ServerSpec
@@ -312,12 +321,7 @@ func (mgr *Manager) rebuildToolsLocked() {
 					continue
 				}
 			}
-			if spec.SourceTrusted || slices.Contains(spec.SourceTrustedTools, info.Name) {
-				def.Metadata[tool.MetadataMCPSourceTrusted] = true
-			}
-			if parameter, ok := spec.ToolResourceParameters[info.Name]; ok {
-				def.Metadata[tool.MetadataMCPResourceParameter] = parameter
-			}
+			def.Source = &tool.SourceFacts{IntegrationID: spec.IntegrationID, ID: key, Revision: hex.EncodeToString(groupHash[:]), CapabilityRevision: hex.EncodeToString(catalogHash[:])}
 			def, warning, err := normalizeListedToolDefinition(def, info.InputSchema)
 			if warning != "" {
 				mgr.addWarning(key, fmt.Sprintf("tool %s: %s", toolLabel, warning))

@@ -61,6 +61,14 @@ func ValidateDurableCoreEvent(event *Event) error {
 	if err := jsonvalue.Validate(event); err != nil {
 		return coreEventValidationError(fmt.Sprintf("event contains invalid JSON-compatible value: %v", err))
 	}
+	if revoked := event.AuthorizationRevocation; revoked != nil {
+		if revoked.Schema != AuthorizationSchemaVersion {
+			return coreEventValidationError("unsupported authorization revocation schema")
+		}
+		if err := revoked.Scope.Validate(); err != nil {
+			return coreEventValidationError(err.Error())
+		}
+	}
 	if event.Journal != nil {
 		if err := ValidateExecutionJournalEntry(*event.Journal); err != nil {
 			return coreEventValidationError(err.Error())

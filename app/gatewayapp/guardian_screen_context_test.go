@@ -99,12 +99,13 @@ func TestGuardianMCPActionIncludesSourceAndFourScopes(t *testing.T) {
 	req.Approval.RawInput = map[string]any{"key": "fixture"}
 	req.Approval.Options = []approval.Option{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_session", Kind: "allow_once"}, {ID: "allow_always", Kind: "allow_always"}, {ID: "cancel", Kind: "reject_once"}}
 	req.RuntimeRequest.Tool = tool.Definition{Name: "docs__read", Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "source-1"}}
+	req.RuntimeRequest.Authorization = &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Choices: []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}, {OptionID: "allow_session", Persistence: session.AuthorizationSession}, {OptionID: "allow_always", Persistence: session.AuthorizationPolicy}}}
 	state, err := guardianScreenState(req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := state["action"].(map[string]any)["mcp_source"].(map[string]any)
-	if source["plugin"] != "fixture" || source["server"] != "docs" || source["remote_tool"] != "read" || len(source["scope_options"].(map[string]any)) != 4 {
+	if source["plugin"] != "fixture" || source["server"] != "docs" || source["remote_tool"] != "read" || len(source["scope_options"].(map[string]any)) != 3 {
 		t.Fatalf("Guardian screening source = %#v", source)
 	}
 	planned, _, err := guardianPlannedActionJSON(req)
@@ -114,6 +115,7 @@ func TestGuardianMCPActionIncludesSourceAndFourScopes(t *testing.T) {
 	if !strings.Contains(planned, `"allow_session"`) || !strings.Contains(planned, `"source-1"`) {
 		t.Fatalf("Guardian action = %s", planned)
 	}
+	req.RuntimeRequest.Authorization = nil
 	req.Approval.Options = []approval.Option{{ID: "confirm_sensitive", Kind: "allow_once"}, {ID: "cancel_sensitive", Kind: "reject_once"}}
 	state, err = guardianScreenState(req, nil)
 	if err != nil {

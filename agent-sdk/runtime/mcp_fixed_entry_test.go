@@ -113,7 +113,7 @@ func (m *fixedEntryModel) Generate(_ context.Context, req *model.Request) iter.S
 func TestFixedMCPEntryHundredsAndCanonicalResume(t *testing.T) {
 	root := t.TempDir()
 	receipt := filepath.Join(root, "receipts")
-	manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "bulk", Command: os.Args[0], Args: []string{"-test.run=^TestFixedEntryMCPServerProcess$"}, WorkDir: root, SourceTrusted: true, Env: map[string]string{"CAELIS_FIXED_MCP_SERVER": "1", "CAELIS_FIXED_MCP_RECEIPTS": receipt}}}, nil)
+	manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "bulk", Command: os.Args[0], Args: []string{"-test.run=^TestFixedEntryMCPServerProcess$"}, WorkDir: root, Env: map[string]string{"CAELIS_FIXED_MCP_SERVER": "1", "CAELIS_FIXED_MCP_RECEIPTS": receipt}}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -405,6 +405,8 @@ approval, revocation and unknown-effect recovery.
 ```bash
 GOWORK=off go test ./agent-sdk/tool/... ./agent-sdk/runtime/chat ./agent-sdk/model/providers ./agent-sdk/session/... -count=1
 GOWORK=off go test ./agent-sdk/runtime -run 'TestFixedMCP|TestRuntimeLateMCP|TestRuntimeMCPToolSearch|TestMCP' -count=1 -timeout=8m
+go test ./control/toolpolicy ./agent-sdk/runtime -run 'TestProductPolicy|TestPolicyIsOnlyMCP|TestAuthorization|TestSessionConsent' -count=1
+go test -race ./control/toolpolicy ./agent-sdk/runtime -run 'TestProductPolicy|TestAuthorization' -count=1
 GOWORK=off go test ./control/appserver/projection ./surfaces/tui/app -run 'TestRoutedMCP' -count=1
 GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sessionprofile -run 'TestExperimental|TestAsyncCompaction|TestCatalog|TestMCP|TestConfigurationCheckpoint' -count=1
 ```

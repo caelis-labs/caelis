@@ -106,7 +106,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 	})
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	defer endpoint.Close()
-	manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "acceptance", Name: "reports", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL, SourceTrusted: true}}, nil)
+	manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "acceptance", Name: "reports", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +188,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		grants, e := runtime.NewMCPGrantStore(filepath.Join(dir, "grants.json"))
-		if e != nil {
-			t.Fatal(e)
-		}
-		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task using actual tools. The reports service and workspace are task-owned synthetic fixtures. Use only this workspace and the authorized command. Do not replay unknown effects."}, PolicyRegistry: policies, DefaultPolicyMode: "local-acceptance", MCPGrants: grants})
+		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task using actual tools. The reports service and workspace are task-owned synthetic fixtures. Use only this workspace and the authorized command. Do not replay unknown effects."}, PolicyRegistry: policies, DefaultPolicyMode: "local-acceptance"})
 		if e != nil {
 			t.Fatal(e)
 		}

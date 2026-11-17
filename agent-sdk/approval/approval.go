@@ -15,12 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// MetadataMCPResourceGate marks a Runtime-owned resource grant request in
-// ApprovalRequest.Metadata. It is set only for that gate, never inherited from
-// per-call policy or tool metadata. Reviewers must also verify the Host-selected
-// resource parameter, exact argument and native Session options.
-const MetadataMCPResourceGate = "caelis.mcp.resource_gate"
-
 // Mode describes how one approval request should be resolved.
 type Mode string
 
@@ -68,27 +62,30 @@ type Option struct {
 }
 
 type Payload struct {
-	Context            *session.PermissionContext        `json:"context,omitempty"`
-	Subject            *session.ApprovalSubject          `json:"subject,omitempty"`
-	ToolCallID         string                            `json:"tool_call_id,omitempty"`
-	ToolName           string                            `json:"tool_name,omitempty"`
-	ToolKind           string                            `json:"tool_kind,omitempty"`
-	ToolTitle          string                            `json:"tool_title,omitempty"`
-	ToolStatus         string                            `json:"tool_status,omitempty"`
-	RawInput           map[string]any                    `json:"raw_input,omitempty"`
-	RawOutput          map[string]any                    `json:"raw_output,omitempty"`
-	Content            []session.ProtocolToolCallContent `json:"content,omitempty"`
-	Reason             string                            `json:"reason,omitempty"`
-	Justification      string                            `json:"justification,omitempty"`
-	SandboxPermissions string                            `json:"sandbox_permissions,omitempty"`
-	Status             Status                            `json:"status,omitempty"`
-	Options            []Option                          `json:"options,omitempty"`
-	ReviewID           string                            `json:"review_id,omitempty"`
-	ReviewStatus       ReviewStatus                      `json:"review_status,omitempty"`
-	ReviewText         string                            `json:"review_text,omitempty"`
-	Risk               string                            `json:"risk,omitempty"`
-	Authorization      string                            `json:"authorization,omitempty"`
-	DecisionSource     string                            `json:"decision_source,omitempty"`
+	// PolicyAuthorization is a detached view of the originating typed request. Display
+	// fields must not be inserted into that request's effective tool arguments.
+	PolicyAuthorization *session.ApprovalAuthorization    `json:"-"`
+	Context             *session.PermissionContext        `json:"context,omitempty"`
+	Subject             *session.ApprovalSubject          `json:"subject,omitempty"`
+	ToolCallID          string                            `json:"tool_call_id,omitempty"`
+	ToolName            string                            `json:"tool_name,omitempty"`
+	ToolKind            string                            `json:"tool_kind,omitempty"`
+	ToolTitle           string                            `json:"tool_title,omitempty"`
+	ToolStatus          string                            `json:"tool_status,omitempty"`
+	RawInput            map[string]any                    `json:"raw_input,omitempty"`
+	RawOutput           map[string]any                    `json:"raw_output,omitempty"`
+	Content             []session.ProtocolToolCallContent `json:"content,omitempty"`
+	Reason              string                            `json:"reason,omitempty"`
+	Justification       string                            `json:"justification,omitempty"`
+	SandboxPermissions  string                            `json:"sandbox_permissions,omitempty"`
+	Status              Status                            `json:"status,omitempty"`
+	Options             []Option                          `json:"options,omitempty"`
+	ReviewID            string                            `json:"review_id,omitempty"`
+	ReviewStatus        ReviewStatus                      `json:"review_status,omitempty"`
+	ReviewText          string                            `json:"review_text,omitempty"`
+	Risk                string                            `json:"risk,omitempty"`
+	Authorization       string                            `json:"authorization,omitempty"`
+	DecisionSource      string                            `json:"decision_source,omitempty"`
 }
 
 type ReviewRequest struct {
@@ -145,7 +142,7 @@ type ModelResolver interface {
 }
 
 func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
-	payload := &Payload{
+	payload := &Payload{PolicyAuthorization: session.CloneApprovalAuthorization(req.Authorization),
 		ToolCallID: strings.TrimSpace(req.Call.ID),
 		ToolName:   strings.TrimSpace(req.Tool.Name),
 		Status:     StatusPending,
@@ -283,6 +280,7 @@ func DisplayReviewText(text string, subject *session.ApprovalSubject) string {
 // the approval queue.
 func CloneRuntimeRequest(in agentsdk.ApprovalRequest) agentsdk.ApprovalRequest {
 	out := in
+	out.Authorization = session.CloneApprovalAuthorization(in.Authorization)
 	if in.Origin != nil {
 		origin := *in.Origin
 		out.Origin = &origin
@@ -320,9 +318,11 @@ func ProtocolApprovalFromPayload(payload *Payload) *session.ProtocolApproval {
 		}
 	}
 	rawInput := jsonvalue.CloneMap(payload.RawInput)
-	rawInput = putRawStringIfMissing(rawInput, "approval_reason", payload.Reason)
-	rawInput = putRawStringIfMissing(rawInput, "justification", payload.Justification)
-	rawInput = putRawStringIfMissing(rawInput, "sandbox_permissions", payload.SandboxPermissions)
+	if payload.PolicyAuthorization == nil {
+		rawInput = putRawStringIfMissing(rawInput, "approval_reason", payload.Reason)
+		rawInput = putRawStringIfMissing(rawInput, "justification", payload.Justification)
+		rawInput = putRawStringIfMissing(rawInput, "sandbox_permissions", payload.SandboxPermissions)
+	}
 	if payload.Context != nil && payload.ToolCallID == "" && payload.ToolName == "" {
 		rawInput = nil
 	}
@@ -479,6 +479,7 @@ func ClonePayload(in *Payload) *Payload {
 		return nil
 	}
 	out := *in
+	out.PolicyAuthorization = session.CloneApprovalAuthorization(in.PolicyAuthorization)
 	out.Context = session.ClonePermissionContext(in.Context)
 	out.Subject = session.CloneApprovalSubject(in.Subject)
 	out.RawInput = jsonvalue.CloneMap(in.RawInput)

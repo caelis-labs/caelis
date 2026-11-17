@@ -37,7 +37,6 @@ func testJSExecConcurrentTargets(t *testing.T, sameTarget bool) {
 			if mcp {
 				def = fixtureMCPDefinition("parallel-default")
 				def.Name = "z__target"
-				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 			}
 			def.Capabilities.ParallelSafe = sameTarget
 			target := tool.NamedTool{Def: def, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {

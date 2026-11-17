@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -112,4 +113,22 @@ func validateProductPair(out Contributions) error {
 		return nil
 	}
 	return fmt.Errorf("desktop-world requires a coherent dtw MCP/Skill pair or desktop-world MCP/Skill pair")
+}
+
+// selectDesktopToolset changes only the effective Host launch snapshot. The
+// original signed package, manifest and paired Skill remain immutable.
+func selectDesktopToolset(out Contributions) Contributions {
+	for i := range out.MCPServerSpecs {
+		spec := &out.MCPServerSpecs[i]
+		if spec.PluginID != "desktop-world" {
+			continue
+		}
+		spec.IntegrationID = "desktop-world/atomic-v1"
+		args := append([]string(nil), spec.Args...)
+		if !slices.Contains(args, "--atomic") {
+			args = append(args, "--atomic")
+		}
+		spec.Args = args
+	}
+	return out
 }

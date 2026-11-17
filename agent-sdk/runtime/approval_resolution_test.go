@@ -98,7 +98,7 @@ func TestNativeApprovalResolutionValidatesPrivateRecoveredOptionsBeforeCommit(t 
 					t.Fatal(err)
 				}
 				waiter := make(chan agent.ApprovalResponse, 1)
-				runtime.approvalWaiters[pending.TokenID] = waiter
+				runtime.approvalWaiters[pending.TokenID] = approvalWaiter{responses: waiter, owner: t.Context()}
 				before, err := sessions.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 				if err != nil {
 					t.Fatal(err)

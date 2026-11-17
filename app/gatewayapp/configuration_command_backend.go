@@ -16,6 +16,8 @@ func (s *controlCommandBackend) executeConfigurationCommand(ctx context.Context,
 		return s.executeHostModelConfigurationCommand(ctx, action, request)
 	case appserver.ExperimentalRequest:
 		return s.executeExperimentalCommand(ctx, typed)
+	case appserver.PolicyRuleRequest:
+		return s.executePolicyRuleCommand(ctx, action, typed)
 	case appserver.WorkspaceTrustRequest:
 		return s.executeWorkspaceTrustCommand(ctx, action, typed)
 	}

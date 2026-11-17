@@ -113,7 +113,7 @@ func MCPApprovalDecision(input policy.ToolContext, constraints sandbox.Constrain
 }
 
 // DangerFullAccessMode allows assembled tools on the Host without this preset's
-// approval or command filtering. Runtime still requires MCP approval. Callers
+// approval or command filtering. An embedding may add source requirements inside its final Policy. Callers
 // must register this exceptional mode explicitly; it is not a substitute for
 // sandbox isolation.
 func DangerFullAccessMode() policy.Mode {

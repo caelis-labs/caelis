@@ -41,6 +41,7 @@ func TestGuardianMCPScreeningSettlesOnlySupportedScope(t *testing.T) {
 			}
 			req.RuntimeRequest.Tool.Name = "docs__read"
 			if tc.mcp {
+				req.RuntimeRequest.Authorization = &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Choices: []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}, {OptionID: "allow_session", Persistence: session.AuthorizationSession}, {OptionID: "allow_always", Persistence: session.AuthorizationPolicy}}}
 				req.RuntimeRequest.Tool.Metadata = map[string]any{
 					tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture",
 					tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "fixture-v1",

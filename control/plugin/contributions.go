@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/mod/semver"
-
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
@@ -146,13 +144,6 @@ func resolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 				return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 			}
 			spec.PackageRoot, spec.PackageVersion = installed.Root, installed.Version
-			// Rules come from the configured plugin identity, never its server
-			// name, remote metadata or script. Only exec creates new desktop work;
-			// result reads an existing receipt in this MCP connection.
-			if installed.ID == "desktop-world" && !legacyDesktopWorldVersion(installed.Version) {
-				spec.ToolResourceParameters = map[string]string{"exec": "app"}
-				spec.SourceTrustedTools = desktopWorldReadTools(installed.Version)
-			}
 			out.MCPServerSpecs = append(out.MCPServerSpecs, spec)
 		}
 		for _, contributed := range installed.Agents {
@@ -163,26 +154,4 @@ func resolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 		}
 	}
 	return out, nil
-}
-
-func desktopWorldReadTools(version string) []string {
-	version = "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
-	if !semver.IsValid(version) {
-		return nil
-	}
-	// Released 0.2 packages retain their own receipt/schema tools. Core does
-	// not emulate these retired endpoints for the 0.3 script contract.
-	if semver.Compare(version, "v0.3.0-0") < 0 {
-		return []string{"apps", "api", "result"}
-	}
-	return []string{"apps"}
-}
-
-// Control keeps released pre-0.2 DTW packages on ordinary MCP source approval;
-// their script entry point cannot satisfy exec.app. Remove this compatibility
-// rule when the supported DTW package floor is 0.2. Unknown versions retain the
-// resource gate rather than silently obtaining broad execution trust.
-func legacyDesktopWorldVersion(version string) bool {
-	version = "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
-	return semver.IsValid(version) && semver.Compare(version, "v0.2.0-0") < 0
 }

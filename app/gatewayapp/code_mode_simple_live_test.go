@@ -230,11 +230,7 @@ func TestCodeModeSimpleLive(t *testing.T) {
 			t.Fatal(e)
 		}
 		writeLiveJSON(t, filepath.Join(dir, "session-ref.json"), active.SessionRef)
-		grants, e := runtime.NewMCPGrantStore(filepath.Join(dir, "grants.json"))
-		if e != nil {
-			t.Fatal(e)
-		}
-		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: fairSystem}, PolicyRegistry: policies, DefaultPolicyMode: "simple-readonly", MCPGrants: grants})
+		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: fairSystem}, PolicyRegistry: policies, DefaultPolicyMode: "simple-readonly"})
 		if e != nil {
 			t.Fatal(e)
 		}

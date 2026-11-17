@@ -412,10 +412,6 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 	if err != nil {
 		return err
 	}
-	grants, err := runtime.NewMCPGrantStore(filepath.Join(root, "mcp-grants.json"))
-	if err != nil {
-		return err
-	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ResponseHeaderTimeout = 0
 	defer transport.CloseIdleConnections()
@@ -425,7 +421,7 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 		return err
 	}
 	trace := &valueTraceModel{fairTrace: &fairTrace{LLM: resolved.Model, root: root, turnCalls: map[int]int{}}}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "value-local", MCPGrants: grants})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "value-local"})
 	if err != nil {
 		return err
 	}

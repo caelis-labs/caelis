@@ -84,7 +84,6 @@ func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
 	def.Metadata[tool.MetadataMCPServer] = server
 	def.Metadata[tool.MetadataMCPTool] = remote
 	def.Metadata[tool.MetadataPluginID] = plugin
-	def.Metadata[tool.MetadataMCPSourceTrusted] = true
 	def.InputSchema = map[string]any{"type": "object", "required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": "integer"}}}
 	var effects []string
 	invoke := func(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -131,7 +130,6 @@ func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
 	def := fixtureMCPDefinition("search-contract-late-v1")
 	def.Name = "late__read"
 	def.Metadata[tool.MetadataMCPServer] = "late-server"
-	def.Metadata[tool.MetadataMCPSourceTrusted] = true
 	effects := 0
 	late := tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 		effects++
@@ -168,7 +166,6 @@ func TestCodeModeSearchContractSelectorsKeepExactAndCapabilityModes(t *testing.T
 		def := fixtureMCPDefinition("search-contract-selector-v1")
 		def.Name = name
 		def.Metadata[tool.MetadataMCPTool] = name
-		def.Metadata[tool.MetadataMCPSourceTrusted] = true
 		source.items = append(source.items, tool.NamedTool{Def: def})
 	}
 	var ranked []string

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -44,18 +45,22 @@ const (
 // resolver. It contains only semantic request/decision data. ItemID identifies
 // the Runtime-admitted tool step when available; older tokens omit it.
 type PauseToken struct {
-	Schema     int               `json:"schema"`
-	TokenID    string            `json:"token_id"`
-	SessionID  string            `json:"session_id"`
-	RunID      string            `json:"run_id"`
-	TurnID     string            `json:"turn_id"`
-	ToolCallID string            `json:"tool_call_id"`
-	ToolName   string            `json:"tool_name"`
-	ItemID     string            `json:"item_id,omitempty"`
-	Revision   uint64            `json:"revision"`
-	Status     PauseTokenStatus  `json:"status"`
-	Input      json.RawMessage   `json:"input,omitempty"`
-	Approval   *ProtocolApproval `json:"approval,omitempty"`
+	// Authorization is approval-domain evidence, independent of Run/Turn state.
+	Authorization               *ApprovalAuthorization `json:"authorization,omitempty"`
+	PolicyRuleID                string                 `json:"policy_rule_id,omitempty"`
+	PolicyConfigurationRevision uint64                 `json:"policy_configuration_revision,omitempty"`
+	Schema                      int                    `json:"schema"`
+	TokenID                     string                 `json:"token_id"`
+	SessionID                   string                 `json:"session_id"`
+	RunID                       string                 `json:"run_id"`
+	TurnID                      string                 `json:"turn_id"`
+	ToolCallID                  string                 `json:"tool_call_id"`
+	ToolName                    string                 `json:"tool_name"`
+	ItemID                      string                 `json:"item_id,omitempty"`
+	Revision                    uint64                 `json:"revision"`
+	Status                      PauseTokenStatus       `json:"status"`
+	Input                       json.RawMessage        `json:"input,omitempty"`
+	Approval                    *ProtocolApproval      `json:"approval,omitempty"`
 	// Presentation is the owner-redacted approval snapshot used by display
 	// replay. Input and Approval retain the original private execution evidence.
 	Presentation *ProtocolApproval `json:"presentation,omitempty"`
@@ -272,6 +277,7 @@ func CloneExecutionJournalEntry(in ExecutionJournalEntry) ExecutionJournalEntry 
 // ClonePauseToken returns one recursively isolated normalized token.
 func ClonePauseToken(in PauseToken) PauseToken {
 	out := in
+	out.Authorization = CloneApprovalAuthorization(in.Authorization)
 	out.TokenID = strings.TrimSpace(in.TokenID)
 	out.SessionID = strings.TrimSpace(in.SessionID)
 	out.RunID = strings.TrimSpace(in.RunID)
@@ -310,11 +316,17 @@ func ValidatePauseTokenTransition(previous PauseToken, next PauseToken) error {
 	if next.Schema != ExecutionJournalSchemaVersion || next.TokenID == "" || next.SessionID == "" || next.RunID == "" || next.TurnID == "" {
 		return invalid("invalid schema or identity")
 	}
+	if err := next.Authorization.Validate(next.Approval); err != nil {
+		return invalid(err.Error())
+	}
 	if previous.Status == "" {
 		if next.Status == PauseTokenPending && next.Revision == 1 {
 			return nil
 		}
 		return invalid("first record must be pending revision 1")
+	}
+	if !reflect.DeepEqual(previous.Authorization, next.Authorization) {
+		return invalid("authorization changed while approval was pending")
 	}
 	if previous.TokenID != next.TokenID || previous.SessionID != next.SessionID || previous.RunID != next.RunID || previous.ItemID != next.ItemID || next.Revision != previous.Revision+1 {
 		return invalid("identity or revision mismatch")

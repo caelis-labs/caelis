@@ -168,7 +168,7 @@ func valueFixtureSpec(ctx context.Context, root, workspace string) (mcp.ServerSp
 		})
 	}
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
-	return mcp.ServerSpec{PluginID: "code-mode-value-fixture", Name: "workitems", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL, SourceTrusted: true, WorkDir: workspace}, f, endpoint.Close, nil
+	return mcp.ServerSpec{PluginID: "code-mode-value-fixture", Name: "workitems", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL, WorkDir: workspace}, f, endpoint.Close, nil
 }
 func TestCodeModeValueFixturesOffline(t *testing.T) {
 	for turn := 1; turn <= 2; turn++ {
