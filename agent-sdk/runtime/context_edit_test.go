@@ -141,7 +141,16 @@ func (s *contextEditAckStore) AppendEvent(ctx context.Context, req session.Appen
 func TestContextEditStaleAssemblyDoesNotAppendTwice(t *testing.T) {
 	store, active := newTestSessionService(t, "stale-edit")
 	hookCalls, admissions, providers := 0, 0, 0
-	llm := scriptedTestModel{generate: func(context.Context, *model.Request) *model.Response {
+	llm := scriptedTestModel{generate: func(_ context.Context, r *model.Request) *model.Response {
+		count := 0
+		for _, m := range r.Messages {
+			if m.TextContent() == "once" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("stale rebuild lost or duplicated edit: %v", r.Messages)
+		}
 		providers++
 		return textResponse("done", model.Usage{})
 	}}

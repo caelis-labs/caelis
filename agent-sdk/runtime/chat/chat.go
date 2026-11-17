@@ -175,7 +175,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				final = &model.Response{Message: *early}
 				messageID = uuid.NewString()
 			} else {
-				assistantMessage, calls, final, messageID, requestPrefix, ok, err = a.collectCanonicalModelStep(ctx, messages, watchdog, &visibility, func(event *session.Event) bool {
+				assistantMessage, calls, final, messageID, requestPrefix, ok, err = a.collectCanonicalModelStep(ctx, &messages, watchdog, &visibility, func(event *session.Event) bool {
 					return yield(event, nil)
 				})
 			}
@@ -313,7 +313,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 
 func (a *Agent) collectCanonicalModelStep(
 	ctx agent.Context,
-	messages []model.Message,
+	messages *[]model.Message,
 	watchdog *generationWatchdog,
 	visibility *tool.ToolVisibility,
 	yield func(*session.Event) bool,
@@ -330,7 +330,7 @@ func (a *Agent) collectCanonicalModelStep(
 		stream := a.request.StreamEnabled(false)
 		messageID := uuid.NewString()
 		request := &model.Request{
-			Messages:    messages,
+			Messages:    *messages,
 			Tools:       visibility.ModelSpecs(),
 			Reasoning:   a.reasoning,
 			Output:      a.request.OutputSpec(),
@@ -349,14 +349,17 @@ func (a *Agent) collectCanonicalModelStep(
 		evidence.ConfigurationRevision = a.modelRevision
 		evidence.LogicalRequestID = logicalID
 		evidence.AssemblyRevision = assembly
-		request, cached, prepareErr := a.prepareModel(ctx, evidence, request)
+		prepared, cached, prepareErr := a.prepareModel(ctx, evidence, request)
+		// ContextEdit updates the same Run context before tools, feedback or a
+		// stale assembly can continue. Only the checkpoint owner mutates it.
+		*messages = model.CloneMessages(request.Messages)
 		if prepareErr != nil {
 			if a.resolveModelRequest != nil && errors.Is(prepareErr, agent.ErrModelRequestSnapshotStale) {
 				continue
 			}
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
 		}
-		messages = model.CloneMessages(request.Messages)
+		request = prepared
 		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
@@ -394,7 +397,7 @@ func (a *Agent) collectCanonicalModelStep(
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
 		if hookrun.FromContext(ctx).Hooks.StreamMode != agent.StreamIncremental {
-			final.Message = normalizeAssistantCitations(final.Message, messages)
+			final.Message = normalizeAssistantCitations(final.Message, *messages)
 		}
 
 		assistantMessage, calls, err := validateAssistantToolCalls(final.Message)
