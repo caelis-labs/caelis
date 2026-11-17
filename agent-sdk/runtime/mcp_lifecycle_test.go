@@ -81,7 +81,7 @@ func TestMCPFixedRoutingRefreshDuringApprovalAndRevocation(t *testing.T) {
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
-	rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: mcpAskFixturePolicy(), DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
