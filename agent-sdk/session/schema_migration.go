@@ -219,13 +219,6 @@ func migrateEventV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
 		kind, _ := json.Marshal(EventTypeContext)
 		object["type"] = kind
 	}
-	if journalRaw := object["journal"]; len(journalRaw) > 0 && string(journalRaw) != "null" {
-		migrated, err := migrateJournalV0ToV1(journalRaw)
-		if err != nil {
-			return nil, err
-		}
-		object["journal"] = migrated
-	}
 	return json.Marshal(object)
 }
 

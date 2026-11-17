@@ -175,26 +175,22 @@ func migrateSchemaFieldV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, err
 	}
-	schema, _ := json.Marshal(1)
-	object["schema"] = schema
+	version, err := rawSchemaVersion(SchemaKind("retired_record"), object, 1)
+	if err != nil {
+		return nil, err
+	}
+	if version == 1 {
+		return append(json.RawMessage(nil), raw...), nil
+	}
+	if object == nil {
+		return nil, fmt.Errorf("retired record must be a JSON object")
+	}
+	object["schema"] = json.RawMessage(`1`)
 	return json.Marshal(object)
 }
 
+// The journal migration owns only its version. Each nested record is validated
+// and migrated independently by migrateJournalJSON, including under v0 events.
 func migrateJournalV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
-	var journal map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &journal); err != nil {
-		return nil, err
-	}
-	schema, _ := json.Marshal(1)
-	journal["schema"] = schema
-	for _, key := range []string{"execution", "tool_execution", "pause_token"} {
-		if nestedRaw := journal[key]; len(nestedRaw) > 0 && string(nestedRaw) != "null" {
-			nested, err := migrateSchemaFieldV0ToV1(nestedRaw)
-			if err != nil {
-				return nil, err
-			}
-			journal[key] = nested
-		}
-	}
-	return json.Marshal(journal)
+	return migrateSchemaFieldV0ToV1(raw)
 }
