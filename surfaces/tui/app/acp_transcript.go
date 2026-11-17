@@ -410,7 +410,7 @@ func styleACPTranscriptHeaderWithMark(
 		if rest == action || strings.HasPrefix(rest, action+" ") {
 			styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(action)
 			if source := strings.TrimPrefix(rest, action); source != "" {
-				styled += ctx.Theme.ToolArgsStyle().Render(source)
+				styled += styleJavaScriptText(ctx, source)
 			}
 			return styled
 		}

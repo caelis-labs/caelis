@@ -43,7 +43,7 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	if root.Done {
 		title = "• Ran script"
 	}
-	source := root.FullArgs
+	source := sanitizeRenderableText(root.FullArgs)
 	preview := root.Args
 	if root.Title != "" {
 		preview = root.Title
@@ -67,11 +67,18 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		} else {
 			headerText = title
 		}
-		if width < displayColumns(title) {
-			headerText = truncateDisplayCells(headerText, width)
+		if width <= displayColumns(title)+1 {
+			headerText = truncateDisplayCells(title, width)
 		}
+		headerText = truncateDisplayCells(headerText, width)
 	}
 	header := renderACPTranscriptHeaderRowMarked(blockID, headerText, width, ctx, foldToken, tone, dim)
+	if !sourceExpanded && source != "" && root.Title == "" && width > displayColumns(title)+1 {
+		initialBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1)
+		finalBudget := maxInt(1, width-displayColumns(title)-1)
+		header.Styled = styleACPTranscriptHeaderWithMark(ctx, title, tone, dim) + " " + styleScriptSourcePreview(ctx, source, initialBudget, finalBudget)
+		header.PreWrapped = true
+	}
 	if source != "" || len(children) == 0 && root.Done && root.Output != "" && !root.OutputSynthetic {
 		header.ClickTokenAlt = acpToolPanelClickToken(root.CallID)
 		header.ClickStartCol = 2
@@ -80,11 +87,11 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	rows := []RenderedRow{header}
 	if len(children) == 0 && root.Done && !root.OutputSynthetic && renderableTextHasContent(root.Output) {
 		token := acpToolPanelClickToken(root.CallID)
-		if sourceExpanded {
-			rows = append(rows, renderACPFullTerminalPanelRows(blockID, root.CallID, root.Output, width, ctx, root.ScriptCompletion == "failed", token)...)
-		} else {
-			rows = append(rows, renderACPToolPanelRows(blockID, root.CallID, root.Name, false, root.Output, width, ctx, root.ScriptCompletion == "failed", token, false, opts)...)
+		output := root.Output
+		if !sourceExpanded {
+			output = summarizeACPToolPanelText(output, true, maxInt(1, width-displayColumns("  └ ")))
 		}
+		rows = append(rows, renderACPFullTerminalPanelRows(blockID, root.CallID, output, width, ctx, root.ScriptCompletion == "failed", token)...)
 	}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
 	for i := 0; i < len(children); {
