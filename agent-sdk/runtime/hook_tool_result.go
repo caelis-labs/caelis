@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -20,7 +21,9 @@ func (t resultHookTool) RuntimePrepareInvocation(_ toolbinding.Token, c tool.Cal
 	return toolbinding.Prepare(t.base, c)
 }
 func (t resultHookTool) Call(ctx context.Context, c tool.Call) (tool.Result, error) {
-	r, err := t.base.Call(ctx, c)
+	var r tool.Result
+	e := hookrun.FromContext(ctx).Evidence
+	err := agent.TraceLifecycle(ctx, agent.LifecycleEvent{Operation: agent.LifecycleTool, SessionRef: e.SessionRef, RunID: e.RunID, TurnID: e.TurnID, StepID: c.ID, Name: c.Name}, hookrun.FromContext(ctx).Trace, func(ctx context.Context) error { var err error; r, err = t.base.Call(ctx, c); return err })
 	return hookrun.FullResult(ctx, t.Definition(), c, r, err)
 }
 

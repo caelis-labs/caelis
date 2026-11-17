@@ -31,12 +31,10 @@ func TestRuntimeEmitsTypedRunTurnModelAndToolLifecycle(t *testing.T) {
 	}}
 	sessions, active := newTestSessionService(t, "lifecycle-runtime")
 	sink := &concurrentTraceSink{}
-	interceptor := &recordingLifecycleInterceptor{}
 	runtime, err := New(Config{
-		Sessions:              sessions,
-		AgentFactory:          chat.Factory{},
-		TraceSink:             sink,
-		LifecycleInterceptors: []agent.LifecycleInterceptor{interceptor},
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{},
+		TraceSink:    sink,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -60,9 +58,6 @@ func TestRuntimeEmitsTypedRunTurnModelAndToolLifecycle(t *testing.T) {
 	for operation := range want {
 		if !sink.saw(operation, agent.TraceStarted) || !sink.saw(operation, agent.TraceCompleted) {
 			t.Fatalf("trace records = %#v, want start/completion for %q", sink.snapshot(), operation)
-		}
-		if !interceptor.saw(operation) {
-			t.Fatalf("interceptor events = %#v, want %q", interceptor.snapshot(), operation)
 		}
 	}
 }
@@ -174,31 +169,4 @@ func (s *concurrentTraceSink) saw(operation agent.LifecycleOperation, status age
 		}
 		time.Sleep(time.Millisecond)
 	}
-}
-
-type recordingLifecycleInterceptor struct {
-	mu     sync.Mutex
-	events []agent.LifecycleEvent
-}
-
-func (i *recordingLifecycleInterceptor) InterceptLifecycle(ctx context.Context, event agent.LifecycleEvent, next agent.LifecycleNext) error {
-	i.mu.Lock()
-	i.events = append(i.events, event)
-	i.mu.Unlock()
-	return next(ctx)
-}
-
-func (i *recordingLifecycleInterceptor) snapshot() []agent.LifecycleEvent {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return append([]agent.LifecycleEvent(nil), i.events...)
-}
-
-func (i *recordingLifecycleInterceptor) saw(operation agent.LifecycleOperation) bool {
-	for _, event := range i.snapshot() {
-		if event.Operation == operation {
-			return true
-		}
-	}
-	return false
 }

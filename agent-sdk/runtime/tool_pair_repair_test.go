@@ -482,16 +482,16 @@ func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 
 type repeatedToolContinuation struct{}
 
-func (repeatedToolContinuation) InterceptLifecycle(ctx context.Context, event agent.LifecycleEvent, next agent.LifecycleNext) error {
-	if event.Operation != agent.LifecycleTool {
-		return next(ctx)
+func (repeatedToolContinuation) Invoke(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	first, err := next(ctx)
+	if err != nil {
+		return first, err
 	}
-	if err := next(ctx); err != nil {
-		return err
-	}
-	return next(ctx)
+	_, err = next(ctx)
+	return first, err
 }
-func TestToolFactsRepeatedLifecycleContinuationCannotReplayEffect(t *testing.T) {
+
+func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 	store, active := newToolFactTestSession(t, "repeated-continuation")
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -504,7 +504,7 @@ func TestToolFactsRepeatedLifecycleContinuationCannotReplayEffect(t *testing.T) 
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, LifecycleInterceptors: []agent.LifecycleInterceptor{repeatedToolContinuation{}}})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "repeat", Invoke: repeatedToolContinuation{}.Invoke}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -512,14 +512,15 @@ func TestToolFactsRepeatedLifecycleContinuationCannotReplayEffect(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = run.Handle.WaitCompletion(t.Context())
+	completionErr := run.Handle.WaitCompletion(t.Context())
 	if effects.Load() != 1 {
 		t.Fatalf("effects=%d", effects.Load())
 	}
 	events, _ := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
 	pairs, err := session.PairToolFacts(events)
 	if err != nil || len(pairs) != 1 || pairs[0].Result == nil || pairs[0].Result.Tool.Result == nil || (model.Message{Parts: pairs[0].Result.Tool.Result.Content}).TextContent() != "full result" {
-		t.Fatalf("first complete result lost: %v", err)
+		raw, _ := json.Marshal(events)
+		t.Fatalf("first complete result lost: %v completion=%v events=%s", err, completionErr, raw)
 	}
 }
 

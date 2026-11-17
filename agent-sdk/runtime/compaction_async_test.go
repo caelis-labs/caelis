@@ -29,12 +29,13 @@ type asyncProbeRequest struct {
 }
 
 type asyncProbeModel struct {
-	foreground chan asyncProbeRequest
-	background chan *model.Request
-	responses  chan snapshotResponse
-	summaries  chan snapshotResponse
-	ignoreStop bool
-	imageInput bool
+	foreground     chan asyncProbeRequest
+	background     chan *model.Request
+	responses      chan snapshotResponse
+	summaries      chan snapshotResponse
+	ignoreStop     bool
+	imageInput     bool
+	cancelObserved chan struct{}
 }
 
 func newAsyncProbeModel() *asyncProbeModel {
@@ -57,6 +58,10 @@ func (m *asyncProbeModel) Generate(ctx context.Context, req *model.Request) iter
 		responses := m.responses
 		background := isRuntimeCompactionRequest(req)
 		if background {
+			if m.cancelObserved != nil {
+				stop := context.AfterFunc(ctx, func() { close(m.cancelObserved) })
+				defer stop()
+			}
 			m.background <- model.CloneRequest(req)
 			responses = m.summaries
 		} else {
@@ -823,4 +828,30 @@ func TestAsyncCompactionValidationGuardsEpochThroughDurableCommit(t *testing.T) 
 func asyncMessagesText(messages []model.Message) string {
 	data, _ := json.Marshal(messages)
 	return string(data)
+}
+
+func TestAsyncCompactionActualDrainPrecedesCanonicalFinal(t *testing.T) {
+	h := newAsyncHarness(t, "")
+	h.llm.ignoreStop = true
+	h.llm.cancelObserved = make(chan struct{})
+	run := h.run(t)
+	h.startCandidate(t)
+	h.llm.responses <- asyncTextResponse("candidate after drain", 6000)
+	receiveSnapshotValue(t, h.llm.cancelObserved)
+	for _, e := range h.load(t).Events {
+		if e.Type == session.EventTypeAssistant && e.Message != nil && e.Message.TextContent() == "candidate after drain" {
+			t.Fatal("final committed before the real producer drained")
+		}
+	}
+	h.llm.summaries <- asyncTextResponse(asyncFixtureSummary, 2100)
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range h.load(t).Events {
+		found = found || e.Type == session.EventTypeAssistant && e.Message != nil && e.Message.TextContent() == "candidate after drain"
+	}
+	if !found {
+		t.Fatal("accepted final absent after actual drain")
+	}
 }

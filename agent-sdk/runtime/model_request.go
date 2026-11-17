@@ -111,7 +111,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		}
 		spec.Models[key] = r.wrapModelForAutoCompaction(ref, candidate, authority)
 	}
-	spec.Model = r.wrapModelForLifecycle(r.wrapModelForAutoCompaction(ref, spec.Model, authority))
+	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model, authority)
 	spec.Tools = r.wrapToolsForRuntime(active, ref, *spec, runtimeToolContext{
 		mode: modeName, approvalMode: string(r.currentApprovalMode(state)),
 		approvalRequester: req.ApprovalRequester, runID: runID, turnID: turnID,

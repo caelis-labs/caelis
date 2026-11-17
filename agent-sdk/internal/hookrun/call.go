@@ -49,6 +49,14 @@ func cloneContext(in agent.HookContext) agent.HookContext {
 	}
 	if in.Tool != nil {
 		c := tool.CloneCall(*in.Tool)
+		// These fields carry executable capabilities or a live owner barrier.
+		// Extensions receive occurrence data only.
+		c.RuntimeModel = nil
+		c.Observer = nil
+		c.Metadata = nil
+		if c.ModelStep != nil {
+			c.ModelStep = &tool.ModelStepRef{ID: c.ModelStep.ID, Index: c.ModelStep.Index, CallCount: c.ModelStep.CallCount}
+		}
 		in.Tool = &c
 	}
 	return in
@@ -113,6 +121,8 @@ func Around[T any](ctx context.Context, phase, name string, timeout time.Duratio
 	var producers sync.WaitGroup
 	active, used := true, false
 	var violation, producerErr error
+	var produced T
+	running := false
 	next := func(requested context.Context) (T, error) {
 		mu.Lock()
 		if !active || used || callCtx.Err() != nil {
@@ -123,6 +133,7 @@ func Around[T any](ctx context.Context, phase, name string, timeout time.Duratio
 			return zero, wrap(phase, name, err)
 		}
 		used = true
+		running = true
 		producers.Add(1)
 		mu.Unlock()
 		defer producers.Done()
@@ -137,6 +148,8 @@ func Around[T any](ctx context.Context, phase, name string, timeout time.Duratio
 		}
 		mu.Lock()
 		producerErr = err
+		produced = out
+		running = false
 		mu.Unlock()
 		return out, err
 	}
@@ -153,12 +166,22 @@ func Around[T any](ctx context.Context, phase, name string, timeout time.Duratio
 	timeoutErr := callCtx.Err()
 	mu.Lock()
 	active = false
+	if running {
+		violation = errors.New("continuation outlived its hook")
+	}
 	mu.Unlock()
 	cancel()
 	producers.Wait()
 	mu.Lock()
+	passthrough := violation == nil && timeoutErr == nil && ctx.Err() == nil && producerErr != nil && errors.Is(err, producerErr) && errors.Is(producerErr, err)
 	err = errors.Join(err, producerErr, violation)
+	if err != nil && used {
+		out = produced
+	}
 	mu.Unlock()
+	if passthrough {
+		return out, producerErr
+	}
 	if err == nil {
 		err = ctx.Err()
 	}

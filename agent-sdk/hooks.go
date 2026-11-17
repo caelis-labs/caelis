@@ -123,6 +123,14 @@ type ToolInvokeHook struct {
 // the admitted request or accounting. ModelResult owns response transformation.
 type ModelNext func(context.Context) error
 
+// RetryRequest asks the existing transport retry owner to reconsider the exact
+// failed attempt. Cause must be next's retryable provider error. It cannot
+// retry admission failures, successful attempts, or irreversible output.
+type RetryRequest struct{ Cause error }
+
+func (r *RetryRequest) Error() string { return fmt.Sprintf("model retry requested: %v", r.Cause) }
+func (r *RetryRequest) Unwrap() error { return r.Cause }
+
 // ModelInvokeHook wraps an actual provider attempt, inside retry and accounting.
 type ModelInvokeHook struct {
 	Name    string

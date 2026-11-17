@@ -13,10 +13,48 @@ type runKey struct{}
 // Run keeps only ephemeral phase configuration and pending early responses.
 // Session, policy, producer lifetime and commits retain their existing owners.
 type Run struct {
-	Hooks    agent.Hooks
-	Evidence agent.HookContext
-	mu       sync.Mutex
-	early    *model.Message
+	Trace     agent.TraceOptions
+	Hooks     agent.Hooks
+	Evidence  agent.HookContext
+	mu        sync.Mutex
+	early     *model.Message
+	requestID string
+	assembly  uint64
+	edits     map[string]bool
+}
+
+// RequestAssembly survives a Runtime context rebuild, but ends with its one
+// semantic model step. It is ephemeral identity, never a request journal.
+func (r *Run) RequestAssembly(newID func() string) (string, uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.requestID == "" {
+		r.requestID = newID()
+		r.edits = map[string]bool{}
+	}
+	r.assembly++
+	return r.requestID, r.assembly
+}
+func (r *Run) RequestEdited(id, name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requestID == id && r.edits[name]
+}
+func (r *Run) RecordRequestEdit(id, name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.requestID == id {
+		r.edits[name] = true
+	}
+}
+func (r *Run) FinishRequest(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.requestID == id {
+		r.requestID = ""
+		r.assembly = 0
+		r.edits = nil
+	}
 }
 
 func WithRun(ctx context.Context, h agent.Hooks, e agent.HookContext) context.Context {
@@ -38,6 +76,7 @@ func (r *Run) SetEarly(m *model.Message) {
 	c := model.CloneMessage(*m)
 	r.early = &c
 }
+func (r *Run) HasEarly() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.early != nil }
 func (r *Run) TakeEarly() *model.Message {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -63,4 +102,16 @@ func CloneTurn(in agent.TurnStartDecision) agent.TurnStartDecision {
 	in.Context = model.CloneParts(in.Context)
 	in.Response = CloneMessagePointer(in.Response)
 	return in
+}
+
+type requestKey struct{}
+
+func WithRequest(ctx context.Context, e agent.HookContext) context.Context {
+	return context.WithValue(ctx, requestKey{}, e)
+}
+func RequestEvidence(ctx context.Context) agent.HookContext {
+	if e, ok := ctx.Value(requestKey{}).(agent.HookContext); ok {
+		return e
+	}
+	return FromContext(ctx).Evidence
 }

@@ -25,7 +25,6 @@ func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 		}
 		return err
 	}
-	next.contextEdits = a.contextEdits
 	next.models = snapshot.Models
 	next.modelRevision = snapshot.Revision
 	next.validateModelRequest = snapshot.Validate

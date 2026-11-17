@@ -22,7 +22,8 @@ type preparedToolCall struct {
 func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, visibility *tool.ToolVisibility) error {
 	a.preparedCalls = make(map[string]preparedToolCall, len(calls))
 	a.bindMCPCalls(ctx, calls, visibility)
-	for i, protocol := range calls {
+	// Allocate the entire batch before the first extension sees an occurrence.
+	for _, protocol := range calls {
 		if _, duplicate := a.preparedCalls[protocol.ID]; duplicate {
 			return fmt.Errorf("duplicate tool call ID in model batch: %q", protocol.ID)
 		}
@@ -32,29 +33,36 @@ func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, vi
 			original := protocol
 			call.ModelCall = &original
 		}
-		var synthetic *tool.Result
-		if err == nil {
-			var prepareErr error
-			call, synthetic, prepareErr = toolbinding.PrepareEffective(ctx, target, call)
-			if prepareErr != nil {
-				return prepareErr
-			}
-			effective := call.Input
-			if call.ModelCall != nil {
-				envelope, marshalErr := json.Marshal(map[string]any{"tool_name": call.Name, "arguments": call.Input})
-				if marshalErr != nil {
-					return marshalErr
-				}
-				effective = envelope
-				fixed := *call.ModelCall
-				fixed.Args = string(effective)
-				call.ModelCall = &fixed
-			}
-			calls[i].Args = string(effective)
-		} else {
-			call = toolbinding.Prepare(target, call)
+		proposal := protocol
+		call.ProposedCall = &proposal
+		call = toolbinding.Prepare(target, call)
+		a.preparedCalls[protocol.ID] = preparedToolCall{target: target, call: call, err: err}
+	}
+	for i, protocol := range calls {
+		prepared := a.preparedCalls[protocol.ID]
+		if prepared.err != nil {
+			continue
 		}
-		a.preparedCalls[protocol.ID] = preparedToolCall{target: target, call: call, err: err, result: synthetic}
+		target, call := prepared.target, prepared.call
+		var synthetic *tool.Result
+		var prepareErr error
+		call, synthetic, prepareErr = toolbinding.PrepareArguments(ctx, target, call)
+		if prepareErr != nil {
+			return prepareErr
+		}
+		effective := call.Input
+		if call.ModelCall != nil {
+			envelope, marshalErr := json.Marshal(map[string]any{"tool_name": call.Name, "arguments": call.Input})
+			if marshalErr != nil {
+				return marshalErr
+			}
+			effective = envelope
+			fixed := *call.ModelCall
+			fixed.Args = string(effective)
+			call.ModelCall = &fixed
+		}
+		calls[i].Args = string(effective)
+		a.preparedCalls[protocol.ID] = preparedToolCall{target: target, call: call, result: synthetic}
 	}
 	return nil
 }
@@ -68,6 +76,7 @@ func (a *Agent) applyPreparedFact(event *session.Event) {
 	}
 	event.Tool.Execution = p.call.Execution
 	event.Tool.Binding = p.call.TargetBinding
+	event.Tool.ProposedCall = p.call.ProposedCall
 
 	if p.err == nil {
 		event.Tool.Name = p.call.Name

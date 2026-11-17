@@ -7,6 +7,8 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -63,13 +65,33 @@ func (r *Runtime) controllerSteeringHandler(
 				}
 			}
 		}
+		events, err := buildSteeringInputEvents(currentSession, turnID, submission)
+		if err != nil {
+			return err
+		}
+		events, err = r.prepareHookInputs(producerCtx, events)
+		if err != nil {
+			return err
+		}
+		if hookrun.FromContext(producerCtx).TakeEarly() != nil {
+			return errorcode.New(errorcode.Unsupported, "external ACP steering cannot enforce an early-response hook decision")
+		}
+		if len(r.hooks.Input) > 0 {
+			input = ""
+			parts = nil
+			for _, e := range events {
+				if e.Message != nil {
+					parts = append(parts, model.ContentPartsFromParts(e.Message.Parts)...)
+				}
+			}
+		}
 		return steerer.SteerController(ctx, controller.ControllerSteerRequest{
 			SessionRef: ref, ControllerID: binding.ControllerID,
 			ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID,
 			TurnID: turnID, Input: input, DisplayInput: submission.DisplayInput,
 			ContentParts: parts,
 			Commit: func() error {
-				return r.commitControllerSteering(producerCtx, currentSession, ref, turnID, submission, handle)
+				return r.commitControllerSteering(producerCtx, currentSession, ref, turnID, events, handle)
 			},
 		})
 	}
@@ -80,7 +102,7 @@ func (r *Runtime) commitControllerSteering(
 	activeSession session.Session,
 	ref session.SessionRef,
 	turnID string,
-	submission agent.Submission,
+	events []*session.Event,
 	handle *runner,
 ) error {
 	if r == nil || r.sessions == nil || handle == nil {
@@ -88,10 +110,6 @@ func (r *Runtime) commitControllerSteering(
 	}
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(producerCtx), steeringCommitTimeout)
 	defer cancel()
-	events, err := buildSteeringInputEvents(activeSession, turnID, submission)
-	if err != nil {
-		return err
-	}
 	if len(events) == 0 {
 		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: main-controller steering input is required")
 	}

@@ -285,6 +285,14 @@ func CloneEventTool(in EventTool) EventTool {
 		value := *in.Parent
 		out.Parent = &value
 	}
+	if in.ProcessingFailure != nil {
+		value := *in.ProcessingFailure
+		out.ProcessingFailure = &value
+	}
+	if in.ProposedCall != nil {
+		value := *in.ProposedCall
+		out.ProposedCall = &value
+	}
 	if in.ModelCall != nil {
 		value := *in.ModelCall
 		out.ModelCall = &value

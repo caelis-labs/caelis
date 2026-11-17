@@ -23,12 +23,17 @@ func (c *localInputContext) CommitAgentInputBatch(inputs []agent.AgentCommunicat
 	return c.commit(agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
 }
 
-func (c *localInputContext) DrainFinalSubmissions() []agent.Submission {
-	taskScopeFromContext(c.runner.ctx).stopCodeMode()
-	if !taskScopeFromContext(c.runner.ctx).wait(c.runner.ctx, c.runner.inputReadySignal()) {
-		return c.runner.drainSubmissions()
+func (c *localInputContext) DrainFinalSubmissions() ([]agent.Submission, error) {
+	taskScopeFromContext(c.Context).stopCodeMode()
+	if !taskScopeFromContext(c.Context).wait(c.Context, c.runner.inputReadySignal()) {
+		return c.runner.drainSubmissions(), nil
 	}
-	return c.runner.drainFinalSubmissions()
+	if scope := asyncScope(c.Context); scope != nil {
+		if err := scope.drain(); err != nil {
+			return nil, err
+		}
+	}
+	return c.runner.drainFinalSubmissions(), nil
 }
 
 func buildSteeringInputEvents(active session.Session, turnID string, submission agent.Submission) ([]*session.Event, error) {

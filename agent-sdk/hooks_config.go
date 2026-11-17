@@ -71,5 +71,5 @@ func CloneHooks(h Hooks) Hooks {
 // HasLoopPhases reports requirements unavailable inside an external Agent's
 // private loop. Embeddings must reject them instead of claiming protection.
 func (h Hooks) HasLoopPhases() bool {
-	return len(h.ModelPrepare)+len(h.ModelInvoke)+len(h.ModelResult)+len(h.ToolPrepare)+len(h.ToolInvoke)+len(h.ToolResult)+len(h.ModelView)+len(h.Completion)+len(h.Stream) > 0
+	return h.StreamMode == StreamBuffered || len(h.ModelPrepare)+len(h.ModelInvoke)+len(h.ModelResult)+len(h.ToolPrepare)+len(h.ToolInvoke)+len(h.ToolResult)+len(h.ModelView)+len(h.Completion)+len(h.Stream) > 0
 }

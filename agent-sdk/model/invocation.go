@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/google/uuid"
 )
 
@@ -107,17 +108,6 @@ func WithInvocationStart(ctx context.Context, start func(context.Context, Invoca
 	return context.WithValue(ctx, invocationStartKey{}, start)
 }
 
-// InvocationMiddleware wraps the accounted actual provider dispatch. Requests
-// are read-only copies; next cannot change the admitted request or receipt.
-type InvocationMiddleware func(context.Context, Invocation, *Request, func(context.Context) error) error
-type invocationMiddlewareKey struct{}
-
-// WithInvocationMiddleware installs a controlled actual-attempt extension.
-// The caller must join any consumed next before returning.
-func WithInvocationMiddleware(ctx context.Context, m InvocationMiddleware) context.Context {
-	return context.WithValue(ctx, invocationMiddlewareKey{}, m)
-}
-
 // InvocationTracker is implemented by request gates and retry wrappers that
 // delegate accounting to their actual provider attempts rather than counting
 // their own admission or orchestration as an attempt.
@@ -151,7 +141,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
-	middleware, _ := ctx.Value(invocationMiddlewareKey{}).(InvocationMiddleware)
+	middleware, _ := ctx.Value(modelinvocation.MiddlewareKey{}).(func(context.Context, Invocation, *Request, func(context.Context) error) error)
 	if admit == nil && observer == nil && start == nil && middleware == nil {
 		return generatePrepared(ctx, llm, CloneRequest(req))
 	}
@@ -189,6 +179,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 		usage := &invocationUsage{}
 		attemptCtx := context.WithValue(ctx, invocationUsageKey{}, usage)
 		var cause error
+		stopped := false
 		var invoked atomic.Bool
 		defer func() {
 			if !invoked.Load() {
@@ -228,26 +219,28 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				if err != nil {
 					cause = err
 					receipt.Outcome = "failed"
+					return err
 				}
 				if !yield(event, err) {
-					return nil
-				}
-				if err != nil {
+					stopped = true
 					return nil
 				}
 			}
 			return cause
 		}
 		if middleware != nil {
-			cause = middleware(attemptCtx, receipt, CloneRequest(prepared), dispatch)
+			middlewareErr := middleware(attemptCtx, receipt, CloneRequest(prepared), dispatch)
+			if !errors.Is(middlewareErr, cause) {
+				cause = errors.Join(cause, middlewareErr)
+			}
 			if cause == nil && !invoked.Load() {
 				cause = &invocationGateError{cause: errors.New("model middleware did not consume actual attempt")}
 			}
-			if cause != nil {
-				yield(nil, cause)
-			}
 		} else {
-			_ = dispatch(attemptCtx)
+			cause = dispatch(attemptCtx)
+		}
+		if cause != nil && !stopped {
+			yield(nil, cause)
 		}
 
 	}

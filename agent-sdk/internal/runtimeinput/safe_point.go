@@ -17,7 +17,7 @@ type BatchCommitter interface {
 // FinalSubmissionDrainer closes admission atomically with an empty final drain.
 // It is not used between tool steps, when the current Turn must remain open.
 type FinalSubmissionDrainer interface {
-	DrainFinalSubmissions() []agent.Submission
+	DrainFinalSubmissions() ([]agent.Submission, error)
 }
 
 // SubmissionCommitter persists one effective input through Runtime input hooks.

@@ -216,6 +216,7 @@ func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*
 		if !yield(event, nil) {
 			return committed, true, nil
 		}
+		committed = committed || hasIrreversibleOutput(ctx)
 	}
 	return committed, false, nil
 }

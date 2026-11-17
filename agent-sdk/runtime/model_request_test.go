@@ -172,8 +172,8 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 		policyCalls.Add(1)
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	interceptor := &recordingLifecycleInterceptor{}
-	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", LifecycleInterceptors: []agent.LifecycleInterceptor{interceptor}})
+	interceptor := &concurrentTraceSink{}
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", TraceSink: interceptor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	if oldCall.RuntimeModel.Name() != "old-model" || newCall.RuntimeModel.Name() != "new-model" || oldCall.Execution.TurnID != "canonical-turn" || newCall.Execution.TurnID != "canonical-turn" || oldCall.Execution.ItemID == newCall.Execution.ItemID {
 		t.Fatalf("tool model/identity not pinned: old=%#v new=%#v", oldCall, newCall)
 	}
-	if policyCalls.Load() != 2 || !interceptor.saw(agent.LifecycleTool) || !interceptor.saw(agent.LifecycleModel) {
+	if policyCalls.Load() != 2 || !interceptor.saw(agent.LifecycleTool, agent.TraceCompleted) || !interceptor.saw(agent.LifecycleModel, agent.TraceCompleted) {
 		t.Fatal("dynamic tools or models bypassed Runtime wrappers")
 	}
 	if !reflect.DeepEqual(first.Messages, second.Messages[:len(first.Messages)]) || !reflect.DeepEqual(second.Messages, third.Messages[:len(second.Messages)]) {
@@ -287,17 +287,15 @@ type snapshotLifecycleBarrier struct {
 	once    sync.Once
 }
 
-func (b *snapshotLifecycleBarrier) InterceptLifecycle(ctx context.Context, event agent.LifecycleEvent, next agent.LifecycleNext) error {
-	if event.Operation == agent.LifecycleModel {
-		b.once.Do(func() {
-			close(b.entered)
-			select {
-			case <-b.release:
-			case <-ctx.Done():
-			}
-		})
-	}
-	return next(ctx)
+func (b *snapshotLifecycleBarrier) Prepare(ctx context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+	b.once.Do(func() {
+		close(b.entered)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+		}
+	})
+	return p, nil
 }
 
 func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) {
@@ -309,7 +307,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 	oldSnapshot.Release = func() { oldReleases.Add(1) }
 	source.set(oldSnapshot)
 	barrier := &snapshotLifecycleBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, LifecycleInterceptors: []agent.LifecycleInterceptor{barrier}})
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "snapshot-barrier", Apply: barrier.Prepare}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

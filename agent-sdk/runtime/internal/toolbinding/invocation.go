@@ -49,6 +49,11 @@ func PreparedResult(ctx context.Context) *tool.Result {
 
 func PrepareEffective(ctx context.Context, candidate tool.Tool, call tool.Call) (tool.Call, *tool.Result, error) {
 	call = Prepare(candidate, call)
+	return PrepareArguments(ctx, candidate, call)
+}
+
+// PrepareArguments transforms an occurrence already allocated by its Runtime owner.
+func PrepareArguments(ctx context.Context, candidate tool.Tool, call tool.Call) (tool.Call, *tool.Result, error) {
 	if candidate == nil {
 		return call, nil, nil
 	}
@@ -63,5 +68,5 @@ func IsPrepared(ctx context.Context, call tool.Call) bool {
 	}
 	original := prepared.call
 	return ok && original.Execution == call.Execution && original.ID == call.ID && original.Name == call.Name && string(original.Input) == string(call.Input) &&
-		reflect.DeepEqual(original.Parent, call.Parent) && reflect.DeepEqual(original.TargetBinding, call.TargetBinding) && reflect.DeepEqual(original.ModelCall, call.ModelCall)
+		reflect.DeepEqual(original.Parent, call.Parent) && reflect.DeepEqual(original.TargetBinding, call.TargetBinding) && reflect.DeepEqual(original.ModelCall, call.ModelCall) && reflect.DeepEqual(original.ProposedCall, call.ProposedCall)
 }

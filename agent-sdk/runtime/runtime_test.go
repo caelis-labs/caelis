@@ -765,6 +765,7 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	}
 	runtime, err := New(Config{
 		Sessions: sessions,
+		Hooks:    agent.Hooks{StreamMode: agent.StreamIncremental},
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Be terse.",
 		},
@@ -950,7 +951,7 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 			gotTexts = append(gotTexts, session.EventText(event))
 		}
 	}
-	wantTexts := []string{"first prompt", "first answer", "steer next step", "steered answer"}
+	wantTexts := []string{"first prompt", "steer next step", "steered answer"}
 	if !reflect.DeepEqual(gotTexts, wantTexts) {
 		t.Fatalf("runner user/assistant texts = %#v, want %#v", gotTexts, wantTexts)
 	}

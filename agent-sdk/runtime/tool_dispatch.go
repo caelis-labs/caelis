@@ -57,6 +57,7 @@ func (t dispatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, er
 	} else if err := consumePolicyDispatch(ctx, t.base); err != nil {
 		return tool.Result{}, err
 	}
+
 	result, err := hookrun.InvokeTool(ctx, def, call, func(callCtx context.Context) (tool.Result, error) {
 		if synthetic := toolbinding.PreparedResult(ctx); synthetic != nil {
 			return *synthetic, nil

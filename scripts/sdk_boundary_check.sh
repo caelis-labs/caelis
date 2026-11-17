@@ -144,6 +144,7 @@ trap cleanup EXIT
 root_go_version="$(go list -m -f '{{.GoVersion}}')"
 cp "${ROOT}/go.sum" "${consumer_dir}/go.sum"
 cp "${ROOT}/scripts/testdata/sdk_consumer/quickstart_test.go" "${consumer_dir}/quickstart_test.go"
+cp "${ROOT}/scripts/testdata/sdk_consumer/hooks_test.go" "${consumer_dir}/hooks_test.go"
 (
   cd "${consumer_dir}"
   go mod init example.com/caelis-sdk-consumer >/dev/null

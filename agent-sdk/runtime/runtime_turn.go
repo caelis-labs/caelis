@@ -66,7 +66,7 @@ func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Sessi
 		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)
-	return ownCodeModeProducers(ctx, concrete, r.wrapToolsForLifecycle(wrapToolResults(spec.Tools)))
+	return ownCodeModeProducers(ctx, concrete, wrapToolResults(spec.Tools))
 }
 
 func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {
