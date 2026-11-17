@@ -8,6 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -169,7 +170,7 @@ func (r *Runtime) runAttempt(
 		ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
 	}
 	var source *requestsource.Tracker
-	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled {
+	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled || len(r.hooks.ModelPrepare) > 0 {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)
 	}
 	batch := make([]*session.Event, 0, 3)
@@ -217,29 +218,42 @@ func (r *Runtime) runAttempt(
 	var pendingCalls []*session.Event
 	pendingCount := 0
 	if sink != nil {
-		runCtx = &localInputContext{Context: runCtx, runner: sink, commit: func(submission agent.Submission) ([]model.Message, error) {
-			events, err := buildSteeringInputEvents(activeSession, turnID, submission)
-			if err != nil {
-				return nil, err
-			}
-			events, err = r.prepareHookInputs(ctx, events)
-			if err != nil {
-				return nil, err
-			}
-			persisted, err := r.appendInputEvents(ctx, ref, events)
-			if err != nil {
-				return nil, err
-			}
-			source.Append(persisted...)
-			messages := make([]model.Message, 0, len(persisted))
-			for _, event := range persisted {
-				batch = append(batch, event)
-				sink.publishEvent(event)
-				messages = append(messages, *event.Message)
-			}
-			emitted = emitted || len(persisted) > 0
-			return messages, nil
-		}}
+		runCtx = &localInputContext{Context: runCtx, runner: sink,
+			contextSource: func() (agent.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
+			contextEdit: func(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+				events, err := r.commitContextEdit(ctx, ref, turnID, runID, logical, name, edit, source.Events(), validate)
+				if err != nil {
+					return nil, err
+				}
+				source.Append(events...)
+				for _, e := range events {
+					batch = append(batch, e)
+					sink.publishEvent(e)
+				}
+				return compact.PromptEventsFromLatestCompact(source.Events()), nil
+			}, commit: func(submission agent.Submission) ([]model.Message, error) {
+				events, err := buildSteeringInputEvents(activeSession, turnID, submission)
+				if err != nil {
+					return nil, err
+				}
+				events, err = r.prepareHookInputs(ctx, events)
+				if err != nil {
+					return nil, err
+				}
+				persisted, err := r.appendInputEvents(ctx, ref, events)
+				if err != nil {
+					return nil, err
+				}
+				source.Append(persisted...)
+				messages := make([]model.Message, 0, len(persisted))
+				for _, event := range persisted {
+					batch = append(batch, event)
+					sink.publishEvent(event)
+					messages = append(messages, *event.Message)
+				}
+				emitted = emitted || len(persisted) > 0
+				return messages, nil
+			}}
 	}
 	for event, runErr := range activeAgent.Run(runCtx) {
 		if runErr != nil {

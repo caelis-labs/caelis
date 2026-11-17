@@ -143,6 +143,7 @@ type EventCompactionContext struct {
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
+	ContextEdit             *ContextEditProvenance   `json:"context_edit,omitempty"`
 	InputEvidence           *InputEvidence           `json:"input_evidence,omitempty"`
 	AuthorizationRevocation *AuthorizationRevocation `json:"authorization_revocation,omitempty"`
 	ID                      string                   `json:"id,omitempty"`
@@ -212,6 +213,9 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 	expanded, err := expandEventMedia(Event(decoded), fields.Media)
 	if err != nil {
+		return err
+	}
+	if err := validateCheckpointContract(&expanded); err != nil {
 		return err
 	}
 	*e = expanded

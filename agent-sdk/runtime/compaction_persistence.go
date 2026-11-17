@@ -13,7 +13,7 @@ import (
 )
 
 func (r *Runtime) persistCompactionArtifacts(ctx context.Context, active *session.Session, source session.LoadedSession, turnID string, result compact.Result) (*session.Event, error) {
-	return r.persistCompactionArtifactsUsing(ctx, active, turnID, result, func(current session.LoadedSession) bool {
+	return r.persistContextArtifactUsing(ctx, active, turnID, result.CompactEvent, func(current session.LoadedSession) bool {
 		return reflect.DeepEqual(mainInvocationEvents(source.Events), mainInvocationEvents(current.Events)) &&
 			reflect.DeepEqual(source.State, current.State)
 	}, nil)
@@ -22,12 +22,12 @@ func (r *Runtime) persistCompactionArtifacts(ctx context.Context, active *sessio
 type checkpointAppender func(context.Context, session.AppendEventRequest) (*session.Event, error)
 
 // Synchronous, asynchronous and idle compaction commit through this sole owner.
-func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *session.Session, turnID string, result compact.Result, valid func(session.LoadedSession) bool, appendCheckpoint checkpointAppender) (*session.Event, error) {
+func (r *Runtime) persistContextArtifactUsing(ctx context.Context, active *session.Session, turnID string, artifact *session.Event, valid func(session.LoadedSession) bool, appendCheckpoint checkpointAppender) (*session.Event, error) {
 	if appendCheckpoint == nil {
 		appendCheckpoint = r.sessions.AppendEvent
 	}
 
-	if result.CompactEvent == nil {
+	if artifact == nil {
 		return nil, errors.New("agent-sdk/runtime: compact event is required")
 	}
 	if validate, ok := ctx.Value(checkpointValidationKey{}).(checkpointValidator); ok && validate != nil {
@@ -40,7 +40,7 @@ func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *s
 		}
 		defer release()
 	}
-	event := normalizeEvent(*active, turnID, result.CompactEvent)
+	event := normalizeEvent(*active, turnID, artifact)
 	if event.ID == "" {
 		event.ID = r.nextID("compact", nil)
 	}

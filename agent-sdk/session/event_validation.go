@@ -61,6 +61,14 @@ func ValidateDurableCoreEvent(event *Event) error {
 	if err := jsonvalue.Validate(event); err != nil {
 		return coreEventValidationError(fmt.Sprintf("event contains invalid JSON-compatible value: %v", err))
 	}
+	if err := validateCheckpointContract(event); err != nil {
+		return coreEventValidationError(err.Error())
+	}
+	if p := event.ContextEdit; p != nil {
+		if p.Version != 1 || p.SourceStamp == "" || p.SourceThroughSeq == 0 || p.SourceThroughID == "" || p.Hook == "" || p.LogicalRequestID == "" || event.Type != EventTypeContext {
+			return coreEventValidationError("invalid context edit provenance")
+		}
+	}
 	if revoked := event.AuthorizationRevocation; revoked != nil {
 		if revoked.Schema != AuthorizationSchemaVersion {
 			return coreEventValidationError("unsupported authorization revocation schema")

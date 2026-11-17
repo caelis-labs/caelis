@@ -8,7 +8,9 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func cloneResponse(r model.Response) model.Response {
@@ -32,6 +34,17 @@ func cloneModelPreparation(p agent.ModelPreparation) agent.ModelPreparation {
 
 func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.Request) (*model.Request, *model.Response, error) {
 	p := agent.ModelPreparation{Request: req}
+	editor, canEdit := ctx.(runtimeinput.ContextEditor)
+	if canEdit && len(hookrun.FromContext(ctx).Hooks.ModelPrepare) > 0 {
+		var err error
+		e.ContextSource, err = editor.ContextEditSource()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if a.contextEdits == nil {
+		a.contextEdits = map[string]bool{}
+	}
 	for _, h := range hookrun.FromContext(ctx).Hooks.ModelPrepare {
 		next, err := hookrun.Call(ctx, "model_prepare", h, e, p, cloneModelPreparation, cloneModelPreparation)
 		if err == nil && next.Request == nil {
@@ -52,7 +65,24 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 			}
 		}
 		if err == nil && next.ContextEdit != nil {
-			err = fmt.Errorf("ContextEdit requires the Runtime checkpoint commit capability")
+			key := e.LogicalRequestID + "/" + h.Name
+			if !a.contextEdits[key] {
+				if !canEdit {
+					err = fmt.Errorf("ContextEdit requires the Runtime checkpoint commit capability")
+				} else {
+					var projected []*session.Event
+					projected, err = editor.CommitContextEdit(e.LogicalRequestID, h.Name, *next.ContextEdit, a.validateModelRequest)
+					if err == nil {
+						next.Request.Messages, err = messagesFromEventsChecked(ctx.Session(), projected)
+						req.Messages = model.CloneMessages(next.Request.Messages)
+						if err == nil {
+							a.contextEdits[key] = true
+							e.ContextSource, err = editor.ContextEditSource()
+						}
+					}
+				}
+			}
+			next.ContextEdit = nil
 		}
 		if err != nil {
 			return nil, nil, &agent.HookError{Phase: "model_prepare", Name: h.Name, Cause: err}

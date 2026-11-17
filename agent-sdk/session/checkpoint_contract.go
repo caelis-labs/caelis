@@ -1,8 +1,10 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"math"
 	"strconv"
 	"strings"
@@ -11,18 +13,29 @@ import (
 // CheckpointMetadataKey is the canonical checkpoint metadata namespace.
 const CheckpointMetadataKey = "compact"
 
-// CheckpointData is the persisted checkpoint coverage contract. Session owns
-// its encoding; Runtime owns summary generation and projection policy.
+// CheckpointPurpose distinguishes compression from an arbitrary durable view.
+type CheckpointPurpose string
+
+const (
+	CheckpointSummary     CheckpointPurpose = "compaction_summary"
+	CheckpointReplacement CheckpointPurpose = "context_replacement"
+)
+
+// CheckpointData is the persisted coverage and replacement contract. Session
+// owns its encoding; Runtime owns generation, validation and commit ordering.
 type CheckpointData struct {
-	Revision             int    `json:"revision,omitempty"`
-	ContractVersion      int    `json:"contract_version,omitempty"`
-	SummarizedThroughID  string `json:"summarized_through_id,omitempty"`
-	SummarizedThroughSeq uint64 `json:"summarized_through_seq,omitempty"`
-	Generator            string `json:"generator,omitempty"`
-	Trigger              string `json:"trigger,omitempty"`
-	SourceEventCount     int    `json:"source_event_count,omitempty"`
-	TotalTokens          int    `json:"total_tokens,omitempty"`
-	ContextWindowTokens  int    `json:"context_window_tokens,omitempty"`
+	Purpose              CheckpointPurpose `json:"purpose,omitempty"`
+	SourceStamp          string            `json:"source_stamp,omitempty"`
+	ReplacementMessages  []model.Message   `json:"replacement_messages,omitempty"`
+	Revision             int               `json:"revision,omitempty"`
+	ContractVersion      int               `json:"contract_version,omitempty"`
+	SummarizedThroughID  string            `json:"summarized_through_id,omitempty"`
+	SummarizedThroughSeq uint64            `json:"summarized_through_seq,omitempty"`
+	Generator            string            `json:"generator,omitempty"`
+	Trigger              string            `json:"trigger,omitempty"`
+	SourceEventCount     int               `json:"source_event_count,omitempty"`
+	TotalTokens          int               `json:"total_tokens,omitempty"`
+	ContextWindowTokens  int               `json:"context_window_tokens,omitempty"`
 	// DiscoveredTools retains old checkpoint data for read-only history.
 	// Runtime never writes or uses it for invocation eligibility. Remove when
 	// the supported Session floor excludes checkpoints containing this field.
@@ -40,6 +53,9 @@ func CheckpointDataFromEvent(event *Event) (CheckpointData, bool) {
 	}
 	switch typed := raw.(type) {
 	case CheckpointData:
+		if typed.ContractVersion < 0 {
+			return CheckpointData{}, false
+		}
 		return normalizeCheckpointData(typed), true
 	case map[string]any:
 		var out CheckpointData
@@ -67,6 +83,20 @@ func CheckpointDataFromEvent(event *Event) (CheckpointData, bool) {
 func CheckpointDataValue(in CheckpointData) map[string]any {
 	in = normalizeCheckpointData(in)
 	out := make(map[string]any)
+	if in.Purpose != "" {
+		out["purpose"] = string(in.Purpose)
+	}
+	if in.SourceStamp != "" {
+		out["source_stamp"] = in.SourceStamp
+	}
+	if in.ReplacementMessages != nil {
+		raw, _ := json.Marshal(in.ReplacementMessages)
+		var messages any
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		_ = dec.Decode(&messages)
+		out["replacement_messages"] = messages
+	}
 	if in.Revision != 0 {
 		out["revision"] = strconv.Itoa(in.Revision)
 	}
@@ -182,6 +212,7 @@ func maxInt() int {
 }
 
 func normalizeCheckpointData(in CheckpointData) CheckpointData {
+	in.ReplacementMessages = model.CloneMessages(in.ReplacementMessages)
 	in.SummarizedThroughID = strings.TrimSpace(in.SummarizedThroughID)
 	in.Generator = strings.TrimSpace(in.Generator)
 	in.Trigger = strings.TrimSpace(in.Trigger)

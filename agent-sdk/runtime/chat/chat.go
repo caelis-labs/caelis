@@ -29,10 +29,12 @@ type Factory struct {
 
 // Agent is the minimal model-backed chat agent.
 type Agent struct {
-	models         map[string]model.LLM
-	modelRevision  string
-	preparedCalls  map[string]preparedToolCall
-	yieldedResults map[*session.Event]bool
+	validateModelRequest func(context.Context) (func(), error)
+	contextEdits         map[string]bool
+	models               map[string]model.LLM
+	modelRevision        string
+	preparedCalls        map[string]preparedToolCall
+	yieldedResults       map[*session.Event]bool
 
 	name                string
 	model               model.LLM
@@ -328,12 +330,17 @@ func (a *Agent) collectCanonicalModelStep(
 
 		assembly++
 		evidence := hookrun.FromContext(ctx).Evidence
+		evidence.ConfigurationRevision = a.modelRevision
 		evidence.LogicalRequestID = logicalID
 		evidence.AssemblyRevision = assembly
 		request, cached, prepareErr := a.prepareModel(ctx, evidence, request)
 		if prepareErr != nil {
+			if a.resolveModelRequest != nil && errors.Is(prepareErr, agent.ErrModelRequestSnapshotStale) {
+				continue
+			}
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
 		}
+		messages = model.CloneMessages(request.Messages)
 		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,

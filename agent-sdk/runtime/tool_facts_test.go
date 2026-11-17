@@ -47,7 +47,7 @@ type recoveryCaptureModel struct{ messages []model.Message }
 func (*recoveryCaptureModel) Name() string { return "recovery-capture" }
 
 func (*recoveryCaptureModel) Capabilities() model.Capabilities {
-	return model.Capabilities{ToolCalls: true}
+	return model.Capabilities{ToolCalls: true, ImageInput: true}
 }
 
 func (m *recoveryCaptureModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {

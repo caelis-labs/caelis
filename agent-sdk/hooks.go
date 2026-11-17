@@ -25,6 +25,7 @@ type HookContext struct {
 	InputSource           session.ActorRef
 	Tool                  *tool.Call
 	ToolDefinition        *tool.Definition
+	ContextSource         ContextSource
 }
 
 // HookPurpose separates the main loop from private auxiliary model calls.

@@ -213,8 +213,8 @@ another one.
 Approval request/resolution facts live in `Event.Approval`. Runtime owns their
 persistence and reusable consent; Control projects their redacted request and
 live queue settlement without a second approval history writer. Restart does not
-recreate approval waiters. Session event schema 3 is required for complete tool
-facts. The Session codec consumes known legacy execution fields and media solely
+recreate approval waiters. Session event schema 4 carries original input evidence and durable context edits;
+complete tool facts from schema 3 remain readable. The Session codec consumes known legacy execution fields and media solely
 for compatibility, preserving old messages and approval review; it never restores
 Run state, execution authority or tool bindings. Unknown future schemas fail closed.
 
@@ -265,6 +265,16 @@ checkpoint follows retained older events. Strict in-context generation validates
 both boundaries and fingerprints and never falls back to an independent request.
 Custom async compactors must enforce `compact.Request` coverage and in-context
 requirements. Synchronous compaction retains its optional fallback.
+
+Model-prepare context edits use the same checkpoint commit owner. Append adds a
+system-authored context event with typed source provenance. ReplacePrefix uses
+checkpoint contract 2 with purpose `context_replacement`, exact source coverage
+and typed replacement messages. Original input, tool, binding and approval facts
+remain immutable; Guardian reads original input evidence. Replacement tool groups
+must remain complete and retain their original call identities and arguments.
+Summary contract 1 remains readable; unsupported event or checkpoint versions
+fail closed. Context replacement may increase the model view within its budget;
+it does not relax the smaller-prefix and ordered-tail rules for compaction.
 
 Candidate readiness is not a commit. Synchronous, async and idle paths use the
 same guarded checkpoint writer, with revision CAS and original-ID readback after

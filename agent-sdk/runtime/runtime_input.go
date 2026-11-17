@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -12,8 +13,10 @@ import (
 // with the producing Runtime, without exposing a Session writer to the Agent.
 type localInputContext struct {
 	agent.Context
-	runner *runner
-	commit func(agent.Submission) ([]model.Message, error)
+	runner        *runner
+	contextSource func() (agent.ContextSource, error)
+	contextEdit   func(string, string, agent.ContextEdit, func(context.Context) (func(), error)) ([]*session.Event, error)
+	commit        func(agent.Submission) ([]model.Message, error)
 }
 
 func (c *localInputContext) CommitAgentInputBatch(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
@@ -65,4 +68,11 @@ func preserveSteeringCorrelation(event *session.Event, metadata map[string]any) 
 
 func (c *localInputContext) CommitSubmission(s agent.Submission) ([]model.Message, error) {
 	return c.commit(s)
+}
+
+func (c *localInputContext) ContextEditSource() (agent.ContextSource, error) {
+	return c.contextSource()
+}
+func (c *localInputContext) CommitContextEdit(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+	return c.contextEdit(logical, name, edit, validate)
 }

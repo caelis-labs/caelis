@@ -84,7 +84,7 @@ func eventMediaID(data string) string {
 }
 
 func expandEventMedia(e Event, media map[string]string) (Event, error) {
-	if media != nil && e.Schema != 2 && e.Schema != EventSchemaVersion {
+	if media != nil && e.Schema != 2 && e.Schema != 3 && e.Schema != EventSchemaVersion {
 		return Event{}, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
 	}
 	for id, data := range media {

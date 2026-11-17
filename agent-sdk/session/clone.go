@@ -57,6 +57,10 @@ func CloneEvent(in *Event) *Event {
 		evidence.Hooks = append([]string(nil), evidence.Hooks...)
 		out.InputEvidence = &evidence
 	}
+	if in.ContextEdit != nil {
+		p := *in.ContextEdit
+		out.ContextEdit = &p
+	}
 	out.legacyJournal = append(json.RawMessage(nil), in.legacyJournal...)
 	if in.Approval != nil {
 		a := CloneApprovalRecord(*in.Approval)
