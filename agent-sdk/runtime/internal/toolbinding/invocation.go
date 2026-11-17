@@ -2,6 +2,7 @@ package toolbinding
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/google/uuid"
@@ -27,7 +28,7 @@ type preparedInvocation struct {
 
 // WithPrepared admits only the exact occurrence prepared by a Runtime caller.
 func WithPrepared(ctx context.Context, call tool.Call) context.Context {
-	return context.WithValue(ctx, preparedKey{}, &preparedInvocation{call: call})
+	return context.WithValue(ctx, preparedKey{}, &preparedInvocation{call: tool.CloneCall(call)})
 }
 
 // IsPrepared excludes caller-authored identity and changed effective arguments.
@@ -37,5 +38,6 @@ func IsPrepared(ctx context.Context, call tool.Call) bool {
 		return false
 	}
 	original := prepared.call
-	return ok && original.Execution == call.Execution && original.ID == call.ID && original.Name == call.Name && string(original.Input) == string(call.Input)
+	return ok && original.Execution == call.Execution && original.ID == call.ID && original.Name == call.Name && string(original.Input) == string(call.Input) &&
+		reflect.DeepEqual(original.Parent, call.Parent) && reflect.DeepEqual(original.TargetBinding, call.TargetBinding) && reflect.DeepEqual(original.ModelCall, call.ModelCall)
 }

@@ -11,8 +11,8 @@ import (
 )
 
 // Keep the complete ordinary wrapper chain inside the existing Run continuation
-// owner. Chat's bounded foreground cancellation drain is not producer quiescence;
-// executeKernelTurn already joins this owner before Runner completion/fence release.
+// owner. Foreground cancellation does not end the producer; executeKernelTurn
+// joins this owner before Runner completion and fence release.
 func ownCodeModeProducers(ctx context.Context, concrete, wrapped []tool.Tool) []tool.Tool {
 	index := 0
 	for _, one := range concrete {
@@ -48,6 +48,9 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 	if t.scope == nil {
 		return tool.Result{}, errors.New("code mode requires the Runtime Run producer owner")
 	}
+	if !toolbinding.IsPrepared(ctx, call) {
+		return tool.Result{}, errors.New("code mode requires the exact prepared invocation")
+	}
 	// This is only an in-memory join registration, never an operation identity,
 	// recovery record, or execution authority. Invocation still owns tool identity.
 	id := "code-mode-producer:" + uuid.NewString()
@@ -67,7 +70,9 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 	var producerError func() error
 	var errorMu sync.Mutex
 	var durabilityErr error
-	ctx = context.WithValue(work.ctx, codeModeProducerErrorKey{}, func(err error) {
+	// Retain the producer lifetime while carrying only the validated private
+	// invocation credential. Caller-authored Execution never supplies it.
+	ctx = context.WithValue(toolbinding.WithPrepared(work.ctx, call), codeModeProducerErrorKey{}, func(err error) {
 		errorMu.Lock()
 		durabilityErr = errors.Join(durabilityErr, err)
 		errorMu.Unlock()
@@ -88,8 +93,8 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 }
 
 // The policy owner receives source-read semantics from the concrete Runtime
-// binding, never from a display name or model/remote metadata. Journal is the
-// sole wrapper between policy and that binding at this point.
+// binding through its dispatch wrapper, never from a display name or
+// model/remote metadata.
 func codeModeReadPathArgument(one tool.Tool) string {
 	if dispatch, ok := one.(dispatchTool); ok {
 		one = dispatch.base
