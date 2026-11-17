@@ -114,7 +114,9 @@ func collectFinalResponse(
 				if !yieldChunk(chunk) {
 					return nil, context.Canceled
 				}
-				model.RecordIrreversibleOutput(ctx)
+				if visibleEvent.PartDelta != nil {
+					model.RecordIrreversibleOutput(ctx)
+				}
 			}
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {

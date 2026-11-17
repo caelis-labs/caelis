@@ -216,15 +216,22 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 		}
 	}
 	r, err := chain(ctx)
-	if err != nil && actual != nil {
+	if err != nil && actual != nil && (!errors.Is(err, actualErr) || !errors.Is(actualErr, err)) {
 		return *actual, &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
 	}
 	if err == nil && len(entries) > 0 {
 		if r.ID != "" && r.ID != call.ID || r.Name != "" && r.Name != call.Name || actual == nil && r.TurnComplete || actual != nil && (r.TurnComplete != actual.TurnComplete || r.IsError != actual.IsError || !reflect.DeepEqual(r.Meta, actual.Meta) || !reflect.DeepEqual(r.Metadata, actual.Metadata)) {
-			return tool.Result{}, fmt.Errorf("middleware changed tool identity or completion")
+			err = fmt.Errorf("middleware changed tool identity or completion")
 		}
-		if check := ValidateResult(def, r); check != nil {
-			return tool.Result{}, check
+		if err == nil {
+			err = ValidateResult(def, r)
+		}
+		if err != nil {
+			err = &agent.HookError{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
+			if actual != nil {
+				return *actual, &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
+			}
+			return tool.Result{}, err
 		}
 	}
 	return r, err

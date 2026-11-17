@@ -4241,7 +4241,7 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
+		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
 		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-retry-tool"}},
 		Events: []*session.Event{{
 			Type:    session.EventTypeUser,
