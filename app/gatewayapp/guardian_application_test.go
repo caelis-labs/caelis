@@ -11,7 +11,7 @@ import (
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
-func TestApplicationGuardianUsesOnlyOwnCanonicalEvidenceWithoutQueryTools(t *testing.T) {
+func TestApplicationGuardianUsesOnlyOwnDialogueAndExactActionWithoutQueryTools(t *testing.T) {
 	ctx := t.Context()
 	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -34,6 +34,7 @@ func TestApplicationGuardianUsesOnlyOwnCanonicalEvidenceWithoutQueryTools(t *tes
 	}
 	appendApprovalReviewerTextEvent(t, ctx, service, other, session.EventTypeUser, model.RoleUser, "other session private instruction sentinel")
 	appendApprovalReviewerTextEvent(t, ctx, service, active, session.EventTypeUser, model.RoleUser, "inspect my own action; preserve the ledger")
+	appendApprovalReviewerTextEvent(t, ctx, service, active, session.EventTypeAssistant, model.RoleAssistant, "own assistant proposal sentinel")
 	call := guardianSource(0, session.EventTypeToolCall, "prior own action sentinel")
 	call.ID, call.Seq = "", 0
 	if _, err := service.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: call}); err != nil {
@@ -62,12 +63,12 @@ func TestApplicationGuardianUsesOnlyOwnCanonicalEvidenceWithoutQueryTools(t *tes
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, want := range []string{"preserve the ledger", "prior own action sentinel", "exact pending action sentinel"} {
+	for _, want := range []string{"preserve the ledger", "own assistant proposal sentinel", "exact pending action sentinel"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("reviewer omitted own canonical evidence %q: %s", want, text)
 		}
 	}
-	for _, absent := range []string{"other session private instruction sentinel", "private execution credential sentinel", "private metadata sentinel", "environment_context", "Read, Grep and RunCommand", "query network policy", "query sandbox"} {
+	for _, absent := range []string{"prior own action sentinel", "other session private instruction sentinel", "private execution credential sentinel", "private metadata sentinel", "environment_context", "Read, Grep and RunCommand", "query network policy", "query sandbox"} {
 		if strings.Contains(text, absent) {
 			t.Fatalf("reviewer request exposes %q: %s", absent, text)
 		}
