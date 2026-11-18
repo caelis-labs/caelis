@@ -199,7 +199,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
-	cmds := []tea.Cmd{tickStatusCmd(), m.loadUIPreferences()}
+	cmds := []tea.Cmd{tickStatusCmd(), m.loadUIPreferences(), m.probeClipboardImage()}
 	if m.cfg.InitialSessionID != "" {
 		cmds = append(cmds, m.executeLineCmd(Submission{Text: "/resume " + m.cfg.InitialSessionID}))
 	}
@@ -481,9 +481,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.handleMouse(typed)
 
+	case clipboardImageAvailableMsg:
+		m.clipboardProbeInFlight = false
+		m.clipboardImageAvailable = bool(typed)
+		return m, nil
+
 	case tea.FocusMsg:
 		m.focused = true
-		return m, m.requestTerminalBackgroundCmd()
+		m.nextClipboardProbe = time.Time{}
+		return m, tea.Batch(m.requestTerminalBackgroundCmd(), m.probeClipboardImage())
 
 	case tea.BlurMsg:
 		m.focused = false

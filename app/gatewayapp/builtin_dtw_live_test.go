@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -115,7 +116,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 	if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" {
 		p.Plugins = []sessionprofile.Plugin{{Root: root}}
 	}
-	p.Instructions = "你是 Caelis Agent。用 Skill、tool_search、mcp_call 完成用户的本机桌面验收；Read 仅可读取该 desktop-world Skill 目录内的随包参考文档。先自主读取 desktop-world Skill，然后自主发现真实工具。只操作本任务标题的 Chrome 页面，不操作其他标签页、用户文件或外部服务。不要用文件读取/终端/HTTP接口绕过桌面读取验收数据。未知作用不重放，使用只读观察核对已发生的效果。"
+	p.Instructions = "你是 Caelis Agent。用 Skill、tool_search、mcp_call 完成用户的本机桌面验收；Read 仅可读取该 dtw Skill 目录内的随包参考文档。先自主读取 dtw Skill，然后自主发现真实工具。只操作本任务标题的 Chrome 页面，不操作其他标签页、用户文件或外部服务。不要用文件读取/终端/HTTP接口绕过桌面读取验收数据。未知作用不重放，使用只读观察核对已发生的效果。"
 	creation := appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "live-task-create"}, Profile: &p}
 	if os.Getenv("CAELIS_DTW_LIVE_SESSION") == "ordinary" {
 		creation.Profile = nil
@@ -157,8 +158,8 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 		}
 		if active := state.Approval.Active; active != nil {
 			selected, err := host.host.SessionMCPStatus(ctx, created.SessionID)
-			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.5.0" || len(selected.Servers) != 1 || len(selected.Servers[0].Tools) != 2 || len(selected.Skills) != 1 {
-				t.Fatal("live source does not contain one paired 0.5.0 MCP/Skill package")
+			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.5.2" || len(selected.Servers) != 1 || !slices.Contains(selected.Servers[0].Tools, "look") || slices.Contains(selected.Servers[0].Tools, "exec") || len(selected.Skills) != 1 {
+				t.Fatal("live source does not contain one paired 0.5.2 MCP/Skill package")
 			}
 			if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" && selected.Plugins[0].Root != root {
 				t.Fatal("explicit package silently fell back to another source")
@@ -215,12 +216,12 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 			skillReference := false
 			if e.Tool.Name == "Read" && selectedRoot != "" {
 				path, _ := e.Tool.Input["path"].(string)
-				skillReference = filepath.IsAbs(path) && plugin.PathWithinRoot(filepath.Join(selectedRoot, "skills", "desktop-world"), path)
+				skillReference = filepath.IsAbs(path) && plugin.PathWithinRoot(filepath.Join(selectedRoot, "skills", "dtw"), path)
 			}
-			if e.Tool.Name != "Skill" && e.Tool.Name != "tool_search" && !strings.HasPrefix(e.Tool.Name, "desktop_world__") && !skillReference {
+			if e.Tool.Name != "Skill" && e.Tool.Name != "tool_search" && !strings.HasPrefix(e.Tool.Name, "dtw__") && !skillReference {
 				t.Fatal("Agent bypassed the authorized desktop-only task path")
 			}
-			if strings.HasPrefix(e.Tool.Name, "desktop_world__") && (e.Tool.ModelCall == nil || e.Tool.ModelCall.Name != "mcp_call" || e.Tool.ModelCall.ID != e.Tool.ID) {
+			if strings.HasPrefix(e.Tool.Name, "dtw__") && (e.Tool.ModelCall == nil || e.Tool.ModelCall.Name != "mcp_call" || e.Tool.ModelCall.ID != e.Tool.ID) {
 				t.Fatal("real MCP result lost its original model envelope")
 			}
 		}

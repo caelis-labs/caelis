@@ -503,6 +503,9 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if base.PasteClipboardImage == nil {
 		base.PasteClipboardImage = defaultPasteClipboardImage
+		if base.HasClipboardImage == nil {
+			base.HasClipboardImage = defaultHasClipboardImage
+		}
 	}
 
 	return base

@@ -338,7 +338,7 @@ func TestSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelectableModels(codex) error = %v", err)
 	}
-	want := []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
+	want := []string{"gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	if got := selectableModelNames(models); !slices.Equal(got, want) {
 		t.Fatalf("codex selectable models = %#v, want maintained fallback %#v", got, want)
 	}
