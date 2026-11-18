@@ -72,9 +72,9 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 					continue
 				}
 				canonical, truncationMeta := canonicalToolResult(progress, nil)
-				event := toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)
-				a.presentMCPEvent(event)
-				_ = yieldProgress(session.MarkUIOnly(event))
+				event := session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta))
+				a.applyPreparedFact(event)
+				_ = yieldProgress(event)
 			default:
 				return done.message, done.event, done.err
 			}
@@ -87,9 +87,9 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				continue
 			}
 			canonical, truncationMeta := canonicalToolResult(progress, nil)
-			event := toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)
-			a.presentMCPEvent(event)
-			if !yieldProgress(session.MarkUIOnly(event)) {
+			event := session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta))
+			a.applyPreparedFact(event)
+			if !yieldProgress(event) {
 				cancel()
 				<-doneCh
 				return model.Message{}, nil, context.Canceled
@@ -135,7 +135,6 @@ func (a *Agent) executeToolCallAdmitted(
 		message := toolResultMessageFromCanonical(call, canonical)
 		event := toolResultEvent(call, result, &message, truncationMeta)
 		a.applyPreparedFact(event)
-		a.presentMCPEvent(event)
 		return message, event, nil
 	}
 
@@ -201,7 +200,6 @@ func (a *Agent) executeToolCallAdmitted(
 			event.Tool.Status = "completed"
 		}
 	}
-	a.presentMCPEvent(event)
 	var hookErr *agent.HookError
 	if errors.As(err, &hookErr) {
 		return message, event, err

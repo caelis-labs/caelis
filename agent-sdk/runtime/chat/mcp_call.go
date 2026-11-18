@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -104,21 +103,6 @@ func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibi
 		}
 		a.boundCalls[call.ID] = bound
 	}
-}
-
-func (a *Agent) presentMCPEvent(event *session.Event) {
-	if event == nil || event.Tool == nil {
-		return
-	}
-	bound, ok := a.boundCalls[event.Tool.ID]
-	if !ok || bound.call.Name == "" {
-		return
-	}
-	original := bound.original
-	event.Tool.ModelCall = &original
-	event.Tool.Name = bound.call.Name
-	event.Tool.Input = mustObject(bound.call.Args)
-	event.Meta = mergeEventMeta(event.Meta, toolMeta(bound.call.Name))
 }
 
 func (a *Agent) boundTool(call model.ToolCall, visibility *tool.ToolVisibility) (tool.Tool, model.ToolCall, *tool.Binding, error) {

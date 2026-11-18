@@ -3,12 +3,8 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -49,30 +45,6 @@ func TestCodeModeSourceInputAndUserDiagnostics(t *testing.T) {
 				}
 				return nil
 			}}
-			if tc.name == "neither" || tc.name == "both" {
-				rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer func() { _ = rt.ReleaseCodeModeEnvironments() }()
-				run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: backend}}}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := run.Handle.WaitCompletion(t.Context()); err == nil || !strings.Contains(err.Error(), "oneOf") {
-					t.Fatalf("invalid source not rejected during preparation: %v", err)
-				}
-				events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, e := range events {
-					if e.Tool != nil {
-						t.Fatal("invalid source committed a partial tool batch")
-					}
-				}
-				return
-			}
 			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: backend}}}, nil, nil)
 			result := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], "source")
 			raw, _ := json.Marshal(result.Content)

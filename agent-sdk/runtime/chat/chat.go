@@ -263,7 +263,6 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
 			for _, event := range toolCallEvents {
 				a.applyPreparedFact(event)
-				a.presentMCPEvent(event)
 				if !yield(event, nil) {
 					return
 				}
@@ -358,6 +357,11 @@ func (a *Agent) collectCanonicalModelStep(
 			request.Instructions = model.CloneParts(a.instructions)
 		} else {
 			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
+		}
+		if invalidAttempts > 0 {
+			// The rejected envelope never entered Session or tool dispatch.
+			// Give this regeneration feedback without replaying malformed input.
+			request.Instructions = append(request.Instructions, model.NewTextPart(toolCallRepairInstruction))
 		}
 
 		run := hookrun.FromContext(ctx)

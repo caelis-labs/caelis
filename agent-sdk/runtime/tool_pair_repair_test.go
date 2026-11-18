@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -701,6 +702,87 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 					t.Fatal("command occurrence or original protocol relation lost")
 				}
 				seen[operation] = true
+			}
+		})
+	}
+}
+
+func TestResumeLegacyGroupedResults(t *testing.T) {
+	for _, scenario := range []string{"complete", "missing-sibling", "previously-repaired"} {
+		t.Run(scenario, func(t *testing.T) {
+			store, active, root := codeModeStore(t)
+			appendFact := func(e *session.Event) {
+				t.Helper()
+				e.Scope = &session.EventScope{TurnID: "old-turn"}
+				if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: e}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := []model.ToolCall{{ID: "a", Name: "Read", Args: "{}"}, {ID: "b", Name: "Read", Args: "{}"}}
+			if scenario == "missing-sibling" {
+				calls = append(calls, model.ToolCall{ID: "c", Name: "Read", Args: "{}"})
+			}
+			batch := model.MessageFromToolCalls(model.RoleAssistant, calls, "")
+			appendFact(&session.Event{ID: "batch", Type: session.EventTypeToolCall, Message: &batch, Tool: &session.EventTool{ID: "a", Name: "Read"}})
+			appendFact(&session.Event{ID: "b", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "b", Name: "Read"}})
+			original := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("b", "Read", map[string]any{"data": "B"}, true), model.NewToolResultJSONPart("a", "Read", map[string]any{"data": "A"}, false))
+			appendFact(&session.Event{ID: "grouped", Type: session.EventTypeToolResult, Message: &original})
+			wantRepairs := 0
+			switch scenario {
+			case "previously-repaired":
+				for i, call := range calls {
+					item := fmt.Sprintf("legacy:batch:%d", i)
+					id := "interrupted:old-turn:" + item
+					appendFact(&session.Event{ID: id, IdempotencyKey: id, Type: session.EventTypeToolResult, Tool: &session.EventTool{
+						ID: call.ID, Name: call.Name, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "old-turn", ItemID: item},
+						Outcome: session.ToolOutcomeUnknown, ErrorCode: "execution_interrupted",
+					}})
+				}
+				wantRepairs = len(calls)
+			case "missing-sibling":
+				wantRepairs = 1
+			}
+			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			rt, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			probe := &recoveryCaptureModel{}
+			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "resume", AgentSpec: agent.AgentSpec{Model: probe}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			var results []model.Message
+			for _, m := range probe.messages {
+				if len(m.ToolResults()) > 0 {
+					results = append(results, m)
+				}
+			}
+			if len(results) == 0 || !reflect.DeepEqual(results[0].ToolResults(), original.ToolResults()) {
+				t.Fatalf("resumed tool messages: %+v", results)
+			}
+			if scenario == "missing-sibling" {
+				if len(results) != 2 || len(results[1].ToolResults()) != 1 || results[1].ToolResults()[0].ToolUseID != "c" || !results[1].ToolResults()[0].IsError {
+					t.Fatalf("missing sibling's result: %+v", results)
+				}
+			} else if len(results) != 1 {
+				t.Fatalf("unexpected extra outcomes: %+v", results)
+			}
+			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+			if err != nil {
+				t.Fatal(err)
+			}
+			repairs := 0
+			for _, event := range events {
+				if event.Tool != nil && event.Tool.ErrorCode == "execution_interrupted" {
+					repairs++
+				}
+			}
+			if repairs != wantRepairs {
+				t.Fatalf("durable interruptions = %d, want %d", repairs, wantRepairs)
 			}
 		})
 	}

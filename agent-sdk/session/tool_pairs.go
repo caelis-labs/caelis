@@ -20,7 +20,10 @@ type ToolPair struct {
 // PairToolFacts pairs occurrences, including known pre-schema-3 partial batches.
 // Ambiguous legacy IDs fail closed instead of assigning a result to another call.
 func PairToolFacts(events []*Event) ([]ToolPair, error) {
-	events = toolPairInputs(events)
+	return pairToolFacts(toolPairInputs(events))
+}
+
+func pairToolFacts(events []*Event) ([]ToolPair, error) {
 	var pairs []ToolPair
 	occurrences := map[string]int{}
 	sibling := map[*Event]bool{}
@@ -112,7 +115,16 @@ func PairToolFacts(events []*Event) ([]ToolPair, error) {
 		}
 	}
 	for _, event := range events {
-		if event == nil || event.Type != EventTypeToolResult || event.Tool == nil {
+		if event == nil || event.Type != EventTypeToolResult {
+			continue
+		}
+		if isLegacyResultBatch(event) {
+			if err := pairLegacyBatch(pairs, event); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if event.Tool == nil {
 			continue
 		}
 		if event.Tool.Execution.ItemID != "" {
@@ -120,36 +132,83 @@ func PairToolFacts(events []*Event) ([]ToolPair, error) {
 				if pairs[n].Call.Tool.ID != event.Tool.ID || pairs[n].Call.Tool.Name != event.Tool.Name {
 					return nil, fmt.Errorf("tool result identity differs for occurrence %s", event.Tool.Execution.ItemID)
 				}
-				if pairs[n].Result != nil {
+				if original := pairs[n].Result; original != nil {
+					// Older repair passes overlooked message-only result batches.
+					// Prefer the earlier durable outcome to their interruption marker.
+					if isLegacyResultBatch(original) && event.Tool.ErrorCode == "execution_interrupted" && event.Tool.Outcome == ToolOutcomeUnknown &&
+						event.ID == "interrupted:"+event.Tool.Execution.TurnID+":"+event.Tool.Execution.ItemID && event.IdempotencyKey == event.ID {
+						continue
+					}
 					return nil, fmt.Errorf("multiple results for occurrence %s", event.Tool.Execution.ItemID)
 				}
 				pairs[n].Result = event
 			}
 			continue
 		}
-		var candidates []int
-		for n, pair := range pairs {
-			call := pair.Call
-			if pair.Result != nil || call.Tool.ID != event.Tool.ID || turnOf(call) != turnOf(event) || call.Seq > event.Seq && event.Seq > 0 {
-				continue
-			}
-			if (call.Tool.Parent == nil) != (event.Tool.Parent == nil) {
-				continue
-			}
-			if call.Tool.Parent != nil && call.Tool.Parent.CallID != event.Tool.Parent.CallID {
-				continue
-			}
-			candidates = append(candidates, n)
+		n, err := legacyResultIndex(pairs, event, event.Tool.ID)
+		if err != nil {
+			return nil, err
 		}
-		if len(candidates) > 1 {
-			return nil, fmt.Errorf("ambiguous legacy tool result %q in Turn %q", event.Tool.ID, turnOf(event))
-		}
-		if len(candidates) == 1 {
-			pairs[candidates[0]].Result = event
+		if n >= 0 {
+			pairs[n].Result = event
 		}
 	}
 	return pairs, nil
 }
+
+// A pre-occurrence model envelope may represent several outcomes in one
+// message, with an optional typed fact for one member. Preserve its part order.
+func isLegacyResultBatch(event *Event) bool {
+	return (event.Tool == nil || event.Tool.Execution.ItemID == "") && event.Message != nil && len(event.Message.Parts) > 1 &&
+		len(event.Message.ToolResults()) > 1 && IsMainInvocationVisibleEvent(event)
+}
+
+func pairLegacyBatch(pairs []ToolPair, event *Event) error {
+	results := event.Message.ToolResults()
+	matched := 0
+	var batch string
+	for _, result := range results {
+		index, err := legacyResultIndex(pairs, event, result.ToolUseID)
+		if err != nil {
+			return err
+		}
+		if index < 0 {
+			continue
+		}
+		if matched > 0 && batch != pairs[index].BatchID {
+			return fmt.Errorf("legacy result message %q crosses tool batches", event.ID)
+		}
+		batch = pairs[index].BatchID
+		pairs[index].Result = event
+		matched++
+	}
+	if matched > 0 && matched != len(results) {
+		return fmt.Errorf("legacy result message %q only partially matches its tool batch", event.ID)
+	}
+	return nil
+}
+
+func legacyResultIndex(pairs []ToolPair, event *Event, id string) (int, error) {
+	index := -1
+	for n, pair := range pairs {
+		call := pair.Call
+		if pair.Result != nil || call.Tool.ID != id || turnOf(call) != turnOf(event) || call.Seq > event.Seq && event.Seq > 0 {
+			continue
+		}
+		if (call.Tool.Parent != nil) != (event.Tool != nil && event.Tool.Parent != nil) {
+			continue
+		}
+		if call.Tool.Parent != nil && call.Tool.Parent.CallID != event.Tool.Parent.CallID {
+			continue
+		}
+		if index >= 0 {
+			return -1, fmt.Errorf("ambiguous legacy tool result %q in Turn %q", id, turnOf(event))
+		}
+		index = n
+	}
+	return index, nil
+}
+
 func occurrenceKey(execution tool.InvocationContext) string {
 	return execution.SessionID + "/" + execution.TurnID + "/" + execution.ItemID
 }
@@ -165,7 +224,7 @@ func turnOf(event *Event) string {
 // tail do not reintroduce already covered calls.
 func OrderToolFacts(events []*Event) ([]*Event, error) {
 	events = toolPairInputs(events)
-	pairs, err := PairToolFacts(events)
+	pairs, err := pairToolFacts(events)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +253,7 @@ func OrderToolFacts(events []*Event) ([]*Event, error) {
 			}
 		}
 	}
+	emitted := make(map[*Event]bool)
 	var out []*Event
 	for _, event := range events {
 		if event == nil {
@@ -210,7 +270,8 @@ func OrderToolFacts(events []*Event) ([]*Event, error) {
 					out = append(out, pair.Call)
 				}
 				for _, pair := range group {
-					if pair.Result != nil {
+					if pair.Result != nil && !emitted[pair.Result] {
+						emitted[pair.Result] = true
 						out = append(out, pair.Result)
 					}
 				}

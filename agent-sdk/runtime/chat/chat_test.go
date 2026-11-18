@@ -701,6 +701,14 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 	if got, want := len(testModel.requests), 3; got != want {
 		t.Fatalf("len(requests) = %d, want retry plus final", got)
 	}
+	initial := testModel.requests[0].Instructions
+	repair := testModel.requests[1].Instructions
+	if len(repair) != len(initial)+1 || repair[len(initial)].Text == nil || repair[len(initial)].Text.Text != toolCallRepairInstruction {
+		t.Fatalf("repair instructions = %+v", repair)
+	}
+	if !reflect.DeepEqual(initial, testModel.requests[2].Instructions) {
+		t.Fatal("repair instructions leaked into the next step")
+	}
 	if got, want := invocations, 1; got != want {
 		t.Fatalf("tool invocations = %d, want %d", got, want)
 	}
