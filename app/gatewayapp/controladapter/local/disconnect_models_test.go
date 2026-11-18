@@ -34,7 +34,16 @@ func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = host.Close() })
 	clients := bindAppServerTestClients(t, host)
-	status, err := clients.Status.SessionStatus(ctx, appserver.StatusRequest{Surface: "test"})
+	services, err := NewAppServer(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := bindAppServerHTTPTestClient(t, services, "local-user")
+	info, err := remote.Initialize(ctx)
+	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilityDeleteModels) {
+		t.Fatalf("initialize = %+v, %v", info, err)
+	}
+	status, err := remote.SessionStatus(ctx, appserver.StatusRequest{Surface: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,25 +65,34 @@ func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
 	adapter, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
 		SessionID: sessionID, WorkspaceKey: "workspace", WorkspaceDir: workspace, Surface: "test",
 		Sessions: clients.Sessions, Participants: clients.Participants, Status: clients.Status,
-		Configuration: clients.Configuration, Agents: clients.Agents, Completion: clients.Completion, Plugins: clients.Plugins,
+		Configuration: remote, Agents: clients.Agents, Completion: clients.Completion, Plugins: clients.Plugins,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets := []string{"xiaomi/mimo-v2.5", "deepseek/deepseek-v4-flash"}
+	profileFor := func(provider, model string) string {
+		t.Helper()
+		profile, err := builder.FromProvider(modelconfig.Config{Provider: provider, Model: model})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return profile.ID
+	}
+	targets := []string{profileFor("xiaomi", "mimo-v2.5"), profileFor("deepseek", "deepseek-v4-flash")}
 	completed, err := adapter.DeleteModels(ctx, targets)
 	if err != nil || !slices.Equal(completed, targets) {
 		t.Fatalf("DeleteModels = %v, %v", completed, err)
 	}
 	for _, target := range targets {
-		assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", target, false)
+		assertSlashArgCandidate(t, remote, sessionID, "disconnect-models", target, false)
 	}
-	assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", "xiaomi/mimo-v2.6-flash", true)
+	remaining := profileFor("xiaomi", "mimo-v2.6-flash")
+	assertSlashArgCandidate(t, remote, sessionID, "disconnect-models", remaining, true)
 	after, err := adapter.Status(ctx)
-	if err != nil || after.ModelStatus.Alias != "xiaomi/mimo-v2.6-flash" {
+	if err != nil || after.ModelStatus.Alias != "xiaomi/mimo-v2.6-flash" || after.Configuration.Revision != revision+1 {
 		t.Fatalf("selected Session status = %#v, %v", after.ModelStatus, err)
 	}
-	completed, err = adapter.DeleteModels(ctx, []string{"xiaomi/mimo-v2.6-flash"})
+	completed, err = adapter.DeleteModels(ctx, []string{remaining})
 	if err != nil || len(completed) != 1 {
 		t.Fatalf("DeleteModels(final) = %v, %v", completed, err)
 	}

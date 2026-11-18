@@ -86,9 +86,9 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 		def  WizardDef
 		want []string
 	}{
-		{name: "account", def: connectModelWizard("account"), want: []string{"provider", "protocol", "endpoint", "baseurl", "apikey", "model", "model_type", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
-		{name: "api-key", def: connectModelWizard("api-key"), want: []string{"provider", "protocol", "endpoint", "baseurl", "apikey", "model", "model_type", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
-		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_install", "acp_command", "acp_model"}},
+		{name: "account", def: connectModelWizard("account"), want: []string{"provider", "protocol", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "api-key", def: connectModelWizard("api-key"), want: []string{"provider", "protocol", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,27 +100,6 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 				t.Fatalf("steps = %#v, want %#v", keys, tt.want)
 			}
 		})
-	}
-}
-
-func TestDefaultDisconnectWizardSeparatesProviderAndACP(t *testing.T) {
-	disconnect := disconnectWizard()
-	if len(disconnect.Steps) != 1 || disconnect.Steps[0].Key != "kind" || disconnect.Branch == nil {
-		t.Fatalf("disconnect root wizard = %#v", disconnect)
-	}
-	provider := disconnect.Branch("kind", "provider", nil, map[string]string{})
-	if provider == nil || len(provider.Steps) != 1 || provider.Steps[0].Key != "provider_model" {
-		t.Fatalf("provider disconnect branch = %#v", provider)
-	}
-	if got := provider.BuildExecLine(map[string]string{"provider_model": "ollama/qwen3"}); got != "/disconnect provider ollama/qwen3" {
-		t.Fatalf("provider disconnect exec line = %q", got)
-	}
-	acp := disconnect.Branch("kind", "acp", nil, map[string]string{})
-	if acp == nil || len(acp.Steps) != 1 || acp.Steps[0].Key != "disconnect_agent" {
-		t.Fatalf("ACP disconnect branch = %#v", acp)
-	}
-	if got := acp.BuildExecLine(map[string]string{"disconnect_agent": "codex"}); got != "/disconnect acp codex" {
-		t.Fatalf("ACP disconnect exec line = %q", got)
 	}
 }
 

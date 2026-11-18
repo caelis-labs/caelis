@@ -216,6 +216,8 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.DeleteModelRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.DeleteModelsRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.SandboxRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.RefreshMCPToolsRequest:

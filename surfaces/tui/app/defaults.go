@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -99,11 +100,18 @@ func connectWizard() WizardDef {
 		Steps: []WizardStepDef{{
 			Key:               "source",
 			RequireCandidate:  true,
-			CompletionCommand: func(map[string]string) string { return "connect-presets" },
+			CompletionCommand: func(map[string]string) string { return "connect-options" },
 		}},
 		Branch: func(_ string, value string, candidate *SlashArgCandidate, state map[string]string) *WizardDef {
 			source := strings.ToLower(strings.TrimSpace(value))
 			state["source"] = source
+			if encoded, ok := strings.CutPrefix(source, "acp:"); ok {
+				if agent, launcher, ok := strings.Cut(encoded, ":"); ok {
+					state["acp_agent"], state["acp_launcher"] = agent, launcher
+					next := connectACPWizard()
+					return &next
+				}
+			}
 			var next WizardDef
 			switch source {
 			// The shared wizard also accepts an older Host's source menu.
@@ -141,6 +149,7 @@ func connectModelWizard(authSource string) WizardDef {
 			},
 			{
 				Key:               "endpoint",
+				RequireCandidate:  true,
 				CompletionCommand: func(state map[string]string) string { return "connect-baseurl:" + state["provider"] },
 				ShouldSkip:        func(state map[string]string) bool { return !connectWizardProviderHasEndpointStep(state["provider"]) },
 			},
@@ -165,13 +174,6 @@ func connectModelWizard(authSource string) WizardDef {
 						command = "connect-models:"
 					}
 					return command + buildConnectWizardPayload(state)
-				},
-			},
-			{
-				Key: "model_type", RequireCandidate: true,
-				CompletionCommand: func(state map[string]string) string { return "connect-model-type:" + buildConnectWizardPayload(state) },
-				ShouldSkip: func(state map[string]string) bool {
-					return state["_unified"] != "true" || state["provider"] != "magpie" && !modelconfig.IsJudgmentProvider(state["provider"])
 				},
 			},
 			{
@@ -221,6 +223,7 @@ func connectACPWizard() WizardDef {
 				Key:               "acp_agent",
 				RequireCandidate:  true,
 				CompletionCommand: func(map[string]string) string { return "connect-acp-agent" },
+				ShouldSkip:        func(state map[string]string) bool { return state["acp_agent"] != "" },
 			},
 			{
 				Key:              "acp_launcher",
@@ -228,13 +231,7 @@ func connectACPWizard() WizardDef {
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-acp-launcher:" + strings.ToLower(strings.TrimSpace(state["acp_agent"]))
 				},
-			},
-			{
-				Key: "acp_install",
-				ShouldSkip: func(state map[string]string) bool {
-					return state["acp_launcher"] != "install" && state["acp_launcher"] != "manual"
-				},
-				CompletionCommand: func(state map[string]string) string { return "connect-acp-install:" + state["acp_agent"] },
+				ShouldSkip: func(state map[string]string) bool { return state["acp_launcher"] != "" },
 			},
 			{
 				Key: "acp_command", NoCompletion: true,
@@ -244,96 +241,53 @@ func connectACPWizard() WizardDef {
 				},
 			},
 			{
-				Key:              "acp_model",
+				Key: "acp_model", MultiSelect: true,
 				RequireCandidate: true,
+				formatSelection:  encodeModelSelection,
 				CompletionCommand: func(state map[string]string) string {
-					return "connect-acp-model:" + buildACPConnectWizardPayload(state)
+					return "connect-acp-model:" + controlagents.EncodeConnectState(acpConnectWizardState(state))
 				},
 			},
 		},
-		OnStepConfirm: confirmACPSetupStep,
 		BuildExecLine: func(state map[string]string) string { return "/connect acp " + buildACPConnectWizardPayload(state) },
 	}
 }
 
 func disconnectWizard() WizardDef {
 	return WizardDef{
-		Command:     "disconnect",
-		DisplayLine: "/disconnect",
+		Command: "disconnect", DisplayLine: "/disconnect",
 		Steps: []WizardStepDef{{
-			Key:               "kind",
+			Key: "models", MultiSelect: true,
 			RequireCandidate:  true,
-			CompletionCommand: func(map[string]string) string { return "disconnect" },
+			formatSelection:   encodeModelSelection,
+			CompletionCommand: func(map[string]string) string { return "disconnect-models" },
 		}},
-		Branch: func(_ string, value string, _ *SlashArgCandidate, state map[string]string) *WizardDef {
-			kind := strings.ToLower(strings.TrimSpace(value))
-			state["kind"] = kind
-			var next WizardDef
-			switch kind {
-			case "provider":
-				next = disconnectProviderWizard()
-			case "acp":
-				next = disconnectACPWizard()
-			default:
-				return nil
-			}
-			return &next
+		BuildExecLine: func(state map[string]string) string {
+			return "/disconnect " + state["models"]
 		},
 	}
 }
 
-func disconnectProviderWizard() WizardDef {
-	return WizardDef{
-		Command: "disconnect", DisplayLine: "/disconnect",
-		Steps: []WizardStepDef{{
-			Key: "provider_model", MultiSelect: true,
-			RequireCandidate:  true,
-			CompletionCommand: func(map[string]string) string { return "disconnect-provider" },
-		}},
-		BuildExecLine: func(state map[string]string) string {
-			return "/disconnect provider " + strings.TrimSpace(state["provider_model"])
-		},
-	}
-}
-
-func disconnectACPWizard() WizardDef {
-	return WizardDef{
-		Command: "disconnect", DisplayLine: "/disconnect",
-		Steps: []WizardStepDef{{
-			Key: "disconnect_agent", MultiSelect: true,
-			RequireCandidate:  true,
-			CompletionCommand: func(map[string]string) string { return "disconnect-acp" },
-		}},
-		BuildExecLine: func(state map[string]string) string {
-			return "/disconnect acp " + strings.TrimSpace(state["disconnect_agent"])
-		},
-	}
+func encodeModelSelection(models []string) string {
+	encoded, _ := json.Marshal(models)
+	return string(encoded)
 }
 
 func confirmConnectModelStep(stepKey string, value string, candidate *SlashArgCandidate, state map[string]string) {
 	switch stepKey {
-	case "model_type":
-		if value == "judgment" {
-			state["provider"] = modelconfig.JudgmentProvider(state["provider"])
-		}
 	case "provider":
 		state["provider"] = strings.ToLower(strings.TrimSpace(value))
 		delete(state, "_reuseauth")
 		delete(state, "_noauth")
-		if candidate != nil && candidate.NoAuth {
+		// A provider-level hint may describe credentials for its default URL.
+		// Once the user can choose an endpoint, only that endpoint can waive key entry.
+		if candidate != nil && candidate.NoAuth && !connectWizardProviderHasEndpointStep(state["provider"]) && !connectWizardProviderHasBaseURLStep(state["provider"]) {
 			state["_noauth"] = "true"
 		}
 	case "protocol":
 		state["provider"] = value
-	case "endpoint":
+	case "endpoint", "baseurl":
 		state["baseurl"] = strings.TrimSpace(value)
-		if candidate != nil && candidate.NoAuth ||
-			modelconfig.EndpointUsesNoAuth(state["provider"], value) {
-			state["_reuseauth"] = "true"
-		} else {
-			delete(state, "_reuseauth")
-		}
-	case "baseurl":
 		if candidate != nil && candidate.NoAuth ||
 			modelconfig.EndpointUsesNoAuth(state["provider"], value) {
 			state["_reuseauth"] = "true"
@@ -379,14 +333,24 @@ func buildConnectModelExecLine(state map[string]string) string {
 	return joinNonEmpty(fields, " ")
 }
 
-func buildACPConnectWizardPayload(state map[string]string) string {
-	return controlagents.EncodeConnectState(controlagents.ConnectState{
+func acpConnectWizardState(state map[string]string) controlagents.ConnectState {
+	return controlagents.ConnectState{
 		Agent:       strings.ToLower(strings.TrimSpace(state["acp_agent"])),
 		Launcher:    controlagents.LauncherChoice(strings.ToLower(strings.TrimSpace(state["acp_launcher"]))),
 		CommandLine: strings.TrimSpace(state["acp_command"]),
-		Model:       strings.TrimSpace(state["acp_model"]),
-		Install:     confirmedACPInstallation(state),
-	})
+	}
+}
+
+func buildACPConnectWizardPayload(state map[string]string) string {
+	payload := acpConnectWizardState(state)
+	var models []string
+	_ = json.Unmarshal([]byte(state["acp_model"]), &models)
+	if len(models) == 1 {
+		payload.Model = models[0]
+	} else {
+		payload.Models = models
+	}
+	return controlagents.EncodeConnectState(payload)
 }
 
 func parseACPConnectWizardPayload(raw string) (controlagents.ConnectState, error) {
@@ -395,7 +359,7 @@ func parseACPConnectWizardPayload(raw string) (controlagents.ConnectState, error
 
 func connectWizardProviderHasEndpointStep(provider string) bool {
 	template, ok := modelconfig.LookupProvider(provider)
-	return ok && len(template.Endpoints) > 0
+	return ok && template.AuthFlow == "" && template.DefaultBaseURL != ""
 }
 
 func connectWizardProviderHasBaseURLStep(provider string) bool {

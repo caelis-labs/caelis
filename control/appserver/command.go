@@ -313,6 +313,7 @@ type CommandResult struct {
 	Target          TurnTarget                      `json:"target,omitempty"`
 	ParticipantID   string                          `json:"participant_id,omitempty"`
 	Resource        *CommandResource                `json:"resource,omitempty"`
+	ACPConnect      *ACPConnectReceipt              `json:"acp_connect,omitempty"`
 	Configuration   *sessionprofile.Configuration   `json:"configuration,omitempty"`
 	SessionResource *sessionprofile.Resource        `json:"session_resource,omitempty"`
 	BackgroundGrant *sessionprofile.BackgroundGrant `json:"background_grant,omitempty"`

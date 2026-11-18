@@ -597,6 +597,17 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	modelOptions := func(model, effort string) []acpclient.SessionConfigOption {
+		return []acpclient.SessionConfigOption{{
+			ID: "model", Name: "Model", Type: "select", Category: "model", CurrentValue: model,
+			Options: []acpclient.SessionConfigSelectOption{
+				{Value: "vendor/alpha", Name: "Alpha"}, {Value: "vendor/beta", Name: "Beta"}, {Value: "vendor/unavailable", Name: "Unavailable"},
+			},
+		}, {
+			ID: "effort", Name: "Effort", Type: "select", Category: "reasoning", CurrentValue: effort,
+			Options: []acpclient.SessionConfigSelectOption{{Value: effort, Name: effort}},
+		}}
+	}
 	authenticated := false
 	connection := jsonrpc.New(os.Stdin, os.Stdout)
 	err = connection.Serve(context.Background(), func(requestCtx context.Context, message jsonrpc.Message) (any, *jsonrpc.RPCError) {
@@ -611,7 +622,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 					SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)},
 				},
 			}
-			if mode == "needs-auth" {
+			if mode == "needs-auth" || mode == "multimodel" {
 				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"agent-login","name":"Agent login"}`)}
 			}
 			return response, nil
@@ -623,8 +634,11 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 			authenticated = true
 			return acpclient.AuthenticateResponse{}, nil
 		case acpclient.MethodSessionNew:
-			if mode == "needs-auth" && !authenticated {
+			if (mode == "needs-auth" || mode == "multimodel") && !authenticated {
 				return nil, &jsonrpc.RPCError{Code: acpclient.ErrorCodeAuthRequired, Message: "Authentication required"}
+			}
+			if mode == "multimodel" {
+				return acpclient.NewSessionResponse{SessionID: "onboarding-session", ConfigOptions: modelOptions("vendor/alpha", "low")}, nil
 			}
 			return acpclient.NewSessionResponse{
 				SessionID: "onboarding-session",
@@ -633,6 +647,15 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 					Options: []acpclient.SessionConfigSelectOption{{Value: "remote-model", Name: "Remote Model"}},
 				}},
 			}, nil
+		case acpclient.MethodSessionSetConfig:
+			var request acpclient.SetSessionConfigOptionRequest
+			if mode == "multimodel" && json.Unmarshal(message.Params, &request) == nil && request.ValueId != nil {
+				option := request.ValueId
+				if option.ConfigId == "model" && option.Value == "vendor/beta" || option.ConfigId == "effort" && option.Value == "high" {
+					return acpclient.SetSessionConfigOptionResponse{ConfigOptions: modelOptions("vendor/beta", "high")}, nil
+				}
+			}
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected model configuration"}
 		case acpclient.MethodSessionPrompt:
 			if mode == "controller-blocking" {
 				<-requestCtx.Done()

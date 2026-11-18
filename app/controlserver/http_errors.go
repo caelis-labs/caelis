@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
 func statusForError(err error) int {
@@ -52,10 +53,16 @@ func writeMappedError(w http.ResponseWriter, err error) {
 		detail = "forbidden"
 	case http.StatusNotFound:
 		detail = "not found"
+		if errors.Is(err, modelconfig.ErrOllamaAPINotFound) {
+			detail = modelconfig.ErrOllamaAPINotFound.Error()
+		}
 	case http.StatusConflict:
 		detail = "conflict"
 	case http.StatusServiceUnavailable:
 		detail = "service unavailable"
+		if errors.Is(err, modelconfig.ErrOllamaUnreachable) {
+			detail = modelconfig.ErrOllamaUnreachable.Error()
+		}
 	}
 	writeErrorIdentity(w, status, detail, code, appserver.ErrorKindOf(err))
 }

@@ -58,6 +58,15 @@ func (a *SessionClientAdapter) CompleteSlashArg(ctx context.Context, command, qu
 		return nil, err
 	}
 	request.Command = trimmedCommand
+	if request.Command == "connect-options" && request.Query == "" {
+		candidates, err := a.completionClient.CompleteSlashArg(ctx, request)
+		if err != nil || len(candidates) > 0 {
+			return candidates, err
+		}
+		// Older Hosts return no rows for the new selector. They own the
+		// original ACP submenu until the minimum compatible Host supports it.
+		request.Command = "connect-presets"
+	}
 	request.SessionID = a.clientSessionID()
 	candidates, err := a.completionClient.CompleteSlashArg(ctx, request)
 	if err != nil && request.SessionID != "" {

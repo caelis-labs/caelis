@@ -39,13 +39,17 @@ func (s *controlCommandBackend) executeAgentCommand(ctx context.Context, action 
 			)
 		}
 		principalIntent, _ := appserver.OperationIntentFromContext(ctx)
-		mutation, profile, err := s.connectPreparedACPAtRevision(ctx, appserver.Principal{ID: principalIntent.PrincipalID}, typed)
+		mutation, profiles, err := s.connectPreparedACPAtRevision(ctx, appserver.Principal{ID: principalIntent.PrincipalID}, typed)
 		command := configurationCommandResult(mutation.Revision)
-		if profile.ID != "" {
-			command.Resource = &appserver.CommandResource{
-				Kind:   appserver.CommandResourceModelProfile,
-				Ref:    profile.ID,
-				Digest: strings.TrimSpace(typed.PreparationDigest),
+		if len(profiles) > 0 {
+			if len(typed.ModelPreparations) > 0 {
+				command.ACPConnect = &appserver.ACPConnectReceipt{Profiles: profiles}
+			} else {
+				command.Resource = &appserver.CommandResource{
+					Kind:   appserver.CommandResourceModelProfile,
+					Ref:    profiles[0].ID,
+					Digest: strings.TrimSpace(typed.PreparationDigest),
+				}
 			}
 		}
 		if mutation.Warning != nil {

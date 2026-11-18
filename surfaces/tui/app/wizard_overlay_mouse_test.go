@@ -17,140 +17,30 @@ func connectMouse(m *Model, msg tea.MouseMsg) {
 	runConnectTestCmd(m, cmd)
 }
 
-func wizardTextPointForTest(t *testing.T, m *Model, text string, end bool) tea.Mouse {
-	t.Helper()
-	s, g := &m.wizardOverlay.text, m.wizardOverlay.geometry
-	for line, value := range s.lines {
-		index := strings.Index(value, text)
-		if index < 0 {
-			continue
-		}
-		column := displayColumns(value[:index])
-		if end {
-			column += displayColumns(text)
-		}
-		for _, row := range s.rows {
-			if row.line == line && column >= row.from && column <= row.from+row.width {
-				return tea.Mouse{X: g.contentX + column - row.from, Y: g.contentY + row.y, Button: tea.MouseLeft}
-			}
-		}
-	}
-	t.Fatalf("text endpoint is not visible: %q end=%v", text, end)
-	return tea.Mouse{}
-}
-
-func TestWizardManualDragCopiesLogicalText(t *testing.T) {
-	for _, reverse := range []bool{false, true} {
-		m, requests, _ := acpInstallationWizardFixture(t)
-		connectPress(m, "down")
-		connectPress(m, "enter")
-		m.width, m.height = 48, 44
-		m.applyTheme(tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor))
-		command := "cd '/Users/测试/é/tools/a long runtime directory/antigravity-acp'"
-		m.wizardOverlay.runtimeSetup.ManualSteps = []string{command, "chmod +x 'agy_acp_server.par'"}
-		var copied string
-		m.cfg.WriteClipboardText = func(text string) error { copied = text; return nil }
-		before := m.View().Content
-		if strings.Contains(before, "Copy instructions") || strings.Contains(before, "[c]") {
-			t.Fatal("obsolete copy control is still displayed")
-		}
-		connectPress(m, "c")
-		if copied != "" {
-			t.Fatal("obsolete shortcut copied text")
-		}
-		for _, value := range []string{command, m.wizardOverlay.runtimeSetup.ArchiveURL, "agy_acp_server.par"} {
-			start := wizardTextPointForTest(t, m, value, false)
-			end := wizardTextPointForTest(t, m, value, true)
-			if reverse {
-				start, end = end, start
-			}
-			connectMouse(m, tea.MouseClickMsg(start))
-			m.Update(tea.MouseMotionMsg(end))
-			highlighted := m.View().Content
-			if highlighted == before || !m.wizardOverlay.text.selecting {
-				t.Fatal("drag did not render a text selection")
-			}
-			connectMouse(m, tea.MouseReleaseMsg(end))
-			if copied != value || strings.Contains(copied, "\x1b") || len(*requests) != 0 {
-				t.Fatalf("drag copied %q, want %q; requests=%d", copied, value, len(*requests))
-			}
-			if m.wizardOverlay.text.selecting {
-				t.Fatal("release retained selection")
-			}
-			m.View()
-		}
-	}
-}
-
-func TestWizardManualDragScrollAndReleaseOverActionOnlyCopies(t *testing.T) {
-	m, requests, _ := acpInstallationWizardFixture(t)
-	connectPress(m, "down")
-	connectPress(m, "enter")
-	m.width, m.height = 40, 18
-	m.View()
-	want := strings.Join(m.wizardOverlay.text.lines, "\n")
-	var copied string
-	m.cfg.WriteClipboardText = func(text string) error { copied = text; return nil }
-	start := wizardTextPointForTest(t, m, "Download ZIP:", false)
-	connectMouse(m, tea.MouseClickMsg(start))
-	for range 120 {
-		g := m.wizardOverlay.geometry
-		mouse := tea.Mouse{X: g.contentX + g.contentWidth - 1, Y: g.actionY, Button: tea.MouseLeft}
-		m.Update(tea.MouseMotionMsg(mouse))
-		previous := m.wizardOverlay.window
-		m.advanceSelectionAutoScroll(m.selectionAutoScroll.scheduledToken)
-		if previous == m.wizardOverlay.window {
-			connectMouse(m, tea.MouseReleaseMsg(mouse))
-			break
-		}
-	}
-	if copied != want || len(*requests) != 0 || !m.isACPManualSetup() {
-		t.Fatalf("scrolling selection lost text or activated action: copied=%q want=%q requests=%d", copied, want, len(*requests))
-	}
-	if m.selectionAutoScroll.active || m.wizardOverlay.text.selecting {
-		t.Fatal("selection scrolling remained active after release")
-	}
-}
-
 func TestWizardHoverAndButtonsAcrossConnectSteps(t *testing.T) {
-	for _, page := range []string{"source", "provider", "connection", "models", "custom model", "ACP agent", "ACP models", "runtime", "install", "manual", "retry"} {
+	for _, page := range []string{"source", "provider", "connection", "models", "custom model", "ACP agent", "ACP models"} {
 		t.Run(page, func(t *testing.T) {
-			var m *Model
-			if page == "runtime" || page == "install" || page == "manual" || page == "retry" {
-				m, _, _ = acpInstallationWizardFixture(t)
-				if page == "manual" {
-					connectPress(m, "down")
-				}
-				if page == "install" || page == "manual" {
+			m, _ := wizardOverlayFixture(t)
+			switch page {
+			case "provider":
+				connectPress(m, "enter")
+			case "connection", "models", "custom model":
+				connectPress(m, "enter")
+				connectPress(m, "enter")
+				connectPress(m, "enter") // endpoint
+				if page != "connection" {
+					connectPaste(m, "fixture-secret")
 					connectPress(m, "enter")
 				}
-				if page == "retry" {
-					m.wizardOverlay.err = "Could not connect. Try again."
-					m.slashArgCandidates = nil
+				if page == "custom model" {
+					m.slashArgIndex = len(m.slashArgCandidates)
+					connectPress(m, "enter")
 				}
-			} else {
-				m, _ = wizardOverlayFixture(t)
-				switch page {
-				case "provider":
+			case "ACP agent", "ACP models":
+				connectPress(m, "down")
+				connectPress(m, "enter")
+				if page == "ACP models" {
 					connectPress(m, "enter")
-				case "connection", "models", "custom model":
-					connectPress(m, "enter")
-					connectPress(m, "enter")
-					if page != "connection" {
-						connectPress(m, "tab")
-						connectPaste(m, "fixture-secret")
-						connectPress(m, "enter")
-					}
-					if page == "custom model" {
-						m.slashArgIndex = len(m.slashArgCandidates)
-						connectPress(m, "enter")
-					}
-				case "ACP agent", "ACP models":
-					connectPress(m, "down")
-					connectPress(m, "enter")
-					if page == "ACP models" {
-						connectPress(m, "enter")
-					}
 				}
 			}
 			m.applyTheme(tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor))
@@ -163,11 +53,8 @@ func TestWizardHoverAndButtonsAcrossConnectSteps(t *testing.T) {
 			targets := []struct {
 				name        string
 				x, y, width int
-			}{{"action", g.actionX, g.actionY, g.actionWidth}, {"back", g.backX, g.backY, g.backWidth}, {"close", g.closeX, g.closeY, 3}, {"send", g.sendX, g.sendY, g.sendWidth}}
+			}{{"action", g.actionX, g.actionY, g.actionWidth}, {"back", g.backX, g.backY, g.backWidth}, {"close", g.closeX, g.closeY, 3}}
 			for _, target := range targets {
-				if target.name == "send" && page != "manual" {
-					continue
-				}
 				if target.width == 0 {
 					t.Fatalf("missing %s button", target.name)
 				}
@@ -215,7 +102,7 @@ func TestWizardRowsFollowHoverWithoutMovingOrEditing(t *testing.T) {
 	g := m.wizardOverlay.geometry
 	m.Update(tea.MouseMotionMsg{X: g.contentX + 1, Y: g.rows[1]})
 	frame := m.View().Content
-	if m.slashArgIndex != 1 || m.wizardStepKey() != "source" || len(*submissions) != 0 || !strings.Contains(ansi.Strip(frame), "› Local ACP Agent") {
+	if m.slashArgIndex != 1 || m.wizardStepKey() != "source" || len(*submissions) != 0 || !strings.Contains(ansi.Strip(frame), "› local acp agent") {
 		t.Fatal("hover did not select the ACP row without activation")
 	}
 	if m.wizardOverlay.geometry.rows[1] != g.rows[1] {
@@ -228,16 +115,20 @@ func TestWizardRowsFollowHoverWithoutMovingOrEditing(t *testing.T) {
 	g = m.wizardOverlay.geometry
 	field, cursor := m.wizardOverlay.field, m.wizardOverlay.cursor
 	before := m.View().Content
-	m.Update(tea.MouseMotionMsg{X: g.contentX + 2, Y: g.rows[1]})
+	m.Update(tea.MouseMotionMsg{X: g.backX, Y: g.backY})
 	if m.View().Content == before || m.wizardOverlay.field != field || m.wizardOverlay.cursor != cursor {
-		t.Fatal("field hover stole editing focus or omitted feedback")
+		t.Fatal("hover stole endpoint editing focus or omitted feedback")
 	}
-	point := tea.Mouse{X: g.contentX + 2, Y: g.rows[1], Button: tea.MouseLeft}
+	connectPress(m, "enter") // endpoint
+	connectPress(m, "tab")   // move focus away from the credential field
+	m.View()
+	g = m.wizardOverlay.geometry
+	point := tea.Mouse{X: g.contentX + 2, Y: g.rows[0], Button: tea.MouseLeft}
 	connectMouse(m, tea.MouseClickMsg(point))
 	connectMouse(m, tea.MouseReleaseMsg(point))
 	connectPaste(m, "fixture-secret")
 	m.View()
-	if m.wizardOverlay.field != 1 || strings.Contains(strings.Join(m.wizardOverlay.text.lines, "\n"), "fixture-secret") || strings.Contains(strings.Join(m.wizardOverlay.text.lines, "\n"), "••") {
+	if m.wizardOverlay.field != 0 || strings.Contains(strings.Join(m.wizardOverlay.text.lines, "\n"), "fixture-secret") || strings.Contains(strings.Join(m.wizardOverlay.text.lines, "\n"), "••") {
 		t.Fatal("field click failed or credential field entered text selection")
 	}
 }
@@ -293,7 +184,7 @@ func TestWizardAuthenticationUsesSharedMouseControlsAndOriginalResponse(t *testi
 			responses := make(chan PromptResponse, 1)
 			m.handleACPAuthSelectionRequest(acpAuthSelectionRequestMsg{
 				seq: m.slashArgLoadSeq,
-				request: agents.AuthenticationSelectionRequest{AgentID: "antigravity", Methods: []agents.AuthenticationMethod{
+				request: agents.AuthenticationSelectionRequest{AgentID: "codex", Methods: []agents.AuthenticationMethod{
 					{ID: "google-login", Name: "Google personal account", Type: agents.AuthenticationAgent},
 					{ID: "api-key", Name: "API key", Type: agents.AuthenticationAgent},
 				}}, response: responses,

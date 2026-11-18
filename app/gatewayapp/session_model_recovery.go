@@ -82,6 +82,19 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 	if r == nil || sessions == nil || r.store == nil {
 		return active, nil
 	}
+	return r.repairSessionModelSelection(ctx, sessions, active, nil, nil)
+}
+
+// Batch removal supplies a canonical catalog shared by the Session sweep and
+// restricts repairs to the exact removed provider models. Recovery on reconnect
+// loads the current catalog on demand and can also repair unsupported settings.
+func (r *sessionModelRecovery) repairSessionModelSelection(
+	ctx context.Context,
+	sessions session.Service,
+	active session.Session,
+	observed *modelLookup,
+	removedProviderID func(string) string,
+) (session.Session, error) {
 	var conflictErr error
 	for attempt := 0; attempt < sessionModelRecoveryMaxAttempts; attempt++ {
 		if active.Controller.Kind == session.ControllerKindACP {
@@ -95,24 +108,26 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 		if currentModel == "" {
 			return active, nil
 		}
-		doc, err := r.store.LoadContext(ctx)
-		if err != nil {
-			return active, err
+		catalog := observed
+		if catalog == nil {
+			catalog, err = r.loadModelCatalog(ctx)
+			if err != nil {
+				return active, err
+			}
 		}
-		contextWindow := 0
-		if r.lookup != nil {
-			r.lookup.mu.RLock()
-			contextWindow = r.lookup.contextWindow
-			r.lookup.mu.RUnlock()
+		var currentConfig ModelConfig
+		var currentConfigured bool
+		if removedProviderID == nil {
+			currentConfig, currentConfigured = catalog.Config(currentModel)
+		} else {
+			removedID := removedProviderID(currentModel)
+			if removedID == "" {
+				return active, nil
+			}
+			if retained, ok := catalog.Config(removedID); ok && strings.EqualFold(retained.ID, removedID) {
+				return active, nil
+			}
 		}
-		catalog, err := newModelLookupFromDocument(doc, contextWindow)
-		if err != nil {
-			return active, err
-		}
-		if r.pins != nil {
-			r.pins.syncConfiguredModels(catalog.Snapshot().Configs)
-		}
-		currentConfig, currentConfigured := catalog.Config(currentModel)
 		currentEffort := modelcatalog.NormalizeReasoningEffort(kernel.CurrentReasoningEffort(state))
 		currentFastMode, fastModePresent := kernel.CurrentModelFastMode(state)
 		if currentConfigured && fastModePresent &&
@@ -170,4 +185,22 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 		}
 	}
 	return active, conflictErr
+}
+
+func (r *sessionModelRecovery) loadModelCatalog(ctx context.Context) (*modelLookup, error) {
+	doc, err := r.store.LoadContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	contextWindow := 0
+	if r.lookup != nil {
+		r.lookup.mu.RLock()
+		contextWindow = r.lookup.contextWindow
+		r.lookup.mu.RUnlock()
+	}
+	catalog, err := newModelLookupFromDocument(doc, contextWindow)
+	if err == nil && r.pins != nil {
+		r.pins.syncConfiguredModels(catalog.Snapshot().Configs)
+	}
+	return catalog, err
 }

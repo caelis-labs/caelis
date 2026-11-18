@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -1391,6 +1392,7 @@ type submitLineOptions struct {
 	forceIdle        bool
 	preserveComposer bool
 	localID          uint64
+	requestContext   context.Context
 }
 
 type resolvedSubmission struct {
@@ -1478,11 +1480,12 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		m.historyDraftAttachments = nil
 	}
 	submission := Submission{
-		Text:        strings.TrimSpace(execLine),
-		DisplayText: displayLine,
-		Attachments: attachments,
-		Mode:        resolved.gatewayMode,
-		localID:     localID,
+		Text:           strings.TrimSpace(execLine),
+		DisplayText:    displayLine,
+		Attachments:    attachments,
+		Mode:           resolved.gatewayMode,
+		localID:        localID,
+		requestContext: opts.requestContext,
 	}
 
 	if !opts.preserveComposer {

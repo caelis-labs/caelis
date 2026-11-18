@@ -65,6 +65,13 @@ func (s *controlCommandBackend) executeHostModelConfigurationCommand(ctx context
 			)
 		}
 		result, err = s.deleteHostModelAtRevision(ctx, req.Model, req.ExpectedRevision)
+	case appserver.DeleteModelsRequest:
+		if action != appserver.ActionModelDelete {
+			return configurationCommandResult(0), configurationRejectedError(
+				errorcode.New(errorcode.InvalidArgument, "gatewayapp: delete-models request/action mismatch"),
+			)
+		}
+		result, err = s.deleteHostModelProfilesAtRevision(ctx, req.ProfileIDs, req.ExpectedRevision)
 	default:
 		return configurationCommandResult(0), configurationRejectedError(
 			errorcode.New(errorcode.InvalidArgument, "gatewayapp: invalid Host model configuration request"),

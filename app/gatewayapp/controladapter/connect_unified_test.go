@@ -2,13 +2,52 @@ package controladapter
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/adapterhost"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
+
+func TestConnectOptionsListsAvailableACPCommands(t *testing.T) {
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	command := "gemini"
+	if runtime.GOOS == "windows" {
+		command += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(bin, command), []byte("discovery only"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	available := false
+	driver := newHostAssembler(&runtimeDeps{Agent: AgentRuntimeDeps{
+		InspectHostedAdapterFn: func(_ context.Context, id string) (adapterhost.Descriptor, error) {
+			if id != "codex" {
+				t.Fatalf("unexpected managed adapter %q", id)
+			}
+			return adapterhost.Descriptor{Available: available}, nil
+		},
+	}}, "", "")
+	for _, available = range []bool{false, true} {
+		rows, err := driver.CompleteSlashArg(t.Context(), "connect-options", "", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"codex", "grok", "deepseek", "xiaomi", "magpie", "ollama", "custom"}
+		if available {
+			want = append(want, "acp:codex:hosted")
+		}
+		want = append(want, "acp:gemini:installed", "acp:custom:command")
+		if got := slashCandidateValues(rows); !slices.Equal(got, want) {
+			t.Fatalf("available=%v: got %v, want %v", available, got, want)
+		}
+	}
+}
 
 func TestUnifiedConnectPresetsAndDeclaredModelTypes(t *testing.T) {
 	models := []modelconfig.SelectableModel{{Name: "codex/gpt-6-luna", MetadataComplete: true, ImageInputKnown: true}, {Name: "typesafe/jev-latest", Judgment: true, MetadataComplete: true, ImageInputKnown: true}}
@@ -21,6 +60,9 @@ func TestUnifiedConnectPresetsAndDeclaredModelTypes(t *testing.T) {
 	presets, err := driver.CompleteSlashArg(t.Context(), "connect-presets", "", 100)
 	if err != nil || !slices.Equal(slashCandidateValues(presets), []string{"codex", "grok", "deepseek", "xiaomi", "magpie", "ollama", "custom", "acp"}) {
 		t.Fatalf("presets: %#v %v", presets, err)
+	}
+	if got := presets[len(presets)-1]; got.Display != "local acp agent" || got.Detail != "Run a local agent over ACP" {
+		t.Fatalf("ACP source: %#v", got)
 	}
 	state := connectwizard.ConnectWizardState{Provider: "magpie"}
 	for _, command := range []string{"connect-model:", "connect-models:"} {

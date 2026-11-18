@@ -52,6 +52,11 @@ func (s *ConfigurationService) DeleteModel(ctx context.Context, principal appser
 	return s.commands.DeleteModel(ctx, principal, req)
 }
 
+// DeleteModels applies a single revision-guarded Host model removal command.
+func (s *ConfigurationService) DeleteModels(ctx context.Context, principal appserver.Principal, req appserver.DeleteModelsRequest) (appserver.CommandResult, error) {
+	return s.commands.DeleteModels(ctx, principal, req)
+}
+
 func (s *ConfigurationService) SetWorkspaceTrust(ctx context.Context, principal appserver.Principal, req appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
 	return s.commands.SetWorkspaceTrust(ctx, principal, req)
 }

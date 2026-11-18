@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/collaboration"
@@ -205,7 +204,6 @@ type ResumeCandidate struct {
 }
 
 type SlashArgCandidate struct {
-	RuntimeSetup *controlagents.RuntimeSetup
 	// ModelConfigID is the Control-supplied durable provider identity, separate
 	// from the public selector in Value.
 	ModelConfigID         string

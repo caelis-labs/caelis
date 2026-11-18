@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -21,10 +26,12 @@ func wizardOverlayFixture(t *testing.T) (*Model, *[]Submission) {
 		SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 			var candidates []SlashArgCandidate
 			switch {
-			case command == "connect-presets":
+			case command == "connect-options":
 				candidates = []SlashArgCandidate{{Value: "api-key", Display: "API key"}, {Value: "acp", Display: "Local ACP Agent"}}
 			case command == "connect-provider-api-key":
 				candidates = []SlashArgCandidate{{Value: "custom-responses", Display: "Responses API"}, {Value: "deepseek", Display: "DeepSeek"}, {Value: "xiaomi", Display: "Xiaomi"}}
+			case command == "connect-baseurl:deepseek":
+				candidates = []SlashArgCandidate{{Value: "https://api.deepseek.com/anthropic", Display: "default"}}
 			case strings.HasPrefix(command, "connect-baseurl:"):
 				candidates = []SlashArgCandidate{{Value: "https://api.example/v1", Display: "Default endpoint"}, {Value: "https://saved.example/v1", Display: "Saved endpoint", NoAuth: true}}
 			case strings.HasPrefix(command, "connect-model:"):
@@ -34,9 +41,9 @@ func wizardOverlayFixture(t *testing.T) (*Model, *[]Submission) {
 			case command == "connect-acp-launcher:codex":
 				candidates = []SlashArgCandidate{{Value: "hosted", Display: "Built in"}}
 			case strings.HasPrefix(command, "connect-acp-model:"):
-				candidates = []SlashArgCandidate{{Value: "remote", Display: "Remote model"}}
+				candidates = []SlashArgCandidate{{Value: "remote", Display: "Remote model"}, {Value: "Remote,variant", Display: "Variant model"}}
 			}
-			return filterSlashArgCandidates(query, candidates), nil
+			return filterSlashArgCandidates(command, query, candidates), nil
 		},
 	})
 	m.width, m.height, m.ready = 100, 30, true
@@ -54,6 +61,68 @@ func connectPress(m *Model, key string) {
 func connectPaste(m *Model, text string) {
 	_, cmd := m.Update(tea.PasteMsg{Content: text})
 	runConnectTestCmd(m, cmd)
+}
+
+func TestConnectOverlayOpeningScreen(t *testing.T) {
+	const label, detail = "local acp agent", "Run a local agent over ACP"
+	for _, name := range []string{"catppuccin-mocha", "catppuccin-latte"} {
+		t.Run(name, func(t *testing.T) {
+			m, _ := wizardOverlayFixture(t)
+			m.applyTheme(tuikit.ResolveSelectedTheme(name, nil, true, false, colorprofile.TrueColor))
+			m.slashArgCandidates[1].Detail = detail
+			for _, selected := range []bool{false, true} {
+				if selected {
+					connectPress(m, "down")
+				}
+				frame := m.renderWizardOverlay()
+				if plain := ansi.Strip(frame); strings.Contains(plain, "/connect ›") || strings.Contains(plain, "▏Search") {
+					t.Fatalf("opening screen includes extra title or search text:\n%s", plain)
+				}
+				line := styledLineContaining(t, frame, detail)
+				plain := ansi.Strip(line)
+				labelPos := strings.Index(plain, label)
+				if labelPos < 0 {
+					t.Fatalf("missing %q in %q", label, plain)
+				}
+				screen := uv.NewScreenBuffer(displayColumns(plain), 1)
+				screen.Method = ansi.GraphemeWidth
+				uv.NewStyledString(line).Draw(screen, screen.Bounds())
+				left := screen.CellAt(displayColumns(plain[:labelPos]), 0)
+				right := screen.CellAt(displayColumns(plain[:strings.Index(plain, detail)]), 0)
+				bg := m.theme.ModalBg
+				if selected {
+					bg = m.theme.CommandActiveStyle().GetBackground()
+				}
+				fg := m.theme.ReadableTextColor(m.theme.CommandSubText, bg)
+				if !colorInSet(right.Style.Fg, []color.Color{fg}) || colorInSet(left.Style.Fg, []color.Color{fg}) {
+					t.Fatalf("selected=%v: label foreground %v, detail foreground %v, want muted detail %v", selected, left.Style.Fg, right.Style.Fg, fg)
+				}
+			}
+			connectPaste(m, "acp")
+			if plain := ansi.Strip(m.renderWizardOverlay()); !strings.Contains(plain, "acp▏") || strings.Contains(plain, "API key / local") {
+				t.Fatalf("typing a query did not filter the source picker:\n%s", plain)
+			}
+		})
+	}
+}
+
+func TestConnectSeparatesDefaultEndpointAndAPIKey(t *testing.T) {
+	const endpoint = "https://api.deepseek.com/anthropic"
+	m, _ := wizardOverlayFixture(t)
+	connectPress(m, "enter")
+	connectPaste(m, "deepseek")
+	connectPress(m, "enter")
+	frame := wizardVisibleText(m.renderWizardOverlay())
+	if !strings.Contains(frame, "/connect › deepseek › Endpoint") || !strings.Contains(frame, "› default") ||
+		!strings.Contains(frame, endpoint) || !strings.Contains(frame, "+ Custom endpoint") || strings.Contains(frame, "Paste key") {
+		t.Fatalf("endpoint picker should preselect the default and offer a custom URL:\n%s", frame)
+	}
+	connectPress(m, "enter")
+	frame = ansi.Strip(m.renderWizardOverlay())
+	if !strings.Contains(frame, "/connect › deepseek › default › API key") || !strings.Contains(frame, "Paste key") ||
+		strings.Contains(frame, endpoint) || len(m.wizardOverlay.fields) != 1 || m.wizard.state["baseurl"] != endpoint {
+		t.Fatalf("key step should contain only the credential field:\n%s", frame)
+	}
 }
 
 func TestWizardOverlayConsumesCompletedCommandOnOpen(t *testing.T) {
@@ -89,10 +158,10 @@ func TestWizardOverlayConnectionFormBackSearchAndMultiSelect(t *testing.T) {
 	m, submissions := wizardOverlayFixture(t)
 	connectPress(m, "enter") // source
 	connectPress(m, "enter") // provider
-	if len(m.wizardOverlay.fields) != 2 {
-		t.Fatalf("connection form = %#v step=%s query=%q candidates=%#v", m.wizardOverlay.fields, m.wizardStepKey(), m.slashArgQuery, m.slashArgCandidates)
+	if m.wizardStepKey() != "baseurl" || len(m.wizardOverlay.fields) != 1 {
+		t.Fatalf("endpoint form = %#v step=%s", m.wizardOverlay.fields, m.wizardStepKey())
 	}
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "sk-private")
 	frame := ansi.Strip(m.renderWizardOverlay())
 	if strings.Contains(frame, "sk-private") || !strings.Contains(frame, "API key") || !strings.Contains(frame, "••") {
@@ -109,7 +178,7 @@ func TestWizardOverlayConnectionFormBackSearchAndMultiSelect(t *testing.T) {
 		t.Fatalf("search/selection lost: %q %#v", m.slashArgQuery, m.wizard.multiSelections)
 	}
 	connectPress(m, "esc")
-	if len(m.wizardOverlay.fields) != 2 || m.wizardOverlay.fields[1].value != "sk-private" {
+	if len(m.wizardOverlay.fields) != 1 || m.wizardOverlay.fields[0].value != "sk-private" {
 		t.Fatal("back lost form draft")
 	}
 	connectPress(m, "enter")
@@ -139,9 +208,7 @@ func TestConnectModelEnterRequiresExplicitCheckbox(t *testing.T) {
 				connectPress(m, "down")
 			}
 			connectPress(m, "enter")
-			if provider == "custom-responses" {
-				connectPress(m, "tab")
-			}
+			connectPress(m, "enter") // endpoint
 			connectPaste(m, "fixture-key")
 			connectPress(m, "enter")
 			if m.wizardStepKey() != "model" {
@@ -172,22 +239,20 @@ func TestWizardOverlayChangingEndpointDropsKeyAndModelDraft(t *testing.T) {
 	m, _ := wizardOverlayFixture(t)
 	connectPress(m, "enter")
 	connectPress(m, "enter")
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "secret")
 	connectPress(m, "enter")
 	connectPress(m, "space")
 	connectPress(m, "esc")
-	connectPress(m, "shift+tab")
+	connectPress(m, "esc") // key back to endpoint
 	connectPress(m, "ctrl+u")
-	if m.wizardOverlay.fields[1].value != "" {
-		t.Fatal("clearing endpoint retained credential")
-	}
 	connectPaste(m, "https://another.example/v1")
-	if m.wizardOverlay.fields[1].value != "" {
+	connectPress(m, "enter")
+	if m.wizardStepKey() != "apikey" || m.wizardOverlay.fields[0].value != "" {
 		t.Fatal("endpoint change retained credential")
 	}
 	connectPress(m, "enter")
-	if m.wizardOverlay.err != "Enter an API key." || m.wizardOverlay.field != 1 {
+	if m.wizardOverlay.err != "Enter an API key." || m.wizardOverlay.field != 0 {
 		t.Fatalf("missing key not focused: %#v", m.wizardOverlay)
 	}
 	connectPaste(m, "new-secret")
@@ -201,7 +266,7 @@ func TestWizardOverlayCustomModelValidatesAndSubmitsOneForm(t *testing.T) {
 	m, submissions := wizardOverlayFixture(t)
 	connectPress(m, "enter")
 	connectPress(m, "enter")
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "secret")
 	connectPress(m, "enter")
 	connectPress(m, "ctrl+n")
@@ -228,7 +293,7 @@ func TestWizardOverlayCustomBackRestoresModelSearch(t *testing.T) {
 	m, _ := wizardOverlayFixture(t)
 	connectPress(m, "enter")
 	connectPress(m, "enter")
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "secret")
 	connectPress(m, "enter")
 	connectPaste(m, "alpha")
@@ -253,10 +318,18 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 		connectPress(m, "enter")
 		connectPaste(m, "https://custom.example/v1")
 		connectPress(m, "enter")
-		if len(m.wizardOverlay.fields) != 2 || m.wizardOverlay.fields[0].value != "https://custom.example/v1" {
-			t.Fatal("custom endpoint did not open combined form")
+		if len(m.wizardOverlay.fields) != 1 || m.wizardOverlay.fields[0].value != "https://custom.example/v1" {
+			t.Fatal("custom endpoint did not open URL form")
 		}
-		connectPress(m, "tab")
+		connectPress(m, "enter")
+		if frame := ansi.Strip(m.renderWizardOverlay()); !strings.Contains(frame, "/connect › xiaomi › custom.example › API key") {
+			t.Fatalf("custom destination missing from credential breadcrumb:\n%s", frame)
+		}
+		connectPress(m, "esc")
+		if len(m.wizardOverlay.fields) != 1 || m.wizardOverlay.fields[0].value != "https://custom.example/v1" {
+			t.Fatal("back did not restore the custom endpoint editor")
+		}
+		connectPress(m, "enter")
 		connectPaste(m, "demo-key")
 		connectPress(m, "enter")
 		connectPress(m, "space")
@@ -272,9 +345,10 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 		connectPress(m, "ctrl+u")
 		connectPaste(m, "https://saved.example/v1")
 		connectPress(m, "enter")
-		if m.wizardStepKey() != "model" || m.wizard.state["_reuseauth"] != "true" {
-			t.Fatal("saved endpoint required another key")
+		if frame := ansi.Strip(m.renderWizardOverlay()); !strings.Contains(frame, "Saved key · leave blank") {
+			t.Fatalf("saved endpoint did not offer credential reuse:\n%s", frame)
 		}
+		connectPress(m, "enter") // keep saved key
 		connectPress(m, "space")
 		connectPress(m, "enter")
 		if len(*submissions) != 1 || strings.Fields((*submissions)[0].Text)[5] != "-" {
@@ -287,7 +361,7 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 		connectPress(m, "enter")
 		connectPress(m, "ctrl+u")
 		connectPaste(m, "https://saved.example/v1")
-		connectPress(m, "tab")
+		connectPress(m, "enter") // endpoint
 		connectPaste(m, "replacement-key")
 		connectPress(m, "enter")
 		connectPress(m, "space")
@@ -296,6 +370,45 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 			t.Fatalf("explicit credential was ignored: %#v", *submissions)
 		}
 	})
+}
+
+func TestConnectOverlaySelectsACPFromRoot(t *testing.T) {
+	m, _ := wizardOverlayFixture(t)
+	m.clearWizard()
+	complete := m.cfg.SlashArgComplete
+	catalogLoads := 0
+	m.cfg.SlashArgComplete = func(ctx context.Context, command, query string, limit int) ([]SlashArgCandidate, error) {
+		if command == "connect-options" {
+			catalogLoads++
+			return []SlashArgCandidate{
+				{Value: "codex", Display: "codex"},
+				{Value: "acp:codex:hosted", Display: "codex cli", Detail: "ACP · Local Codex CLI"},
+				{Value: "acp:custom:command", Display: "custom acp command"},
+			}, nil
+		}
+		return complete(ctx, command, query, limit)
+	}
+	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
+	if screen := ansi.Strip(m.View().Content); !strings.Contains(screen, "codex cli") || !strings.Contains(screen, "custom acp command") {
+		t.Fatalf("root ACP options missing from frame:\n%s", screen)
+	}
+	connectPress(m, "down")
+	connectPress(m, "enter")
+	if m.wizardStepKey() != "acp_model" || m.wizard.state["acp_agent"] != "codex" || m.wizard.state["acp_launcher"] != "hosted" {
+		t.Fatalf("hosted option did not open model selection: %s, %v", m.wizardStepKey(), m.wizard.state)
+	}
+	connectPress(m, "esc")
+	if m.wizardStepKey() != "source" {
+		t.Fatalf("back from direct ACP selection opened %s", m.wizardStepKey())
+	}
+	connectPaste(m, "custom")
+	if catalogLoads != 1 {
+		t.Fatalf("initial display, back and filter loaded the same catalog %d times", catalogLoads)
+	}
+	connectPress(m, "enter")
+	if m.wizardStepKey() != "acp_command" || m.wizard.state["acp_agent"] != "custom" {
+		t.Fatalf("custom option did not open the command field: %s, %v", m.wizardStepKey(), m.wizard.state)
+	}
 }
 
 func TestWizardOverlayACPSkipsUniqueLauncherAndBackSkipsIt(t *testing.T) {
@@ -310,6 +423,17 @@ func TestWizardOverlayACPSkipsUniqueLauncherAndBackSkipsIt(t *testing.T) {
 	if m.wizardStepKey() != "acp_agent" {
 		t.Fatalf("Back visited automatic launcher: %s", m.wizardStepKey())
 	}
+	if frame := ansi.Strip(m.renderWizardOverlay()); strings.Contains(frame, "▏Search") || !strings.Contains(frame, "Codex CLI") {
+		t.Fatalf("ACP picker should open directly on its list:\n%s", frame)
+	}
+	connectPaste(m, "codex")
+	if frame := ansi.Strip(m.renderWizardOverlay()); !strings.Contains(frame, "codex▏") || !strings.Contains(frame, "Codex CLI") {
+		t.Fatalf("ACP picker should show an active filter:\n%s", frame)
+	}
+	connectPress(m, "ctrl+u")
+	if frame := ansi.Strip(m.renderWizardOverlay()); strings.Contains(frame, "▏") {
+		t.Fatalf("clearing the filter should hide the search row:\n%s", frame)
+	}
 	connectPress(m, "enter")
 	connectPress(m, "enter")
 	if len(*submissions) != 1 {
@@ -318,6 +442,30 @@ func TestWizardOverlayACPSkipsUniqueLauncherAndBackSkipsIt(t *testing.T) {
 	payload, err := parseACPConnectWizardPayload(strings.TrimPrefix((*submissions)[0].Text, "/connect acp "))
 	if err != nil || payload.Model != "remote" || payload.Launcher != "hosted" {
 		t.Fatalf("ACP payload = %#v, %v", payload, err)
+	}
+}
+
+func TestWizardOverlayConnectsSeveralACPModels(t *testing.T) {
+	m, submissions := wizardOverlayFixture(t)
+	connectPress(m, "down")
+	connectPress(m, "enter")
+	connectPress(m, "enter")
+	connectPress(m, "space")
+	connectPress(m, "down")
+	connectPress(m, "space")
+	frame := ansi.Strip(m.View().Content)
+	for _, text := range []string{"[x] Remote model", "[x] Variant model", "Connect 2 models"} {
+		if !strings.Contains(frame, text) {
+			t.Fatalf("missing %q in ACP picker:\n%s", text, frame)
+		}
+	}
+	connectPress(m, "enter")
+	if len(*submissions) != 1 {
+		t.Fatalf("submitted %v", *submissions)
+	}
+	payload, err := parseACPConnectWizardPayload(strings.TrimPrefix((*submissions)[0].Text, "/connect acp "))
+	if err != nil || payload.Model != "" || !slices.Equal(payload.Models, []string{"remote", "Remote,variant"}) {
+		t.Fatalf("ACP selection = %#v, %v", payload, err)
 	}
 }
 
@@ -368,7 +516,7 @@ func TestWizardOverlayRejectedSubmissionRetainsFilteredDraft(t *testing.T) {
 	}
 	connectPress(m, "enter")
 	connectPress(m, "enter")
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "demo-key")
 	connectPress(m, "enter")
 	connectPaste(m, "beta")
@@ -430,7 +578,7 @@ func TestWizardOverlayFramesBoundedAndComposerVisible(t *testing.T) {
 			m.width, m.height = size[0], size[1]
 			connectPress(m, "enter")
 			connectPress(m, "enter")
-			connectPress(m, "tab")
+			connectPress(m, "enter") // endpoint
 			connectPaste(m, "super-secret")
 			frame := ansi.Strip(m.View().Content)
 			if !strings.Contains(frame, "keep my draft") || strings.Contains(frame, "super-secret") {

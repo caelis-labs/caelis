@@ -27,9 +27,12 @@ type connectWizardPayload = connectwizard.ConnectWizardState
 
 func completeConnectArgs(ctx context.Context, driver *assembler, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	switch {
+	case command == "connect-options":
+		return completeConnectOptions(ctx, driver, query, limit)
 	case command == "connect-presets":
+		// Older TUI clients expand the ACP catalog from a separate root item.
 		candidates := completeConnectProviders(ctx, driver, "", "", 0)
-		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: "acp", Display: "Local ACP Agent", Detail: "Codex CLI, Gemini CLI"})
+		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: "acp", Display: "local acp agent", Detail: "Run a local agent over ACP"})
 		return filterSlashArgCandidates(candidates, query, limit), nil
 	case command == "connect":
 		return completeConnectSources(query, limit), nil
@@ -42,18 +45,7 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 	case command == "connect-acp-agent":
 		return completeConnectACPAgents(query, limit), nil
 	case strings.HasPrefix(command, "connect-acp-launcher:"):
-		agent := strings.TrimPrefix(command, "connect-acp-launcher:")
-		installedCommand := ""
-		if driver != nil && driver.deps != nil && driver.deps.Agent.InstalledCommandFn != nil {
-			var err error
-			installedCommand, err = driver.deps.Agent.InstalledCommandFn(ctx, agent)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return completeConnectACPLaunchers(agent, query, limit, installedCommand), nil
-	case strings.HasPrefix(command, "connect-acp-install:"):
-		return completeConnectACPInstall(ctx, strings.TrimPrefix(command, "connect-acp-install:"))
+		return completeConnectACPLaunchers(strings.TrimPrefix(command, "connect-acp-launcher:"), query, limit), nil
 	case command == "connect-custom-protocol":
 		var candidates []controlprompt.SlashArgCandidate
 		for _, protocol := range modelconfig.CustomProtocols() {
@@ -83,6 +75,41 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 	}
 }
 
+func completeConnectOptions(ctx context.Context, driver *assembler, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+	candidates := completeConnectProviders(ctx, driver, "", "", 0)
+	for _, agent := range agentregistry.ConnectableAgents() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		label, detail := strings.ToLower(agent.DisplayName), "ACP · "+agent.Description
+		switch agent.Preferred {
+		case controlagents.LauncherChoiceHosted:
+			if driver == nil || driver.deps == nil || driver.deps.Agent.InspectHostedAdapterFn == nil {
+				continue
+			}
+			descriptor, err := driver.deps.Agent.InspectHostedAdapterFn(ctx, agent.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !descriptor.Available {
+				continue
+			}
+		case controlagents.LauncherChoiceInstalled:
+			if agentregistry.FindInstalledCommand(agent.ID) == "" {
+				continue
+			}
+		case controlagents.LauncherChoiceCommand:
+			label = "custom acp command"
+		default:
+			continue
+		}
+		candidates = append(candidates, controlprompt.SlashArgCandidate{
+			Value: "acp:" + agent.ID + ":" + string(agent.Preferred), Display: label, Detail: detail,
+		})
+	}
+	return filterSlashArgCandidates(candidates, query, limit), nil
+}
+
 func completeConnectSources(query string, limit int) []controlprompt.SlashArgCandidate {
 	// Control retains the original menu for existing settings clients and older
 	// TUI fallback. Remove it when the minimum client uses connect-presets.
@@ -106,19 +133,10 @@ func completeConnectACPAgents(query string, limit int) []controlprompt.SlashArgC
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func completeConnectACPLaunchers(agent string, query string, limit int, installedCommand string) []controlprompt.SlashArgCandidate {
+func completeConnectACPLaunchers(agent string, query string, limit int) []controlprompt.SlashArgCandidate {
 	entry, ok := agentregistry.LookupConnectableAgent(agent)
 	if !ok {
 		return nil
-	}
-	if entry.Installation != nil && installedCommand == "" {
-		setup, err := entry.Installation.Setup()
-		if err == nil {
-			return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{
-				{Value: "install", Display: "Install " + setup.Command, Detail: "Download the official runtime", RuntimeSetup: &setup},
-				{Value: "manual", Display: "Manual setup", Detail: "View download and installation steps", RuntimeSetup: &setup},
-			}, query, limit)
-		}
 	}
 	candidates := make([]controlprompt.SlashArgCandidate, 0, len(entry.Launchers))
 	for _, launcher := range entry.Launchers {
@@ -199,9 +217,8 @@ func completeConnectProviders(ctx context.Context, driver *assembler, authSource
 		if query != "" && !strings.Contains(strings.ToLower(template.Label+" "+template.Provider+" "+template.Description), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}
-		// Only endpoint-less providers can safely skip authentication here. For
-		// providers with a later endpoint/base-URL step, credential reuse must be
-		// decided after that exact endpoint is selected.
+		// Older clients without a default endpoint step still use this hint.
+		// Clients with an endpoint picker use the exact endpoint candidate.
 		reusableAuth := driver != nil && len(template.Endpoints) == 0 && !template.PromptForBaseURL &&
 			driver.hasReusableConnectAuth(ctx, template.Provider, template.DefaultBaseURL)
 		detail := strings.TrimSpace(template.Description)
@@ -231,8 +248,8 @@ func completeConnectBaseURL(ctx context.Context, driver *assembler, provider str
 		return nil
 	}
 	candidates := connectEndpointCandidates(template)
-	if len(candidates) == 0 {
-		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: template.DefaultBaseURL, Display: template.DefaultBaseURL, Detail: "default base URL"})
+	if len(candidates) == 0 && template.DefaultBaseURL != "" {
+		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: template.DefaultBaseURL, Display: "default"})
 	}
 	for i := range candidates {
 		if driver != nil && driver.hasReusableConnectAuth(ctx, template.Label, candidates[i].Value) {

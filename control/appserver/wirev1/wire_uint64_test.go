@@ -120,6 +120,14 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 					},
 					decoded: &appserver.DeleteModelRequest{},
 				},
+				{
+					name: "delete batch",
+					request: appserver.DeleteModelsRequest{
+						WriteBase:  appserver.WriteBase{OperationID: "models-delete-operation-1", ExpectedRevision: &value},
+						ProfileIDs: []string{"provider:one", "acp:two"},
+					},
+					decoded: &appserver.DeleteModelsRequest{},
+				},
 			}
 			for _, modelRequest := range modelRequests {
 				raw := mustMarshalWire(t, modelRequest.request)
@@ -133,6 +141,8 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 				case *appserver.UseModelRequest:
 					base = decoded.WriteBase
 				case *appserver.DeleteModelRequest:
+					base = decoded.WriteBase
+				case *appserver.DeleteModelsRequest:
 					base = decoded.WriteBase
 				}
 				if base.ExpectedRevision == nil || *base.ExpectedRevision != value {
@@ -426,6 +436,17 @@ func TestACPOnboardingWirePreservesHostRevisionAtUint64Boundary(t *testing.T) {
 				PreparationRef:    "preparation-1",
 				PreparationDigest: digest,
 				ConfigValues:      map[string]string{"effort": "high"},
+			},
+			decoded: &appserver.ConnectACPRequest{},
+		},
+		{
+			name:   "connect batch",
+			schema: "ConnectACPRequest",
+			request: appserver.ConnectACPRequest{
+				WriteBase:         appserver.WriteBase{OperationID: "connect-batch", ExpectedRevision: &revision},
+				PreparationRef:    "roster",
+				PreparationDigest: digest,
+				ModelPreparations: []appserver.ACPModelPreparationRef{{Ref: "beta", Digest: digest}, {Ref: "alpha", Digest: digest}},
 			},
 			decoded: &appserver.ConnectACPRequest{},
 		},

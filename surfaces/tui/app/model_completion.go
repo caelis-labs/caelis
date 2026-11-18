@@ -338,23 +338,28 @@ func (m *Model) clearInputOverlays() {
 	}
 }
 
-func filterSlashArgCandidates(query string, candidates []SlashArgCandidate) []SlashArgCandidate {
+func filterSlashArgCandidates(command, query string, candidates []SlashArgCandidate) []SlashArgCandidate {
 	if len(candidates) == 0 {
 		return nil
 	}
 	filtered := make([]SlashArgCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if slashArgCandidateMatchesQuery(query, candidate) {
+		if slashArgCandidateMatchesQuery(command, query, candidate) {
 			filtered = append(filtered, candidate)
 		}
 	}
 	return filtered
 }
 
-func slashArgCandidateMatchesQuery(query string, candidate SlashArgCandidate) bool {
+func slashArgCandidateMatchesQuery(command, query string, candidate SlashArgCandidate) bool {
 	query = strings.ToLower(strings.TrimSpace(query))
 	// Configured models support substring search across their label and public
 	// selector. Other completion steps retain their argument-prefix semantics.
+	if command == "disconnect-models" {
+		return strings.Contains(strings.ToLower(candidate.Value), query) ||
+			strings.Contains(strings.ToLower(candidate.Display), query) ||
+			strings.Contains(strings.ToLower(candidate.Detail), query)
+	}
 	if candidate.ModelSelection != nil {
 		return strings.Contains(strings.ToLower(candidate.Value), query) || strings.Contains(strings.ToLower(candidate.Display), query)
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
+	"github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
@@ -60,10 +60,12 @@ type runtimeHostAuthorities struct {
 	grokAuth                *grokauth.Manager
 	apiKeyCredentials       *credentialstore.Store
 	providerUsage           *providerusage.Registry
-	adapterHost             controladapterhost.Service
-	acpEndpointResolver     endpoint.Resolver
-	sessionModelPins        *sessionModelPinRegistry
-	lifecycleCtx            context.Context
+	adapterHost             interface {
+		RequireAvailable(context.Context, string) (adapterhost.Descriptor, error)
+	}
+	acpEndpointResolver endpoint.Resolver
+	sessionModelPins    *sessionModelPinRegistry
+	lifecycleCtx        context.Context
 	// hostedChildInput is the Host-owned parent/sibling route borrowed by
 	// spawned child Session Runtimes. The function carries routing capability,
 	// not Registry ownership.

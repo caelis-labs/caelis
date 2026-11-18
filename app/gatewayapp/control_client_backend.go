@@ -326,6 +326,7 @@ func isHostConfigurationCommandRequest(request any) bool {
 	case appserver.PolicyRuleRequest, appserver.ConnectModelRequest,
 		appserver.UseModelRequest,
 		appserver.DeleteModelRequest,
+		appserver.DeleteModelsRequest,
 		appserver.WorkspaceTrustRequest, appserver.ExperimentalRequest,
 		appserver.SandboxRequest:
 		return true

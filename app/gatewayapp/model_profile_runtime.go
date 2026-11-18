@@ -96,13 +96,15 @@ func materializeProviderProfileConfig(ctx context.Context, snapshot *placementSn
 	return snapshot.lookup.materializeAPIKeyCredential(ctx, configured)
 }
 
-// A native self participant inherits the activated Session main model, including
-// capabilities. Runtime Team revisions must not validate it against a different
-// provider generation. Explicit deletion still revokes the model through the
-// existing catalog and child pin admission fences.
-func (s *runtimeComposition) selfPlacementSnapshot(ctx context.Context, profileID string) (*placementSnapshot, error) {
+// ACP self uses the current Control catalog for the external Agent route. Native
+// self inherits the activated Session's provider model and capabilities, while
+// the Host catalog still controls whether that provider model can be used.
+func (s *runtimeComposition) selfPlacementSnapshot(current *placementSnapshot, profileID string) (*placementSnapshot, error) {
 	if s.activation == nil {
-		return s.placementSnapshot(ctx)
+		return current, nil
+	}
+	if profile, ok := modelprofile.Lookup(current.placement.Profiles, profileID); ok && profile.Kind() == modelprofile.BackendACP {
+		return current, nil
 	}
 	configured, err := s.lookup.ResolveConfig(strings.TrimPrefix(modelprofile.NormalizeID(profileID), "provider:"))
 	if err != nil {

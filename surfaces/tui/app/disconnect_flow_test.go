@@ -9,62 +9,42 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestDisconnectWizardSelectsMultipleTargetsBeforeSubmission(t *testing.T) {
-	for _, kind := range []string{"provider", "acp"} {
-		t.Run(kind, func(t *testing.T) {
-			called := ""
-			m := NewModel(Config{
-				Wizards: DefaultWizards(),
-				ExecuteLine: func(submission Submission) TaskResultMsg {
-					called = submission.Text
-					return TaskResultMsg{}
-				},
-				SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
-					if command == "disconnect" {
-						return []SlashArgCandidate{{Value: kind, Display: kind}}, nil
-					}
-					candidates := []SlashArgCandidate{
-						{Value: "first", Display: "first"},
-						{Value: "second", Display: "second"},
-						{Value: "third", Display: "third"},
-					}
-					return candidates, nil
-				},
-			})
-			m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-			runConnectTestCmd(m, m.openSlashArgPicker("disconnect"))
-			_, cmd := m.handleWizardEnter()
-			runConnectTestCmd(m, cmd)
-			if got := m.slashArgCommand; got != "disconnect-"+kind {
-				t.Fatalf("target picker = %q", got)
+func TestDisconnectWizardSelectsMixedModelsFromOneList(t *testing.T) {
+	var called string
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
+		SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
+			if command != "disconnect-models" {
+				t.Fatalf("unexpected completion command %q", command)
 			}
-			press := func(code rune) {
-				t.Helper()
-				handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: code}))
-				if !handled {
-					t.Fatalf("key %v not handled", code)
-				}
-				runConnectTestCmd(m, cmd)
-			}
-			press(tea.KeySpace)
-			press(tea.KeyDown)
-			press(tea.KeySpace)
-			press(tea.KeySpace) // Clear second; only first and third should be removed.
-			press(tea.KeyDown)
-			press(tea.KeySpace)
-			if called != "" {
-				t.Fatalf("selection submitted before confirmation: %q", called)
-			}
-			frame := ansi.Strip(m.renderWizardOverlay())
-			for _, want := range []string{"[x] first", "[ ] second", "[x] third", "space toggle", "Disconnect 2"} {
-				if !strings.Contains(frame, want) {
-					t.Fatalf("disconnect picker missing %q:\n%s", want, frame)
-				}
-			}
-			press(tea.KeyEnter)
-			if want := "/disconnect " + kind + " first,third"; called != want {
-				t.Fatalf("submitted = %q, want %q", called, want)
-			}
-		})
+			return []SlashArgCandidate{
+				{Value: "provider:codex/model", Display: "Codex / Model"},
+				{Value: "acp:codex:model", Display: "ACP · Codex / Model"},
+			}, nil
+		},
+	})
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	runConnectTestCmd(m, m.openSlashArgPicker("disconnect"))
+	connectPress(m, "space")
+	connectPress(m, "down")
+	connectPress(m, "space")
+	if called != "" {
+		t.Fatalf("selection submitted before confirmation: %q", called)
 	}
+	waiting := m.View().Content
+	for _, want := range []string{"Connected models", "[x] Codex / Model", "[x] ACP · Codex / Model", "space toggle", "Disconnect 2"} {
+		if !strings.Contains(ansi.Strip(waiting), want) {
+			t.Fatalf("disconnect picker missing %q:\n%s", want, ansi.Strip(waiting))
+		}
+	}
+	connectPress(m, "enter")
+	if want := `/disconnect ["provider:codex/model","acp:codex:model"]`; called != want {
+		t.Fatalf("submitted = %q, want %q", called, want)
+	}
+	updates := renderFullscreenFramesForTest(t, 100, 30, waiting)
+	assertPhysicalFullscreenFrame(t, 100, 30, waiting, updates)
 }

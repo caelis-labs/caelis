@@ -2,13 +2,16 @@ package modelconfig
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
@@ -116,6 +119,39 @@ func TestSelectableOllamaModelsUsesLocalInstalledModelsOnly(t *testing.T) {
 	}
 	assertSelectableModel(t, models, "gemma4:12b-mlx", false)
 	assertSelectableModel(t, models, "glm-5.2:cloud", false)
+}
+
+func TestSelectableOllamaModelsClassifiesDiscoveryFailures(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name         string
+		status       int
+		transportErr error
+		want         error
+		code         errorcode.Code
+	}{
+		{name: "unreachable endpoint", transportErr: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}, want: ErrOllamaUnreachable, code: errorcode.Unavailable},
+		{name: "missing model API", status: http.StatusNotFound, want: ErrOllamaAPINotFound, code: errorcode.NotFound},
+		{name: "canceled dial", transportErr: &net.OpError{Op: "dial", Net: "tcp", Err: context.Canceled}, want: context.Canceled, code: errorcode.Cancelled},
+		{name: "dial deadline exceeded", transportErr: &net.OpError{Op: "dial", Net: "tcp", Err: context.DeadlineExceeded}, want: context.DeadlineExceeded, code: errorcode.Timeout},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &http.Client{Transport: modelconfigRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if test.transportErr != nil {
+					return nil, test.transportErr
+				}
+				return modelconfigHTTPResponse(r, test.status, "not found"), nil
+			})}
+			_, err := selectableOllamaModels(context.Background(), "http://local.test", client)
+			if !errors.Is(err, test.want) || errorcode.CodeOf(err) != test.code {
+				t.Fatalf("selectableOllamaModels() error = %v, code = %q, want %v with code %q", err, errorcode.CodeOf(err), test.want, test.code)
+			}
+			if test.transportErr != nil && !errors.Is(err, test.transportErr) {
+				t.Fatalf("selectableOllamaModels() error = %v, want transport cause %v", err, test.transportErr)
+			}
+		})
+	}
 }
 
 func TestAssembleConnectUsesModernCompatibleDefaultsAndSupportsExplicitNoReasoning(t *testing.T) {

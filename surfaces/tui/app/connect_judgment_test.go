@@ -19,7 +19,7 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 		SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 			var candidates []SlashArgCandidate
 			switch {
-			case command == "connect-presets":
+			case command == "connect-options":
 				candidates = []SlashArgCandidate{{Value: "judgment", Display: "Connect a judgment model"}}
 			case command == "connect-provider-judgment":
 				candidates = []SlashArgCandidate{{Value: "custom-judgment", Display: "Custom System One"}}
@@ -28,14 +28,14 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 			case strings.HasPrefix(command, "connect-model:"):
 				candidates = []SlashArgCandidate{{Value: "jev-1.13.0", ModelMetadataComplete: true, ModelImageInputKnown: true}}
 			}
-			return filterSlashArgCandidates(query, candidates), nil
+			return filterSlashArgCandidates(command, query, candidates), nil
 		},
 	})
 	m.width, m.height, m.ready = 100, 30, true
 	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
 	connectPress(m, "enter")
 	connectPress(m, "enter")
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "fixture-private-key")
 	frame := ansi.Strip(m.renderWizardOverlay())
 	if strings.Contains(frame, "fixture-private-key") || !strings.Contains(frame, "API key") {
@@ -69,19 +69,19 @@ func TestCustomJudgmentModelFormCollectsOnlyModelID(t *testing.T) {
 	m.cfg.SlashArgComplete = func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 		var candidates []SlashArgCandidate
 		switch command {
-		case "connect-presets":
+		case "connect-options":
 			candidates = []SlashArgCandidate{{Value: "judgment", Display: "Connect a judgment model"}}
 		case "connect-provider-judgment":
 			candidates = []SlashArgCandidate{{Value: "custom-judgment", Display: "Custom System One"}}
 		case "connect-baseurl:custom-judgment":
 			candidates = []SlashArgCandidate{{Value: "https://api.typesafe.ai/v1"}}
 		}
-		return filterSlashArgCandidates(query, candidates), nil
+		return filterSlashArgCandidates(command, query, candidates), nil
 	}
 	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
 	connectPress(m, "enter")
 	connectPress(m, "enter")
-	connectPress(m, "tab")
+	connectPress(m, "enter") // endpoint
 	connectPaste(m, "fixture-key")
 	connectPress(m, "enter")
 	connectPress(m, "ctrl+n")

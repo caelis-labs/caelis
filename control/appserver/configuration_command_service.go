@@ -39,6 +39,11 @@ func (s *CommandService) DeleteModel(ctx context.Context, principal Principal, r
 	return s.execute(ctx, principal, ActionModelDelete, req.WriteBase, "host/configuration/model-catalog", req)
 }
 
+// DeleteModels submits an atomic Host catalog removal through the operation ledger.
+func (s *CommandService) DeleteModels(ctx context.Context, principal Principal, req DeleteModelsRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionModelDelete, req.WriteBase, "host/configuration/model-catalog/batch-delete", req)
+}
+
 func (s *CommandService) SetWorkspaceTrust(ctx context.Context, principal Principal, req WorkspaceTrustRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionWorkspaceTrust, req.WriteBase, "host/configuration/workspace-trust", req)
 }
@@ -148,6 +153,21 @@ func validateDeleteModelRequest(req DeleteModelRequest) error {
 	}
 	if strings.TrimSpace(req.Model) == "" {
 		return errors.New("controlclient: model is required")
+	}
+	return nil
+}
+
+func validateDeleteModelsRequest(req DeleteModelsRequest) error {
+	if err := validateHostModelWrite(req.WriteBase); err != nil {
+		return err
+	}
+	if len(req.ProfileIDs) == 0 {
+		return errors.New("controlclient: at least one profile ID is required")
+	}
+	for _, id := range req.ProfileIDs {
+		if strings.TrimSpace(id) == "" {
+			return errors.New("controlclient: profile IDs must not be empty")
+		}
 	}
 	return nil
 }

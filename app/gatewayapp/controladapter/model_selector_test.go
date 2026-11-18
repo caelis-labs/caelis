@@ -60,7 +60,7 @@ func TestCompleteSlashArgModelPublishesPublicSelectors(t *testing.T) {
 						t.Fatalf("provider display = %q", candidate.Display)
 					}
 				case "acp:codex:default":
-					if candidate.Display != "Codex — Sol" {
+					if candidate.Display != "ACP · Codex — Sol" {
 						t.Fatalf("ACP display = %q", candidate.Display)
 					}
 				}

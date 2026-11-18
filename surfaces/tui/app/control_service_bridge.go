@@ -272,7 +272,6 @@ type ControlServices interface {
 	Interrupt(context.Context) error
 	Connect(context.Context, controlprompt.ConnectConfig) (controlstatus.StatusSnapshot, error)
 	DeleteModels(context.Context, []string) ([]string, error)
-	DisconnectACPAgents(context.Context, []string) ([]string, error)
 	controlprompt.SessionModeService
 	controlprompt.CompletionService
 	controlprompt.PluginService
@@ -310,10 +309,18 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if base.ExecuteLine == nil {
 		runExecuteLine := func(sub Submission) executeLineResult {
-			runCtx := ctx
+			runCtx := sub.requestContext
+			if runCtx == nil {
+				runCtx = ctx
+			} else if err := runCtx.Err(); err != nil {
+				if wizardSubmissionCanceledByUser(runCtx, err) {
+					return executeLineResult{completion: TaskResultMsg{Interrupted: true}}
+				}
+				return executeLineResult{completion: TaskResultMsg{Err: err}}
+			}
 			finish := func() {}
 			if sender != nil {
-				runCtx, finish = sender.beginRunContext(ctx)
+				runCtx, finish = sender.beginRunContext(runCtx)
 			}
 			defer finish()
 			if sender != nil {
@@ -329,7 +336,12 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 					}
 				}
 			}
-			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub, promptRouterFactory)
+			result := executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub, promptRouterFactory)
+			if sub.requestContext != nil && wizardSubmissionCanceledByUser(runCtx, result.completion.Err) {
+				result.completion.Err = nil
+				result.completion.Interrupted = true
+			}
+			return result
 		}
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
 			return runExecuteLine(sub).completion
@@ -456,7 +468,6 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 					NoAuth:                c.NoAuth,
 					ModelConfigID:         c.ModelConfigID,
 					ModelSelection:        c.ModelSelection,
-					RuntimeSetup:          c.RuntimeSetup,
 					ModelMetadataComplete: c.ModelMetadataComplete,
 					ModelImageInputKnown:  c.ModelImageInputKnown,
 				}

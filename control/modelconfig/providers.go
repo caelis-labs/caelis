@@ -71,20 +71,20 @@ type ProviderTemplate struct {
 }
 
 var providerTemplates = []ProviderTemplate{
-	{Label: "codex", Provider: "openai-codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", Description: "ChatGPT subscription", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 258400, DefaultMaxOutputTokens: 32768},
-	{Label: "grok", Provider: "xai", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", Description: "Grok subscription", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768},
-	{Label: "deepseek", Provider: "deepseek", API: model.APIDeepSeek, AuthType: model.AuthAPIKey, Description: "DeepSeek API", DefaultBaseURL: "https://api.deepseek.com/anthropic", DefaultBaseURLAliases: []string{"https://api.deepseek.com/v1"}, DefaultContextWindowTokens: 1048576},
-	{Label: "xiaomi", Provider: "xiaomi", API: model.APIMimo, AuthType: model.AuthAPIKey, Description: "MiMo API or Token Plan", DefaultEndpointID: "api-cn", DefaultBaseURL: XiaomiAPIBaseURL, DefaultContextWindowTokens: 262144, Endpoints: []EndpointTemplate{
+	{Label: "codex", Provider: "openai-codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", Description: "Sign in with ChatGPT", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 258400, DefaultMaxOutputTokens: 32768},
+	{Label: "grok", Provider: "xai", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", Description: "Sign in with Grok", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768},
+	{Label: "deepseek", Provider: "deepseek", API: model.APIDeepSeek, AuthType: model.AuthAPIKey, Description: "Connect with a DeepSeek API key", DefaultBaseURL: "https://api.deepseek.com/anthropic", DefaultBaseURLAliases: []string{"https://api.deepseek.com/v1"}, DefaultContextWindowTokens: 1048576},
+	{Label: "xiaomi", Provider: "xiaomi", API: model.APIMimo, AuthType: model.AuthAPIKey, Description: "MiMo API and Token Plan endpoints", DefaultEndpointID: "api-cn", DefaultBaseURL: XiaomiAPIBaseURL, DefaultContextWindowTokens: 262144, Endpoints: []EndpointTemplate{
 		{ID: "api-cn", BaseURL: XiaomiAPIBaseURL, Display: "api cn", Detail: "MiMo API", API: model.APIMimo},
 		{ID: "token-plan-cn", BaseURL: XiaomiTokenPlanCNBaseURL, Display: "token plan cn", Detail: "MiMo Token Plan", API: model.APIMimo},
 	}},
-	{Label: "magpie", Provider: "magpie", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Local gateway", DefaultEndpointID: "local", DefaultBaseURL: "http://127.0.0.1:3425/v1", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+	{Label: "magpie", Provider: "magpie", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Discover models on a local Magpie gateway", DefaultEndpointID: "local", DefaultBaseURL: "http://127.0.0.1:3425/v1", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
 		{ID: "local", BaseURL: "http://127.0.0.1:3425/v1", Display: "local", Detail: "Running Magpie gateway", API: model.APIOpenAIResponses, AuthType: model.AuthNone, NoAuthRequired: true},
 	}},
-	{Label: "ollama", Provider: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Description: "Local Ollama models", DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+	{Label: "ollama", Provider: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Description: "Discover models on a local Ollama server", DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
 		{ID: "local", BaseURL: "http://localhost:11434", Display: "local", Detail: "Installed Ollama models", API: model.APIOllama, AuthType: model.AuthNone, NoAuthRequired: true},
 	}},
-	{Label: "custom", Provider: "custom", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Custom API endpoint", PromptForBaseURL: true, DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8192},
+	{Label: "custom", Provider: "custom", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Connect a compatible API endpoint", PromptForBaseURL: true, DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8192},
 }
 
 // ProviderTemplates returns an isolated copy of the maintained provider list.

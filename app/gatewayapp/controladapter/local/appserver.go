@@ -55,6 +55,9 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 		Session: sessionDeps, Status: statusRuntimeDeps(statusReads), Agent: agentRuntimeDeps(agentReads),
 		Model: modelRuntimeDeps(modelReads), Skill: skillRuntimeDeps(skillReads), Plugin: pluginRuntimeDeps(pluginReads),
 	}
+	if hosted := host.AdapterHost(); hosted != nil {
+		completionDeps.Agent.InspectHostedAdapterFn = hosted.Inspect
+	}
 	pluginDeps := controladapter.PluginAssemblyDeps{Plugin: pluginRuntimeDeps(pluginReads)}
 
 	status, err := newStatusService(statusServiceDeps{

@@ -9,8 +9,8 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-// Model type follows endpoint discovery after model selection. Existing
-// connection commands retain their protocol names and identity semantics.
+// completeConnectModelType serves released TUI peers that require a model type
+// confirmation. Remove this Host completion when those peers are unsupported.
 func completeConnectModelType(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	chat, judgment := false, modelconfig.IsJudgmentProvider(payload.Provider)
 	if template, ok := modelconfig.LookupProvider(payload.Provider); ok && template.Provider == "magpie" {

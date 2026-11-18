@@ -2863,6 +2863,9 @@ func (sessionClientAdapterTestConfigurationClient) UseModel(_ context.Context, r
 func (sessionClientAdapterTestConfigurationClient) DeleteModel(_ context.Context, request appserver.DeleteModelRequest) (appserver.CommandResult, error) {
 	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }
+func (sessionClientAdapterTestConfigurationClient) DeleteModels(_ context.Context, request appserver.DeleteModelsRequest) (appserver.CommandResult, error) {
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
+}
 func (sessionClientAdapterTestConfigurationClient) SetWorkspaceTrust(_ context.Context, request appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
 	return appserver.CommandResult{OperationID: request.OperationID, Outcome: appserver.OutcomeCommitted}, nil
 }

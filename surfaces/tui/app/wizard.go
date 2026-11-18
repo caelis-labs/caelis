@@ -60,6 +60,8 @@ type WizardStepDef struct {
 	// be accumulated. Nil accepts every candidate.
 	MultiSelectCandidate func(candidate SlashArgCandidate) bool
 
+	formatSelection func([]string) string
+
 	// CompletionCommand returns the command string passed to
 	// Config.SlashArgComplete for this step. It receives the accumulated
 	// state from previous steps. If it returns "", no completion is requested.
@@ -261,13 +263,18 @@ func (m *Model) advanceWizardStepWithQuery(value string, initialQuery string, ca
 	m.cancelSlashArgRequest()
 	m.slashArgActive = true
 	m.slashArgCommand = w.completionCommand()
+	if m.slashArgLoaded && !sameAsyncSlashArgCatalog(m.slashArgLoadedCommand, m.slashArgCommand) {
+		m.slashArgLoaded = false
+		m.slashArgLoadedCommand = ""
+		m.slashArgLoadedCandidates = nil
+	}
 	m.slashArgQuery = strings.TrimSpace(initialQuery)
 	m.slashArgIndex = 0
 	m.slashArgCandidates = nil
 	m.slashArgCandidateCommand = ""
 	m.slashArgCompletionSettled = false
 	if m.wizardOverlay != nil {
-		m.openWizardStep(strings.TrimSpace(initialQuery))
+		m.openWizardStep(strings.TrimSpace(initialQuery), nil)
 	} else {
 		m.setInputText(strings.TrimSpace(initialQuery))
 		m.syncTextareaFromInput()
@@ -297,8 +304,13 @@ func (m *Model) wizardSubmit() tea.Cmd {
 
 // clearWizard resets all wizard and slash-arg state.
 func (m *Model) clearWizard() {
-	if m.wizardOverlay != nil && m.wizardOverlay.text.selecting {
-		m.cancelSelectionAutoScroll()
+	if s := m.wizardOverlay; s != nil {
+		if s.submitCancel != nil {
+			s.submitCancel(nil)
+		}
+		if s.text.selecting {
+			m.cancelSelectionAutoScroll()
+		}
 	}
 	m.wizardOverlay = nil
 	m.cancelSlashArgRequest()
@@ -387,7 +399,7 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 		return true, nil
 	}
 	if step.MultiSelect && len(selectedValues) > 0 && (value == "" || m.wizardOverlay != nil) {
-		formatted := strings.Join(selectedValues, ",")
+		formatted := step.selectionValue(selectedValues)
 		complete := SlashArgCandidate{
 			Value:                 formatted,
 			ModelMetadataComplete: true,
@@ -400,7 +412,7 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	var candidate *SlashArgCandidate
 	if len(m.slashArgCandidates) > 0 && m.slashArgIndex >= 0 && m.slashArgIndex < len(m.slashArgCandidates) {
 		c := m.slashArgCandidates[m.slashArgIndex]
-		if slashArgCandidateMatchesQuery(value, c) {
+		if slashArgCandidateMatchesQuery(m.slashArgCommand, value, c) {
 			value = strings.TrimSpace(c.Value)
 			candidate = &c
 		}
@@ -420,7 +432,7 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	}
 	if step.MultiSelect && candidate != nil {
 		selectedValues = appendUniqueWizardValue(selectedValues, value)
-		formatted := strings.Join(selectedValues, ",")
+		formatted := step.selectionValue(selectedValues)
 		complete := SlashArgCandidate{
 			Value:                 formatted,
 			ModelMetadataComplete: candidate.ModelMetadataComplete,
@@ -431,6 +443,13 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 
 	cmd := m.advanceWizardStep(value, candidate)
 	return true, cmd
+}
+
+func (step *WizardStepDef) selectionValue(values []string) string {
+	if step.formatSelection != nil {
+		return step.formatSelection(values)
+	}
+	return strings.Join(values, ",")
 }
 
 func wizardMultiSelectValues(w *wizardRuntime, step *WizardStepDef) []string {
@@ -446,7 +465,7 @@ func appendUniqueWizardValue(values []string, value string) []string {
 		return values
 	}
 	for _, existing := range values {
-		if strings.EqualFold(strings.TrimSpace(existing), value) {
+		if strings.TrimSpace(existing) == value {
 			return values
 		}
 	}
@@ -475,7 +494,7 @@ func (m *Model) toggleWizardMultiSelectCandidate(candidate SlashArgCandidate) (b
 	if len(values) == 0 {
 		delete(m.wizard.state, step.Key)
 	} else {
-		m.wizard.state[step.Key] = strings.Join(values, ",")
+		m.wizard.state[step.Key] = step.selectionValue(values)
 	}
 	if m.wizardOverlay != nil {
 		// Checkbox changes do not change the available catalog. Keep the search
@@ -508,7 +527,7 @@ func (m *Model) toggleWizardMultiSelectCandidate(candidate SlashArgCandidate) (b
 func wizardMultiSelectContains(values []string, value string) bool {
 	value = strings.TrimSpace(value)
 	for _, existing := range values {
-		if strings.EqualFold(strings.TrimSpace(existing), value) {
+		if strings.TrimSpace(existing) == value {
 			return true
 		}
 	}
@@ -519,7 +538,7 @@ func removeWizardMultiSelectValue(values []string, value string) []string {
 	value = strings.TrimSpace(value)
 	out := make([]string, 0, len(values))
 	for _, existing := range values {
-		if strings.EqualFold(strings.TrimSpace(existing), value) {
+		if strings.TrimSpace(existing) == value {
 			continue
 		}
 		out = append(out, existing)

@@ -78,22 +78,16 @@ func slashConnectWithContext(ctx context.Context, service ControlServices, agent
 		if agents == nil {
 			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect ACP agent", fmt.Errorf("ACP connection service is unavailable"))}
 		}
-		result, err := agents.ConnectACP(ctx, controlagents.ConnectRequest{
-			AdapterID: payload.Agent, Launcher: payload.Launcher,
-			CommandLine: payload.CommandLine, ModelID: payload.Model,
-			ConfigValues: payload.ConfigValues,
-			Install:      payload.Install,
-		})
-		if err != nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect ACP agent", err)}
+		result, err := agents.ConnectACP(ctx, payload.ConnectRequest(""))
+		if len(result.Profiles) > 0 {
+			names := make([]string, 0, len(result.Profiles))
+			for _, profile := range result.Profiles {
+				names = append(names, firstNonEmpty(strings.TrimSpace(profile.DisplayName), strings.TrimSpace(profile.ID)))
+			}
+			sendNotice(send, "Connected "+strings.Join(names, ", "), SlashNoticeFeedback)
+			refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		}
-		names := make([]string, 0, len(result.Profiles))
-		for _, profile := range result.Profiles {
-			names = append(names, strings.TrimSpace(profile.DisplayName)+" ["+strings.TrimSpace(profile.ID)+"]")
-		}
-		sendNotice(send, "Connected "+strings.Join(names, ", "), SlashNoticeFeedback)
-		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return TaskResultMsg{SuppressTurnDivider: true, Err: controlprompt.FriendlyCommandError("connect ACP agent", err)}
 	}
 	cfg := controlprompt.ParseConnectArgs(args)
 	if cfg.Provider == "" || cfg.Model == "" {

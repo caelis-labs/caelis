@@ -23,10 +23,6 @@ func (m *Model) moveWizardSelection(delta int) {
 		m.activePrompt.choiceIndex = wrapSelectionIndex(m.activePrompt.choiceIndex, len(m.visiblePromptChoices()), delta)
 		return
 	}
-	if m.isACPManualSetup() {
-		s.window = max(0, s.window+delta)
-		return
-	}
 	if count := m.wizardRowCount(); count > 0 {
 		if len(s.fields) > 0 {
 			s.field = (s.field + delta + count) % count
@@ -51,18 +47,6 @@ func (m *Model) acceptWizardOverlay() tea.Cmd {
 	if s.blocked {
 		m.clearWizard()
 		return nil
-	}
-	if m.isACPManualSetup() {
-		if s.footerFocus == "send" {
-			return m.sendACPInstallPrompt()
-		}
-		if s.err != "" {
-			return m.requestCurrentSlashArgCompletion()
-		}
-		return m.backWizardOverlay()
-	}
-	if m.wizardStepKey() == "acp_install" && len(s.fields) > 0 {
-		return m.submitACPInstallation()
 	}
 
 	if len(s.fields) > 0 {
@@ -104,9 +88,6 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	if s == nil {
 		return nil
 	}
-	if s.pending {
-		return nil
-	}
 	if _, release := msg.(tea.KeyReleaseMsg); release {
 		return nil
 	}
@@ -116,6 +97,9 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	m.cancelSelectionAutoScroll()
 	if k.Code == tea.KeyEscape {
 		return m.backWizardOverlay()
+	}
+	if s.pending {
+		return nil
 	}
 	if s.blocked {
 		if k.Code == tea.KeyEnter {
@@ -149,14 +133,6 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	case tea.KeyDown:
 		m.moveWizardSelection(1)
 	case tea.KeyTab:
-		if m.canSendACPInstallPrompt() {
-			if s.footerFocus == "send" {
-				s.footerFocus = "action"
-			} else {
-				s.footerFocus = "send"
-			}
-			return nil
-		}
 		delta := 1
 		if k.Mod.Contains(tea.ModShift) {
 			delta = -1
@@ -239,15 +215,7 @@ func (m *Model) editWizardField(k tea.Key) {
 func (m *Model) setWizardFieldValue(value string) bool {
 	s := m.wizardOverlay
 	f := &s.fields[s.field]
-	updated := truncateRunes(value, 8192)
-	if (f.key == "baseurl" || f.key == "endpoint") && updated != f.value {
-		for i := range s.fields {
-			if s.fields[i].secret {
-				s.fields[i].value = ""
-			}
-		}
-	}
-	f.value = updated
+	f.value = truncateRunes(value, 8192)
 	s.cursor = min(s.cursor, len([]rune(f.value)))
 	s.err = ""
 	return true

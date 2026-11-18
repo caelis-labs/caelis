@@ -58,7 +58,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 	targets := make(map[string]spawn.Target, len(agents))
 
 	if hasSessionSelection {
-		selfSnapshot, err := s.selfPlacementSnapshot(context.Background(), session.ProfileID)
+		selfSnapshot, err := s.selfPlacementSnapshot(snapshot, session.ProfileID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -113,7 +113,7 @@ func (s *runtimeComposition) resolveDelegationPlacement(ctx context.Context, req
 		return assembly.AgentConfig{}, err
 	}
 	if target.Selector == string(agentbinding.HandleSelf) {
-		snapshot, err = s.selfPlacementSnapshot(ctx, target.Placement.ProfileID)
+		snapshot, err = s.selfPlacementSnapshot(snapshot, target.Placement.ProfileID)
 		if err != nil {
 			return assembly.AgentConfig{}, err
 		}

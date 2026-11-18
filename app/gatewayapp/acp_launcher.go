@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	"github.com/caelis-labs/caelis/control/adapterhost"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/plugin"
 )
@@ -34,12 +36,12 @@ func (s *controlCommandBackend) resolveACPConnectionLauncher(ctx context.Context
 		if s == nil || s.composition == nil || s.composition.authorities.adapterHost == nil {
 			return controlagents.Connection{}, fmt.Errorf("gatewayapp: built-in ACP adapter service is unavailable")
 		}
-		descriptor, err := s.composition.authorities.adapterHost.Inspect(ctx, req.AdapterID)
+		descriptor, err := s.composition.authorities.adapterHost.RequireAvailable(ctx, req.AdapterID)
 		if err != nil {
-			return controlagents.Connection{}, fmt.Errorf("gatewayapp: inspect built-in ACP adapter %q: %w", req.AdapterID, err)
-		}
-		if !descriptor.Available {
-			return controlagents.Connection{}, fmt.Errorf("gatewayapp: built-in ACP adapter %q is unavailable: %s", req.AdapterID, descriptor.Diagnostic)
+			if req.AdapterID == adapterhost.CodexAdapterID && errors.Is(err, exec.ErrNotFound) {
+				return controlagents.Connection{}, errorcode.New(errorcode.InvalidArgument, `Install Codex so "codex" is available on the Host's PATH.`)
+			}
+			return controlagents.Connection{}, fmt.Errorf("gatewayapp: built-in ACP adapter %q is unavailable: %w", req.AdapterID, err)
 		}
 		connection.Name = firstNonEmpty(descriptor.Name, req.AdapterID)
 		connection.Launcher = controlagents.Launcher{
@@ -59,14 +61,7 @@ func (s *controlCommandBackend) resolveACPConnectionLauncher(ctx context.Context
 			return controlagents.Connection{}, catalogLauncherInconsistency(req.AdapterID, req.Launcher, "installed-command preset")
 		}
 		commands := agentregistry.InstalledAgentCommandCandidates(req.AdapterID)
-		var store *appConfigStore
-		if s != nil && s.composition != nil {
-			store = s.composition.authorities.store
-		}
-		selectedCommand, err := findInstalledACPCommand(ctx, store, req.AdapterID)
-		if err != nil {
-			return controlagents.Connection{}, err
-		}
+		selectedCommand := agentregistry.FindInstalledCommand(req.AdapterID)
 		if selectedCommand == "" {
 			return controlagents.Connection{}, installedACPCommandNotFound(req.AdapterID, commands)
 		}

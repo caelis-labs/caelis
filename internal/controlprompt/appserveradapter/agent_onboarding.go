@@ -20,7 +20,10 @@ func (a *SessionClientAdapter) DiscoverACPConnection(ctx context.Context, reques
 	}
 	a.acpPreparationMu.Lock()
 	defer a.acpPreparationMu.Unlock()
-	preparation, err := a.prepareACPConnectionLocked(ctx, request)
+	if len(request.ModelIDs) > 0 {
+		return controlagents.DiscoverySnapshot{}, errors.New("ACP discovery addresses one model at a time through ModelID")
+	}
+	preparation, err := a.prepareACPConnectionLocked(ctx, request, "")
 	return preparation.Discovery, err
 }
 
@@ -34,9 +37,19 @@ func (a *SessionClientAdapter) ConnectACP(ctx context.Context, request controlag
 	if strings.TrimSpace(request.CWD) == "" {
 		request.CWD = a.WorkspaceDir()
 	}
-	preparation, err := a.prepareACPConnectionLocked(ctx, request)
+	if len(request.ModelIDs) > 0 && (request.ModelID != "" || len(request.ConfigValues) > 0) {
+		return controlagents.ConnectResult{}, errors.New("ACP ModelIDs cannot be used with ModelID or ConfigValues")
+	}
+	preparation, err := a.prepareACPConnectionLocked(ctx, request, "")
 	if err != nil {
 		return controlagents.ConnectResult{}, err
+	}
+	var modelPreparations []appserver.ACPModelPreparationRef
+	if len(request.ModelIDs) > 0 {
+		modelPreparations, err = a.prepareACPConnectModelsLocked(ctx, request, preparation)
+		if err != nil {
+			return controlagents.ConnectResult{}, err
+		}
 	}
 	before, err := a.addressedStatus(ctx, "", false)
 	if err != nil {
@@ -49,7 +62,7 @@ func (a *SessionClientAdapter) ConnectACP(ctx context.Context, request controlag
 			ExpectedRevision: &revision,
 		},
 		PreparationRef: preparation.Ref, PreparationDigest: preparation.ContentDigest,
-		ConfigValues: request.ConfigValues,
+		ConfigValues: request.ConfigValues, ModelPreparations: modelPreparations,
 	})
 	if receipt.Outcome != appserver.OutcomeCommitted {
 		if commandErr == nil {
@@ -57,20 +70,11 @@ func (a *SessionClientAdapter) ConnectACP(ctx context.Context, request controlag
 		}
 		return controlagents.ConnectResult{}, &appserver.CommandReceiptError{Receipt: receipt, Err: commandErr}
 	}
-	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceModelProfile || strings.TrimSpace(receipt.Resource.Ref) == "" {
-		return controlagents.ConnectResult{}, &appserver.CommandReceiptError{
-			Receipt: receipt,
-			Err:     errors.New("app/gatewayapp/controladapter: committed ACP connect returned no ModelProfile resource"),
-		}
+	profiles, err := acpConnectedProfiles(receipt, preparation, len(modelPreparations))
+	if err != nil {
+		return controlagents.ConnectResult{}, &appserver.CommandReceiptError{Receipt: receipt, Err: errors.Join(commandErr, err)}
 	}
-	displayName := acpPreparedModelDisplayName(preparation)
-	connected := controlagents.ConnectResult{
-		Connection: preparation.Connection,
-		Discovery:  preparation.Discovery,
-		Profiles: []controlagents.ConnectedProfile{{
-			ID: receipt.Resource.Ref, DisplayName: displayName,
-		}},
-	}
+	connected := controlagents.ConnectResult{Connection: preparation.Connection, Discovery: preparation.Discovery, Profiles: profiles}
 	if commandErr != nil || strings.TrimSpace(receipt.Detail) != "" {
 		warning := commandErr
 		if detail := strings.TrimSpace(receipt.Detail); detail != "" {
@@ -84,12 +88,56 @@ func (a *SessionClientAdapter) ConnectACP(ctx context.Context, request controlag
 	return connected, nil
 }
 
-func (a *SessionClientAdapter) prepareACPConnectionLocked(ctx context.Context, request controlagents.ConnectRequest) (controlagents.ACPPreparation, error) {
+func (a *SessionClientAdapter) prepareACPConnectModelsLocked(ctx context.Context, request controlagents.ConnectRequest, roster controlagents.ACPPreparation) ([]appserver.ACPModelPreparationRef, error) {
+	seen := make(map[string]bool, len(request.ModelIDs))
+	for _, modelID := range request.ModelIDs {
+		if controlagents.IsDefaultRemoteModelID(modelID) {
+			return nil, errors.New("use ModelID to connect Agent default")
+		}
+		if seen[modelID] {
+			return nil, fmt.Errorf("ACP model %q was selected more than once", modelID)
+		}
+		if _, _, err := controlagents.ResolveDiscoverySelection(roster.Discovery, modelID, nil); err != nil {
+			return nil, err
+		}
+		seen[modelID] = true
+	}
+	refs := make([]appserver.ACPModelPreparationRef, 0, len(request.ModelIDs))
+	selection := request
+	selection.ModelIDs = nil
+	for _, modelID := range request.ModelIDs {
+		selection.ModelID = modelID
+		prepared, err := a.prepareACPConnectionLocked(ctx, selection, roster.Ref)
+		if err != nil {
+			return nil, fmt.Errorf("prepare ACP model %q: %w", modelID, err)
+		}
+		refs = append(refs, appserver.ACPModelPreparationRef{Ref: prepared.Ref, Digest: prepared.ContentDigest})
+	}
+	return refs, nil
+}
+
+func acpConnectedProfiles(receipt appserver.CommandResult, preparation controlagents.ACPPreparation, count int) ([]controlagents.ConnectedProfile, error) {
+	if count > 0 {
+		if receipt.ACPConnect == nil || len(receipt.ACPConnect.Profiles) != count {
+			return nil, errors.New("app/gatewayapp/controladapter: committed ACP connect returned an incomplete profile receipt")
+		}
+		return receipt.ACPConnect.Profiles, nil
+	}
+	if receipt.Resource == nil || receipt.Resource.Kind != appserver.CommandResourceModelProfile || strings.TrimSpace(receipt.Resource.Ref) == "" {
+		return nil, errors.New("app/gatewayapp/controladapter: committed ACP connect returned no ModelProfile resource")
+	}
+	return []controlagents.ConnectedProfile{{ID: receipt.Resource.Ref, DisplayName: acpPreparedModelDisplayName(preparation)}}, nil
+}
+
+func (a *SessionClientAdapter) prepareACPConnectionLocked(ctx context.Context, request controlagents.ConnectRequest, rosterRef string) (controlagents.ACPPreparation, error) {
 	request = controlagents.NormalizeConnectRequest(request)
 	if request.CWD == "" {
 		request.CWD = a.WorkspaceDir()
 	}
 	key := acpPreparationCacheKey(request)
+	if rosterRef != "" {
+		key += "\x00" + rosterRef
+	}
 	preparation, cached := a.acpPreparations[key]
 	if pending, ok := a.acpPending[key]; ok {
 		var err error
@@ -101,8 +149,8 @@ func (a *SessionClientAdapter) prepareACPConnectionLocked(ctx context.Context, r
 	}
 	if !cached || !preparation.ExpiresAt.After(time.Now()) ||
 		(preparation.State != controlagents.PreparationStateNeedsAuth && preparation.State != controlagents.PreparationStateReady) {
-		parentRef := ""
-		if request.ModelID != "" {
+		parentRef := rosterRef
+		if parentRef == "" && request.ModelID != "" {
 			base := request
 			base.ModelID = ""
 			if parent, ok := a.acpPreparations[acpPreparationCacheKey(base)]; ok &&

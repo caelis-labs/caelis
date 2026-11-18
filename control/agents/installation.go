@@ -2,16 +2,16 @@ package agents
 
 import "strings"
 
-// RuntimeInstallation records the archive and destination explicitly confirmed
-// by a user for one onboarding attempt. It is not a managed runtime version.
+// RuntimeInstallation retains the archive and destination in legacy ACP
+// onboarding payloads and preparation records. The Host rejects new install
+// requests.
 type RuntimeInstallation struct {
 	Directory  string `json:"directory"`
 	ArchiveURL string `json:"archive_url"`
 	SHA256     string `json:"sha256,omitempty"`
 }
 
-// RuntimeSetup describes an optional installation entry in the ACP wizard.
-// ArchiveURL and ManualSteps are populated after the Host resolves the official download.
+// RuntimeSetup retains installation details in the legacy completion contract.
 type RuntimeSetup struct {
 	Command    string `json:"command"`
 	Directory  string `json:"directory"`

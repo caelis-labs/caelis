@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"image/color"
 	"net/url"
 	"strings"
 
@@ -17,9 +18,6 @@ func (m *Model) renderWizardOverlay() string {
 	}
 	s.text.lines, s.text.rows = nil, nil
 	width := min(112, max(16, m.width-4))
-	if m.isACPManualSetup() {
-		width = min(max(16, m.width-4), max(112, min(180, m.width*9/10)))
-	}
 	inner := max(8, width-m.overlayBorderChromeWidth())
 	border, inset := 0, 0
 	if m.overlayUsesBorder() {
@@ -27,52 +25,28 @@ func (m *Model) renderWizardOverlay() string {
 	}
 	// Leave the fixed composer visible even when the form or catalog scrolls.
 	maxHeight := max(8, m.height-7)
-	if m.isACPManualSetup() {
-		maxHeight = max(8, m.height-5)
-	}
 	muted := m.theme.HelpHintTextStyle()
-	title := "/" + m.wizard.def.Command + " · " + m.wizardTitle()
-	body := []string{m.theme.TitleStyle().Render(padRightDisplay(truncateTailDisplay(title, inner-4), inner-3)) + m.wizardButtonStyle("close", m.wizardCloseEnabled(), false).Render("[×]")}
-	if context := m.connectContext(); context != "" {
-		body = append(body, muted.Render(truncateTailDisplay(context, inner)))
-	}
-	if m.isWizardAuthChoice() {
-		body = append(body, muted.Render(truncateTailDisplay(m.activePrompt.prompt, inner)))
-	}
+	path := m.wizardBreadcrumb()
+	title := tuikit.RenderBreadcrumb(m.theme, inner-4, path[:len(path)-1], path[len(path)-1])
+	body := []string{padRightDisplay(title, inner-3) + m.wizardButtonStyle("close", m.wizardCloseEnabled(), false).Render("[×]")}
 	body = append(body, muted.Render(strings.Repeat("─", inner)))
-	busy := m.wizardBusy()
-	if s.runtimeSetup != nil && !busy {
-		switch {
-		case m.wizardStepKey() == "acp_launcher":
-			body = append(body, muted.Render(truncateTailDisplay("The ACP runtime is not installed.", inner)))
-		case m.wizardStepKey() == "acp_install":
-			source, _ := url.Parse(s.runtimeSetup.ArchiveURL)
-			if source != nil && !m.isACPManualSetup() {
-				body = append(body, m.theme.LinkStyle().Hyperlink(tuikit.EscapeHyperlinkURI(s.runtimeSetup.ArchiveURL)).Render(truncateTailDisplay("Download from "+source.Hostname()+" ↗", inner)))
-			}
-			if m.isACPManualSetup() {
-				body = append(body, muted.Render(truncateTailDisplay("Drag to select text · release to copy", inner)))
-			} else {
-				body = append(body, muted.Render(truncateTailDisplay("New or empty directory on the Host.", inner)))
-			}
-		}
+	if m.isWizardAuthChoice() {
+		body = append(body, muted.Render(truncateTailDisplay(wizardPlainText(m.activePrompt.prompt), inner)))
 	}
-	if len(s.fields) == 0 && s.runtimeSetup == nil && m.wizardStepKey() != "acp_install" && !s.blocked && !busy && !m.isWizardAuthChoice() {
+	busy := m.wizardBusy()
+	if m.slashArgQuery != "" && len(s.fields) == 0 && !s.blocked && !busy && !m.isWizardAuthChoice() {
 		search := "/ " + truncateDisplayCellsFromEnd(m.slashArgQuery, inner-3) + "▏"
-		if m.slashArgQuery == "" {
-			search += "Search"
-		}
-		body = append(body, muted.Render(truncateTailDisplay(search, inner)))
+		body = append(body, muted.Render(search))
 	}
 	footer := []string{}
 	if m.wizard.def.Command == "disconnect" && m.wizardMultiSelectStep() && !busy {
 		if c, ok := m.currentSlashArgCandidate(); ok && c.Detail != "" {
-			footer = append(footer, muted.Render(truncateTailDisplay(c.Detail, inner)))
+			footer = append(footer, muted.Render(truncateTailDisplay(wizardPlainText(c.Detail), inner)))
 		}
 	}
 	if s.err != "" {
 		// Keep diagnostics readable without pushing actions outside the overlay.
-		styled := m.theme.ErrorStyle().Render(tuikit.LinkifyText(tuikit.SanitizeLogText(s.err), m.theme.LinkStyle()))
+		styled := m.theme.ErrorStyle().Render(wizardPlainText(s.err))
 		lines := splitStyledPhysicalLines(ansi.Wrap(styled, inner, " "))
 		limit := max(1, maxHeight-len(body)-len(footer)-2*border-3)
 		if len(lines) > limit {
@@ -99,15 +73,6 @@ func (m *Model) renderWizardOverlay() string {
 			}
 		}
 	}
-	if m.wizardStepKey() == "acp_model" {
-		help = "↑↓ select  esc back"
-	}
-	if m.isACPManualSetup() {
-		help = "↑↓ scroll  esc back"
-		if m.canSendACPInstallPrompt() {
-			help = "↑↓ scroll  tab action  esc back"
-		}
-	}
 	if m.isWizardAuthChoice() {
 		help = "↑↓ select  esc back"
 	}
@@ -125,17 +90,13 @@ func (m *Model) renderWizardOverlay() string {
 	}
 	footer = append(footer, muted.Render(strings.Repeat("─", inner)))
 	buttons := m.renderWizardFooter(inner, help)
-	sendFooterOffset := len(footer)
 	footer = append(footer, buttons.lines...)
 	budget := max(1, maxHeight-len(body)-len(footer)-2*border)
 	rows, offsets := m.wizardBodyLines(inner, len(body), budget)
 	body = append(body, rows...)
-	sendOffset := len(body) + sendFooterOffset
 	actionOffset := len(body) + len(footer) - 1
 	body = append(body, footer...)
-	if !m.isACPManualSetup() || s.runtimeSetup == nil {
-		m.collectWizardReadonlyText(body, offsets)
-	}
+	m.collectWizardReadonlyText(body, offsets)
 	m.renderWizardTextSelection(body)
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{Body: body, Width: width, UseBorder: m.overlayUsesBorder()})
 	w, h := lipgloss.Width(frame), lipgloss.Height(frame)
@@ -147,12 +108,39 @@ func (m *Model) renderWizardOverlay() string {
 	}
 	s.geometry = wizardOverlayGeometry{
 		x: x, y: y, width: w, height: h, closeX: x + inset + inner - 3, closeY: y + border,
-		rows: offsets, actionX: x + inset + inner - buttons.actionRightInset - buttons.actionWidth, actionY: y + border + actionOffset, actionWidth: buttons.actionWidth,
+		rows: offsets, actionX: x + inset + inner - buttons.actionWidth, actionY: y + border + actionOffset, actionWidth: buttons.actionWidth,
 		backX: x + inset, backY: y + border + actionOffset, backWidth: buttons.backWidth,
-		sendX: x + inset + inner - buttons.sendWidth, sendY: y + border + sendOffset, sendWidth: buttons.sendWidth,
 		contentX: x + inset, contentY: y + border, contentWidth: inner,
 	}
 	return frame
+}
+
+func (m *Model) wizardBreadcrumb() []string {
+	command := m.wizard.def.Command
+	path := []string{"/" + command}
+	if command == "connect" {
+		state := m.wizard.state
+		if state["source"] == "acp" {
+			if agent := state["acp_agent"]; agent != "" {
+				path = append(path, agent)
+			}
+		} else if provider := state["provider"]; provider != "" {
+			path = append(path, provider)
+			if address := state["baseurl"]; address != "" && m.wizardStepKey() != "endpoint" && m.wizardStepKey() != "baseurl" {
+				if template, ok := modelconfig.LookupProvider(provider); ok {
+					if endpoint, ok := modelconfig.EndpointForBaseURL(template, address); ok {
+						path = append(path, firstNonEmpty(endpoint.Display, "default"))
+					} else if parsed, err := url.Parse(address); err == nil && parsed.Host != "" {
+						path = append(path, parsed.Host)
+					}
+				}
+			}
+		}
+	}
+	if step := m.wizardTitle(); step != "" {
+		path = append(path, step)
+	}
+	return path
 }
 
 func (m *Model) wizardTitle() string {
@@ -178,62 +166,44 @@ func (m *Model) wizardTitle() string {
 		if m.slashArgLoadAuthURL != "" {
 			return "Sign in"
 		}
-		if m.wizardStepKey() == "acp_model" {
-			if confirmedACPInstallation(m.wizard.state) != nil {
-				return "Installing and connecting"
-			}
-			return "Preparing Agent"
+		if m.wizardStepKey() == "source" {
+			return ""
 		}
-		if m.wizardStepKey() == "acp_install" {
-			return "Checking official download"
+		if m.wizardStepKey() == "acp_model" {
+			return "Preparing Agent"
 		}
 		return "Loading models"
 	case m.connectCapabilitiesForm():
 		return "Model details"
-	case len(s.fields) > 0 && m.wizardStepKey() != "acp_command":
-		if m.wizardStepKey() == "acp_install" {
-			return "Install runtime"
-		}
-		return "Connection"
 	}
 	if m.wizard.def.Command == "disconnect" {
-		switch m.wizardStepKey() {
-		case "kind":
-			return "Source"
-		case "provider_model":
-			return "Provider models"
-		default:
-			return "ACP Agents"
-		}
+		return "Connected models"
 	}
 	if m.wizard.def.Command == "plugin" {
 		return m.pluginWizardTitle()
 	}
 	switch m.wizardStepKey() {
 	case "source":
-		return "Source"
+		return ""
 	case "provider":
 		return "Provider"
 	case "endpoint":
+		if len(s.fields) > 0 {
+			return "Custom endpoint"
+		}
 		return "Endpoint"
+	case "baseurl":
+		return "Endpoint"
+	case "apikey":
+		return "API key"
 	case "acp_agent":
 		return "ACP Agent"
 	case "acp_launcher":
-		if s.runtimeSetup != nil {
-			return "Set up runtime"
-		}
 		return "Launch method"
 	case "acp_command":
 		return "Command"
-	case "acp_install":
-		if m.isACPManualSetup() {
-			return "Manual setup"
-		}
-		return "Install runtime"
 	case "model", "acp_model":
 		return "Models"
-	case "model_type":
-		return "Model type"
 	}
 	return "Connection"
 }
@@ -260,9 +230,6 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		}
 		return lines[:min(len(lines), budget)], nil
 	}
-	if m.isACPManualSetup() && s.runtimeSetup != nil {
-		return m.acpManualBodyLines(width, offset, budget), nil
-	}
 	candidates, index := m.slashArgCandidates, m.slashArgIndex
 	if m.isWizardAuthChoice() {
 		candidates = nil
@@ -272,14 +239,15 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		index = m.activePrompt.choiceIndex
 	}
 	count := len(candidates)
+	endpointStep := m.wizardStepKey() == "endpoint"
 	form := len(s.fields) > 0 && !m.isWizardAuthChoice()
 	if form {
 		count, index = len(s.fields), min(s.field, len(s.fields)-1)
-	} else if !m.isWizardAuthChoice() && (m.wizardStepKey() == "model" || m.wizardStepKey() == "endpoint") {
+	} else if !m.isWizardAuthChoice() && (m.wizardStepKey() == "model" || endpointStep) {
 		count++
 	}
 	if count == 0 {
-		if m.wizardStepKey() == "acp_install" && s.err != "" {
+		if s.err != "" {
 			return nil, nil
 		}
 		text := "No matches"
@@ -313,6 +281,14 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		}
 		lines = append(lines, muted.Render(hint))
 	}
+	connectSource := m.wizard.def.Command == "connect" && m.wizardStepKey() == "source"
+	var sourceDetail, activeSourceDetail color.Color
+	if connectSource {
+		sourceDetail = m.theme.ReadableTextColor(m.theme.CommandSubText, m.theme.ModalBg)
+		if active := m.theme.CommandActiveStyle(); !active.GetReverse() {
+			activeSourceDetail = m.theme.ReadableTextColor(m.theme.CommandSubText, active.GetBackground())
+		}
+	}
 	for i := s.window; i < end; i++ {
 		offsets[i] = offset + len(lines)
 		if form {
@@ -324,14 +300,18 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			continue
 		}
 		label, detail := "+ Custom model", ""
-		if m.wizardStepKey() == "endpoint" {
+		if endpointStep {
 			label = "+ Custom endpoint"
 		}
 		selected := i == index
 		if i < len(candidates) {
 			candidate := candidates[i]
 			label, detail = slashArgCandidateIdentity(candidate), candidate.Detail
-			if !selected {
+			if endpointStep {
+				if address := strings.TrimSpace(candidate.Value); address != label {
+					detail = joinNonEmpty([]string{address, detail}, " · ")
+				}
+			} else if !selected {
 				detail = ""
 			}
 			if m.wizard.def.Command == "plugin" && m.wizardStepKey() != "target" {
@@ -340,22 +320,19 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			}
 			if m.wizard.def.Command == "disconnect" {
 				detail = ""
-				if m.wizardStepKey() == "provider_model" && slashArgIdentityDuplicated(label, candidates) {
+				if slashArgIdentityDuplicated(label, candidates) {
 					detail = candidate.Detail
 				}
 			}
-			if m.wizardStepKey() == "source" {
-				detail = ""
-				if m.wizard.def.Command == "connect" {
-					detail = candidate.Detail
-				}
+			if connectSource {
+				detail = candidate.Detail
 				switch candidate.Value {
 				case "account":
 					label = "Sign in"
 				case "api-key":
 					label = "API key / local"
 				case "acp":
-					label = "Local ACP Agent"
+					label = "local acp agent"
 				}
 			}
 			if m.wizardStepKey() == "acp_agent" && candidate.Value == "codex" {
@@ -373,29 +350,18 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			marker = "› "
 		}
 		labelWidth := min(46, max(14, (width-4)*3/5))
-		if s.runtimeSetup != nil {
-			labelWidth = max(1, width-4)
-			detail = ""
+		if endpointStep {
+			labelWidth = min(labelWidth, max(16, displayColumns(marker+label)))
 		}
-		if m.wizard.def.Command == "connect" && m.wizardStepKey() == "source" {
-			labelWidth = min(32, max(14, (width-4)*2/5), max(1, width-5))
-			// Keep examples visible on every row, with subdued text even when selected.
-			detail = truncateTailDisplay(detail, max(1, width-labelWidth-4))
-			if selected && detail != "" {
-				base := m.theme.CommandActiveStyle().Padding(0, 0).UnsetBold()
-				hint := base
-				if m.theme.HelpHintFg != nil {
-					hint = hint.Foreground(m.theme.HelpHintFg)
-				} else if !m.theme.NoColor {
-					hint = hint.Faint(true)
-				}
-				identity := padRightDisplay(truncateTailDisplay(marker+label, labelWidth), labelWidth)
-				trail := strings.Repeat(" ", max(0, width-labelWidth-displayColumns(detail)-4))
-				lines = append(lines, base.Bold(true).Render(" "+identity)+base.Render("  ")+hint.Render(detail)+base.Render(trail+" "))
-				continue
+		var detailColor color.Color
+		if connectSource {
+			labelWidth = min(20, max(14, (width-4)*2/5), max(1, width-5))
+			detailColor = sourceDetail
+			if selected {
+				detailColor = activeSourceDetail
 			}
 		}
-		lines = append(lines, m.renderPickerColumnsLine(marker+label, detail, labelWidth, max(1, width-2), selected, nil))
+		lines = append(lines, m.renderPickerColumnsLine(marker+wizardPlainText(label), wizardPlainText(detail), labelWidth, max(1, width-2), selected, detailColor))
 	}
 	if count > budget && budget >= 3 {
 		hint := ""
@@ -405,6 +371,14 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		lines = append(lines, muted.Render(hint))
 	}
 	return lines, offsets
+}
+
+const wizardURLSeparator = ":\u034f//"
+
+func wizardPlainText(text string) string {
+	// ttyd's xterm WebLinksAddon detects URLs even without OSC 8. A zero-width
+	// combining mark in the scheme delimiter survives terminal cell layout.
+	return strings.ReplaceAll(tuikit.SanitizeLogText(text), "://", wizardURLSeparator)
 }
 
 func (m *Model) renderWizardField(field wizardField, selected bool, width int) string {
@@ -433,23 +407,13 @@ func (m *Model) renderWizardField(field wizardField, selected bool, width int) s
 	}
 	if field.value == "" && selected && !field.choice {
 		placeholder := field.placeholder
-		if field.key == "apikey" && m.connectKeyOptional() {
+		if field.key == "apikey" && m.wizard.state["_reuseauth"] == "optional" {
 			placeholder = "Saved key · leave blank"
 		}
 		value += placeholder
 	}
 	value = truncateDisplayCells(value, available)
 	return m.renderPickerColumnsLine(field.label, value, labelWidth, max(1, width-2), selected, nil)
-}
-
-func (m *Model) connectDisplayEndpoint() string {
-	if value := m.wizard.state["baseurl"]; value != "" {
-		return value
-	}
-	if template, ok := modelconfig.LookupProvider(m.wizard.state["provider"]); ok {
-		return template.DefaultBaseURL
-	}
-	return ""
 }
 
 func (m *Model) wizardResultHint() string {

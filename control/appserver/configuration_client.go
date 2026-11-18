@@ -64,6 +64,16 @@ type DeleteModelRequest struct {
 	Model string `json:"model"`
 }
 
+// CapabilityDeleteModels advertises atomic removal of mixed Host model profiles.
+const CapabilityDeleteModels = "delete-models-v1"
+
+// DeleteModelsRequest removes the selected stable model profile IDs in a single
+// Host configuration revision. ACP connections remain available for re-add.
+type DeleteModelsRequest struct {
+	WriteBase
+	ProfileIDs []string `json:"profile_ids"`
+}
+
 type SandboxRequest struct {
 	WriteBase
 	Backend string `json:"backend,omitempty"`
@@ -90,6 +100,7 @@ type ConfigurationService interface {
 	ConnectModel(context.Context, Principal, ConnectModelRequest) (CommandResult, error)
 	UseModel(context.Context, Principal, UseModelRequest) (CommandResult, error)
 	DeleteModel(context.Context, Principal, DeleteModelRequest) (CommandResult, error)
+	DeleteModels(context.Context, Principal, DeleteModelsRequest) (CommandResult, error)
 	SetWorkspaceTrust(context.Context, Principal, WorkspaceTrustRequest) (CommandResult, error)
 	SetSandboxBackend(context.Context, Principal, SandboxRequest) (CommandResult, error)
 	PrepareSandbox(context.Context, Principal, SandboxRequest) (CommandResult, error)
@@ -111,6 +122,7 @@ type ConfigurationCommandService interface {
 	ConnectModel(context.Context, Principal, ConnectModelRequest) (CommandResult, error)
 	UseModel(context.Context, Principal, UseModelRequest) (CommandResult, error)
 	DeleteModel(context.Context, Principal, DeleteModelRequest) (CommandResult, error)
+	DeleteModels(context.Context, Principal, DeleteModelsRequest) (CommandResult, error)
 	SetWorkspaceTrust(context.Context, Principal, WorkspaceTrustRequest) (CommandResult, error)
 	SetSandboxBackend(context.Context, Principal, SandboxRequest) (CommandResult, error)
 	PrepareSandbox(context.Context, Principal, SandboxRequest) (CommandResult, error)
@@ -128,6 +140,7 @@ type ConfigurationClient interface {
 	ConnectModel(context.Context, ConnectModelRequest) (CommandResult, error)
 	UseModel(context.Context, UseModelRequest) (CommandResult, error)
 	DeleteModel(context.Context, DeleteModelRequest) (CommandResult, error)
+	DeleteModels(context.Context, DeleteModelsRequest) (CommandResult, error)
 	SetWorkspaceTrust(context.Context, WorkspaceTrustRequest) (CommandResult, error)
 	SetSandboxBackend(context.Context, SandboxRequest) (CommandResult, error)
 	PrepareSandbox(context.Context, SandboxRequest) (CommandResult, error)
@@ -182,6 +195,9 @@ func (c *boundConfigurationClient) UseModel(ctx context.Context, req UseModelReq
 }
 func (c *boundConfigurationClient) DeleteModel(ctx context.Context, req DeleteModelRequest) (CommandResult, error) {
 	return c.service.DeleteModel(ctx, c.boundPrincipal(), req)
+}
+func (c *boundConfigurationClient) DeleteModels(ctx context.Context, req DeleteModelsRequest) (CommandResult, error) {
+	return c.service.DeleteModels(ctx, c.boundPrincipal(), req)
 }
 func (c *boundConfigurationClient) SetWorkspaceTrust(ctx context.Context, req WorkspaceTrustRequest) (CommandResult, error) {
 	return c.service.SetWorkspaceTrust(ctx, c.boundPrincipal(), req)

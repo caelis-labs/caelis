@@ -16,8 +16,7 @@ import (
 
 type acpConnectControlStub struct {
 	ControlServices
-	req          controlagents.ConnectRequest
-	disconnected string
+	req controlagents.ConnectRequest
 }
 
 type modelConnectControlStub struct {
@@ -83,15 +82,10 @@ func (s *acpConnectControlStub) ConnectACP(_ context.Context, req controlagents.
 	return controlagents.ConnectResult{Profiles: []controlagents.ConnectedProfile{{ID: "acp:claude:opus"}}}, nil
 }
 
-func (s *acpConnectControlStub) DisconnectACPAgents(_ context.Context, agentIDs []string) ([]string, error) {
-	s.disconnected = strings.Join(agentIDs, ",")
-	return slices.Clone(agentIDs), nil
-}
-
 func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 	service := &acpConnectControlStub{}
 	payload := buildACPConnectWizardPayload(map[string]string{
-		"acp_agent": "custom", "acp_launcher": "command", "acp_command": "claude-agent-acp", "acp_model": "opus",
+		"acp_agent": "custom", "acp_launcher": "command", "acp_command": "claude-agent-acp", "acp_model": `["opus"]`,
 	})
 	result := slashConnectWithContext(context.Background(), service, service, nil, "acp "+payload)
 	if result.Err != nil {
@@ -124,20 +118,6 @@ func TestConnectIsHandledAsLocalAppConfiguration(t *testing.T) {
 	}
 	if service.connected.Provider != "codex" || service.connected.Model != "gpt-6-sol" {
 		t.Fatalf("Connect() config = %#v, want local App model connection", service.connected)
-	}
-}
-
-func TestSlashDisconnectSeparatesProviderAndACP(t *testing.T) {
-	provider := &modelConnectControlStub{}
-	result := slashDisconnectWithContext(context.Background(), provider, nil, "provider ollama/qwen3")
-	if result.Err != nil || !result.SuppressTurnDivider || provider.deleted != "ollama/qwen3" {
-		t.Fatalf("provider disconnect = %#v, deleted %q", result, provider.deleted)
-	}
-
-	acp := &acpConnectControlStub{}
-	result = slashDisconnectWithContext(context.Background(), acp, nil, "acp codex")
-	if result.Err != nil || !result.SuppressTurnDivider || acp.disconnected != "codex" {
-		t.Fatalf("ACP disconnect = %#v, disconnected %q", result, acp.disconnected)
 	}
 }
 

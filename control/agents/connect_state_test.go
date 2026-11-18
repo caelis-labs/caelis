@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestConnectStateRoundTripPreservesModelSelections(t *testing.T) {
+	models := []string{"Vendor/Model=beta", "Vendor/Model,alpha"}
+	got, err := DecodeConnectState(EncodeConnectState(ConnectState{Agent: "custom", Models: models}))
+	if err != nil || !reflect.DeepEqual(got.ConnectRequest("").ModelIDs, models) {
+		t.Fatalf("selection = %#v, %v; want %v", got, err, models)
+	}
+}
+
 func TestConnectStateRoundTripPreservesConfigValuePunctuation(t *testing.T) {
 	want := NormalizeConnectState(ConnectState{
 		Agent: "claude", Launcher: LauncherChoiceManaged, Model: "opus",
