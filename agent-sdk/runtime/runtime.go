@@ -329,7 +329,7 @@ func validateRunInput(req agent.RunRequest) error {
 				Kind: req.InputKind, Text: strings.TrimSpace(req.Input), DisplayInput: strings.TrimSpace(req.DisplayInput),
 				ContentParts: req.ContentParts, Actor: req.InputActor, Inputs: req.Inputs,
 			}); err != nil {
-				return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: invalid Agent communication", err)
+				return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: "+err.Error(), err)
 			}
 			return nil
 		}
