@@ -1,10 +1,11 @@
 package tuiapp
 
 import (
-	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
-	"github.com/charmbracelet/colorprofile"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
 )
 
 func TestScriptActionTitlesAndNoDetails(t *testing.T) {
@@ -43,16 +44,17 @@ func TestScriptActionNameContrastAndWholeTitle(t *testing.T) {
 			t.Fatalf("whole phrase not highlighted: %q", styled)
 		}
 	}
-	for _, name := range []string{"Read", "desktop_world__exec", "desktop_world.exec"} {
-		text := "  └ " + name + " target"
-		row := StyledPlainRow("b", text, styleExplorationSummaryRow(text, ctx))
-		ev := SubagentEvent{Name: name, Done: true}
-		styled := styleScriptToolState(row, ev, ctx)
-		if !strings.Contains(styled.Styled, ctx.Theme.Tokens().Accent.Bold(true).Render(name)) {
-			t.Fatalf("tool name lacks accent: %q", styled.Styled)
+	for _, tc := range []struct{ name, action string }{
+		{"Read", "Read"}, {"RunCommand", "Ran"}, {"desktop_world__exec", "desktop_world__exec"},
+	} {
+		ev := SubagentEvent{Name: tc.name, Args: "target", Done: true}
+		row := renderScriptInvocationRows("b", []SubagentEvent{ev}, 60, ctx, "", true, false)[0]
+		if !strings.Contains(row.Styled, toolActionStyle(ctx, tc.action).Render(tc.action)) {
+			t.Fatalf("tool action lacks the standard header style: %q", row.Styled)
 		}
 		ev.Err = true
-		if got := styleScriptToolState(row, ev, ctx); got.Styled != ctx.Theme.ErrorStyle().Render(text) {
+		failed := renderScriptInvocationRows("b", []SubagentEvent{ev}, 60, ctx, "", true, false)[0]
+		if failed.Styled != ctx.Theme.ErrorStyle().Render(row.Plain) {
 			t.Fatal("failure color did not take priority")
 		}
 	}
