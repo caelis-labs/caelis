@@ -656,14 +656,15 @@ func isCompactExplorationTool(ev SubagentEvent) bool {
 }
 
 func isExplorationToolEvent(ev SubagentEvent) bool {
+	return ev.ParentToolName != "js_exec" && explorationInvocationVerb(ev) != ""
+}
+
+func explorationInvocationVerb(ev SubagentEvent) string {
 	// A reviewed invocation keeps its own header and decision visible.
-	if ev.Kind != SEToolCall || ev.ApprovalStatus != "" || ev.ParentToolName == "js_exec" {
-		return false
+	if ev.Kind != SEToolCall || ev.ApprovalStatus != "" || strings.TrimSpace(ev.CallID) == "" {
+		return ""
 	}
-	if strings.TrimSpace(ev.CallID) == "" {
-		return false
-	}
-	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb)
+	return surfaceExplorationVerb(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 }
 
 func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode) []string {

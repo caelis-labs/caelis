@@ -133,12 +133,85 @@ func TestUnifiedJSUsesSingleLineSummaryColumns(t *testing.T) {
 		events := []SubagentEvent{
 			{Kind: SEToolCall, CallID: "root", Name: "js_exec", Done: true},
 			{Kind: SEToolCall, CallID: "one", Name: "Read", Args: "docs/first.txt", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
+			{Kind: SEToolCall, CallID: "task", Name: "Task", Args: "Read task-handle", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 			{Kind: SEToolCall, CallID: "two", Name: "Read", Args: "docs/second.txt", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 		}
 		rows, _, _ := renderInvocationToolGroupRows("b", events, 0, width, ctx, acpTranscriptRenderOptions{})
 		want := "  └ Read " + compactSingleLineHeader("first.txt, second.txt", width-9)
 		if len(rows) != 2 || rows[1].Plain != want || !rows[1].PreWrapped {
 			t.Fatalf("width %d: %#v", width, rows)
+		}
+	}
+}
+
+func TestUnifiedJSOnlyGroupsExplorationCalls(t *testing.T) {
+	for _, scope := range []string{"main", "child"} {
+		for _, replay := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/replay=%v", scope, replay), func(t *testing.T) {
+				events := consecutiveScriptEvents()[:1]
+				add := func(id, name string, input map[string]any) {
+					events = append(events, &session.Event{
+						Type: session.EventTypeToolCall, SessionID: "fixture", Visibility: session.VisibilityMirror,
+						Tool: &session.EventTool{
+							ID: id, Name: name, Status: "started", Input: input,
+							Parent: &session.EventParentTool{CallID: "script1", Name: "js_exec"},
+						},
+					})
+				}
+				add("read-1", "Read", map[string]any{"path": "first.txt"})
+				add("task", "Task", map[string]any{"action": "read", "handle": "hidden-task"})
+				add("read-2", "Read", map[string]any{"path": "second.txt"})
+				add("run-1", "RunCommand", map[string]any{"command": "echo first\necho second"})
+				add("run-2", "RunCommand", map[string]any{"command": "echo first\necho second"})
+				add("spawn-1", "StartThread", map[string]any{"agent": "reviewer", "prompt": "review one"})
+				add("spawn-2", "StartThread", map[string]any{"agent": "reviewer", "prompt": "review two"})
+				add("send-1", "SendMessage", map[string]any{"to": "reviewer", "message": "hello one"})
+				add("send-2", "SendMessage", map[string]any{"to": "reviewer", "message": "hello two"})
+				add("patch-1", "Patch", map[string]any{"path": "first.txt"})
+				add("patch-2", "Patch", map[string]any{"path": "second.txt"})
+
+				m, b := groupedCanonicalModel(t, events, scope, replay)
+				ctx := m.blockRenderContext(60)
+				want := []string{
+					"  └ Read first.txt, second.txt",
+					"    Ran echo first echo second ... +1 lines",
+					"    Ran echo first echo second ... +1 lines",
+					"    Spawned reviewer: review one", "    Spawned reviewer: review two",
+					"    @reviewer: hello one", "    @reviewer: hello two",
+					"    Edit first.txt", "    Edit second.txt",
+				}
+				rows := b.Render(ctx)
+				if got := joinRenderedPlain(rows[1:]); got != strings.Join(want, "\n") {
+					t.Fatalf("collapsed script rows:\n%s", got)
+				}
+				for i, id := range []string{"run-1", "run-2", "spawn-1", "spawn-2", "send-1", "send-2"} {
+					if row := rows[i+2]; row.ClickToken != acpToolPanelClickToken(id) || !row.PreWrapped {
+						t.Fatalf("missing single-row disclosure for %s: %+v", id, row)
+					}
+				}
+				for _, width := range []int{8, 24, 36} {
+					narrow := b.Render(m.blockRenderContext(width))
+					if len(narrow) != len(rows) {
+						t.Fatalf("width %d changed the row count:\n%s", width, joinRenderedPlain(narrow))
+					}
+					for _, row := range narrow[1:] {
+						if displayColumns(row.Plain) > width || ansi.Strip(row.Styled) != row.Plain {
+							t.Fatalf("width %d invalid row: %q (%q)", width, row.Plain, row.Styled)
+						}
+					}
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("run-2"))
+				text := joinRenderedPlain(b.Render(ctx))
+				if strings.Count(text, "+1 lines") != 1 || !strings.Contains(text, "\n     echo first\n     echo second") {
+					t.Fatalf("command disclosure did not retain its own lines:\n%s", text)
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("run-2"))
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1"))
+				want = append([]string{"  └ Read first.txt", "    Read second.txt"}, want[1:]...)
+				if got := joinRenderedPlain(b.Render(ctx)[1:]); got != strings.Join(want, "\n") {
+					t.Fatalf("expanded script rows:\n%s", got)
+				}
+			})
 		}
 	}
 }
@@ -286,7 +359,7 @@ func TestUnifiedJSLongArgumentsPhysicalMouseAndGolden(t *testing.T) {
 	}
 }
 
-func TestUnifiedJSAggregateLongCallsAndNames(t *testing.T) {
+func TestUnifiedJSKeepsNonExplorationCallsSeparate(t *testing.T) {
 	for _, width := range []int{8, 24, 36} {
 		m := NewModel(Config{})
 		ctx := m.blockRenderContext(width)
@@ -298,7 +371,7 @@ func TestUnifiedJSAggregateLongCallsAndNames(t *testing.T) {
 			b.UpdateToolWithMeta(id, name, args, "PRIVATE_BODY", true, false, ToolUpdateMeta{ParentToolCallID: "root", ParentToolName: "js_exec", FullArgs: args})
 		}
 		rows := b.Render(ctx)
-		if len(rows) != 2 || rows[1].ClickToken != acpStableExplorationClickToken("tools:root") {
+		if len(rows) != 3 || rows[1].ClickToken != acpToolPanelClickToken("one") || rows[2].ClickToken != acpToolPanelClickToken("two") {
 			t.Fatal(joinRenderedPlain(rows))
 		}
 		if !b.toggleExplorationExpanded("tools:root") {
@@ -306,7 +379,7 @@ func TestUnifiedJSAggregateLongCallsAndNames(t *testing.T) {
 		}
 		rows = b.Render(ctx)
 		if len(rows) != 3 {
-			t.Fatal("aggregate did not reveal individual calls")
+			t.Fatal("expanding the group changed non-exploration calls")
 		}
 		for _, row := range rows[1:] {
 			if displayColumns(row.Plain) > width || ansi.StringWidth(row.Styled) > width {
