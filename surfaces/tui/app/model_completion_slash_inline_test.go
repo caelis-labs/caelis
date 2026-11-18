@@ -166,8 +166,8 @@ func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 	if model.slashSkillOnly {
 		t.Fatal("running line-start overlay is skill-only, want mixed allowed commands and skills")
 	}
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/resume", "/quit", "/theme", "/lint", "/superpowers:brainstorm"}) {
-		t.Fatalf("running slashCandidates = %#v, want skills plus /resume /quit /theme", got)
+	if want := []string{"/resume", "/theme", "/quit", "/lint", "/superpowers:brainstorm"}; !slices.Equal(model.slashCandidates, want) {
+		t.Fatalf("running slashCandidates = %#v, want %q", model.slashCandidates, want)
 	}
 
 	model.setInputText("/help")

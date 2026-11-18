@@ -1,7 +1,7 @@
 package tuiapp
 
 import (
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +11,16 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
+
+// slashCommandOrder keeps related actions adjacent within the Commands group.
+var slashCommandOrder = []string{
+	"/help",
+	"/resume", "/new", "/status", "/compact", "/btw",
+	"/model", "/connect", "/disconnect",
+	"/team", "/review",
+	"/plugin", "/theme", "/experimental",
+	"/doctor", "/quit",
+}
 
 type slashCompletionCandidates struct {
 	commands []string
@@ -247,26 +257,26 @@ func assembleSlashCompletionCandidates(commands []string, reserved []string, ski
 			details[key] = detail
 		}
 	}
-	sort.Strings(commandNames)
-	sort.Strings(agentNames)
-	sort.Strings(skillNames)
+	slices.Sort(agentNames)
+	slices.Sort(skillNames)
 	result := slashCompletionCandidates{displays: displays, details: details}
 	if skillOnly {
 		result.commands = skillNames
 		return result
 	}
-	// Keep common entry points at the start of the Commands group.
-	front := 0
-	for _, name := range []string{"/help", "/resume", "/model", "/connect"} {
-		for j := front; j < len(commandNames); j++ {
-			if commandNames[j] == name {
-				copy(commandNames[front+1:j+1], commandNames[front:j])
-				commandNames[front] = name
-				front++
-				break
-			}
+	slices.SortFunc(commandNames, func(a, b string) int {
+		left, right := slices.Index(slashCommandOrder, a), slices.Index(slashCommandOrder, b)
+		switch {
+		case left == right:
+			return strings.Compare(a, b)
+		case left < 0:
+			return 1
+		case right < 0:
+			return -1
+		default:
+			return left - right
 		}
-	}
+	})
 	for _, group := range []struct {
 		title string
 		names []string

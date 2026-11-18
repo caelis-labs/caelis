@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"image/color"
 	"reflect"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,6 +65,29 @@ func TestSlashCompletionDescriptionContrast(t *testing.T) {
 	}
 }
 
+func TestSlashCompletionOrdersCommandsByFunction(t *testing.T) {
+	commands := append(DefaultCommands(), "btw", "codex-1")
+	slices.Reverse(commands)
+	model := newCompletionMouseTestModel(t, 120, 40, Config{Commands: commands})
+	model.slashSkillCatalog = []CompletionCandidate{{Value: "lint"}, {Value: "brainstorm"}}
+	model.Update(keyPress("/"))
+
+	want := []string{
+		"/help",
+		"/resume", "/new", "/status", "/compact", "/btw",
+		"/model", "/connect", "/disconnect",
+		"/team", "/review",
+		"/plugin", "/theme", "/experimental",
+	}
+	if runtime.GOOS == "windows" {
+		want = append(want, "/doctor")
+	}
+	want = append(want, "/quit", "/breeze", "/codex-1", "/orbit", "/zenith", "/brainstorm", "/lint")
+	if !slices.Equal(model.slashCandidates, want) {
+		t.Fatalf("slash candidates = %q, want %q", model.slashCandidates, want)
+	}
+}
+
 func TestSlashCompletionGroupsSearchAndInteraction(t *testing.T) {
 	const detail = "Show current provider, model, session, sandbox, and store info"
 	for _, size := range []struct {
@@ -86,7 +111,7 @@ func TestSlashCompletionGroupsSearchAndInteraction(t *testing.T) {
 				model.refreshSlashCommands()
 			}
 			open("/")
-			if got, want := model.slashCandidates, []string{"/help", "/connect", "/status", "/theme", "/breeze", "/codex-1", "/alpha", "/context7-mcp"}; !reflect.DeepEqual(got, want) {
+			if got, want := model.slashCandidates, []string{"/help", "/status", "/connect", "/theme", "/breeze", "/codex-1", "/alpha", "/context7-mcp"}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("candidates = %q, want %q", got, want)
 			}
 
