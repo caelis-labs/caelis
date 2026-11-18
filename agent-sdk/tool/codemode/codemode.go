@@ -233,7 +233,7 @@ Tools return a Body. result.text() joins reply text/JSON with newlines, preservi
 
 tools.search({name}) finds an exact schema; use {query} for capabilities, {server,tool,plugin?} for an exact method, or {server,plugin?,after?} to list. Its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Pass next as after. Follow call_path, e.g. tools.call(name,args).
 
-Inspect error.message, error.code and error.result (reply alias) when present. Failed Bodies are diagnostics; json() only parses text. On stale_revision, refresh the exact schema and rebuild args. Check child outcomes before retrying; never replay unknown outcomes. runtime.state() reports generation/execution.`
+Inspect error.message, error.code and error.result when present (reply alias). Failed Bodies are diagnostics; json() only parses text. On stale_revision, refresh the exact schema and rebuild args. Check child outcomes before retrying; never replay unknown outcomes. runtime.state() reports generation/execution.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.
