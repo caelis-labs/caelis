@@ -39,6 +39,24 @@ func guardianScreenOptions(payload *approval.Payload) error {
 // evidence judgments. Scope is selected separately: prefer once and never
 // broaden authority by combining option mass.
 func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment.Response) (approval.Option, error) {
+	return guardianScreenSelectionWith(req, response, guardianDefaultScreenThresholds)
+}
+
+type guardianScreenThresholds struct {
+	outcomeRatio, outcomeGap    float64
+	allowUnknownMax             float64
+	allowViolationMax           float64
+	denyViolationMin            float64
+	denyHighUnknownBoundary     float64
+	denyHighUnknownViolationMin float64
+}
+
+var guardianDefaultScreenThresholds = guardianScreenThresholds{
+	outcomeRatio: 20, outcomeGap: .9, allowUnknownMax: .15, allowViolationMax: .1,
+	denyViolationMin: .85, denyHighUnknownBoundary: .8, denyHighUnknownViolationMin: .9,
+}
+
+func guardianScreenSelectionWith(req kernel.ApprovalReviewRequest, response judgment.Response, thresholds guardianScreenThresholds) (approval.Option, error) {
 	fail := func() (approval.Option, error) {
 		return approval.Option{}, fmt.Errorf("guardian classifier decision or evidence requires Agent review")
 	}
@@ -74,7 +92,8 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 	if groups["deny"] > groups["allow"] {
 		winner = "deny"
 	}
-	if !guardianDistributionDominates(groups, winner, 20, .9) || !guardianScreenEvidenceSupports(winner, response.Answers) {
+	if !guardianDistributionDominates(groups, winner, thresholds.outcomeRatio, thresholds.outcomeGap) ||
+		!guardianScreenEvidenceSupports(winner, response.Answers, thresholds) {
 		return fail()
 	}
 	nativeMCP := req.RuntimeRequest.Authorization != nil

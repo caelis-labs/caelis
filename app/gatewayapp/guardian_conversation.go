@@ -73,10 +73,9 @@ type guardianConversationCommit struct {
 	ExpectedVersion uint64
 	Fork            guardianConversationForkRef
 
-	ParentCursor  guardianParentCanonicalCursor
-	User          *session.Event
-	Assistant     *session.Event
-	ContextEvents []*session.Event
+	ParentCursor guardianParentCanonicalCursor
+	User         *session.Event
+	Assistant    *session.Event
 }
 
 func newGuardianConversationManager() *guardianConversationManager {
@@ -172,15 +171,6 @@ func normalizeGuardianConversationForkRef(ref guardianConversationForkRef) (guar
 	return ref, nil
 }
 
-func sameGuardianConversationEvent(left *session.Event, right *session.Event) bool {
-	if left == nil || right == nil {
-		return false
-	}
-	return session.EventTypeOf(left) == session.EventTypeOf(right) &&
-		left.Message != nil && right.Message != nil && left.Message.Role == right.Message.Role &&
-		session.EventText(left) == session.EventText(right)
-}
-
 // forget releases one main Session's non-persistent Guardian conversation.
 func (m *guardianConversationManager) forget(sessionID string) {
 	if m == nil {
@@ -253,7 +243,7 @@ func validateGuardianParentCursorAdvance(current guardianParentCanonicalCursor, 
 	return nil
 }
 
-// commitTurn keeps a complete tool loop. Shared source input is joined once;
+// commitTurn keeps only the validated request and answer. Shared user input is joined once;
 // concurrent approval branches are joined in their original model-call order.
 func (m *guardianConversationManager) commitTurn(req guardianConversationCommit) (bool, bool, error) {
 	if m == nil || req.SessionID == "" || req.Assistant == nil {
@@ -265,30 +255,11 @@ func (m *guardianConversationManager) commitTurn(req guardianConversationCommit)
 	if _, err := normalizeGuardianParentCanonicalCursor(req.ParentCursor); err != nil {
 		return false, false, err
 	}
-	if _, _, err := validatedGuardianConversationPair(req.User, req.Assistant); err != nil {
+	user, assistant, err := validatedGuardianConversationPair(req.User, req.Assistant)
+	if err != nil {
 		return false, false, err
 	}
-	var turn []*session.Event
-	if len(req.ContextEvents) > 0 {
-		start := -1
-		for i, e := range req.ContextEvents {
-			if sameGuardianConversationEvent(e, req.User) {
-				start = i
-			}
-		}
-		if start < 0 {
-			return false, false, fmt.Errorf("guardian context lost current request")
-		}
-		turn = session.CloneEvents(req.ContextEvents[start:])
-	} else {
-		turn = session.CloneEvents([]*session.Event{req.User, req.Assistant})
-	}
-	if len(turn) < 2 || !sameGuardianConversationEvent(turn[len(turn)-1], req.Assistant) {
-		return false, false, fmt.Errorf("incomplete Guardian turn")
-	}
-	if turn[0].Meta == nil {
-		turn[0].Meta = map[string]any{}
-	}
+	turn := []*session.Event{user, assistant}
 	for _, e := range turn {
 		if e.Meta == nil {
 			e.Meta = map[string]any{}

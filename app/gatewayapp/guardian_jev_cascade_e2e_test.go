@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
-	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -22,17 +21,11 @@ func TestGuardianJevCascadeE2E(t *testing.T) {
 	if os.Getenv("CAELIS_JEV_CASCADE_E2E") != "1" {
 		t.Skip("set CAELIS_JEV_CASCADE_E2E=1 to run the live Jev cascade E2E")
 	}
-	if strings.TrimSpace(os.Getenv("JEV_API_KEY")) == "" {
-		t.Skip("set JEV_API_KEY for the live Jev cascade E2E")
-	}
 	alias := strings.TrimSpace(os.Getenv("CAELIS_GUARDIAN_E2E_MODEL"))
 	if alias == "" {
 		t.Skip("set CAELIS_GUARDIAN_E2E_MODEL to a configured local model alias")
 	}
-	client, err := typesafe.New(typesafe.Config{APIKey: os.Getenv("JEV_API_KEY")})
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := guardianLiveEvaluator(t)
 	// The generative Guardian Agent is the local provider model, never a stub.
 	guardianModel, _ := guardianCommandE2EModel(t, alias)
 

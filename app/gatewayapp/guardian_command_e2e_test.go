@@ -283,21 +283,13 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	record["repetition"] = repetition
 	record["initial_state"] = mainModel.initialState
 	record["first_result_ms"] = mainModel.firstResultMS
-	if snapshot, err := reviewer.conversations.snapshot(active.SessionID); err == nil {
-		var evidence []*session.EventTool
-		for _, event := range snapshot.Events {
-			if event.Tool != nil {
-				evidence = append(evidence, event.Tool)
-			}
-		}
-		record["guardian_evidence"] = evidence
-	}
 	t.Logf("%s", mustGuardianE2EJSON(t, record))
 	if out := os.Getenv("CAELIS_GUARDIAN_COMMAND_E2E_OUT"); out != "" {
 		if err := os.MkdirAll(out, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(out, fmt.Sprintf("%s-%s-%d.json", alias, name, repetition)), []byte(mustGuardianE2EJSON(t, record)), 0600); err != nil {
+		modelLabel := strings.NewReplacer("/", "_", "\\", "_").Replace(alias)
+		if err := os.WriteFile(filepath.Join(out, fmt.Sprintf("%s-%s-%d.json", modelLabel, name, repetition)), []byte(mustGuardianE2EJSON(t, record)), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -461,6 +453,22 @@ func (r *guardianReasoningTransport) RoundTrip(req *http.Request) (*http.Respons
 
 func guardianCommandE2EModel(t *testing.T, alias string) (model.LLM, *guardianReasoningTransport) {
 	t.Helper()
+	wire := &guardianReasoningTransport{inner: http.DefaultTransport}
+	cfg := guardianLiveModelConfig(t, alias, &http.Client{Transport: wire})
+	cfg.ReasoningEffort, cfg.DefaultReasoningEffort, cfg.ReasoningMode = "", "", ""
+	resolved, err := modelconfig.BuildModel(cfg, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	llm := resolved.Model
+	if strings.HasPrefix(alias, "deepseek") {
+		llm = &systemAgentReasoningModel{inner: llm, effort: "none"}
+	}
+	return llm, wire
+}
+
+func guardianLiveModelConfig(t *testing.T, alias string, client *http.Client) ModelConfig {
+	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -486,10 +494,6 @@ func guardianCommandE2EModel(t *testing.T, alias string) (model.LLM, *guardianRe
 			break
 		}
 	}
-	cfg.ReasoningEffort, cfg.DefaultReasoningEffort = "", ""
-	cfg.ReasoningMode = ""
-	wire := &guardianReasoningTransport{inner: http.DefaultTransport}
-	client := &http.Client{Transport: wire}
 	if cfg.CredentialRef == modelconfig.CodexOAuthCredentialRef {
 		path := codexauth.DefaultCredentialPath(t.TempDir())
 		raw, err := os.ReadFile(codexauth.DefaultCredentialPath(source))
@@ -510,7 +514,7 @@ func guardianCommandE2EModel(t *testing.T, alias string) (model.LLM, *guardianRe
 		if err != nil {
 			t.Fatal(err)
 		}
-	} else {
+	} else if cfg.AuthType != model.AuthNone {
 		// Snapshot only this credential before using the store API, whose reads
 		// acquire a filesystem lock. Live configuration remains read-only.
 		snapshot := t.TempDir()
@@ -536,13 +540,5 @@ func guardianCommandE2EModel(t *testing.T, alias string) (model.LLM, *guardianRe
 		}
 	}
 	cfg.HTTPClient = client
-	resolved, err := modelconfig.BuildModel(cfg, 0, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	llm := resolved.Model
-	if strings.HasPrefix(alias, "deepseek") {
-		llm = &systemAgentReasoningModel{inner: llm, effort: "none"}
-	}
-	return llm, wire
+	return cfg
 }

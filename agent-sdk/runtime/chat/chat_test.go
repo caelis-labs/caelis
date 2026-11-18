@@ -4084,8 +4084,9 @@ func (m *streamingModel) Generate(_ context.Context, req *model.Request) iter.Se
 }
 
 type longToolLoopModel struct {
-	calls    int
-	progress bool
+	calls     int
+	progress  bool
+	toolCalls []model.ToolCall
 }
 
 func (m *longToolLoopModel) Name() string { return "long-tool-loop" }
@@ -4095,18 +4096,18 @@ func (m *longToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.S
 	callIndex := m.calls
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if callIndex <= 9 {
-			args := `{"value":"pong"}`
-			if m.progress {
-				args = fmt.Sprintf(`{"value":"pong-%d"}`, callIndex)
+			calls := m.toolCalls
+			if len(calls) == 0 {
+				args := `{"value":"pong"}`
+				if m.progress {
+					args = fmt.Sprintf(`{"value":"pong-%d"}`, callIndex)
+				}
+				calls = []model.ToolCall{{ID: "call-loop", Name: "ECHO", Args: args}}
 			}
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "call-loop",
-						Name: "ECHO",
-						Args: args,
-					}}, ""),
+					Message:      model.MessageFromToolCalls(model.RoleAssistant, calls, ""),
 					TurnComplete: true,
 					StepComplete: true,
 					Status:       model.ResponseStatusCompleted,

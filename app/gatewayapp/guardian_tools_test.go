@@ -179,7 +179,7 @@ func (m *guardianToolLoopModel) Generate(ctx context.Context, req *model.Request
 		yield(model.StreamEventFromResponse(&model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"option_id":"allow_once"}`), StepComplete: true, TurnComplete: true}), nil)
 	}
 }
-func TestGuardianNativeToolTurnReplaysAsStablePrefix(t *testing.T) {
+func TestGuardianNativeToolTurnRetainsOnlyRequestAndAnswer(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_GUARDIAN_NATIVE") != "1" {
 		t.Skip("set CAELIS_TEST_GUARDIAN_NATIVE=1 for native sandbox execution")
 	}
@@ -196,8 +196,8 @@ func TestGuardianNativeToolTurnReplaysAsStablePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(snapshot.Events)
-	if !strings.Contains(string(raw), "query-1") || !strings.Contains(string(raw), "evidence") {
-		t.Fatal("tool loop was discarded")
+	if len(snapshot.Events) != 2 || strings.Contains(string(raw), "query-1") {
+		t.Fatal("tool loop survived into the next approval prefix")
 	}
 	for _, e := range snapshot.Events {
 		if guardianTurn(e) == "" {
@@ -214,9 +214,11 @@ func TestGuardianNativeToolTurnReplaysAsStablePrefix(t *testing.T) {
 	if len(llm.affinities) != 3 || llm.affinities[0] == "" || llm.affinities[0] != llm.affinities[2] {
 		t.Fatalf("provider affinity changed: %v", llm.affinities)
 	}
-	a, b := llm.requests[1], llm.requests[2]
-	if !reflect.DeepEqual(a.Instructions, b.Instructions) || !reflect.DeepEqual(a.Tools, b.Tools) || !reflect.DeepEqual(a.Messages, b.Messages[:len(a.Messages)]) {
-		t.Fatal("tool-loop prefix changed on next approval")
+	a, b := llm.requests[0], llm.requests[2]
+	if !reflect.DeepEqual(a.Instructions, b.Instructions) || !reflect.DeepEqual(a.Tools, b.Tools) ||
+		len(b.Messages) != 3 || !reflect.DeepEqual(a.Messages[0], b.Messages[0]) ||
+		b.Messages[1].TextContent() != `{"option_id":"allow_once"}` {
+		t.Fatal("next approval did not reuse only the completed request and answer")
 	}
 	events, err := service.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
 	if err != nil || len(events) != 0 {

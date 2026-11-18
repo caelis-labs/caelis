@@ -632,14 +632,12 @@ Consumer setup and package layout live in
 
 An optional auxiliary judgment binding selects a tool-free first-stage classifier
 through the typed `approval.JudgmentResolver` contract. Its input contains only
-chronological user messages and the current approval ticket: exact tool arguments,
-reason, justification, execution route and working directory when supplied. It
-never selects historical tool observations, matches prior actions, correlates or
-waits for Tasks. User text remains verbatim and ordered. Agent fallback retains
-its independent full source projection. Screening creates neither a generative
-LLM nor a query sandbox. Its complete serialized input has a local 24,000-byte
-budget (not an API limit); excess input defers to Agent review without dropping
-user constraints.
+ordered user/assistant dialogue and the same exact current action used by Agent
+review, including its Runtime-bound sandbox facts when supplied. It never
+retains approval history, queries tools, or reads past tool observations. It
+creates neither a generative LLM nor a query sandbox. Its complete serialized
+input has a local 24,000-byte budget (not an API limit); excess input defers to
+Agent review rather than dropping user constraints or changing the action.
 
 One request asks a Choice question containing exactly the original option IDs,
 names and kinds, plus two independent Noul questions: `material_unknown` identifies
@@ -654,9 +652,10 @@ versus deny mass. Settlement requires a normalized lead of 0.9 and odds of 20
 under one uniform rule. It prefers a once option; without one, the exact persistent
 option must independently dominate. Scalar confidence is not a settlement
 threshold. Direct approval additionally requires `material_unknown` to be at most
-0.2 and `visible_violation` at most 0.1. Direct refusal requires `visible_violation`
-to be at least 0.9; it does not require resolving unknown effects when the visible
-conflict already suffices.
+0.15 and `visible_violation` at most 0.1. Direct refusal requires
+`visible_violation` of at least 0.85, rising to 0.90 when `material_unknown`
+exceeds 0.80. A known independent conflict can justify refusal even when another
+fact is missing.
 All three answers must be present and valid. Intermediate values, conflicting
 judgments or material information gaps block direct approval. The signals are
 neither averaged nor multiplied into a safety score. These are abstention rules,
@@ -665,8 +664,9 @@ not calibrated correctness or authorization probabilities.
 Unseen executable behavior, unresolved targets and other decision-relevant gaps
 are distinct from uncertainty between approval options. A confident judgment that
 facts are missing still defers; a familiar test/build label does not establish
-project code's effects. The classifier receives no trusted sandbox guarantees
-and cannot infer them from action-authored claims or route labels. Direct actions
+project code's effects. Separate Runtime-bound sandbox facts can establish
+whether escalation is necessary; action-authored claims, route labels and
+claims about earlier failures cannot establish those facts. Direct actions
 with sufficiently specified effects remain eligible for approval. Reading a named
 file does not require knowing its contents beforehand; executing its unseen
 contents does introduce an information gap. Unrelated missing details and absent
@@ -684,8 +684,8 @@ added to its prompt. Both stages persist their invocation receipts under the sam
 review identity. The Agent follows the resident conversation contract below.
 
 Control assembles Guardian as a resident, private approval classifier with
-optional inspection tools. The Harness supplies the user task, constraints,
-current action and incremental observed results for a prompt decision. Guardian
+optional inspection tools. The Harness supplies the user task, constraints and
+exact current action for a prompt decision. Guardian
 does not prove every operation safe or independently audit task completion. It
 reviews built-in and external main-Agent and subagent requests using the exact
 supplied action, approval options and Runtime-bound producer origin. Missing
@@ -709,32 +709,38 @@ validated at admission permits receipt-only Control accounting after
 cancellation; invalid claims never gain that authority. No late decision can
 authorize execution.
 
-The Harness owns source-history intake. Its forward paged reader consumes the
-canonical Session log at a source checkpoint and projects user messages, tool
-calls and tool results independently of the pending approval. Source Session,
-event ID and Seq identify each projected record; routine input uses the
-root-scoped Seq. A late result never rewrites its call. Tool previews include
-successful and failed outputs with bounded arguments, diagnostics and truncation
-facts. A completed wrapper or zero exit code does not establish that its
-internal operation succeeded. User messages are not individually truncated on
-ingestion. The disposable projection cache has a 16 MiB retention allowance for
-users and for other evidence; eviction does not remove canonical originals. The
-intake cursor advances independently of validated-review commits. Journal
-records, client mirrors, assistant reasoning and main-Agent compact summaries do
-not enter this projection. User documents and quotations remain evidence rather
-than new instructions.
+The Harness projects original user messages and public main-Assistant prose from
+the root Session in source order. The disposable source cache advances
+independently of completed reviews and never deletes canonical originals.
+Tool payloads and results, reasoning, summaries, mirrors and journal records
+are not approval context. When a canonical output contains both assistant prose
+and a tool call, only the prose is included. User documents and quotations
+remain evidence rather than new instructions.
 
-Instructions, tool definitions and output schema are stable across ordinary
-reviews. Below the window budget the model input only appends. Retention
-measures the entire assembled request, including instructions, tools and output
-schema. The SDK's model-size watermarks trigger batched removal of whole oldest
-turns. User messages have no independent small input cap: they are reduced only
-when the physical input budget remains exceeded after other history is removed.
-Original task and latest steering records survive that reduction; omitted text
-is explicitly unavailable. An active review that still exceeds model capacity is
-unavailable. Guardian does not summarize or reconstruct its own history, and
-omitted evidence is not proof of absent risk or authorization. Steering
-invalidates pending automatic approvals before settlement.
+Instructions, tool definitions and output schema are stable. Newly observed
+dialogue appends after the existing prefix, without moving it ahead of retained
+review pairs. Eviction preserves the order of all remaining messages. A past
+approval is not current evidence or authority, and its evidence tool transcript
+does not enter another review. For model windows of at least 64,000 tokens,
+32 completed reviews or more than 32,000 estimated history tokens trigger a
+rotation to at most eight complete pairs that fit. That rotation also brings
+the user region toward 32,000 tokens, folding very long messages before omitting
+older ones. Assistant prose uses a separate watermark of 40 messages or 10,000
+estimated tokens, retaining at most 20 and 5,000 tokens after rotation. A message
+over 900 tokens is marked unavailable rather than turned into a partial proposal.
+Smaller windows keep no prior reviews and budget user messages plus a recent
+assistant slice against the space left by the fixed prefix and exact ticket.
+Physical input capacity
+also takes precedence over optional history. The original task and latest
+steering are retained; folded or omitted user text is explicitly unavailable.
+If the required request still does not fit, the review is unavailable rather than
+running on a truncated action. Steering invalidates pending automatic approvals
+before settlement.
+
+Short user instructions can authorize ordinary task-related actions without
+restating their tool arguments. Assistant proposals can explain what a later
+authentic user reply accepts, but cannot authorize actions on their own. No
+word or phrase substitutes for an identifiable proposal and a scoped reply.
 
 Most approvals decide from supplied context. Optional `Read` and `Grep` use SDK
 file-tool semantics, and `RunCommand` supports focused inspection, such as

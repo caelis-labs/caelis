@@ -78,11 +78,13 @@ func TestGuardianJudgmentUsesCanonicalSourcesAndStrictSettlement(t *testing.T) {
 				}
 				for _, id := range []string{"material_unknown", "visible_violation"} {
 					instructions, _ := r.Questions[id].Instructions.(string)
-					if !strings.Contains(instructions, "no historical tool observations or trusted sandbox guarantees") {
-						t.Errorf("%s question must exclude trusted sandbox metadata", id)
+					if !strings.Contains(instructions, "no historical tool observations") || !strings.Contains(instructions, "Runtime-bound runtime_sandbox") {
+						t.Errorf("%s question must distinguish current trusted boundaries from history and claims", id)
 					}
 				}
-				if strings.Contains(string(raw), "UNTRUSTED_ASSISTANT_PERMISSION") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
+				dialogue := r.State.(map[string]any)["conversation"].([]guardianDialogueMessage)
+				if len(dialogue) != 2 || dialogue[1].Role != model.RoleAssistant || !strings.Contains(dialogue[1].Text, "UNTRUSTED_ASSISTANT_PERMISSION") ||
+					!strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
 					t.Errorf("invalid canonical projection")
 				}
 				return judgment.Response{Model: "fixture-classifier", Answers: guardianScreenAnswers(tc.decision, tc.confidence, tc.unknown, tc.violation), Usage: judgment.Usage{InputTokens: 100}}, nil

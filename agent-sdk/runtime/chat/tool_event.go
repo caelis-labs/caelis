@@ -62,14 +62,19 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 
 func runtimeTaskResultSourceDeclared(metaParts []map[string]any) bool {
 	for _, meta := range metaParts {
-		caelis, _ := meta["caelis"].(map[string]any)
-		runtimeMeta, _ := caelis["runtime"].(map[string]any)
-		binding, _ := runtimeMeta[toolbinding.MetadataSection].(map[string]any)
-		if trusted, _ := binding[toolbinding.MetadataTaskResult].(bool); trusted {
+		if isRuntimeTaskResult(meta) {
 			return true
 		}
 	}
 	return false
+}
+
+func isRuntimeTaskResult(meta map[string]any) bool {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	binding, _ := runtimeMeta[toolbinding.MetadataSection].(map[string]any)
+	trusted, _ := binding[toolbinding.MetadataTaskResult].(bool)
+	return trusted
 }
 
 func withoutUntrustedRuntimeTaskAuthority(meta map[string]any, trusted bool) map[string]any {
@@ -125,10 +130,7 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 		if call.Name == "js_exec" {
 			// Returned business data may itself contain a running inner Task.
 			// Only the original outer Task producer owns this invocation state.
-			caelis, _ := result.Metadata["caelis"].(map[string]any)
-			runtimeMeta, _ := caelis["runtime"].(map[string]any)
-			taskMeta, _ := runtimeMeta["task"].(map[string]any)
-			state, _ = taskMeta["state"].(string)
+			state, _ = runtimeTaskMetadata(result.Metadata)["state"].(string)
 		}
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
@@ -146,11 +148,15 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 	return "completed"
 }
 
-func runtimeTaskKind(meta map[string]any) string {
+func runtimeTaskMetadata(meta map[string]any) map[string]any {
 	caelis, _ := meta["caelis"].(map[string]any)
 	runtimeMeta, _ := caelis["runtime"].(map[string]any)
 	taskMeta, _ := runtimeMeta["task"].(map[string]any)
-	kind, _ := taskMeta["kind"].(string)
+	return taskMeta
+}
+
+func runtimeTaskKind(meta map[string]any) string {
+	kind, _ := runtimeTaskMetadata(meta)["kind"].(string)
 	return strings.ToLower(strings.TrimSpace(kind))
 }
 

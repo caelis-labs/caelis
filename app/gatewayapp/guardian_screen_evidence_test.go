@@ -24,17 +24,18 @@ func TestGuardianScreenEvidenceGatesDecisiveOutcomes(t *testing.T) {
 		answers map[string]judgment.Answer
 		wantID  string
 	}{
-		// Allow needs unknown<=.2 and violation<=.1; both endpoints are inclusive.
-		{name: "allow at upper endpoints", answers: guardianScreenAnswers("allow_once", 1, .2, .1), wantID: "allow_once"},
+		// Both allow endpoints are inclusive.
+		{name: "allow at upper endpoints", answers: guardianScreenAnswers("allow_once", 1, .15, .1), wantID: "allow_once"},
 		{name: "allow below endpoints", answers: guardianScreenAnswers("allow_once", .98, .05, .05), wantID: "allow_once"},
-		{name: "allow just beyond unknown endpoint", answers: guardianScreenAnswers("allow_once", 1, .2000001, 0)},
+		{name: "allow just beyond unknown endpoint", answers: guardianScreenAnswers("allow_once", 1, .1500001, 0)},
 		{name: "allow just beyond violation endpoint", answers: guardianScreenAnswers("allow_once", 1, 0, .1000001)},
-		// Deny needs visible_violation>=.9; material_unknown cannot veto a settled
-		// violation, but it must still be a valid Noul answer.
-		{name: "deny at violation endpoint", answers: guardianScreenAnswers("reject_once", 1, 0, .9), wantID: "reject_once"},
-		{name: "deny with unknown=1 at violation endpoint", answers: guardianScreenAnswers("reject_once", 1, 1, .9), wantID: "reject_once"},
+		// Missing facts require stronger evidence of a separate known violation.
+		{name: "deny at low-unknown endpoints", answers: guardianScreenAnswers("reject_once", 1, .8, .85), wantID: "reject_once"},
+		{name: "deny at high-unknown endpoint", answers: guardianScreenAnswers("reject_once", 1, 1, .9), wantID: "reject_once"},
+		{name: "unverified prerequisite with moderate violation defers", answers: guardianScreenAnswers("reject_once", .99, .98, .86)},
 		{name: "unknown=1 with full deny support still settles", answers: guardianScreenAnswers("reject_once", 1, 1, 1), wantID: "reject_once"},
-		{name: "deny just below violation endpoint", answers: guardianScreenAnswers("reject_once", 1, 0, .8999999)},
+		{name: "deny just below violation endpoint", answers: guardianScreenAnswers("reject_once", 1, 0, .8499999)},
+		{name: "deny violation endpoint does not bypass choice dominance", answers: guardianScreenAnswers("reject_once", .94, 1, .85)},
 		// Conflicting, gray or unsupported evidence abstains.
 		{name: "allow distribution with violation conflict", answers: guardianScreenAnswers("allow_once", .98, 0, .9)},
 		{name: "allow distribution with material gap", answers: guardianScreenAnswers("allow_once", .98, .5, 0)},

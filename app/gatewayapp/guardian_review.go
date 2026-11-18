@@ -143,7 +143,6 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 			ParentCursor:    promptItems.ParentCursor,
 			User:            promptEvent,
 			Assistant:       runResult.AssistantEvent,
-			ContextEvents:   runResult.ContextEvents,
 			PrefixEvents:    historyEvents,
 			TurnID:          turnKey,
 		})

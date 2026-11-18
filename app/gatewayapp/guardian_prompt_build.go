@@ -103,6 +103,18 @@ func guardianModelRequest(history []*session.Event, input string, output *model.
 }
 
 func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, error) {
+	action := guardianPlannedAction(req)
+	if !guardianActionWithinStructuralLimits(action) {
+		return guardianOversizedActionJSON(), true, nil
+	}
+	raw, err := json.MarshalIndent(action, "", "  ")
+	if err != nil {
+		return "", false, err
+	}
+	return string(raw), false, nil
+}
+
+func guardianPlannedAction(req kernel.ApprovalReviewRequest) map[string]any {
 	action := map[string]any{"origin": req.RuntimeRequest.Origin, "tool_call_id": req.RuntimeRequest.Call.ID}
 	if snapshot, ok := req.RuntimeRequest.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot); ok && !sandbox.PolicySnapshotEmpty(snapshot) {
 		action["runtime_sandbox"] = sandbox.SummarizePolicy(snapshot)
@@ -157,14 +169,7 @@ func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, 
 			action["arguments"] = raw
 		}
 	}
-	if !guardianActionWithinStructuralLimits(action) {
-		return guardianOversizedActionJSON(), true, nil
-	}
-	raw, err := json.MarshalIndent(action, "", "  ")
-	if err != nil {
-		return "", false, err
-	}
-	return string(raw), false, nil
+	return action
 }
 
 func guardianOversizedActionJSON() string {

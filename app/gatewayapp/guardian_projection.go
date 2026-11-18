@@ -2,15 +2,16 @@ package gatewayapp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-const guardianSourceProjection = "guardian_source_projection"
+const guardianAssistantContext = "guardian_assistant_context"
 
 // guardianProjection consumes canonical events once. This bounded cache is
 // disposable; its source sequence is independent of completed review history.
@@ -50,8 +51,7 @@ func (p *guardianProjection) read(ctx context.Context, service session.Service, 
 				p.events = append(p.events, projected)
 				// Retention follows source order, not the caller's page size or
 				// approval cadence, so a reopened source rebuilds the same cut.
-				p.events = guardianTrimUsers(p.events, 16*1024*1024)
-				p.events = guardianTrimTurns(p.events, 16*1024*1024, "")
+				p.events = guardianBoundSourceDialogue(p.events)
 			}
 		}
 		if !page.HasMore {
@@ -66,136 +66,74 @@ func (p *guardianProjection) read(ctx context.Context, service session.Service, 
 	return session.CloneEvents(p.events), p.cursor, nil
 }
 
-// guardianProjectEvent is independent of the pending action, paging and review
-// completion. Calls and late results retain their distinct source identities.
+// guardianProjectEvent projects public prose, including prose saved with a
+// compound assistant tool call, without copying tool or reasoning parts.
 func guardianProjectEvent(e *session.Event) *session.Event {
 	if e == nil || !session.IsCanonicalHistoryEvent(e) {
 		return nil
 	}
-	if e.Meta[guardianSourceProjection] == true {
-		return session.CloneEvent(e)
-	}
-	// Sequence numbers identify records within the pinned parent Session.
-	identity := fmt.Sprintf("seq=%d", e.Seq)
-	var text string
-	user := session.EventTypeOf(e) == session.EventTypeUser && (e.Actor.Kind == session.ActorKindUser || e.Actor.Kind == "")
-	if user {
-		original := session.CloneEvent(e)
+	var one *session.Event
+	switch session.EventTypeOf(e) {
+	case session.EventTypeUser:
+		if e.Actor.Kind != session.ActorKindUser && e.Actor.Kind != "" {
+			return nil
+		}
+		text := guardianVisibleText(e)
 		if evidence := session.OriginalInputMessage(e); evidence != nil {
-			original.Message = evidence
-			original.Text = evidence.TextContent()
-			original.Protocol = nil
+			text = evidence.TextContent()
 		}
-		text = fmt.Sprintf("User message [%s]:\n%s", identity, guardianVisibleText(original))
-	} else if (session.EventTypeOf(e) == session.EventTypeToolCall || session.EventTypeOf(e) == session.EventTypeToolResult) && session.IsMainInvocationVisibleEvent(e) && e.Tool != nil {
-		kind, value := "Operation", e.Tool.Input
-		if session.EventTypeOf(e) == session.EventTypeToolResult {
-			kind, value = "Tool result", e.Tool.Output
+		one = guardianEvidenceEvent(fmt.Sprintf("User message [seq=%d]:\n%s", e.Seq, text))
+		one.Meta[guardianUserSource] = fmt.Sprintf("%s:%d", e.SessionID, e.Seq)
+	case session.EventTypeAssistant, session.EventTypeToolCall:
+		text := guardianAssistantText(e)
+		if text == "" {
+			return nil
 		}
-		text = fmt.Sprintf("%s [%s tool_call_id=%s tool=%s status=%s]\n%s", kind, identity, e.Tool.ID, e.Tool.Name, e.Tool.Status, guardianEvidenceJSON(value))
-		if kind == "Tool result" {
-			facts := map[string]any{}
-			for _, key := range []string{"state", "status", "error", "error_code", "error_kind", "exit_code", "is_error", "truncated", "stderr"} {
-				if v, ok := value[key]; ok {
-					facts[key] = v
-				}
-			}
-			if len(facts) > 0 {
-				text = fmt.Sprintf("Result diagnostics (untrusted evidence): %s\n", guardianEvidenceJSON(facts)) + text
-			}
+		label := fmt.Sprintf("Assistant message [seq=%d, context only]:\n", e.Seq)
+		one = guardianEvidenceEvent(label + text)
+		if guardianMessageTokens(one) > guardianAssistantEntryTokens {
+			one = guardianEvidenceEvent(label + "[message omitted; its scope cannot be inferred]")
 		}
-		if len(value) == 0 && kind == "Tool result" {
-			text += "\n" + guardianFold(guardianVisibleText(e), 2048)
-		}
-	} else {
+		message := model.NewTextMessage(model.RoleAssistant, one.Text)
+		one.Type, one.Message = session.EventTypeAssistant, &message
+		one.Meta[guardianAssistantContext] = true
+	default:
 		return nil
 	}
-	one := guardianEvidenceEvent(text)
 	one.ID, one.Seq, one.SessionID = e.ID, e.Seq, e.SessionID
-	one.Meta[guardianSourceProjection] = true
-	if user {
-		one.Meta[guardianUserSource] = fmt.Sprintf("%s:%d", e.SessionID, e.Seq)
-	} else {
-		// Fixed source blocks make retention independent of approval boundaries.
-		one.Meta[guardianTurnKey] = fmt.Sprintf("source:%s:%d", e.SessionID, e.Seq/4)
-	}
 	return one
 }
 
-// Bound before serialization: untrusted nested outputs must not require a full
-// JSON copy merely to determine that only a small fragment fits.
-func guardianEvidenceJSON(value any) string {
-	nodes := 128
-	var bound func(any, int) any
-	bound = func(v any, depth int) any {
-		nodes--
-		if nodes < 0 || depth > 8 {
-			return "[omitted: structural limit]"
-		}
-		switch v := v.(type) {
-		case string:
-			return guardianFold(v, 2048)
-		case json.RawMessage:
-			return guardianFold(string(v), 2048)
-		case map[string]any:
-			// Keep deterministic key selection with constant temporary memory.
-			// Preserve failure/status fields ahead of arbitrary payload keys.
-			keys := make([]string, 0, 33)
-			for key := range v {
-				i := sort.Search(len(keys), func(i int) bool { return guardianEvidenceKeyLess(key, keys[i]) })
-				if i >= 32 {
-					continue
-				}
-				keys = append(keys, "")
-				copy(keys[i+1:], keys[i:])
-				keys[i] = key
-				if len(keys) > 32 {
-					keys = keys[:32]
-				}
-			}
-			out := make(map[string]any)
-			if len(v) > len(keys) {
-				out["_omitted"] = "structural limit"
-			}
-			for i, key := range keys {
-				if i >= 32 || nodes <= 0 {
-					out["_omitted"] = "structural limit"
-					break
-				}
-				out[guardianFold(key, 128)] = bound(v[key], depth+1)
-			}
-			return out
-		case []any:
-			out := make([]any, 0, min(len(v), 32))
-			for i, item := range v {
-				if i >= 32 || nodes <= 0 {
-					out = append(out, "[omitted]")
-					break
-				}
-				out = append(out, bound(item, depth+1))
-			}
-			return out
-		case nil, bool, float64, float32, int, int64, uint64, json.Number:
-			return v
-		default:
-			return "[unavailable structured value]"
-		}
+func guardianAssistantText(event *session.Event) string {
+	if (event.Actor.Kind != "" && event.Actor.Kind != session.ActorKindController) ||
+		(event.Scope != nil && event.Scope.Participant.ID != "") ||
+		session.IsAgentCommunicationProtocol(event) ||
+		session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentThought) {
+		return ""
 	}
-	raw, _ := json.Marshal(bound(value, 0))
-	return guardianFold(string(raw), 3072)
+	if event.Message != nil {
+		if event.Message.Role == model.RoleAssistant {
+			return strings.TrimSpace(event.Message.TextContent())
+		}
+		return ""
+	}
+	if session.EventTypeOf(event) == session.EventTypeAssistant {
+		return strings.TrimSpace(guardianVisibleText(event))
+	}
+	return ""
 }
 
-func guardianEvidenceKeyLess(a, b string) bool {
-	priority := func(key string) bool {
-		switch key {
-		case "state", "status", "error", "error_code", "error_kind", "exit_code", "is_error", "truncated", "stderr", "stdout", "result":
-			return true
-		default:
-			return false
-		}
+func guardianIsAssistantContext(event *session.Event) bool {
+	return event != nil && event.Meta[guardianAssistantContext] == true
+}
+
+func guardianBoundSourceDialogue(events []*session.Event) []*session.Event {
+	users, assistants, _ := guardianSplitHistory(events)
+	retainedUsers := guardianTrimUsers(users, 16*1024*1024)
+	if tokens, _ := guardianHistoryUsage(assistants); len(assistants) > guardianAssistantHighEntries || tokens > guardianAssistantHighTokens {
+		assistants = guardianRecentAssistants(assistants, guardianAssistantKeepEntries, guardianAssistantKeepTokens)
+	} else if len(events) == len(retainedUsers)+len(assistants) && slices.Equal(users, retainedUsers) {
+		return events
 	}
-	if priority(a) != priority(b) {
-		return priority(a)
-	}
-	return a < b
+	return guardianRetainedHistory(events, retainedUsers, assistants)
 }
