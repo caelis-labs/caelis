@@ -255,6 +255,8 @@
     return (name,read,write)=>{const cell=bindings[name];if(!cell||cell.ready)throw new ErrorType("invalid declaration initialization");cell.read=read;cell.write=write;cell.ready=true;};
   }
   define(globals,"runtime",{value:freeze({state:()=>({generation:state.generation,execution:state.execution})})});
+  const noop=()=>{};
+  define(globals,"console",{value:freeze({log:noop,warn:noop,error:noop}),configurable:true});
   return freeze({
     configure(nextLimits,names,nextState){limits=nextLimits;state=nextState;install(names);},
     prepare,

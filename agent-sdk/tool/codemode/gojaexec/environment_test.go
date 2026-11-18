@@ -59,6 +59,28 @@ func TestBodyReadsAllTextAndDoesNotGuessFirstJSON(t *testing.T) {
 	}
 }
 
+func TestConsoleMethodsAreNoOps(t *testing.T) {
+	env := (&Executor{}).NewEnvironment()
+	defer env.Close()
+	host := &namedTestHost{names: []codemode.ToolRoute{{Name: "console"}}}
+	host.call = func(_ context.Context, name string, _ json.RawMessage) (codemode.Reply, error) {
+		t.Errorf("console dispatched a Host call: %s", name)
+		return codemode.Reply{}, nil
+	}
+	for _, test := range []struct {
+		code, want string
+	}{
+		{`console.log("log");console.warn("warn");console.error("error");`, "null"},
+		{`{let evaluated=0;const value={get label(){throw Error("inspected a console argument");}};return [console.log(++evaluated,value)===undefined,console.warn(value)===undefined,console.error(value)===undefined,evaluated,typeof tools.native.console];}`, `[true,true,true,1,"function"]`},
+		{`const console="script binding";return console;`, `"script binding"`},
+	} {
+		out, err := env.Execute(t.Context(), fixed(test.code), codemode.Limits{}, host)
+		if err != nil || string(out.Value) != test.want || len(out.Parts) != 0 || out.Reply {
+			t.Fatalf("console script %s: output=%+v error=%v", test.code, out, err)
+		}
+	}
+}
+
 func TestContinuousEnvironmentClosuresAndScope(t *testing.T) {
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()

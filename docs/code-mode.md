@@ -15,7 +15,9 @@ description summaries. Search finds tools not shown in the hints, and discovery
 does not rewrite existing prompt slices or tool definitions.
 
 Supply an async JavaScript function body, use `await`, and explicitly `return`
-the desired result. Top-level state remains available in the active environment. `file` paths resolve
+the desired result. `console.log`, `console.warn`, and `console.error` discard
+their arguments after normal JavaScript evaluation and produce no output.
+Top-level state remains available in the active environment. `file` paths resolve
 relative to the working directory. Use tools for filesystem and network I/O, and
 RunCommand remains available both as a native function call and inside JavaScript.
 Both routes use the same command producer, policy, approval, tool facts and Task controls.
@@ -25,8 +27,15 @@ works for tools learned from Skills too; no search is needed when the schema is
 known. Calls may use function or method syntax, for example:
 
 ```javascript
-const file = await Read(args);
-return {content: file.json().content};
+{
+  const response = await Read(args);
+  return response.json().content;
+}
+```
+
+Method calls follow the same contract:
+
+```javascript
 await dtw.apps(args);
 await context7['query-docs'](args);
 ```
@@ -86,10 +95,10 @@ fields or use null. An omitted return is null.
 
 An active host Session has one disposable JavaScript environment. Execute scripts
 in sequence. Top-level `let`, `const`, `var`, function and class declarations stay
-available to later scripts; ordinary assignment updates that same binding.
-`let` and `const` cannot be redeclared in the same environment, and `const` cannot
-be assigned. `var` and function declarations may be repeated. Block and function
-locals retain their JavaScript scope. Top-level `await` waits for tools and
+available to later scripts. Use block-local `let` or `const` for temporary
+values and assignment to update an existing `let`. A top-level name can be
+redeclared only if both declarations are `var` or function declarations.
+Block and function locals retain their JavaScript scope. Top-level `await` waits for tools and
 `return` selects this script's output without clearing its bindings. Bindings are
 reserved before execution; failed or unreached lexical initialization stays
 uninitialized until the environment is reset.
