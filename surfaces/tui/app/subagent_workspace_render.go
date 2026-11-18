@@ -44,6 +44,9 @@ func (m *Model) renderPaneHint(view *subagentOutputView, state *subagentOutputOv
 		}
 		label += m.theme.HelpHintTextStyle().Render(notice)
 	}
+	if label == "" && m.workspace.childFocused && state.menu == "" {
+		label = m.clipboardImageHint()
+	}
 	return truncateTailDisplay(label, width)
 }
 

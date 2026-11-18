@@ -1764,3 +1764,49 @@ func TestResolveSubmissionSkipsRunningPromptGateForOverlay(t *testing.T) {
 		t.Fatalf("resolveSubmission() = %#v, want overlay without defer", got)
 	}
 }
+
+func TestClipboardImageHintFollowsFormatAndPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		platform string
+		wsl      bool
+		key      string
+	}{
+		{"darwin", false, "ctrl+v"},
+		{"linux", false, "ctrl+v"},
+		{"windows", false, "ctrl+alt+v"},
+		{"linux", true, "ctrl+alt+v"},
+	} {
+		available := true
+		m := NewModel(Config{
+			HasClipboardImage:   func() bool { return available },
+			PasteClipboardImage: func() ([]string, string, error) { t.Fatal("rendering the hint read the image"); return nil, "", nil },
+		})
+		m.keys = defaultKeyMapForPlatform(tc.platform, tc.wsl)
+		m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		cmd := m.probeClipboardImage()
+		if cmd == nil || m.probeClipboardImage() != nil {
+			t.Fatal("expected one in-flight clipboard probe")
+		}
+		m.Update(cmd())
+		hint := func() string { return strings.TrimSpace(ansi.Strip(m.renderHintRow())) }
+		if got := hint(); got != tc.key+" paste image" {
+			t.Fatalf("%s (WSL %t): hint = %q", tc.platform, tc.wsl, got)
+		}
+		m.hint = "Attachment failed"
+		if got := hint(); got != m.hint {
+			t.Fatalf("clipboard displaced active hint: %q", got)
+		}
+		m.hint = ""
+		m.Update(tea.BlurMsg{})
+		if hint() != "" || m.probeClipboardImage() != nil {
+			t.Fatal("background clipboard hint or probe")
+		}
+		available = false
+		m.focused = true
+		m.nextClipboardProbe = time.Time{}
+		m.Update(m.probeClipboardImage()())
+		if got := hint(); got != "" {
+			t.Fatalf("stale image hint: %q", got)
+		}
+	}
+}

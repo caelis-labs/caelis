@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 )
@@ -56,7 +57,12 @@ func TestConnectModelCompletionOmitsConnectedModelsOnSelectedEndpoint(t *testing
 func TestConnectModelCompletionRefreshesAfterConnectAndDisconnect(t *testing.T) {
 	t.Parallel()
 
-	configured := []ModelChoice{{Provider: "openai-codex", Model: "gpt-6-astra"}}
+	const provider = "openai-codex"
+	recommended := modelcatalog.ListRecommendedModels(provider)
+	if len(recommended) < 4 {
+		t.Fatal("test requires four subscription recommendations")
+	}
+	configured := []ModelChoice{{Provider: provider, Model: recommended[0]}}
 	driver := newHostAssembler(&runtimeDeps{Model: ModelRuntimeDeps{
 		ListChoicesFn: func(context.Context, session.SessionRef) ([]ModelChoice, error) {
 			return slices.Clone(configured), nil
@@ -74,13 +80,13 @@ func TestConnectModelCompletionRefreshesAfterConnectAndDisconnect(t *testing.T) 
 			t.Fatalf("limited model candidates = %#v, want %q", got, want)
 		}
 	}
-	assertFirst("gpt-6.1-sol")
-	configured = append(configured, ModelChoice{Provider: "openai-codex", Model: "gpt-6.1-sol"})
-	assertFirst("gpt-6.1-terra")
-	configured = append(configured, ModelChoice{Provider: "openai-codex", Model: "gpt-6.1-terra"})
-	assertFirst("gpt-6-sol")
+	assertFirst(recommended[1])
+	configured = append(configured, ModelChoice{Provider: provider, Model: recommended[1]})
+	assertFirst(recommended[2])
+	configured = append(configured, ModelChoice{Provider: provider, Model: recommended[2]})
+	assertFirst(recommended[3])
 	configured = configured[1:]
-	assertFirst("gpt-6-astra")
+	assertFirst(recommended[0])
 }
 
 func TestConnectModelCompletionReportsConfiguredCatalogFailure(t *testing.T) {

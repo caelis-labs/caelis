@@ -163,6 +163,7 @@ type Config struct {
 	SlashArgComplete       func(context.Context, string, string, int) ([]SlashArgCandidate, error)
 	ReadClipboardText      func() (string, error)
 	WriteClipboardText     func(string) error
+	HasClipboardImage      func() bool
 	PasteClipboardImage    func() ([]string, string, error)
 	ClearAttachments       func() []string
 	SetAttachments         func([]string) []string
@@ -347,9 +348,12 @@ type Model struct {
 	keys          appKeyMap
 	help          help.Model
 
-	width   int
-	height  int
-	focused bool
+	width                   int
+	height                  int
+	focused                 bool
+	clipboardImageAvailable bool
+	clipboardProbeInFlight  bool
+	nextClipboardProbe      time.Time
 
 	terminalResponseGuardUntil time.Time
 	terminalResponsePending    string

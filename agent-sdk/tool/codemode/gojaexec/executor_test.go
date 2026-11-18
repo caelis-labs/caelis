@@ -158,3 +158,23 @@ func TestFailedReplyPreservesOutcomeClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestArgumentQuotingUsesPristineStringEncoder(t *testing.T) {
+	const code = `JSON.stringify = () => "wrong";
+	const key = 'a"\\b';
+	await tools.call("Write", {[key]: "line\n\t\u0000中文😀", lone: "\ud800"});
+	return true;`
+	var raw json.RawMessage
+	host := testHost{call: func(_ context.Context, _ string, args json.RawMessage) (codemode.Reply, error) {
+		raw = args
+		return codemode.Reply{Outcome: codemode.OutcomeSucceeded}, nil
+	}}
+	e := Executor{}
+	if _, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, host); err != nil {
+		t.Fatal(err)
+	}
+	var args map[string]string
+	if err := json.Unmarshal(raw, &args); err != nil || args["a\"\\b"] != "line\n\t\x00中文😀" || !strings.Contains(string(raw), `\ud800`) {
+		t.Fatalf("invalid quoted arguments: %s (%v)", raw, err)
+	}
+}

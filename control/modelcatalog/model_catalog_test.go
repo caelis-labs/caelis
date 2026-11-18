@@ -86,7 +86,14 @@ func TestCoreCatalogIsOneValidatedSource(t *testing.T) {
 			t.Fatalf("unsupported default effort: %s", key)
 		}
 	}
-	if len(ListRecommendedModels("openai-codex")) != 5 {
+	recommended := ListRecommendedModels("openai-codex")
+	for name, window := range map[string]int{"gpt-6.2-sol": 475000, "gpt-6.2-astra": 258400} {
+		caps, ok := LookupModelCapabilities("openai-codex", name)
+		if !ok || !slices.Contains(recommended, name) || caps.ContextWindowTokens != window {
+			t.Fatalf("missing subscription recommendation or incorrect default window for %s", name)
+		}
+	}
+	if len(recommended) != 7 {
 		t.Fatal("subscription recommendations missing")
 	}
 	for _, provider := range []string{"openai", "openrouter", "anthropic", "magpie", "custom"} {

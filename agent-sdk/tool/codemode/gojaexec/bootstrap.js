@@ -2,7 +2,7 @@
 (function(rpc) {
   "use strict";
   const globals=globalThis, SyntaxErrorType=SyntaxError,ReferenceErrorType=ReferenceError,TypeErrorType=TypeError;
-  const parse=JSON.parse, keys=Object.keys, isArray=Array.isArray;
+  const parse=JSON.parse, stringify=JSON.stringify, keys=Object.keys, isArray=Array.isArray;
   const finite=Number.isFinite, freeze=Object.freeze, define=Object.defineProperty;
   const descriptor=Object.getOwnPropertyDescriptor, assign=Object.assign;
   const create=Object.create, ErrorType=Error, SetType=Set, WeakMapType=WeakMap;
@@ -47,6 +47,10 @@
       out += s;
     }
     function quote(s) {
+      if (budget === undefined) {
+        out += stringify(s);
+        return;
+      }
       put('"', 1);
       for (let i = 0; i < s.length; i++) {
         const c = charCode(s, i);

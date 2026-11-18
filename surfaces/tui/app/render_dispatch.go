@@ -505,7 +505,7 @@ func (m *Model) handleBTWErrorMsg(msg BTWErrorMsg) tea.Model {
 }
 
 func (m *Model) handleStatusTickMsg() (tea.Model, tea.Cmd) {
-	cmds := []tea.Cmd{tickStatusCmd()}
+	cmds := []tea.Cmd{tickStatusCmd(), m.probeClipboardImage()}
 	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}

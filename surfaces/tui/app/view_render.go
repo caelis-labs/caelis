@@ -78,6 +78,9 @@ func (m *Model) buildHintText() string {
 	if m.slashArgActive && m.slashArgCommand != "" && m.isWizardActive() {
 		return m.wizardHintText()
 	}
+	if !m.workspace.childFocused {
+		return m.clipboardImageHint()
+	}
 	return ""
 }
 

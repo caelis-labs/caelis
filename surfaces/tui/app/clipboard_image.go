@@ -7,9 +7,50 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 const clipboardImageCommandTimeout = 8 * time.Second
+
+type clipboardImageAvailableMsg bool
+
+func (m *Model) probeClipboardImage() tea.Cmd {
+	probe := m.cfg.HasClipboardImage
+	if probe == nil || !m.focused || m.clipboardProbeInFlight || time.Now().Before(m.nextClipboardProbe) {
+		return nil
+	}
+	m.clipboardProbeInFlight = true
+	m.nextClipboardProbe = time.Now().Add(5 * time.Second)
+	return func() tea.Msg { return clipboardImageAvailableMsg(probe()) }
+}
+
+func (m *Model) clipboardImageHint() string {
+	if !m.clipboardImageAvailable || !m.focused || m.cfg.PasteClipboardImage == nil {
+		return ""
+	}
+	return m.theme.HelpHintTextStyle().Render(m.keys.ImagePaste.Help().Key + " paste image")
+}
+
+// Check advertised formats only. Materialize the image on an explicit paste.
+func defaultHasClipboardImage() bool {
+	var cmd clipboardCommand
+	switch {
+	case clipboardGOOS == "windows" || isWSL():
+		cmd = clipboardCommand{name: "powershell.exe", args: []string{"-NoProfile", "-NonInteractive", "-STA", "-Command", "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::ContainsImage()"}}
+	case clipboardGOOS == "darwin":
+		cmd = clipboardCommand{name: "osascript", args: []string{"-e", "return (clipboard info for «class PNGf») is not {}"}}
+	case clipboardGOOS == "linux":
+		_, mime := linuxClipboardImageFormat()
+		return mime != ""
+	default:
+		return false
+	}
+	cmd.label = "clipboard image format reader"
+	cmd.timeout = clipboardCommandTimeout
+	out, err := runClipboardOutputCommand(cmd)
+	return err == nil && strings.EqualFold(strings.TrimSpace(string(out)), "true")
+}
 
 func defaultPasteClipboardImage() ([]string, string, error) {
 	if isWSL() {
@@ -115,28 +156,33 @@ end run
 	return finalizeClipboardImageResult(path)
 }
 
-func pasteLinuxClipboardImage() ([]string, string, error) {
+func linuxClipboardImageFormat() (string, string) {
 	if clipboardGetenv("WAYLAND_DISPLAY") != "" && commandAvailable("wl-paste") {
-		if mimeType, ok := firstClipboardImageMime(wlPasteTargets); ok {
-			out, err := runClipboardOutputCommand(clipboardCommand{name: "wl-paste", args: []string{"--type", mimeType, "--no-newline"}, label: "Wayland clipboard image reader", timeout: clipboardImageCommandTimeout})
-			if err != nil {
-				return nil, "", err
-			}
-			return writeClipboardImageBytes(out, mimeType)
-		}
-		return nil, "", nil
+		return "wl-paste", firstClipboardImageMime(wlPasteTargets)
 	}
 	if commandAvailable("xclip") {
-		if mimeType, ok := firstClipboardImageMime(xclipTargets); ok {
-			out, err := runClipboardOutputCommand(clipboardCommand{name: "xclip", args: []string{"-selection", "clipboard", "-t", mimeType, "-o"}, label: "X11 clipboard image reader", timeout: clipboardImageCommandTimeout})
-			if err != nil {
-				return nil, "", err
-			}
-			return writeClipboardImageBytes(out, mimeType)
-		}
+		return "xclip", firstClipboardImageMime(xclipTargets)
+	}
+	return "", ""
+}
+
+func pasteLinuxClipboardImage() ([]string, string, error) {
+	reader, mime := linuxClipboardImageFormat()
+	if reader == "" {
+		return nil, "", fmt.Errorf("clipboard image paste requires wl-paste or xclip")
+	}
+	if mime == "" {
 		return nil, "", nil
 	}
-	return nil, "", fmt.Errorf("clipboard image paste requires wl-paste or xclip")
+	args := []string{"--type", mime, "--no-newline"}
+	if reader == "xclip" {
+		args = []string{"-selection", "clipboard", "-t", mime, "-o"}
+	}
+	out, err := runClipboardOutputCommand(clipboardCommand{name: reader, args: args, label: reader + " clipboard image reader", timeout: clipboardImageCommandTimeout})
+	if err != nil {
+		return nil, "", err
+	}
+	return writeClipboardImageBytes(out, mime)
 }
 
 func wlPasteTargets() (string, error) {
@@ -149,10 +195,10 @@ func xclipTargets() (string, error) {
 	return string(out), err
 }
 
-func firstClipboardImageMime(targets func() (string, error)) (string, bool) {
+func firstClipboardImageMime(targets func() (string, error)) string {
 	raw, err := targets()
 	if err != nil {
-		return "", false
+		return ""
 	}
 	available := map[string]struct{}{}
 	for _, line := range strings.Fields(raw) {
@@ -160,10 +206,10 @@ func firstClipboardImageMime(targets func() (string, error)) (string, bool) {
 	}
 	for _, mimeType := range []string{"image/png", "image/jpeg", "image/webp", "image/gif"} {
 		if _, ok := available[mimeType]; ok {
-			return mimeType, true
+			return mimeType
 		}
 	}
-	return "", false
+	return ""
 }
 
 func writeClipboardImageBytes(data []byte, mimeType string) ([]string, string, error) {
