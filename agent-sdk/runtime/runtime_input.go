@@ -7,6 +7,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 )
 
 // localInputContext keeps safe-point persistence and final admission closure
@@ -41,7 +42,8 @@ func buildSteeringInputEvents(active session.Session, turnID string, submission 
 		return nil, err
 	}
 	events, err := buildRunInputEvents(active, turnID, agent.RunRequest{
-		InputKind: submission.Kind, Input: submission.Text, DisplayInput: submission.DisplayInput,
+		InputKind: submission.Kind, Input: submission.Text,
+		DisplayInput: userdisplay.ResolveDisplayInput(submission.DisplayInput, submission.Metadata),
 		ContentParts: submission.ContentParts, InputActor: submission.Actor, Inputs: submission.Inputs,
 	})
 	for _, event := range events {

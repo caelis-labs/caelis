@@ -8,10 +8,9 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 )
 
@@ -26,15 +25,20 @@ func buildRunInputEvents(
 	}
 	events := make([]*session.Event, 0, len(inputs))
 	for index, item := range inputs {
-		event, err := buildInputEvent(
-			activeSession, turnID, req.InputKind, item.Input, item.DisplayInput,
-			item.ContentParts, item.Source, item.MessageID, req.InputCompaction,
-		)
+		event, err := runtimeinput.NewEvent(normalizeInputKind(req.InputKind), item, nil)
 		if err != nil {
 			return nil, err
 		}
 		if event == nil {
 			continue
+		}
+		scope := defaultScope(activeSession, turnID)
+		event.Scope = &scope
+		event.IdempotencyKey = "turn-input:" + strings.TrimSpace(turnID)
+		if req.InputCompaction != nil {
+			cloned := *req.InputCompaction
+			cloned.UserEvidence = append([]string(nil), cloned.UserEvidence...)
+			event.Compaction = &cloned
 		}
 		if len(inputs) > 1 {
 			event.IdempotencyKey = fmt.Sprintf("turn-input:%s:%d", strings.TrimSpace(turnID), index)
@@ -57,79 +61,6 @@ func communicationInputsFromRunRequest(req agent.RunRequest) []agent.AgentCommun
 		DisplayInput: req.DisplayInput,
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 	}}
-}
-
-func agentCommunicationSingularFieldsSet(input, displayInput string, parts []model.ContentPart, actor session.ActorRef) bool {
-	return strings.TrimSpace(input) != "" || strings.TrimSpace(displayInput) != "" ||
-		len(parts) > 0 || session.ActorRefHasIdentity(actor)
-}
-
-func buildInputEvent(
-	activeSession session.Session,
-	turnID string,
-	inputKind agent.SubmissionKind,
-	input string,
-	displayInput string,
-	parts []model.ContentPart,
-	actor session.ActorRef,
-	messageID string,
-	compaction *session.EventCompactionContext,
-) (*session.Event, error) {
-	if strings.TrimSpace(input) == "" && len(parts) == 0 {
-		return nil, nil
-	}
-	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, nil)
-	inputKind = normalizeInputKind(inputKind)
-	eventType := session.EventTypeUser
-	// Conversation inputs do not adopt Agent communication correlation identities.
-	eventMessageID := ""
-	var protocol session.EventProtocol
-	switch inputKind {
-	case agent.SubmissionKindConversation:
-		if !session.ActorRefHasIdentity(actor) {
-			actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
-		}
-		protocol = session.EventProtocol{Update: &session.ProtocolUpdate{
-			SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-			Content:       session.ProtocolTextContent(displayText),
-		}}
-	case agent.SubmissionKindAgentCommunication:
-		if err := session.ValidateAgentCommunicationActor(actor); err != nil {
-			return nil, fmt.Errorf("agent-sdk/runtime: %w", err)
-		}
-		prepared, err := agentcommunication.AppendSender(message, actor)
-		if err != nil {
-			return nil, err
-		}
-		message = prepared
-		eventType = session.EventTypeContext
-		eventMessageID = strings.TrimSpace(messageID)
-		protocol = session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
-	default:
-		return nil, fmt.Errorf("agent-sdk/runtime: unsupported input kind %q", inputKind)
-	}
-	var compactionCopy *session.EventCompactionContext
-	if compaction != nil {
-		cloned := *compaction
-		cloned.UserEvidence = append([]string(nil), compaction.UserEvidence...)
-		compactionCopy = &cloned
-	}
-	idempotencyKey := "turn-input:" + strings.TrimSpace(turnID)
-	scope := defaultScope(activeSession, turnID)
-	event := &session.Event{
-		IdempotencyKey: idempotencyKey,
-		Type:           eventType,
-		Visibility:     session.VisibilityCanonical,
-		Actor:          actor,
-		Compaction:     compactionCopy,
-		Scope:          &scope,
-		MessageID:      eventMessageID,
-		Message:        &message,
-		Text:           displayText,
-		Meta:           meta,
-		Protocol:       &protocol,
-	}
-	return event, nil
 }
 
 func normalizeInputKind(kind agent.SubmissionKind) agent.SubmissionKind {

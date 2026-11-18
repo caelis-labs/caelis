@@ -9,14 +9,12 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
@@ -678,50 +676,19 @@ func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, 
 		if !isModelInputSubmission(submission) {
 			continue
 		}
-		text := strings.TrimSpace(submission.Text)
-		if text == "" && len(submission.ContentParts) == 0 {
+		event, err := runtimeinput.NewEvent(submission.Kind, agent.AgentCommunicationInput{
+			Source: submission.Actor, Input: submission.Text, DisplayInput: submission.DisplayInput, ContentParts: submission.ContentParts,
+		}, submission.Metadata)
+		if err != nil {
+			return accepted, err
+		}
+		if event == nil {
 			continue
-		}
-		message, displayText, meta := userdisplay.Resolve(text, submission.DisplayInput, submission.ContentParts, submission.Metadata)
-		eventType := session.EventTypeUser
-		actor := session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
-		if submission.Kind == runtimeinput.ModelContext || submission.Kind == agent.SubmissionKindAgentCommunication {
-			if !session.ActorRefHasIdentity(submission.Actor) {
-				return accepted, fmt.Errorf("context submission requires source identity")
-			}
-			eventType = session.EventTypeContext
-			actor = session.CloneActorRef(submission.Actor)
-		} else if session.ActorRefHasIdentity(submission.Actor) {
-			actor = session.CloneActorRef(submission.Actor)
-		}
-		event := &session.Event{
-			Type:       eventType,
-			Visibility: session.VisibilityCanonical,
-			Actor:      actor,
-			Message:    &message,
-			Text:       displayText,
-			Meta:       meta,
-		}
-		providerMessage := message
-		if eventType == session.EventTypeUser {
-			event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-				Content:       session.ProtocolTextContent(displayText),
-			}}
-		} else if submission.Kind == agent.SubmissionKindAgentCommunication {
-			prepared, err := agentcommunication.AppendSender(message, actor)
-			if err != nil {
-				return accepted, fmt.Errorf("submit model context: %w", err)
-			}
-			providerMessage = prepared
-			event.Message = &providerMessage
-			protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
-			event.Protocol = &protocol
 		}
 		if !yield(event) {
 			return accepted, nil
 		}
-		*messages = append(*messages, providerMessage)
+		*messages = append(*messages, *event.Message)
 		accepted = true
 	}
 	return accepted, nil

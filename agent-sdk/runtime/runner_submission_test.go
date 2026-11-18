@@ -20,6 +20,9 @@ func TestRunnerPublicSubmitRejectsRuntimeModelContext(t *testing.T) {
 		Kind: runtimeinput.ModelContext, Text: "hidden context",
 		Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "participant-1"},
 	}
+	if err := validateRunInput(agent.RunRequest{InputKind: submission.Kind, Input: submission.Text, InputActor: submission.Actor}); err == nil {
+		t.Fatal("public Run accepted reserved model context")
+	}
 	if err := runner.Submit(submission); err == nil {
 		t.Fatal("Runner.Submit(runtime model context) error = nil, want unsupported kind")
 	}
