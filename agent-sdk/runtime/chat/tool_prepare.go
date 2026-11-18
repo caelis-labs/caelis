@@ -1,11 +1,13 @@
 package chat
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -29,8 +31,8 @@ func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, vi
 		}
 		target, actual, binding, err := a.boundTool(protocol, visibility)
 		call := tool.Call{ID: protocol.ID, Name: actual.Name, Input: json.RawMessage(actual.Args), TargetBinding: binding}
-		if binding != nil {
-			original := protocol
+		if bound, routed := a.boundCalls[protocol.ID]; routed && actual.Name != "" {
+			original := bound.original
 			call.ModelCall = &original
 		}
 		proposal := protocol
@@ -48,6 +50,12 @@ func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, vi
 		var prepareErr error
 		call, synthetic, prepareErr = toolbinding.PrepareArguments(ctx, target, call)
 		if prepareErr != nil {
+			var hookErr *agent.HookError
+			if errorcode.Is(prepareErr, tool.ErrorCodeInvalidInput) && !errors.As(prepareErr, &hookErr) {
+				prepared.err = prepareErr
+				a.preparedCalls[protocol.ID] = prepared
+				continue
+			}
 			return prepareErr
 		}
 		effective := call.Input
@@ -74,16 +82,19 @@ func (a *Agent) applyPreparedFact(event *session.Event) {
 	if !ok {
 		return
 	}
-	event.Tool.Execution = p.call.Execution
-	event.Tool.Binding = p.call.TargetBinding
-	event.Tool.ProposedCall = p.call.ProposedCall
+	if !session.IsUIOnly(event) {
+		event.Tool.Execution = p.call.Execution
+		event.Tool.Binding = p.call.TargetBinding
+		event.Tool.ProposedCall = p.call.ProposedCall
+	}
 
-	if p.err == nil {
+	if p.call.Name != "" {
 		event.Tool.Name = p.call.Name
 		event.Tool.ModelCall = p.call.ModelCall
-		decoder := json.NewDecoder(bytes.NewReader(p.call.Input))
-		decoder.UseNumber()
-		_ = decoder.Decode(&event.Tool.Input)
+		event.Tool.Input = mustObject(string(p.call.Input))
+		if p.call.ModelCall != nil {
+			event.Meta = mergeEventMeta(event.Meta, toolMeta(p.call.Name))
+		}
 	}
 }
 

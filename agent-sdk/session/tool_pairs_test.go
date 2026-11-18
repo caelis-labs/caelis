@@ -71,3 +71,26 @@ func TestToolFactsLegacyHalfBatchAndAmbiguousID(t *testing.T) {
 		t.Fatalf("ambiguous legacy ID guessed: %v", err)
 	}
 }
+
+func TestLegacyGroupedResultsRejectConflictingFacts(t *testing.T) {
+	first := pairCall(1, "batch", "", "a")
+	batch := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "a", Name: "Tool", Args: "{}"}, {ID: "b", Name: "Tool", Args: "{}"}}, "")
+	first.Message = &batch
+	result := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("b", "Tool", nil, false), model.NewToolResultJSONPart("a", "Tool", nil, false))
+	grouped := &Event{ID: "result", Seq: 2, Type: EventTypeToolResult, Scope: first.Scope, Message: &result}
+	pairs, err := PairToolFacts([]*Event{first, grouped})
+	if err != nil || len(pairs) != 2 {
+		t.Fatalf("pairs=%v, err=%v", pairs, err)
+	}
+	other := pairResult(3, pairs[0].Call, "another effect")
+	other.Tool.Outcome = ToolOutcomeUnknown
+	other.Tool.ErrorCode = "execution_interrupted"
+	if _, err := PairToolFacts([]*Event{first, grouped, other}); err == nil {
+		t.Fatal("conflicting occurrence result accepted")
+	}
+	orphan := model.NewToolResultJSONPart("absent", "Tool", nil, false)
+	result.Parts = append(result.Parts, orphan)
+	if _, err := OrderToolFacts([]*Event{first, grouped}); err == nil {
+		t.Fatal("orphan outcome included in original batch")
+	}
+}

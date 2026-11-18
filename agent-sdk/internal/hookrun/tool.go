@@ -1,6 +1,7 @@
 package hookrun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,16 +70,25 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 		}
 		p = next
 	}
+	unchanged := bytes.Equal(call.Input, p.Input)
 	if len(p.Input) == 0 {
 		p.Input = json.RawMessage(`{}`)
 	}
+	// A rejected model proposal is a recoverable tool error. A hook that
+	// supplied invalid arguments or a synthetic decision fails preparation.
+	invalidInput := func(err error) (tool.Call, *tool.Result, error) {
+		if p.Kind == agent.ToolPrepareContinue && unchanged {
+			return call, nil, err
+		}
+		return failure(err)
+	}
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(p.Input, &object); err != nil || object == nil {
-		return failure(fmt.Errorf("tool arguments require one JSON object"))
+		return invalidInput(tool.NewError(tool.ErrorCodeInvalidInput, "tool arguments require one JSON object"))
 	}
 	if def.InputSchema != nil {
 		if err := tool.ValidateMCPArguments(def, p.Input); err != nil {
-			return failure(err)
+			return invalidInput(err)
 		}
 	}
 	call.Input = append(json.RawMessage(nil), p.Input...)

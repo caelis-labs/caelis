@@ -263,7 +263,6 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
 			for _, event := range toolCallEvents {
 				a.applyPreparedFact(event)
-				a.presentMCPEvent(event)
 				if !yield(event, nil) {
 					return
 				}

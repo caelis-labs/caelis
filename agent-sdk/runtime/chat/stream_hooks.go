@@ -100,7 +100,31 @@ func (s *textStream) accept(index int, text string) (string, error) {
 
 func (s *textStream) finish(ctx context.Context, message model.Message, incremental bool, publish func(int, string) error) (model.Message, error) {
 	message = model.CloneMessage(message)
+	// Some providers number their sole text stream from zero and place
+	// reasoning before it in the final message. Keep the published stream
+	// index for suffixes and transformer state when that mapping is unique.
+	soleText := -1
+	if _, zero := s.raw[0]; zero && len(s.raw) == 1 {
+		for i, part := range message.Parts {
+			if part.Text != nil {
+				if soleText >= 0 {
+					soleText = -1
+					break
+				}
+				soleText = i
+			}
+		}
+	}
+	streamIndex := func(i int) int {
+		if i == soleText {
+			return 0
+		}
+		return i
+	}
 	for index, text := range s.raw {
+		if index == 0 && soleText >= 0 {
+			continue
+		}
 		if text != "" && (index < 0 || index >= len(message.Parts) || message.Parts[index].Text == nil) {
 			return model.Message{}, fmt.Errorf("stream text has no matching final part")
 		}
@@ -109,6 +133,7 @@ func (s *textStream) finish(ctx context.Context, message model.Message, incremen
 		if p.Text == nil {
 			continue
 		}
+		index = streamIndex(index)
 		text := p.Text.Text
 		if incremental {
 			// Published fragments are authoritative. A final provider snapshot can
@@ -172,7 +197,7 @@ func (s *textStream) finish(ctx context.Context, message model.Message, incremen
 	}
 	for index := range message.Parts {
 		if message.Parts[index].Text != nil {
-			message.Parts[index].Text.Text = s.accepted[index]
+			message.Parts[index].Text.Text = s.accepted[streamIndex(index)]
 		}
 	}
 	s.finished = true
