@@ -77,14 +77,17 @@ type completionOverlayGeometry struct {
 	innerWidth     int
 	candidateTop   int
 	candidateCount int
+	groupedRows    []completionOverlayRow
 	chrome         completionOverlayChrome
 	scroll         completionScrollAffordance
 }
 
-func (m *Model) completionOverlayVisibleLimit(total int) int {
-	if total <= 0 {
-		return 0
-	}
+type completionOverlayRow struct {
+	candidate int
+	heading   string
+}
+
+func (m *Model) completionOverlayBodyLimit() int {
 	limit := completionOverlayVisibleItems
 	if m.height > 0 {
 		chrome := m.completionChrome()
@@ -94,7 +97,7 @@ func (m *Model) completionOverlayVisibleLimit(total int) int {
 		}
 		limit = minInt(limit, available)
 	}
-	return minInt(total, limit)
+	return limit
 }
 
 func (m *Model) buildCompletionOverlayGeometry(snapshot completionSnapshot) completionOverlayGeometry {
@@ -106,7 +109,8 @@ func (m *Model) buildCompletionOverlayGeometry(snapshot completionSnapshot) comp
 	if selected >= total && total > 0 {
 		selected = total - 1
 	}
-	visible := m.completionOverlayVisibleLimit(total)
+	bodyLimit := m.completionOverlayBodyLimit()
+	visible := minInt(total, bodyLimit)
 	start := 0
 	if m.completionWindow.kind == snapshot.kind {
 		start = m.completionWindow.start
@@ -133,9 +137,22 @@ func (m *Model) buildCompletionOverlayGeometry(snapshot completionSnapshot) comp
 		start = maxStart
 	}
 	end := minInt(total, start+visible)
+	bodyRows := end - start
+	var groupedRows []completionOverlayRow
+	if snapshot.kind == completionSlashCommand && len(m.slashGroups) > 0 && total > 0 && bodyLimit > 1 {
+		groupedRows = make([]completionOverlayRow, 0, bodyLimit)
+		for {
+			groupedRows, end = layoutGroupedCompletionRows(groupedRows[:0], m.slashGroups, start, total, bodyLimit)
+			if selected < end {
+				break
+			}
+			start++
+		}
+		bodyRows = len(groupedRows)
+	}
 
 	chrome := m.completionChrome()
-	height := end - start + chrome.rowCount()
+	height := bodyRows + chrome.rowCount()
 	main := m.workspaceLayout().main
 	top := main.y + main.height - m.bottomSectionHeight() - height
 	if top < main.y {
@@ -157,9 +174,42 @@ func (m *Model) buildCompletionOverlayGeometry(snapshot completionSnapshot) comp
 		innerWidth:     m.completionOverlayInnerWidth(),
 		candidateTop:   candidateTop,
 		candidateCount: end - start,
+		groupedRows:    groupedRows,
 		chrome:         chrome,
 		scroll:         scroll,
 	}
+}
+
+// layoutGroupedCompletionRows keeps each heading with its first candidate and
+// repeats the heading when a group continues at the top of the window. Short
+// windows reserve their row budget for headings and candidates.
+func layoutGroupedCompletionRows(rows []completionOverlayRow, groups []slashCompletionGroup, start, total, limit int) ([]completionOverlayRow, int) {
+	group := 0
+	for group+1 < len(groups) && groups[group+1].start <= start {
+		group++
+	}
+	index := start
+	for ; index < total && len(rows) < limit; index++ {
+		if group+1 < len(groups) && groups[group+1].start == index {
+			group++
+		}
+		if index == start || groups[group].start == index {
+			gap := len(rows) > 0 && limit == completionOverlayVisibleItems
+			needed := 2
+			if gap {
+				needed++
+			}
+			if len(rows)+needed > limit {
+				break
+			}
+			if gap {
+				rows = append(rows, completionOverlayRow{candidate: -1})
+			}
+			rows = append(rows, completionOverlayRow{candidate: -1, heading: groups[group].title})
+		}
+		rows = append(rows, completionOverlayRow{candidate: index})
+	}
+	return rows, index
 }
 
 func (g completionOverlayGeometry) contains(mouse tea.Mouse) bool {
@@ -174,6 +224,12 @@ func (g completionOverlayGeometry) candidateIndexAt(mouse tea.Mouse) (int, bool)
 		return 0, false
 	}
 	row := mouse.Y - g.candidateTop
+	if len(g.groupedRows) > 0 {
+		if row < 0 || row >= len(g.groupedRows) || g.groupedRows[row].candidate < 0 {
+			return 0, false
+		}
+		return g.groupedRows[row].candidate, true
+	}
 	if row < 0 || row >= g.candidateCount {
 		return 0, false
 	}

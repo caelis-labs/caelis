@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type welcomeAction struct {
@@ -14,9 +14,9 @@ type welcomeAction struct {
 
 var welcomeActions = []welcomeAction{
 	{token: welcomeActionTokenResume, label: "Resume Session", command: "/resume"},
+	{token: welcomeActionTokenConnect, label: "Connect Model", command: "/connect"},
 	{token: welcomeActionTokenModel, label: "Switch Model", command: "/model"},
-	{token: welcomeActionTokenTeam, label: "Configure Team", command: "/team"},
-	{token: welcomeActionTokenConnect, label: "Connect Model / Agent", command: "/connect"},
+	{token: welcomeActionTokenQuit, label: "Quit", command: "/quit"},
 }
 
 func welcomeActionForToken(token string) (welcomeAction, bool) {
@@ -29,21 +29,41 @@ func welcomeActionForToken(token string) (welcomeAction, bool) {
 	return welcomeAction{}, false
 }
 
-func (m *Model) tryTriggerWelcomeActionToken(blockID string, token string, contentLine int) tea.Cmd {
-	action, ok := welcomeActionForToken(token)
-	if !ok || m == nil || m.doc == nil || contentLine < 0 || contentLine >= len(m.viewportClickBounds) {
-		return nil
+func (m *Model) hasWelcomeCard() bool {
+	// The welcome block is inserted before startup logs and removed when the
+	// main transcript starts.
+	return m.doc != nil && m.doc.Len() > 0 && m.doc.Blocks()[0].Kind() == BlockWelcome
+}
+
+func (m *Model) welcomeActionAt(point textSelectionPoint) (welcomeAction, bool) {
+	if !m.hasWelcomeCard() || point.line < 0 || point.line >= len(m.viewportClickBounds) {
+		return welcomeAction{}, false
 	}
-	block := m.doc.Find(strings.TrimSpace(blockID))
-	if block == nil || block.Kind() != BlockWelcome || m.selectionStart.line != contentLine {
-		return nil
+	bounds := m.viewportClickBounds[point.line]
+	if point.col < bounds.start || point.col >= bounds.end {
+		return welcomeAction{}, false
 	}
-	clickBounds := m.viewportClickBounds[contentLine]
-	if !clickBounds.valid() || m.selectionStart.col < clickBounds.start || m.selectionStart.col >= clickBounds.end {
-		return nil
+	return welcomeActionForToken(m.viewportClickTokens[point.line])
+}
+
+func (m *Model) renderWelcomeHover(view string) string {
+	if m.welcomeMouse == nil || m.sessionPicker != nil || m.wizardOverlay != nil || m.activePrompt != nil || m.experimental != nil {
+		return view
 	}
-	_, cmd := m.submitInteractiveLine(action.command, action.command, nil)
-	return cmd
+	point, ok := m.mousePointToContentPoint(m.welcomeMouse.X, m.welcomeMouse.Y, false)
+	if !ok {
+		return view
+	}
+	if _, ok := m.welcomeActionAt(point); !ok {
+		return view
+	}
+	row := point.line - m.viewportVisibleOffset()
+	lines := strings.Split(view, "\n")
+	bounds := m.viewportClickBounds[point.line]
+	label := sliceByDisplayColumns(m.viewportPlainLines[point.line], bounds.start, bounds.end)
+	lines[row] = ansi.Cut(lines[row], 0, bounds.start) + m.theme.SelectionStyle().Render(label) +
+		ansi.Cut(lines[row], bounds.end, displayColumns(lines[row]))
+	return strings.Join(lines, "\n")
 }
 
 // appendMainTranscriptBlock is the single content append path for the main

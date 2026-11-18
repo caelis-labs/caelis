@@ -54,6 +54,7 @@ type OverlayState struct {
 	slashCandidates       []string
 	slashDisplays         map[string]string
 	slashDetails          map[string]string
+	slashGroups           []slashCompletionGroup
 	slashIndex            int
 	slashPrefix           string
 	slashSkillOnly        bool

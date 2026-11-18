@@ -375,8 +375,13 @@ func (m *Model) completionOverlayWidth() int {
 	if m.width > 0 {
 		width = minInt(width, maxInt(44, m.width-chrome))
 	}
-	if m.isModelPicker() && m.width > 0 {
-		width = min(width, max(1, m.mainColumnWidth()-2*inputHorizontalInset-chrome))
+	if m.width > 0 {
+		switch {
+		case m.isModelPicker():
+			width = min(width, max(1, m.mainColumnWidth()-2*inputHorizontalInset-chrome))
+		case m.activeCompletionKind() == completionSlashCommand && !m.slashSkillOnly:
+			width = min(width, max(1, m.mainColumnWidth()-inputHorizontalInset-chrome))
+		}
 	}
 	if width <= 0 {
 		width = 72

@@ -377,6 +377,7 @@ type Model struct {
 	hasCommittedLine       bool
 	planEntries            []planEntryState
 	welcomeCardPending     bool
+	welcomeMouse           *tea.Mouse
 	liveTurn               liveTurnState
 	nextLiveTurnGeneration uint64
 	submissionDispatches   map[uint64]scheduledSubmissionDispatch

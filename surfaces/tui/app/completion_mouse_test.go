@@ -68,7 +68,7 @@ func TestSlashCompletionMouseClickAppliesCandidate(t *testing.T) {
 	model := newSlashCompletionMouseTestModel(t, 120, 40, []string{
 		"alpha", "bravo", "charlie", "delta",
 	})
-	point := completionMouseCandidatePoint(t, model, 2)
+	point := completionMouseCandidatePoint(t, model, 3)
 	point.Button = tea.MouseLeft
 
 	_, _ = model.handleMouse(tea.MouseClickMsg(point))
@@ -175,7 +175,7 @@ func TestSlashCompletionMouseClickWorksWithoutBorder(t *testing.T) {
 	if model.overlayUsesBorder() {
 		t.Fatal("test requires borderless completion overlay")
 	}
-	point := completionMouseCandidatePoint(t, model, 1)
+	point := completionMouseCandidatePoint(t, model, 2)
 	point.Button = tea.MouseLeft
 
 	_, _ = model.handleMouse(tea.MouseClickMsg(point))
@@ -223,12 +223,16 @@ func TestCompletionGeometryMatchesRenderedOverlay(t *testing.T) {
 					t.Fatalf("rendered row %d width = %d, geometry width = %d", index, got, geometry.width)
 				}
 			}
-			point := tea.Mouse{
-				X: geometry.left + geometry.width/2,
-				Y: geometry.candidateTop,
-			}
-			if index, hit := geometry.candidateIndexAt(point); !hit || index != geometry.windowStart {
-				t.Fatalf("first painted candidate missed geometry: index=%d hit=%v geometry=%+v", index, hit, geometry)
+			for offset, line := range lines {
+				plain := strings.TrimSpace(strings.Trim(ansi.Strip(line), "│"))
+				if !strings.HasPrefix(plain, "/") && plain != "Commands" && plain != "Agents" {
+					continue
+				}
+				point := tea.Mouse{X: geometry.left + geometry.width/2, Y: geometry.top + offset}
+				index, hit := geometry.candidateIndexAt(point)
+				if command := strings.HasPrefix(plain, "/"); hit != command || hit && !strings.HasPrefix(plain, model.slashCandidates[index]+" ") {
+					t.Fatalf("painted row %q maps to candidate index %d, hit=%v", plain, index, hit)
+				}
 			}
 		})
 	}
@@ -395,16 +399,14 @@ func completionMouseCandidatePoint(t *testing.T, model *Model, visibleRow int) t
 	if visibleRow < 0 || visibleRow >= geometry.candidateCount {
 		t.Fatalf("visible row %d outside completion geometry %+v", visibleRow, geometry)
 	}
-	point := tea.Mouse{
-		X: geometry.left + maxInt(1, geometry.width/2),
-		Y: geometry.candidateTop + visibleRow,
+	point := tea.Mouse{X: geometry.left + maxInt(1, geometry.width/2)}
+	for point.Y = geometry.candidateTop; point.Y < geometry.top+geometry.height; point.Y++ {
+		if index, hit := geometry.candidateIndexAt(point); hit && index == geometry.windowStart+visibleRow {
+			return point
+		}
 	}
-	if index, hit := geometry.candidateIndexAt(point); !hit {
-		t.Fatalf("candidate point %+v missed geometry %+v", point, geometry)
-	} else if index != geometry.windowStart+visibleRow {
-		t.Fatalf("candidate index = %d, want %d", index, geometry.windowStart+visibleRow)
-	}
-	return point
+	t.Fatalf("candidate %d has no point in geometry %+v", visibleRow, geometry)
+	return tea.Mouse{}
 }
 
 func clickCompletionCandidate(t *testing.T, model *Model, visibleRow int) tea.Cmd {

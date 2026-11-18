@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -193,72 +194,32 @@ func renderSlashStatusLines(status controlstatus.StatusSnapshot) []slashOutputLi
 }
 
 func renderSlashHelpLines(help controlprompt.CommandHelpSnapshot) []slashOutputLine {
-	lines := []slashOutputLine{slashSection("Commands")}
-	groups := slashHelpGroups(help.Items)
-	writtenGroups := 0
-	for _, group := range groups {
-		if len(group.items) == 0 {
-			continue
-		}
-		if writtenGroups > 0 {
-			lines = append(lines, slashBlank())
-		}
-		lines = append(lines, slashSection(group.title))
-		table := make([][]string, 0, len(group.items))
-		for _, item := range group.items {
-			table = append(table, []string{strings.TrimSpace(item.Usage), strings.TrimSpace(item.Description)})
-			for _, detail := range item.Details {
-				if detail = strings.TrimSpace(detail); detail != "" {
-					table = append(table, []string{"", detail})
-				}
-			}
-		}
-		lines = append(lines, renderSlashPaddedRows(table)...)
-		writtenGroups++
-	}
-	return lines
-}
+	lines := []slashOutputLine{slashSection("Find commands and skills")}
+	lines = append(lines, renderSlashPaddedRows([][]string{
+		{"/", "Filter commands, agents, and skills by name"},
+		{"↑/↓", "Move selection. Enter or click to apply"},
+	})...)
 
-type slashHelpGroup struct {
-	title string
-	items []controlprompt.CommandHelpItem
-}
-
-func slashHelpGroups(items []controlprompt.CommandHelpItem) []slashHelpGroup {
-	groupOrder := []string{"Core", "Model & Session", "Agents", "Plugins & Tools", "Lifecycle"}
-	groups := make(map[string][]controlprompt.CommandHelpItem, len(groupOrder))
-	for _, item := range items {
-		if strings.TrimSpace(item.Usage) == "" {
-			continue
+	lines = append(lines, slashBlank(), slashSection("Work in a session"))
+	session := [][]string{{"Ctrl+O", "Find and reopen a recent session"}}
+	for _, example := range [][2]string{
+		{"connect", "Add a model or agent before chatting"},
+		{"model", "Use ←/→ when reasoning effort is available"},
+	} {
+		if slices.ContainsFunc(help.Items, func(item controlprompt.CommandHelpItem) bool {
+			return item.Known && item.Name == example[0]
+		}) {
+			session = append(session, []string{"/" + example[0], example[1]})
 		}
-		group := slashHelpGroupTitle(item)
-		groups[group] = append(groups[group], item)
 	}
-	out := make([]slashHelpGroup, 0, len(groupOrder))
-	for _, title := range groupOrder {
-		out = append(out, slashHelpGroup{title: title, items: groups[title]})
-	}
-	return out
-}
+	lines = append(lines, renderSlashPaddedRows(session)...)
 
-func slashHelpGroupTitle(item controlprompt.CommandHelpItem) string {
-	if item.Dynamic {
-		return "Agents"
-	}
-	switch strings.ToLower(strings.TrimSpace(item.Name)) {
-	case "help", "status", "doctor":
-		return "Core"
-	case "model", "connect", "new", "resume", "compact":
-		return "Model & Session"
-	case "review", "breeze", "orbit", "zenith", "team":
-		return "Agents"
-	case "plugin":
-		return "Plugins & Tools"
-	case "quit":
-		return "Lifecycle"
-	default:
-		return "Core"
-	}
+	lines = append(lines, slashBlank(), slashSection("Compose and interrupt"))
+	return append(lines, renderSlashPaddedRows([][]string{
+		{"Enter", "Send the prompt"},
+		{"Ctrl+J", "Insert a newline in your prompt"},
+		{"Esc", "Close a picker or interrupt a turn"},
+	})...)
 }
 
 func renderSlashTokenUsage(usage promptview.TokenUsageView) []slashOutputLine {

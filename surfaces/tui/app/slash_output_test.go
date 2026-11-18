@@ -87,7 +87,7 @@ func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
 	}
 }
 
-func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
+func TestSlashHelpOutputShowsWorkflowsAndShortcuts(t *testing.T) {
 	t.Parallel()
 
 	lines := renderSlashCommandResultLines(controlprompt.SlashCommandResult{
@@ -100,16 +100,18 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 	})
 	plain := slashOutputPlainForTest(lines)
 	want := strings.Join([]string{
-		"Commands",
-		"Core",
-		"  /help  Show commands and shortcuts",
+		"Find commands and skills",
+		"  /    Filter commands, agents, and skills by name",
+		"  ↑/↓  Move selection. Enter or click to apply",
 		"",
-		"Model & Session",
-		"  /model <model> [effort] [fast]  Switch model",
-		"                                  optional GPT fast mode",
+		"Work in a session",
+		"  Ctrl+O  Find and reopen a recent session",
+		"  /model  Use ←/→ when reasoning effort is available",
 		"",
-		"Agents",
-		"  /helper <prompt>  Send a prompt to the registered ACP agent",
+		"Compose and interrupt",
+		"  Enter   Send the prompt",
+		"  Ctrl+J  Insert a newline in your prompt",
+		"  Esc     Close a picker or interrupt a turn",
 	}, "\n")
 	if plain != want {
 		t.Fatalf("help output mismatch:\n--- got ---\n%s\n--- want ---\n%s", plain, want)

@@ -66,6 +66,9 @@ func (m *Model) buildHintText() string {
 		}
 		return m.promptHintText()
 	}
+	if m.sessionSwitchPending {
+		return m.theme.SpinnerStyle().Render(m.runningFrame()) + " " + m.theme.HelpHintTextStyle().Render("Switching Session…")
+	}
 	if m.mentionRequestPending || m.slashArgRequestPending {
 		return m.theme.HelpHintTextStyle().Render("loading completions...")
 	}

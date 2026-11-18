@@ -1,20 +1,37 @@
 package tuiapp
 
 import (
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
+
+// slashCommandOrder keeps related actions adjacent within the Commands group.
+var slashCommandOrder = []string{
+	"/help",
+	"/resume", "/new", "/status", "/compact", "/btw",
+	"/model", "/connect", "/disconnect",
+	"/team", "/review",
+	"/plugin", "/theme", "/experimental",
+	"/doctor", "/quit",
+}
 
 type slashCompletionCandidates struct {
 	commands []string
 	displays map[string]string
 	details  map[string]string
+	groups   []slashCompletionGroup
+}
+
+type slashCompletionGroup struct {
+	start int
+	title string
 }
 
 func (m *Model) refreshSlashCommands() {
@@ -43,13 +60,14 @@ func (m *Model) refreshSlashCommands() {
 		commands = append(commands, "theme")
 		reserved = append(reserved, "theme")
 	}
-	assembled := assembleSlashCompletionCandidates(commands, reserved, m.slashSkillCatalog, query)
+	assembled := assembleSlashCompletionCandidates(commands, reserved, m.slashSkillCatalog, query, skillOnly)
 	if len(assembled.commands) == 0 {
 		return
 	}
 	m.slashCandidates = assembled.commands
 	m.slashDisplays = assembled.displays
 	m.slashDetails = assembled.details
+	m.slashGroups = assembled.groups
 	m.slashIndex = 0
 	if selected != "" {
 		for i, candidate := range assembled.commands {
@@ -134,8 +152,8 @@ func (m *Model) resetSlashSkillCatalog() {
 	m.slashSkillLoadPending = false
 }
 
-func assembleSlashCompletionCandidates(commands []string, reserved []string, skills []CompletionCandidate, query string) slashCompletionCandidates {
-	candidates := make([]string, 0, len(commands)+len(skills))
+func assembleSlashCompletionCandidates(commands []string, reserved []string, skills []CompletionCandidate, query string, skillOnly bool) slashCompletionCandidates {
+	var commandNames, agentNames, skillNames []string
 	seen := make(map[string]struct{}, len(commands)+len(skills)+len(reserved))
 	builtinNames := make(map[string]struct{}, len(commands)+len(reserved))
 	var displays map[string]string
@@ -144,7 +162,8 @@ func assembleSlashCompletionCandidates(commands []string, reserved []string, ski
 	for _, command := range commands {
 		name := strings.TrimSpace(command)
 		var aliases []string
-		if spec, ok := controlprompt.Lookup(name); ok {
+		spec, known := controlprompt.Lookup(name)
+		if known {
 			name, aliases = spec.Name, spec.Aliases
 		}
 		if name == "" {
@@ -166,7 +185,12 @@ func assembleSlashCompletionCandidates(commands []string, reserved []string, ski
 		if !commandMatchesQuery(full, aliases, queryKey) {
 			continue
 		}
-		candidates = append(candidates, full)
+		switch {
+		case name == "theme" || name == "btw", known && !agentbinding.IsDirectRun(agentbinding.Handle(name)):
+			commandNames = append(commandNames, full)
+		default:
+			agentNames = append(agentNames, full)
+		}
 		if len(aliases) > 0 {
 			if displays == nil {
 				displays = map[string]string{}
@@ -215,22 +239,55 @@ func assembleSlashCompletionCandidates(commands []string, reserved []string, ski
 			continue
 		}
 		seen[key] = struct{}{}
-		candidates = append(candidates, "/"+command)
+		skillNames = append(skillNames, "/"+command)
 		if !strings.EqualFold(display, command) {
 			if displays == nil {
 				displays = map[string]string{}
 			}
 			displays[key] = "/" + display
 		}
-		if detail := formatSlashSkillDetail(candidate.Kind, candidate.Detail); detail != "" {
+		detail := strings.TrimSpace(candidate.Detail)
+		if skillOnly {
+			detail = formatSlashSkillDetail(candidate.Kind, detail)
+		}
+		if detail != "" || !skillOnly {
 			if details == nil {
 				details = map[string]string{}
 			}
 			details[key] = detail
 		}
 	}
-	sort.Strings(candidates)
-	return slashCompletionCandidates{commands: candidates, displays: displays, details: details}
+	slices.Sort(agentNames)
+	slices.Sort(skillNames)
+	result := slashCompletionCandidates{displays: displays, details: details}
+	if skillOnly {
+		result.commands = skillNames
+		return result
+	}
+	slices.SortFunc(commandNames, func(a, b string) int {
+		left, right := slices.Index(slashCommandOrder, a), slices.Index(slashCommandOrder, b)
+		switch {
+		case left == right:
+			return strings.Compare(a, b)
+		case left < 0:
+			return 1
+		case right < 0:
+			return -1
+		default:
+			return left - right
+		}
+	})
+	for _, group := range []struct {
+		title string
+		names []string
+	}{{"Commands", commandNames}, {"Agents", agentNames}, {"Skills", skillNames}} {
+		if len(group.names) == 0 {
+			continue
+		}
+		result.groups = append(result.groups, slashCompletionGroup{start: len(result.commands), title: group.title})
+		result.commands = append(result.commands, group.names...)
+	}
+	return result
 }
 
 func formatSlashSkillDetail(kind string, detail string) string {
@@ -401,7 +458,22 @@ func (m *Model) renderSlashCommandListGeometry(geometry completionOverlayGeometr
 			hint:     m.commandCompletionDetail(command),
 		})
 	}
-	return m.renderCompletionOverlay(geometry, m.renderCompletionTableLines(geometry, rows))
+	candidateLines := m.renderCompletionTableLines(geometry, rows)
+	if len(geometry.groupedRows) == 0 {
+		return m.renderCompletionOverlay(geometry, candidateLines)
+	}
+	lines := make([]string, 0, len(geometry.groupedRows))
+	for _, row := range geometry.groupedRows {
+		switch {
+		case row.heading != "":
+			lines = append(lines, " "+m.theme.Tokens().TextSecondary.Bold(true).Render(row.heading))
+		case row.candidate < 0:
+			lines = append(lines, "")
+		default:
+			lines = append(lines, candidateLines[row.candidate-geometry.windowStart])
+		}
+	}
+	return m.renderCompletionOverlay(geometry, lines)
 }
 
 func (m *Model) slashCommandDisplay(command string) string {
@@ -416,6 +488,7 @@ func (m *Model) clearSlashCompletion() {
 	m.slashCandidates = nil
 	m.slashDisplays = nil
 	m.slashDetails = nil
+	m.slashGroups = nil
 	m.slashIndex = 0
 	m.slashPrefix = ""
 	m.slashSkillOnly = false

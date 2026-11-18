@@ -68,6 +68,7 @@ func TestNewSessionBackendWorkRunsOutsideModelUpdate(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	model := NewModel(Config{
+		NoAnimation: true,
 		ExecuteLine: func(submission Submission) TaskResultMsg {
 			if submission.Text != "/new" {
 				t.Errorf("submission text = %q, want /new", submission.Text)
@@ -78,7 +79,11 @@ func TestNewSessionBackendWorkRunsOutsideModelUpdate(t *testing.T) {
 		},
 	})
 
-	cmd := model.executeLineCmd(Submission{Text: "/new"})
+	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	_, cmd := model.submitInteractiveLine("/new", "/new", nil)
+	if frame := ansi.Strip(model.View().Content); !strings.Contains(frame, "/new") || !strings.Contains(frame, "Switching Session…") {
+		t.Fatalf("first frame should show the command and session loading state:\n%s", frame)
+	}
 	select {
 	case <-started:
 		t.Fatal("/new backend work ran synchronously while creating tea.Cmd")

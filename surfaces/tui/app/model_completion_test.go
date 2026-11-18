@@ -631,8 +631,8 @@ func TestSlashCompletionMergesSkillsWithoutShadowingCommands(t *testing.T) {
 	if got := model.slashCommandDisplay("/custom:status"); got != "/custom:status" {
 		t.Fatalf("slashCommandDisplay(/custom:status) = %q, want canonical display beside built-in /status", got)
 	}
-	if detail := model.commandCompletionDetail("/lint"); !strings.Contains(detail, "Skill") || !strings.Contains(detail, "Run lint checks") {
-		t.Fatalf("commandCompletionDetail(/lint) = %q, want skill metadata", detail)
+	if detail := model.commandCompletionDetail("/lint"); detail != "Run lint checks" {
+		t.Fatalf("commandCompletionDetail(/lint) = %q, want description only", detail)
 	}
 
 	model.setInputText("/brain")
@@ -656,7 +656,7 @@ func TestSlashCompletionDistinguishesDuplicateSkillLabelsFromCanonicalValues(t *
 	model.setInputText("/")
 	loadSlashSkillCatalog(t, model)
 
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/one:lint", "/theme", "/two:lint"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/theme", "/one:lint", "/two:lint"}) {
 		t.Fatalf("slashCandidates = %#v, want unique canonical command values", got)
 	}
 	for _, command := range []string{"/one:lint", "/two:lint"} {
@@ -725,7 +725,7 @@ func TestSlashCommandTypingRefreshesBuiltinsImmediately(t *testing.T) {
 	model := NewModel(Config{Commands: []string{"help", "status", "stop"}})
 
 	_, _ = model.handleKey(keyPress("/"))
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/stop", "/theme"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/theme", "/stop"}) {
 		t.Fatalf("slashCandidates after / = %#v, want immediate built-in commands", got)
 	}
 
@@ -847,7 +847,7 @@ func TestSlashSkillCatalogLoadDoesNotBlockUpdateLoop(t *testing.T) {
 	close(release)
 	msg := <-result
 	_, _ = model.Update(msg)
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/lint", "/status", "/theme"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/theme", "/lint"}) {
 		t.Fatalf("slashCandidates after async load = %#v", got)
 	}
 }
@@ -1391,23 +1391,23 @@ func TestComposerPlaceholderIsEmptyAndPromptRemains(t *testing.T) {
 
 func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testing.T) {
 	model := NewModel(Config{
-		Commands: []string{"alpha", "doctor"},
+		Commands: []string{"alpha", "delta"},
 	})
 
 	_, cmd := model.handleKey(keyPress("/"))
 	runCompletionCmd(t, model, cmd)
-	if got := model.slashCandidates; len(got) != 3 || got[0] != "/alpha" {
-		t.Fatalf("slashCandidates after / = %#v, want stale list starting with /alpha", got)
+	if got := model.slashCandidates; len(got) != 3 || got[0] != "/theme" {
+		t.Fatalf("slashCandidates after / = %#v, want stale list starting with /theme", got)
 	}
-	_, cmd = model.handleKey(keyPress("do"))
+	_, cmd = model.handleKey(keyPress("de"))
 	if cmd == nil {
-		t.Fatal("handleKey(do) should schedule a debounced completion refresh")
+		t.Fatal("handleKey(de) should schedule a debounced completion refresh")
 	}
 
 	_, cmd = model.handleKey(keyPress("tab"))
 	runCompletionCmd(t, model, cmd)
-	if got := string(model.input); got != "/doctor " {
-		t.Fatalf("input after /do<Tab> = %q, want /doctor ", got)
+	if got := string(model.input); got != "/delta " {
+		t.Fatalf("input after /de<Tab> = %q, want /delta ", got)
 	}
 }
 
@@ -1426,27 +1426,24 @@ func TestSlashCommandCompletionDoesNotExposeRemovedLeadCommand(t *testing.T) {
 
 func TestSlashCommandTabKeepsArrowSelectedCandidateAcrossRefresh(t *testing.T) {
 	model := NewModel(Config{
-		Commands: []string{"alpha", "doctor"},
+		Commands: []string{"alpha", "bravo"},
 	})
 	model.setInputText("/")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if got := model.slashCandidates; len(got) != 3 || got[0] != "/alpha" || got[1] != "/doctor" {
-		t.Fatalf("slashCandidates = %#v, want /alpha then /doctor", got)
-	}
 
 	handled, _ := model.handleSlashCommandKey(keyPress("down"))
 	if !handled {
 		t.Fatal("handleSlashCommandKey(down) = false, want true")
 	}
-	if model.slashIndex != 1 {
-		t.Fatalf("slashIndex after down = %d, want 1", model.slashIndex)
+	if selected := model.slashCandidates[model.slashIndex]; selected != "/alpha" {
+		t.Fatalf("selected after down = %q, want /alpha", selected)
 	}
 
 	_, cmd := model.handleKey(keyPress("tab"))
 	runCompletionCmd(t, model, cmd)
-	if got := string(model.input); got != "/doctor " {
-		t.Fatalf("input after selecting /doctor then <Tab> = %q, want /doctor ", got)
+	if got := string(model.input); got != "/alpha " {
+		t.Fatalf("input after selecting /alpha then <Tab> = %q, want /alpha ", got)
 	}
 }
 
@@ -1694,6 +1691,7 @@ func TestProfileSlashCompletionShowsBoundProviderModelButExecutesStableProfile(t
 	if got := ansi.Strip(model.renderInputOverlay()); !strings.Contains(got, "/breeze") || !strings.Contains(got, "openai-codex/gpt-5.6-sol") {
 		t.Fatalf("renderInputOverlay() = %q, want profile and bound model display", got)
 	}
+	model.handleSlashCommandKey(keyPress("down"))
 	model.applySlashCommandCompletion()
 	model.syncTextareaFromInput()
 	if got := model.textarea.Value(); got != "/breeze " {

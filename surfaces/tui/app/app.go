@@ -419,6 +419,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width = typed.Width
 		m.height = typed.Height
+		m.welcomeMouse = nil
 		m.clearPaneChromeMouse()
 		m.refreshPaneLayoutMenu()
 		m.reconcileSubagentPaneFocus()
@@ -493,6 +494,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.BlurMsg:
 		m.focused = false
+		m.welcomeMouse = nil
 		m.clearCompletionMouseState()
 		return m, nil
 
