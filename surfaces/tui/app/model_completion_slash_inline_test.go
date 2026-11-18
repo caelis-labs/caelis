@@ -94,7 +94,7 @@ func TestIdleLineStartSlashCompletionStillMixesCommandsAndSkills(t *testing.T) {
 	if model.slashSkillOnly {
 		t.Fatal("idle line-start slash overlay is skill-only, want mixed commands and skills")
 	}
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/lint", "/status", "/theme"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/theme", "/lint"}) {
 		t.Fatalf("idle line-start slashCandidates = %#v, want mixed commands and skills", got)
 	}
 }
@@ -166,7 +166,7 @@ func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 	if model.slashSkillOnly {
 		t.Fatal("running line-start overlay is skill-only, want mixed allowed commands and skills")
 	}
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/lint", "/quit", "/resume", "/superpowers:brainstorm", "/theme"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/resume", "/quit", "/theme", "/lint", "/superpowers:brainstorm"}) {
 		t.Fatalf("running slashCandidates = %#v, want skills plus /resume /quit /theme", got)
 	}
 

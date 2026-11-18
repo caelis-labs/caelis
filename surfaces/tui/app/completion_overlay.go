@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"image/color"
 	"strings"
 )
 
@@ -47,36 +48,54 @@ func (m *Model) renderCompletionTextLine(display string, detail string, selected
 	if detail == "" {
 		identityWidth = m.completionRowInnerWidth()
 	}
-	return m.renderCompletionTableLine(display, detail, identityWidth, selected)
+	return m.renderCompletionTableLine(display, detail, identityWidth, m.completionRowInnerWidth(), selected, nil)
 }
 
 func (m *Model) renderCompletionTableLines(geometry completionOverlayGeometry, rows []completionTableRow) []string {
-	identityWidth := completionTableIdentityWidth(rows, m.completionRowInnerWidth())
+	innerWidth := m.completionRowInnerWidth()
+	indent := ""
+	if len(geometry.groupedRows) > 0 {
+		indent = "  "
+		innerWidth -= len(indent)
+	}
+	activeStyle := m.theme.CommandActiveStyle().Padding(0, 0)
+	var hintColor, activeHintColor color.Color
+	if geometry.kind == completionSlashCommand && !m.slashSkillOnly {
+		hintColor = m.theme.ReadableTextColor(m.theme.CommandSubText, m.theme.ModalBg)
+		if !activeStyle.GetReverse() {
+			activeHintColor = m.theme.ReadableTextColor(m.theme.CommandSubText, activeStyle.GetBackground())
+		}
+	}
+	identityWidth := completionTableIdentityWidth(rows, innerWidth)
 	lines := make([]string, 0, len(rows))
 	for i, row := range rows {
-		lines = append(lines, m.renderCompletionTableLine(
-			row.identity,
-			row.hint,
-			identityWidth,
-			geometry.windowStart+i == geometry.selected,
-		))
+		selected := geometry.windowStart+i == geometry.selected
+		prefix := indent
+		detailColor := hintColor
+		if selected {
+			if indent != "" {
+				prefix = activeStyle.Render(indent)
+			}
+			detailColor = activeHintColor
+		}
+		lines = append(lines, prefix+m.renderCompletionTableLine(row.identity, row.hint, identityWidth, innerWidth, selected, detailColor))
 	}
 	return lines
 }
 
-func (m *Model) renderCompletionTableLine(identity string, hint string, identityWidth int, selected bool) string {
+func (m *Model) renderCompletionTableLine(identity, hint string, identityWidth, innerWidth int, selected bool, detailColor color.Color) string {
 	identity = strings.TrimSpace(identity)
 	hint = strings.Join(strings.Fields(strings.TrimSpace(hint)), " ")
-	return m.renderCompletionColumnsLine(identity, hint, identityWidth, selected)
+	return m.renderPickerColumnsLine(identity, hint, identityWidth, innerWidth, selected, detailColor)
 }
 
 // renderCompletionColumnsLine preserves spacing in preformatted control
 // columns while sharing the normal completion row styles and width budget.
 func (m *Model) renderCompletionColumnsLine(identity string, hint string, identityWidth int, selected bool) string {
-	return m.renderPickerColumnsLine(identity, hint, identityWidth, m.completionRowInnerWidth(), selected)
+	return m.renderPickerColumnsLine(identity, hint, identityWidth, m.completionRowInnerWidth(), selected, nil)
 }
 
-func (m *Model) renderPickerColumnsLine(identity, hint string, identityWidth, innerWidth int, selected bool) string {
+func (m *Model) renderPickerColumnsLine(identity, hint string, identityWidth, innerWidth int, selected bool, detailColor color.Color) string {
 	if hint == "" || identityWidth <= 0 {
 		if selected {
 			return m.renderCompletionSelectedLine(innerWidth, truncateTailDisplay(identity, innerWidth))
@@ -102,7 +121,11 @@ func (m *Model) renderPickerColumnsLine(identity, hint string, identityWidth, in
 	}
 
 	if selected {
-		return m.renderCompletionSelectedTableLine(innerWidth, identityPad, hintText)
+		return m.renderCompletionSelectedTableLine(innerWidth, identityPad, hintText, detailColor)
+	}
+	detailStyle := m.theme.HelpHintTextStyle()
+	if detailColor != nil {
+		detailStyle = detailStyle.Foreground(detailColor)
 	}
 	identityCore := strings.TrimRight(identityPad, " ")
 	identityGap := strings.Repeat(" ", maxInt(0, displayColumns(identityPad)-displayColumns(identityCore)))
@@ -111,11 +134,11 @@ func (m *Model) renderPickerColumnsLine(identity, hint string, identityWidth, in
 		m.theme.CommandStyle().Padding(0, 0).Render(identityCore),
 		identityGap,
 		separator,
-		m.theme.HelpHintTextStyle().Render(hintText),
+		detailStyle.Render(hintText),
 	)
 }
 
-func (m *Model) renderCompletionSelectedTableLine(innerWidth int, identityPad string, hintText string) string {
+func (m *Model) renderCompletionSelectedTableLine(innerWidth int, identityPad string, hintText string, detailColor color.Color) string {
 	separator := "  "
 	used := displayColumns(identityPad) + displayColumns(separator) + displayColumns(hintText)
 	trail := ""
@@ -123,8 +146,12 @@ func (m *Model) renderCompletionSelectedTableLine(innerWidth int, identityPad st
 		trail = strings.Repeat(" ", pad)
 	}
 	base := m.theme.CommandActiveStyle().Padding(0, 0).UnsetBold()
+	detailStyle := base
+	if detailColor != nil {
+		detailStyle = detailStyle.Foreground(detailColor)
+	}
 	return base.Bold(true).Render(" "+identityPad) +
-		base.Render(separator+hintText+trail+" ")
+		detailStyle.Render(separator+hintText+trail+" ")
 }
 
 func completionTableIdentityWidth(rows []completionTableRow, innerWidth int) int {

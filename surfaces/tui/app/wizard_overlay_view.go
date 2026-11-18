@@ -395,7 +395,7 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 				continue
 			}
 		}
-		lines = append(lines, m.renderPickerColumnsLine(marker+label, detail, labelWidth, max(1, width-2), selected))
+		lines = append(lines, m.renderPickerColumnsLine(marker+label, detail, labelWidth, max(1, width-2), selected, nil))
 	}
 	if count > budget && budget >= 3 {
 		hint := ""
@@ -439,7 +439,7 @@ func (m *Model) renderWizardField(field wizardField, selected bool, width int) s
 		value += placeholder
 	}
 	value = truncateDisplayCells(value, available)
-	return m.renderPickerColumnsLine(field.label, value, labelWidth, max(1, width-2), selected)
+	return m.renderPickerColumnsLine(field.label, value, labelWidth, max(1, width-2), selected, nil)
 }
 
 func (m *Model) connectDisplayEndpoint() string {

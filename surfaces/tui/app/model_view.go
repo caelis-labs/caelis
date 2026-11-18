@@ -220,7 +220,7 @@ func (m *Model) desiredMouseMode() tea.MouseMode {
 	if m.subagentOutputOverlay != nil && m.activePrompt == nil && m.subagentOverlay == nil {
 		return tea.MouseModeAllMotion
 	}
-	if m.hasWelcomeCard() {
+	if m.hasWelcomeCard() || (m.activeCompletionKind() == completionSlashCommand && len(m.slashGroups) > 0) {
 		return tea.MouseModeAllMotion
 	}
 	return tea.MouseModeCellMotion
