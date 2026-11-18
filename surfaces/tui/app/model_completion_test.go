@@ -322,6 +322,70 @@ func TestPluginManageCompletionSubmitsPickerCommand(t *testing.T) {
 	}
 }
 
+func TestPluginManageTypedOrPastedSubmitsExactCommand(t *testing.T) {
+	for _, method := range []string{"typing", "typing-before-refresh", "paste", "keyboard-candidate", "mouse-candidate"} {
+		t.Run(method, func(t *testing.T) {
+			var submitted string
+			var notices []string
+			m := NewModel(Config{
+				Commands: DefaultCommands(),
+				ExecuteLine: func(submission Submission) TaskResultMsg {
+					submitted = submission.Text
+					result, emitted := runPluginCmd(&pluginStubService{}, strings.TrimPrefix(submitted, "/plugin "))
+					notices = emitted
+					return result
+				},
+				SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
+					return []SlashArgCandidate{
+						{Value: "marketplace", Detail: "Manage plugin marketplaces"},
+						{Value: "manage", Detail: "List, enable, or disable installed plugins"},
+					}, nil
+				},
+			})
+			m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			typeText := func(input string) {
+				for _, r := range input {
+					m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+				}
+			}
+			if method == "paste" {
+				_, cmd := m.Update(tea.PasteMsg{Content: "/plugin manage"})
+				runCompletionCmd(t, m, cmd)
+			} else {
+				typeText("/plugin ma")
+				syncSlashInputOverlaysForTest(t, m)
+				if candidate, ok := m.currentSlashArgCandidate(); !ok || candidate.Value != "marketplace" {
+					t.Fatalf("fixture should highlight the marketplace detail match first: %+v", candidate)
+				}
+				switch method {
+				case "typing", "typing-before-refresh":
+					typeText("nage")
+					if method == "typing" {
+						syncSlashInputOverlaysForTest(t, m)
+					}
+				case "keyboard-candidate":
+					m.Update(keyPress("down"))
+				}
+			}
+			var cmd tea.Cmd
+			if method == "mouse-candidate" {
+				cmd = clickCompletionCandidate(t, m, 1)
+			} else {
+				_, cmd = m.Update(keyPress("enter"))
+			}
+			if cmd != nil {
+				findAndRunTaskResult(cmd(), m)
+			}
+			if submitted != "/plugin manage" {
+				t.Fatalf("submitted %q, composer %q", submitted, m.textarea.Value())
+			}
+			if !strings.Contains(strings.Join(notices, "\n"), "No plugins installed") {
+				t.Fatalf("manage did not reach the installed-plugin empty state: %v", notices)
+			}
+		})
+	}
+}
+
 func TestModelSelectionOpensEffortThenSpeedPicker(t *testing.T) {
 	const alias = "deepseek/deepseek-v4-pro"
 	model := NewModel(Config{

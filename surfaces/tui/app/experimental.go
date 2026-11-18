@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/experimental"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type experimentalState struct {
@@ -176,8 +177,9 @@ func (m *Model) renderExperimental() string {
 	if state == nil {
 		return ""
 	}
-	width := max(24, min(100, m.width-6))
+	width := min(100, max(1, m.width-6))
 	lines := []string{"Experimental features", "Host defaults · next Runtime activation · no App restart", "Loaded from saved settings · Space edits; Enter saves."}
+	selected := 0
 	if state.loaded {
 		effective := "No active Runtime for this Session."
 		if state.snapshot.Effective != nil {
@@ -207,6 +209,7 @@ func (m *Model) renderExperimental() string {
 				line = fmt.Sprintf("%s [%s] %s\n%s", cursor, mark, f.Name, lipgloss.NewStyle().Width(width-6).PaddingLeft(6).Render(f.Description))
 			}
 			if i == state.selected {
+				selected = len(lines) - 1
 				line = m.theme.HelpHintTextStyle().Bold(true).Render(line)
 			}
 			lines = append(lines, line)
@@ -223,9 +226,45 @@ func (m *Model) renderExperimental() string {
 		lines = append(lines, "", "Save/read error: "+state.err)
 	}
 	hint := "↑↓ move · Space toggle · Enter save · Esc discard and close"
+	compactHint := "↑↓ move · Space toggle\nEnter save · Esc close"
 	if state.request != nil && !state.busy {
 		hint = "Selections retained · Enter checks original save · Esc closes"
+		compactHint = "Enter checks original save\nEsc closes"
 	}
-	lines = append(lines, "", hint)
-	return lipgloss.NewStyle().Width(width).Padding(1, 2).Border(lipgloss.RoundedBorder()).Render(strings.Join(lines, "\n"))
+	style := lipgloss.NewStyle().Width(width).Border(lipgloss.RoundedBorder())
+	full := style.Padding(1, 2).Render(strings.Join(lines, "\n") + "\n\n" + hint)
+	if m.height <= 0 || (lipgloss.Height(full) <= m.height && lipgloss.Width(full) <= m.width) {
+		return full
+	}
+	return renderCompactExperimental(style.Padding(0, 1), m.height, lines, selected, compactHint)
+}
+
+// Reserve the title, controls and border before selecting physical body rows.
+// Derive the window from the selection so keyboard navigation and resize agree.
+func renderCompactExperimental(style lipgloss.Style, height int, lines []string, selected int, hint string) string {
+	width := style.GetWidth()
+	if width < 9 || height < 4 {
+		return ansi.Truncate("Esc close", width, "")
+	}
+	inner := width - style.GetHorizontalFrameSize()
+	title := ansi.Truncate(lines[0], inner, "…")
+	footer := strings.Split(ansi.Wrap(hint, inner, ""), "\n")
+	available := height - style.GetVerticalFrameSize() - 1
+	if len(footer) >= available {
+		footer = []string{ansi.Truncate("Esc close", inner, "")}
+	}
+	if count := available - len(footer); count > 0 {
+		var body []string
+		selectedStart, selectedEnd := 0, 0
+		for i, line := range lines[1:] {
+			start := len(body)
+			body = append(body, splitStyledPhysicalLines(ansi.Wrap(line, inner, ""))...)
+			if i == selected {
+				selectedStart, selectedEnd = start, len(body)
+			}
+		}
+		start := min(selectedStart, max(0, selectedEnd-count))
+		footer = append(body[start:min(len(body), start+count)], footer...)
+	}
+	return style.Render(title + "\n" + strings.Join(footer, "\n"))
 }

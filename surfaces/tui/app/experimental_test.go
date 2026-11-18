@@ -142,6 +142,43 @@ func TestExperimentalRenderedGoldenAndTerminal(t *testing.T) {
 	}
 }
 
+func TestExperimentalShortTerminalKeepsFooterAndSelectionVisible(t *testing.T) {
+	m, _ := experimentalModel(t)
+	features := m.experimental.snapshot.Features
+	for i := range 5 {
+		id := fmt.Sprintf("fixture-%d", i)
+		features = append(features, experimental.Definition{ID: id, Name: "Feature " + id,
+			Description: "A long feature description that wraps across several rows in a compact terminal."})
+	}
+	m.experimental.snapshot.Features = features
+	for _, size := range []tea.WindowSizeMsg{{Width: 52, Height: 15}, {Width: 60, Height: 18}, {Width: 112, Height: 30}, {Width: 52, Height: 15}} {
+		m.Update(size)
+		assertFrame := func(wantSelected string) string {
+			frame := m.View().Content
+			plain := evalharness.NormalizeFrame(frame)
+			for _, want := range []string{"Space toggle", "Enter save", "Esc ", "╰", "╯", wantSelected} {
+				if !strings.Contains(plain, want) {
+					t.Fatalf("%d×%d missing %q:\n%s", size.Width, size.Height, want, plain)
+				}
+			}
+			return frame
+		}
+		before := assertFrame("› [x] " + features[0].Name)
+		for range features {
+			m.Update(keyPress("down"))
+		}
+		last := features[len(features)-1]
+		m.Update(keyPress("space"))
+		after := assertFrame("› [x] " + last.Name)
+		assertPhysicalFullscreenFrame(t, size.Width, size.Height, after, renderFullscreenFramesForTest(t, size.Width, size.Height, before, after))
+		m.Update(keyPress("space"))
+		for range features {
+			m.Update(keyPress("up"))
+		}
+		assertFrame("› [x] " + features[0].Name)
+	}
+}
+
 type overwrittenExperimentalFixture struct{ *experimentalFixture }
 
 func (f overwrittenExperimentalFixture) SetExperimentalFeatures(ctx context.Context, req appserver.ExperimentalRequest) (appserver.CommandResult, error) {

@@ -95,6 +95,11 @@ func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
 	case len(m.mentionCandidates) > 0:
 		m.dropStaleMentionCandidates()
 	case !m.turnRunning() && m.slashArgActive:
+		// A complete plugin action can end argument completion before the
+		// debounced refresh has had a chance to close the previous picker.
+		if m.slashArgCommand == "plugin" && !m.isWizardActive() && !m.syncSlashInputOverlayState() {
+			return
+		}
 		m.dropStaleSlashArgCandidates()
 	case len(m.slashCandidates) > 0:
 		m.refreshSlashCommands()

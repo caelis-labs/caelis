@@ -460,14 +460,15 @@ func pluginSlashArgQuery(command string, fields []string, hasTrailingDelimiter b
 	}
 	action := strings.ToLower(strings.TrimSpace(fields[1]))
 	if len(fields) == 2 {
+		if action == "manage" {
+			return "", "", false
+		}
 		if hasTrailingDelimiter {
 			switch action {
 			case "install", "rm":
 				return command + " " + action, "", true
 			case "marketplace":
 				return command + " marketplace", "", true
-			case "manage":
-				return "", "", false
 			default:
 				return "", "", false
 			}
