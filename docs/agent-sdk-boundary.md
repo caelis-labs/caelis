@@ -75,6 +75,11 @@ remain in force. An admitted response retains its snapshot lease through tools.
 Every tool route prepares all occurrences and final arguments before the batch
 is atomically committed. Policy, approval, canonical envelope and dispatch use
 those same arguments. ProposedCall keeps the original proposal as evidence.
+A model proposal that fails the tool schema produces a paired error result.
+Tool-local execution errors and approval denials also return to the model so
+it can correct the call or choose another action. A malformed call envelope
+gets a bounded request to regenerate before any call in its batch executes.
+Invalid hook transformations fail preparation before batch commit.
 Synthetic success still passes Policy and final dispatch checks. Full results
 and checked model views share one ToolResult commit, including nested Code Mode
 calls. ToolResult affects JS Body; ModelView does not. A failed transformation

@@ -13,6 +13,8 @@ import (
 
 const maxInvalidToolCallRepairAttempts = 2
 
+const toolCallRepairInstruction = "Your previous tool call batch was invalid. None of its calls were dispatched. If tools are still needed, return a corrected batch with a unique nonempty ID, an exact tool name, and one valid JSON object of arguments for each call."
+
 type invalidToolCallError struct {
 	Tool   string
 	Reason string

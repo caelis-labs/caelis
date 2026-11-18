@@ -358,6 +358,11 @@ func (a *Agent) collectCanonicalModelStep(
 		} else {
 			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
 		}
+		if invalidAttempts > 0 {
+			// The rejected envelope never entered Session or tool dispatch.
+			// Give this regeneration feedback without replaying malformed input.
+			request.Instructions = append(request.Instructions, model.NewTextPart(toolCallRepairInstruction))
+		}
 
 		run := hookrun.FromContext(ctx)
 		logicalID, assembly := run.RequestAssembly(uuid.NewString)
