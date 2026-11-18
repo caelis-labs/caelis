@@ -139,8 +139,8 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			}
 			if tc.wantAgent {
 				raw, _ := json.Marshal(llm.Requests())
-				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) || !strings.Contains(string(raw), "INDEPENDENT_TOOL_EVIDENCE") {
-					t.Fatal("Agent prompt lost canonical evidence or included classifier output")
+				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) || strings.Contains(string(raw), "INDEPENDENT_TOOL_EVIDENCE") {
+					t.Fatal("Agent prompt lost the user or ticket or included material outside their review")
 				}
 			}
 			if !tc.wantAgent {

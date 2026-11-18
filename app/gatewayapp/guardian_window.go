@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"unicode/utf8"
@@ -16,21 +15,18 @@ import (
 const guardianUserSource = "guardian_user_source"
 const guardianTurnKey = "guardian_turn"
 
-// guardianWindow prepares an append-only input sequence. Source users survive
-// completed-turn eviction and are folded only under physical capacity pressure.
+// guardianWindow appends projected dialogue without changing the existing prefix.
 func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalReviewRequest, output *model.OutputSpec, queryTools bool) ([]*session.Event, guardianPromptItems, error) {
-	history := session.CloneEvents(snapshot.Events)
+	history := append([]*session.Event(nil), snapshot.Events...)
 	items := guardianPromptItems{ParentCursor: snapshot.ParentCursor}
 	for _, e := range snapshot.ParentEvents {
-		if e == nil || e.Seq <= snapshot.ParentCursor.EventSeq || !session.IsCanonicalHistoryEvent(e) {
+		if e == nil || e.Seq <= snapshot.ParentCursor.EventSeq {
 			continue
 		}
 		if e.Seq > items.ParentCursor.EventSeq {
 			items.ParentCursor = guardianParentCanonicalCursor{EventID: e.ID, EventSeq: e.Seq}
 		}
-		if one := guardianProjectEvent(e); one != nil {
-			history = append(history, one)
-		}
+		history = append(history, e)
 	}
 	if snapshot.SourceCursor.EventSeq > items.ParentCursor.EventSeq {
 		items.ParentCursor = snapshot.SourceCursor
@@ -51,8 +47,8 @@ func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalRe
 		items.MandatoryInputTooLarge = true
 		return history, items, nil
 	}
-	beforeRetention := session.CloneEvents(history)
-	history, fits := guardianFitHistory(history, req.Model, items.Text, output, req.ReviewID, queryTools)
+	beforeRetention := history
+	history, fits := guardianFitHistory(history, req.Model, items.Text, output, queryTools)
 	items.MandatoryInputTooLarge = !fits
 	items.ContextTrimmed = !reflect.DeepEqual(beforeRetention, history)
 	return history, items, nil
@@ -78,16 +74,18 @@ func guardianFold(text string, limit int) string {
 }
 
 func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
-	total := func() int {
-		n := 0
-		for _, e := range events {
-			if guardianIsUser(e) {
-				n += len(session.EventText(e))
-			}
-		}
-		return n
+	return guardianTrimUserHistory(events, budget, func(event *session.Event) int {
+		return len(session.EventText(event))
+	})
+}
+
+func guardianTrimUserHistory(events []*session.Event, budget int, measure func(*session.Event) int) []*session.Event {
+	events = append([]*session.Event(nil), events...)
+	total := 0
+	for _, event := range events {
+		total += measure(event)
 	}
-	for total() > budget {
+	for total > budget {
 		largest := -1
 		for i, e := range events {
 			if guardianIsUser(e) && len([]rune(session.EventText(e))) > 4096 && (largest < 0 || len(session.EventText(e)) > len(session.EventText(events[largest]))) {
@@ -103,34 +101,33 @@ func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
 		message := model.NewTextMessage(model.RoleUser, text)
 		one.Message, one.Text = &message, text
 		one.Meta = session.CloneState(old.Meta)
+		total += measure(one) - measure(old)
 		events[largest] = one
 	}
-	for total() > budget {
-		dropped := false
-		first, last := -1, -1
-		for i, e := range events {
-			if guardianIsUser(e) {
-				if first < 0 {
-					first = i
-				}
-				last = i
-			}
-		}
-		for i, e := range events {
-			if guardianIsUser(e) && i != first && i != last {
-				events = append(events[:i:i], events[i+1:]...)
-				dropped = true
-				break
-			}
-		}
-		if !dropped {
-			break
-		}
+	if total <= budget || len(events) <= 2 {
+		return events
 	}
-	return events
+	firstRetained := 1
+	omission := session.CloneEvent(events[firstRetained])
+	omission.Text = "[omitted older user messages; their constraints and authorizations are unavailable]"
+	message := model.NewTextMessage(model.RoleUser, omission.Text)
+	omission.Message = &message
+	for total+measure(omission) > budget && firstRetained < len(events)-1 {
+		total -= measure(events[firstRetained])
+		firstRetained++
+	}
+	return append([]*session.Event{events[0], omission}, events[firstRetained:]...)
 }
 func guardianIsUser(e *session.Event) bool {
-	return e != nil && e.Meta != nil && e.Meta[guardianUserSource] != nil
+	return guardianUserKey(e) != ""
+}
+
+func guardianUserKey(event *session.Event) string {
+	if event == nil {
+		return ""
+	}
+	key, _ := event.Meta[guardianUserSource].(string)
+	return key
 }
 func guardianTurn(e *session.Event) string {
 	if e == nil {
@@ -138,65 +135,6 @@ func guardianTurn(e *session.Event) string {
 	}
 	s, _ := e.Meta[guardianTurnKey].(string)
 	return s
-}
-func guardianDropOldestTurn(events []*session.Event, current string) []*session.Event {
-	oldest := ""
-	for _, e := range events {
-		if key := guardianTurn(e); key != "" && key != current && !guardianIsUser(e) {
-			oldest = key
-			break
-		}
-	}
-	if oldest == "" {
-		return events
-	}
-	out := make([]*session.Event, 0, len(events))
-	for _, e := range events {
-		if guardianIsUser(e) || guardianTurn(e) != oldest {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-func guardianTrimTurns(events []*session.Event, budget int, current string) []*session.Event {
-	size := func() int {
-		n := 0
-		for _, e := range events {
-			if !guardianIsUser(e) {
-				// Budget the model input, not duplicated Event.Text, metadata,
-				// IDs and journal provenance that never enter the model prefix.
-				message, ok := session.ModelMessageOf(e)
-				if !ok {
-					message = model.NewTextMessage(model.RoleUser, session.EventText(e))
-				}
-				raw, _ := json.Marshal(message)
-				n += len(raw)
-			}
-		}
-		return n
-	}
-	if size() <= budget {
-		return events
-	}
-	// A low-water target buys several append-only turns after each trim.
-	// Never split the active turn or move user-source messages. Turn count is
-	// not a budget: many short approvals can share the same cache epoch.
-	for {
-		groups := map[string]bool{}
-		for _, e := range events {
-			if key := guardianTurn(e); key != "" && key != current {
-				groups[key] = true
-			}
-		}
-		if size() <= budget*6/10 || (len(groups) <= 1 && size() <= budget) {
-			return events
-		}
-		next := guardianDropOldestTurn(events, current)
-		if len(next) == len(events) {
-			return events
-		}
-		events = next
-	}
 }
 
 // The Harness trims completed turns before Run. An overflowing active review

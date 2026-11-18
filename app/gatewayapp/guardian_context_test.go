@@ -29,7 +29,56 @@ func (r guardianCommandResultRuntime) Run(context.Context, sandbox.CommandReques
 	return r.result, nil
 }
 
-func TestGuardianHarnessSuppliesIncrementalOutcomesWithoutQueries(t *testing.T) {
+func TestGuardianDialogueSuppliesProposalBeforeReplyWithoutToolOrReasoning(t *testing.T) {
+	service, active := newApprovalReviewerTestSession(t, t.Context())
+	appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeUser, model.RoleUser, "修好这个问题。")
+	proposal := "请允许推送当前分支并更新 PR。"
+	message := model.NewMessage(model.RoleAssistant,
+		model.NewTextPart(proposal),
+		model.NewReasoningMessage(model.RoleAssistant, "hidden reasoning", model.ReasoningVisibilityVisible).Parts[0],
+		model.NewToolUsePart("call-1", "RunCommand", json.RawMessage(`{"command":"private tool argument"}`)),
+	)
+	if _, err := service.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
+		Type: session.EventTypeToolCall, Visibility: session.VisibilityCanonical, Message: &message,
+		Tool: &session.EventTool{ID: "call-1", Name: "RunCommand", Input: map[string]any{"command": "private tool argument"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeUser, model.RoleUser, "照这个办。")
+	llm := &approvalReviewerFakeModel{}
+	req := approvalReviewerTestRequest(active, llm, "Update PR", map[string]any{"command": "git push origin HEAD"})
+	reviewer := newGuardianApprovalApprover(service)
+	defer reviewer.Close()
+	if _, err := reviewer.Decide(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	requests := llm.Requests()
+	if len(requests) != 1 || len(requests[0].Messages) != 4 || !strings.Contains(requests[0].Messages[1].TextContent(), proposal) ||
+		!strings.Contains(requests[0].Messages[2].TextContent(), "照这个办。") {
+		t.Fatalf("proposal and user reply did not reach Agent review in source order: %v", requests)
+	}
+	for _, part := range requests[0].Messages[1].Parts {
+		if part.Text == nil || strings.Contains(part.Text.Text, "hidden reasoning") || strings.Contains(part.Text.Text, "private tool argument") {
+			t.Fatal("proposal imported non-dialogue content")
+		}
+	}
+	var projection guardianProjection
+	events, _, err := projection.read(t.Context(), service, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	screen, err := guardianScreenState(req, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialogue := screen["conversation"].([]guardianDialogueMessage)
+	if len(dialogue) != 3 || dialogue[1].Role != model.RoleAssistant || dialogue[1].Text != requests[0].Messages[1].TextContent() ||
+		dialogue[2].Role != model.RoleUser || dialogue[2].Text != requests[0].Messages[2].TextContent() {
+		t.Fatalf("Jev did not see the same ordered proposal and reply: %+v", dialogue)
+	}
+}
+
+func TestGuardianHarnessOnlyProjectsUserAuthorityWithoutQueries(t *testing.T) {
 	for _, fileBacked := range []bool{false, true} {
 		t.Run(fmt.Sprintf("file=%v", fileBacked), func(t *testing.T) {
 			service, active := newApprovalReviewerTestSession(t, t.Context())
@@ -89,21 +138,25 @@ func TestGuardianHarnessSuppliesIncrementalOutcomesWithoutQueries(t *testing.T) 
 				t.Fatal(err)
 			}
 			requests := llm.Requests()
-			if len(requests) != 2 || !reflect.DeepEqual(requests[0].Messages, requests[1].Messages[:len(requests[0].Messages)]) {
-				t.Fatal("ordinary approvals queried, summarized or rewrote the source prefix")
+			if len(requests) != 2 || len(requests[1].Messages) != 5 ||
+				!reflect.DeepEqual(requests[0].Messages, requests[1].Messages[:len(requests[0].Messages)]) ||
+				!strings.Contains(requests[1].Messages[3].TextContent(), "Use only generated files") {
+				t.Fatal("ordinary approvals queried or changed the retained user and ticket")
 			}
 			var text strings.Builder
 			for _, m := range requests[1].Messages {
 				text.WriteString(m.TextContent())
 				text.WriteByte('\n')
 			}
-			for _, want := range []string{command, "preserve the original ledger", "partial workspace listing", "upstream inspection: Permission denied", `"exit_code":0`, `"state":"completed"`, "Use only generated files"} {
+			for _, want := range []string{"inspect-current", "preserve the original ledger", "Use only generated files"} {
 				if !strings.Contains(text.String(), want) {
 					t.Fatalf("Harness omitted %q: %s", want, text.String())
 				}
 			}
-			if strings.Count(text.String(), command) != 1 || strings.Count(text.String(), "upstream inspection: Permission denied") != 1 || strings.Index(text.String(), "Permission denied") > strings.Index(text.String(), "Use only generated files") {
-				t.Fatal("delta repeated or reordered source observations")
+			for _, excluded := range []string{command, "partial workspace listing", "upstream inspection: Permission denied"} {
+				if strings.Contains(text.String(), excluded) {
+					t.Fatalf("prior operation %q entered the prompt", excluded)
+				}
 			}
 			var names []string
 			for _, spec := range requests[1].Tools {

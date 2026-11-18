@@ -121,8 +121,8 @@ func TestGuardianResidentDecidesAfterEvidenceFailures(t *testing.T) {
 					if llm.calls != 4 || len(metrics) != 2 {
 						t.Fatalf("calls=%d metrics=%+v", llm.calls, metrics)
 					}
-					if !metrics[1].RuntimeReused || !metrics[1].SandboxReused {
-						t.Fatalf("resident resources not reused: %+v", metrics)
+					if metrics[1].RuntimeReused || !metrics[1].SandboxReused {
+						t.Fatalf("a previous evidence loop must rebuild context without reopening its sandbox: %+v", metrics)
 					}
 					for _, m := range metrics {
 						if m.ModelCalls != 2 || m.ToolCalls != 1 || m.TotalMS > kernel.AutoReviewTimeout.Milliseconds() {
@@ -188,28 +188,26 @@ func TestGuardianResidentCloseCancelsQueuedAndActiveReview(t *testing.T) {
 	}
 }
 
-func TestGuardianProjectionIncludesLateResultAndIgnoresPendingAction(t *testing.T) {
+func TestGuardianProjectionExcludesLateToolResultEvenForSameAction(t *testing.T) {
 	call := guardianSource(1, session.EventTypeToolCall, "run verification")
 	result := guardianSource(2, session.EventTypeToolResult, "")
 	result.Tool.ID = call.Tool.ID
 	result.Tool.Output = map[string]any{"exit_code": 1, "stderr": "Sandbox denied the operation", "stdout": strings.Repeat("large result", 32768)}
-	one := guardianProjectEvent(result)
-	if text := session.EventText(one); !strings.Contains(text, "Sandbox denied") || !strings.Contains(text, "folded") || len(text) > 16*1024 {
-		t.Fatalf("result evidence=%s", text)
-	}
 	first := guardianWindowRequest(t, "first")
-	a, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{call}}, first, nil, true)
+	projected, cursor := guardianWindowProjection(call)
+	a, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: projected, SourceCursor: cursor}, first, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second := first
 	second.ReviewID = "second"
 	second.RuntimeRequest.Call.ID = call.Tool.ID
-	b, _, err := guardianWindow(guardianConversationSnapshot{Events: a, ParentCursor: items.ParentCursor, ParentEvents: []*session.Event{call, result}}, second, nil, true)
+	projected, cursor = guardianWindowProjection(call, result)
+	b, _, err := guardianWindow(guardianConversationSnapshot{Events: a, ParentCursor: items.ParentCursor, ParentEvents: projected, SourceCursor: cursor}, second, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(b) != 2 || session.EventText(b[0]) != session.EventText(a[0]) || session.EventText(b[1]) != session.EventText(one) {
-		t.Fatal("late result rewrote call or depended on pending approval")
+	if len(a) != 0 || len(b) != 0 {
+		t.Fatal("late tool result entered context for the same action")
 	}
 }

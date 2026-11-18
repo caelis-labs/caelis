@@ -24,27 +24,75 @@ func TestGuardianUsesOriginalHookInputEvidence(t *testing.T) {
 	}
 }
 
+func TestGuardianProjectionRejectsReasoningAndIncompleteAuthorityContext(t *testing.T) {
+	reasoning := guardianSource(1, session.EventTypeAssistant, "hidden")
+	reasoning.Message = ptrMessage(model.NewReasoningMessage(model.RoleAssistant, "hidden", model.ReasoningVisibilityVisible))
+	delegated := guardianSource(2, session.EventTypeAssistant, "private child proposal")
+	delegated.Scope = &session.EventScope{Participant: session.ParticipantRef{ID: "child", Role: session.ParticipantRoleDelegated}}
+	for _, event := range []*session.Event{reasoning, delegated, session.MarkUIOnly(guardianSource(3, session.EventTypeAssistant, "uncommitted stream chunk"))} {
+		if guardianProjectEvent(event) != nil {
+			t.Fatalf("non-dialogue source was projected: seq=%d", event.Seq)
+		}
+	}
+	long := guardianProjectEvent(guardianSource(4, session.EventTypeAssistant, "May I push? "+strings.Repeat("context ", 1200)+" Or delete the branch?"))
+	if !guardianIsAssistantContext(long) || !strings.Contains(long.Text, "scope cannot be inferred") ||
+		strings.Contains(long.Text, "May I push") || strings.Contains(long.Text, "delete") {
+		t.Fatal("partial assistant proposal could be mistaken for a complete proposal")
+	}
+}
+
+func TestGuardianSourceDialogueRotatesAtTokenBudgetWithoutLosingUsers(t *testing.T) {
+	service, active := newApprovalReviewerTestSession(t, t.Context())
+	appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeUser, model.RoleUser, "Do not upload anything.")
+	proposal := func(index int) string {
+		return fmt.Sprintf("Proposal %02d: %s", index, strings.Repeat("abcd ", 600))
+	}
+	entryTokens := guardianMessageTokens(guardianProjectEvent(guardianSource(11, session.EventTypeAssistant, proposal(0))))
+	assistantCount := guardianAssistantHighTokens/entryTokens + 1
+	if assistantCount >= guardianAssistantHighEntries {
+		t.Fatal("fixture must cross the token threshold before the entry threshold")
+	}
+	for index := range assistantCount {
+		appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeAssistant, model.RoleAssistant, proposal(index))
+	}
+	appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeUser, model.RoleUser, "Only update the local file.")
+	var projection guardianProjection
+	window, cursor, err := projection.read(t.Context(), service, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users, assistants, reviews := guardianSplitHistory(window)
+	tokens, _ := guardianHistoryUsage(assistants)
+	if len(users) != 2 || len(reviews) != 0 || len(assistants) == 0 || len(assistants) >= assistantCount ||
+		tokens > guardianAssistantKeepTokens || !strings.HasSuffix(assistants[len(assistants)-1].Text, strings.TrimSpace(proposal(assistantCount-1))) {
+		t.Fatalf("source token rotation retained users=%d assistants=%d reviews=%d tokens=%d", len(users), len(assistants), len(reviews), tokens)
+	}
+	for index := 1; index < len(window); index++ {
+		if window[index-1].Seq >= window[index].Seq {
+			t.Fatal("source context changed message order")
+		}
+	}
+	next, nextCursor, err := projection.read(t.Context(), service, active.SessionRef)
+	if err != nil || cursor != nextCursor || !reflect.DeepEqual(window, next) {
+		t.Fatalf("reading the same cut changed the projected dialogue: %v", err)
+	}
+}
+
 type guardianPagedOnlyStore struct {
 	session.Service
 	pages int
 }
 
 func TestGuardianCompactSourceAddressRetainsOriginalIdentity(t *testing.T) {
-	for _, kind := range []session.EventType{session.EventTypeUser, session.EventTypeToolCall, session.EventTypeToolResult} {
-		e := guardianSource(17, kind, "Preserve the original ledger.")
-		e.SessionID, e.ID = "parent-session-identity", "canonical-event-identity"
-		if kind == session.EventTypeToolResult {
-			e.Tool.Output = map[string]any{"stdout": "middle evidence fact", "exit_code": 7}
-		}
-		preview := guardianProjectEvent(e)
-		if preview.SessionID != e.SessionID || preview.ID != e.ID || preview.Seq != e.Seq {
-			t.Fatalf("%s lost projection identity", kind)
-		}
-		text := session.EventText(preview)
-		if !strings.Contains(text, "seq=17") || strings.Contains(text, e.SessionID) || strings.Contains(text, e.ID) {
-			t.Fatalf("%s routine address is missing or repeats full identity", kind)
-		}
-
+	event := guardianSource(17, session.EventTypeUser, "Preserve the original ledger.")
+	event.SessionID, event.ID = "parent-session-identity", "canonical-event-identity"
+	preview := guardianProjectEvent(event)
+	if preview.SessionID != event.SessionID || preview.ID != event.ID || preview.Seq != event.Seq {
+		t.Fatal("lost projection identity")
+	}
+	text := session.EventText(preview)
+	if !strings.Contains(text, "seq=17") || strings.Contains(text, event.SessionID) || strings.Contains(text, event.ID) {
+		t.Fatal("routine address is missing or repeats full identity")
 	}
 }
 
@@ -86,6 +134,10 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 			event = guardianSource(0, session.EventTypeUser, fmt.Sprintf("user constraint %d", i))
 			event.ID = ""
 		}
+		if i == 128 {
+			event = guardianSource(0, session.EventTypeAssistant, "May I send the report?")
+			event.ID = ""
+		}
 		batch = append(batch, event)
 		// One durable transaction per cadence window keeps the incremental cut
 		// exercised without paying a file transaction (several fsyncs) per event;
@@ -113,8 +165,10 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 		t.Fatalf("model context changed after reopening source: cut=%+v/%+v err=%v", cut, restoredCut, err)
 	}
 	text := guardianEventsText(a)
-	if !strings.Contains(text, "user constraint 0") || !strings.Contains(text, "user constraint 129") || len(text) > 16*1024*1024 {
-		t.Fatalf("retained context lost user boundaries or grew unbounded: %d", len(text))
+	if len(a) != 3 || !guardianIsAssistantContext(a[1]) || !strings.Contains(text, "user constraint 0") ||
+		!strings.Contains(a[1].Text, "May I send the report?") || !strings.Contains(text, "user constraint 129") ||
+		strings.Contains(text, "synthetic error") {
+		t.Fatal("projection lost users or included parent tool results")
 	}
 
 }

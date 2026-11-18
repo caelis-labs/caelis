@@ -8,6 +8,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -48,7 +50,7 @@ func TestGuardianScreenContextExcludesAllToolHistory(t *testing.T) {
 		t.Fatal("tool history changed screening input")
 	}
 	state := after.State.(map[string]any)
-	if len(state) != 2 || state["user_messages"] == nil || state["action"] == nil {
+	if len(state) != 2 || state["conversation"] == nil || state["action"] == nil {
 		t.Fatalf("unexpected classifier state: %v", state)
 	}
 	action := state["action"].(map[string]any)
@@ -60,9 +62,28 @@ func TestGuardianScreenContextExcludesAllToolHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	users := after.State.(map[string]any)["user_messages"].([]string)
-	if len(users) != 2 || !strings.Contains(users[0], "Do not push or delete files") || !strings.Contains(users[1], "Correction: do not run tests now") {
+	users := after.State.(map[string]any)["conversation"].([]guardianDialogueMessage)
+	if len(users) != 2 || !strings.Contains(users[0].Text, "Do not push or delete files") || !strings.Contains(users[1].Text, "Correction: do not run tests now") {
 		t.Fatalf("chronological user constraints lost: %v", users)
+	}
+}
+
+func TestGuardianScreenUsesOnlyTypedCurrentSandboxBoundary(t *testing.T) {
+	req := guardianWindowRequest(t, "screen-boundary")
+	req.Approval.RawInput["runtime_sandbox"] = map[string]any{"network": "untrusted claim"}
+	state, err := guardianScreenState(req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := state["action"].(map[string]any)
+	if _, exists := action["runtime_sandbox"]; exists {
+		t.Fatal("argument claim became a trusted boundary")
+	}
+	typed := sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Network: sandbox.NetworkDisabled}
+	req.RuntimeRequest.Metadata = map[string]any{policy.MetadataSandboxPolicy: typed}
+	state, err = guardianScreenState(req, nil)
+	if err != nil || !reflect.DeepEqual(state["action"].(map[string]any)["runtime_sandbox"], sandbox.SummarizePolicy(typed)) {
+		t.Fatalf("current typed boundary lost: %v", err)
 	}
 }
 
