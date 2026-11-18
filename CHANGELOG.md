@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.82.0](https://github.com/caelis-labs/caelis/compare/v0.81.2...v0.82.0) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **policy:** SDK MCPGrantStore and retired Runtime/ServerSpec source-trust and grant APIs are removed. Embedders supply their final Policy explicitly; no compatibility alias revives the removed gate.
+
+### Features
+
+* **sdk:** replace guardrails with typed lifecycle hooks ([#243](https://github.com/caelis-labs/caelis/issues/243)) ([fdbab17](https://github.com/caelis-labs/caelis/commit/fdbab17cc845912e2d34c79d9607a994a5d0841e))
+* **tui:** improve the welcome card and slash commands ([#249](https://github.com/caelis-labs/caelis/issues/249)) ([ee9222a](https://github.com/caelis-labs/caelis/commit/ee9222a25d2b0fe597bed5aaeac4765407d41f98))
+* **tui:** streamline model and ACP connection workflows ([#252](https://github.com/caelis-labs/caelis/issues/252)) ([77d2ed9](https://github.com/caelis-labs/caelis/commit/77d2ed9f2219cf708769a17ec5118882fa1f7a84))
+
+
+### Bug Fixes
+
+* **codemode:** remove tool argument byte budgets ([#237](https://github.com/caelis-labs/caelis/issues/237)) ([1556985](https://github.com/caelis-labs/caelis/commit/15569853051ca5ce05b0765c81ffff21b1f7454e))
+* **codemode:** tolerate console calls and clarify js_exec usage ([#250](https://github.com/caelis-labs/caelis/issues/250)) ([786b4c0](https://github.com/caelis-labs/caelis/commit/786b4c0f0c637591a94a8fa261611a619735b4ac))
+* **guardian:** bound approval context and preserve user intent ([#253](https://github.com/caelis-labs/caelis/issues/253)) ([d306311](https://github.com/caelis-labs/caelis/commit/d30631113e904615eb6ceba3fa4d4c1404166555))
+* **policy:** unify MCP approvals and adopt DTW atomic ([e4093c6](https://github.com/caelis-labs/caelis/commit/e4093c65572db8cee611b9109f70143d28b09730)), closes [#240](https://github.com/caelis-labs/caelis/issues/240)
+* **runtime:** preserve trusted completion notices at model boundaries ([#246](https://github.com/caelis-labs/caelis/issues/246)) ([2fa3a27](https://github.com/caelis-labs/caelis/commit/2fa3a27a3b4a135303ea3f9763980429daa5dd55))
+* **sdk:** preserve tool outcomes and incremental reasoning streams ([#244](https://github.com/caelis-labs/caelis/issues/244)) ([c2bedf8](https://github.com/caelis-labs/caelis/commit/c2bedf8c9fd57720ed74a9180b1504813cf18efc))
+* **tui:** align Code Mode tool rows with direct calls ([#251](https://github.com/caelis-labs/caelis/issues/251)) ([594ba05](https://github.com/caelis-labs/caelis/commit/594ba052fdcc6018ff797d2ce2e12f65766a0832))
+* **tui:** fold script results by visual rows and highlight JavaScript ([#235](https://github.com/caelis-labs/caelis/issues/235)) ([1dd71ee](https://github.com/caelis-labs/caelis/commit/1dd71eeb0590116ee66c1229ae28f652a8d61be4))
+* **tui:** keep experimental controls visible and submit plugin manage ([#254](https://github.com/caelis-labs/caelis/issues/254)) ([7423ba9](https://github.com/caelis-labs/caelis/commit/7423ba9620485637f112d744ba04ae1549dd4263))
+
 ## [0.81.2](https://github.com/caelis-labs/caelis/compare/v0.81.1...v0.81.2) (2026-11-16)
 
 
