@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"context"
 	"strings"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -31,6 +32,7 @@ type Submission struct {
 	// composer entry. It is presentation-local and never crosses into Control.
 	localID        uint64
 	viewGeneration uint64
+	requestContext context.Context
 }
 
 func cloneAttachments(items []Attachment) []Attachment {

@@ -321,7 +321,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		s.authorities.appName,
 		s.workspace.CWD,
 		runtimeCfg.SystemPrompt,
-		runtimeCfg.Model,
 		sandboxCfg,
 		sandboxPolicySnapshot,
 		plan.SkillDirs,

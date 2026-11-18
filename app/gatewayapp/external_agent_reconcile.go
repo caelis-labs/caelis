@@ -183,6 +183,20 @@ func (s *controlCommandBackend) reconcileDisconnectedACPAgentSession(
 	if closed {
 		return nil
 	}
+	return s.reconcileDisconnectedACPBindings(ctx, runtimes, active, agentID, removed, fallback, configurationRevision)
+}
+
+// An empty agentID scopes revocation to the exact profile IDs and preserves the
+// external Agent and any sibling models in its connection.
+func (s *controlCommandBackend) reconcileDisconnectedACPBindings(
+	ctx context.Context,
+	runtimes *sessionRuntimeRegistry,
+	active session.Session,
+	agentID string,
+	removed map[string]struct{},
+	fallback disconnectedACPFallback,
+	configurationRevision uint64,
+) error {
 	if !controllerUsesDisconnectedACP(active.Controller, agentID, removed) &&
 		!sessionHasDisconnectedACPParticipant(active, agentID, removed) {
 		return nil
@@ -190,6 +204,7 @@ func (s *controlCommandBackend) reconcileDisconnectedACPAgentSession(
 
 	var runtime *sessionRuntime
 	var releaseRuntime func()
+	var err error
 	if runtimes != nil {
 		runtime, releaseRuntime, err = runtimes.acquireLoadedRuntime(active.SessionID, runtimeUseCommand)
 		if err != nil {

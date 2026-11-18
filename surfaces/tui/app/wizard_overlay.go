@@ -1,17 +1,25 @@
 package tuiapp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 )
+
+var errWizardSubmissionCanceled = errors.New("wizard submission canceled by user")
+
+func wizardSubmissionCanceledByUser(ctx context.Context, err error) bool {
+	return errors.Is(context.Cause(ctx), errWizardSubmissionCanceled) &&
+		(errors.Is(err, context.Canceled) || errors.Is(err, errWizardSubmissionCanceled)) &&
+		activeSubmissionErrorOutcome(err) == appserver.OutcomeUnknown
+}
 
 type wizardField struct {
 	key, label, value, placeholder string
@@ -31,12 +39,11 @@ type wizardOverlayState struct {
 	blocked       bool
 	pending       bool
 	submitID      uint64
+	submitCancel  context.CancelCauseFunc
 	formAdvancing bool
 	geometry      wizardOverlayGeometry
 	pressed       string
-	runtimeSetup  *agents.RuntimeSetup
 	hovered       string
-	footerFocus   string
 	text          wizardTextSelection
 }
 
@@ -58,7 +65,6 @@ type wizardOverlayGeometry struct {
 	actionX, actionY                 int
 	actionWidth                      int
 	backX, backY, backWidth          int
-	sendX, sendY, sendWidth          int
 	contentX, contentY, contentWidth int
 }
 
@@ -110,20 +116,23 @@ func (m *Model) rememberWizardStep() {
 	s.parents = append(s.parents, draft)
 }
 
-func (m *Model) openWizardStep(query string) {
+func (m *Model) openWizardStep(query string, draft *wizardStepDraft) {
 	s := m.wizardOverlay
 	s.fields, s.field, s.cursor, s.window = nil, 0, 0, 0
 	s.err, s.blocked = "", false
-	s.runtimeSetup = nil
 	s.hovered, s.pressed = "", ""
-	s.footerFocus = ""
 	s.text = wizardTextSelection{}
 	m.cancelSelectionAutoScroll()
 	s.submitID = 0
 	if s.formAdvancing {
 		return
 	}
-	if draft, ok := s.drafts[m.wizardDraftKey()]; ok {
+	if draft == nil {
+		if saved, ok := s.drafts[m.wizardDraftKey()]; ok {
+			draft = &saved
+		}
+	}
+	if draft != nil {
 		m.slashArgQuery, m.slashArgIndex = draft.query, draft.index
 		m.wizard.multiSelections = cloneWizardRuntime(draft.wizard).multiSelections
 		s.fields, s.field, s.cursor = append([]wizardField(nil), draft.fields...), draft.field, draft.cursor
@@ -142,7 +151,14 @@ func (m *Model) backWizardOverlay() tea.Cmd {
 	if m.isWizardAuthChoice() {
 		return m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	}
-	if s == nil || s.pending {
+	if s == nil {
+		return nil
+	}
+	if s.pending {
+		if s.submitCancel != nil {
+			s.submitCancel(errWizardSubmissionCanceled)
+			m.clearWizard()
+		}
 		return nil
 	}
 	if s.blocked || len(s.parents) == 0 {
@@ -159,7 +175,7 @@ func (m *Model) backWizardOverlay() tea.Cmd {
 	w := cloneWizardRuntime(draft.wizard)
 	m.wizard = &w
 	m.slashArgActive, m.slashArgCommand = true, w.completionCommand()
-	m.openWizardStep(draft.query)
+	m.openWizardStep(draft.query, &draft)
 	return m.beginSlashArgLoad()
 }
 
@@ -193,13 +209,6 @@ func (m *Model) wizardCatalogReady(err error) tea.Cmd {
 		return nil
 	}
 	s.err = ""
-	if len(m.slashArgCandidates) > 0 && m.slashArgCandidates[0].RuntimeSetup != nil {
-		setup := *m.slashArgCandidates[0].RuntimeSetup
-		s.runtimeSetup = &setup
-		if m.wizardStepKey() == "acp_install" && !m.isACPManualSetup() {
-			m.initACPInstallationForm()
-		}
-	}
 	if m.wizardStepKey() == "acp_launcher" && m.slashArgQuery == "" && len(m.slashArgCandidates) == 1 {
 		candidate := m.slashArgCandidates[0]
 		// A single declared launcher needs no extra choice. Do not add that
@@ -227,9 +236,15 @@ func (m *Model) submitWizardOverlay() tea.Cmd {
 	m.cancelWizardCatalog()
 	m.slashArgActive = false
 	s.submitID = m.allocateSubmissionID()
-	_, cmd := m.submitLineWithDisplayAndAttachmentsOptions(m.wizard.def.BuildExecLine(m.wizard.state), "/"+m.wizard.def.Command, nil, submitLineOptions{
-		preserveComposer: true, localID: s.submitID,
-	})
+	opts := submitLineOptions{preserveComposer: true, localID: s.submitID}
+	if m.wizard.def.Command == "connect" && m.wizard.state["source"] != "acp" && m.cfg.executeLineCmd != nil {
+		if provider, ok := modelconfig.LookupProvider(m.wizard.state["provider"]); ok && provider.AuthFlow != "" {
+			// Own cancellation before the render yield. A closed wizard must
+			// cancel even when the asynchronous request has yet to start.
+			opts.requestContext, s.submitCancel = context.WithCancelCause(contextOrBackground(m.cfg.Context))
+		}
+	}
+	_, cmd := m.submitLineWithDisplayAndAttachmentsOptions(m.wizard.def.BuildExecLine(m.wizard.state), "/"+m.wizard.def.Command, nil, opts)
 	return cmd
 }
 
@@ -239,6 +254,10 @@ func (m *Model) finishWizardSubmission(msg TaskResultMsg) {
 		return
 	}
 	s.pending = false
+	if s.submitCancel != nil {
+		s.submitCancel(nil)
+		s.submitCancel = nil
+	}
 	if msg.Err == nil {
 		m.clearWizard()
 		return
@@ -294,12 +313,6 @@ func (m *Model) wizardAction() string {
 	if m.isWizardAuthChoice() {
 		return "Continue"
 	}
-	if m.isACPManualSetup() && s.err == "" && !m.slashArgLoadPending {
-		return "Check installation"
-	}
-	if m.wizardStepKey() == "acp_install" && len(s.fields) > 0 {
-		return "Install and continue"
-	}
 	switch {
 	case s.pending:
 		return "Saving…"
@@ -322,9 +335,6 @@ func (m *Model) wizardAction() string {
 		if count == 0 {
 			return "Select a model"
 		}
-		if m.wizard.state["_unified"] == "true" && (m.wizard.state["provider"] == "magpie" || modelconfig.IsJudgmentProvider(m.wizard.state["provider"])) {
-			return "Continue"
-		}
 		if count > 1 {
 			return fmt.Sprintf("Connect %d models", count)
 		}
@@ -334,39 +344,22 @@ func (m *Model) wizardAction() string {
 		if c, ok := m.currentSlashArgCandidate(); ok && c.ModelMetadataComplete && c.ModelImageInputKnown {
 			return "Connect"
 		}
-	case m.wizardStepKey() == "acp_model", m.wizardStepKey() == "model_type", m.connectCapabilitiesForm():
+	case m.wizardStepKey() == "acp_model":
+		if count := len(m.wizard.multiSelections["acp_model"]); count > 1 {
+			return fmt.Sprintf("Connect %d models", count)
+		}
+		return "Connect"
+	case m.connectCapabilitiesForm():
 		return "Connect"
 	}
 	return "Continue"
 }
 
 func (m *Model) wizardSearch(query string) tea.Cmd {
-	if m.wizardOverlay.runtimeSetup != nil || m.wizardStepKey() == "acp_install" {
-		return nil
-	}
 	m.wizardOverlay.err, m.wizardOverlay.window = "", 0
 	m.wizardOverlay.submitID = 0
 	m.slashArgQuery, m.slashArgIndex = truncateRunes(query, 160), 0
 	return m.requestCurrentSlashArgCompletion()
-}
-
-func (m *Model) connectContext() string {
-	if m.wizard == nil {
-		return ""
-	}
-	if m.wizard.def.Command != "connect" {
-		return ""
-	}
-	state := m.wizard.state
-	if state["source"] == "acp" {
-		return state["acp_agent"]
-	}
-	for _, field := range m.wizardOverlay.fields {
-		if field.key == "baseurl" || field.key == "endpoint" {
-			return state["provider"]
-		}
-	}
-	return joinNonEmpty([]string{state["provider"], m.connectDisplayEndpoint()}, " · ")
 }
 
 func (m *Model) wizardMultiSelectStep() bool {

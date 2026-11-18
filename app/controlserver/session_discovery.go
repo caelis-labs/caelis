@@ -19,6 +19,9 @@ func sessionServerInfo(info appserver.ServerInfo, services appserver.AppServerSe
 	if !slices.Contains(info.Capabilities, appserver.CapabilityModelAuthStream) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityModelAuthStream)
 	}
+	if services.Configuration != nil && !slices.Contains(info.Capabilities, appserver.CapabilityDeleteModels) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityDeleteModels)
+	}
 	if !slices.Contains(info.Capabilities, appserver.CapabilityExecutionConfiguration) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityExecutionConfiguration)
 	}

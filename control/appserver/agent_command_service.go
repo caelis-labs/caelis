@@ -155,6 +155,14 @@ func validateACPConnectCommandRequest(action Action, request ConnectACPRequest) 
 	if strings.TrimSpace(request.PreparationRef) == "" || strings.TrimSpace(request.PreparationDigest) == "" {
 		return errors.New("controlclient: ready ACP preparation ref and digest are required")
 	}
+	if len(request.ModelPreparations) > 0 && len(request.ConfigValues) > 0 {
+		return errors.New("controlclient: batch ACP connect uses per-model discovered defaults")
+	}
+	for _, model := range request.ModelPreparations {
+		if strings.TrimSpace(model.Ref) == "" || strings.TrimSpace(model.Digest) == "" {
+			return errors.New("controlclient: all ACP model preparation refs and digests are required")
+		}
+	}
 	return nil
 }
 

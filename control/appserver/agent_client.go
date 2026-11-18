@@ -32,11 +32,28 @@ type PrepareACPAuthenticationRequest struct {
 	MethodID          string `json:"method_id"`
 }
 
+// ConnectACPRequest commits one ready, model-scoped preparation, or several
+// model-scoped children of the same ready roster preparation.
 type ConnectACPRequest struct {
 	WriteBase
 	PreparationRef    string            `json:"preparation_ref"`
 	PreparationDigest string            `json:"preparation_digest"`
 	ConfigValues      map[string]string `json:"config_values,omitempty"`
+	// ModelPreparations lists selected models in receipt order. When present,
+	// the top-level reference addresses the unselected roster and ConfigValues
+	// must be empty. Each model uses its own discovered defaults.
+	ModelPreparations []ACPModelPreparationRef `json:"model_preparations,omitempty"`
+}
+
+// ACPModelPreparationRef identifies the exact ready model discovery to commit.
+type ACPModelPreparationRef struct {
+	Ref    string `json:"ref"`
+	Digest string `json:"digest"`
+}
+
+// ACPConnectReceipt identifies the profiles committed by a batch ACP connect.
+type ACPConnectReceipt struct {
+	Profiles []controlagents.ConnectedProfile `json:"profiles"`
 }
 
 type ACPPreparationRequest struct {

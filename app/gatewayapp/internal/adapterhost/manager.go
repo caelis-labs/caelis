@@ -108,6 +108,21 @@ func normalizeRegistration(in Registration) Registration {
 // Inspect reports registration, executable, and current backend status without
 // starting a process.
 func (m *Manager) Inspect(_ context.Context, adapterID string) (controladapterhost.Descriptor, error) {
+	descriptor, _, err := m.inspect(adapterID)
+	return descriptor, err
+}
+
+// RequireAvailable checks the same prerequisites as Inspect and returns the
+// underlying error when those prerequisites are not met.
+func (m *Manager) RequireAvailable(_ context.Context, adapterID string) (controladapterhost.Descriptor, error) {
+	descriptor, unavailable, err := m.inspect(adapterID)
+	if err != nil {
+		return descriptor, err
+	}
+	return descriptor, unavailable
+}
+
+func (m *Manager) inspect(adapterID string) (descriptor controladapterhost.Descriptor, unavailable, err error) {
 	adapterID = strings.ToLower(strings.TrimSpace(adapterID))
 	m.mu.Lock()
 	registration, ok := m.registrations[adapterID]
@@ -116,17 +131,17 @@ func (m *Manager) Inspect(_ context.Context, adapterID string) (controladapterho
 	closed := m.closed
 	m.mu.Unlock()
 	if !ok {
-		return controladapterhost.Descriptor{}, fmt.Errorf("gatewayapp adapterhost: unknown adapter %q", adapterID)
+		return controladapterhost.Descriptor{}, nil, fmt.Errorf("gatewayapp adapterhost: unknown adapter %q", adapterID)
 	}
-	descriptor := controladapterhost.Descriptor{ID: registration.ID, Name: registration.Name, BackendState: "stopped",
+	descriptor = controladapterhost.Descriptor{ID: registration.ID, Name: registration.Name, BackendState: "stopped",
 		ACPDraftSchemas: append([]string(nil), registration.ACPDraftSchemas...)}
 	if closed {
 		descriptor.Diagnostic = "Host adapter service is shutting down"
-		return descriptor, nil
+		return descriptor, errors.New(descriptor.Diagnostic), nil
 	}
-	if !commandAvailable(registration.Command) {
+	if _, lookErr := exec.LookPath(registration.Command); lookErr != nil {
 		descriptor.Diagnostic = fmt.Sprintf("install %s so %q is available on PATH", registration.Name, registration.Command)
-		return descriptor, nil
+		return descriptor, lookErr, nil
 	}
 	descriptor.Available = true
 	if running != nil {
@@ -135,12 +150,7 @@ func (m *Manager) Inspect(_ context.Context, adapterID string) (controladapterho
 		descriptor.BackendState = "failed"
 		descriptor.Diagnostic = lastErr.Error()
 	}
-	return descriptor, nil
-}
-
-func commandAvailable(command string) bool {
-	_, err := exec.LookPath(command)
-	return err == nil
+	return descriptor, nil, nil
 }
 
 // IssueGrant creates one short-lived credential restricted to one route and

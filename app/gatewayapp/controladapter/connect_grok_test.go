@@ -79,4 +79,10 @@ func TestConnectCatalogMarksDefaultProviderCredentialReusable(t *testing.T) {
 	if !strings.Contains(providers[0].Detail, "configured auth") {
 		t.Fatalf("DeepSeek provider detail = %q, want configured auth", providers[0].Detail)
 	}
+	called = false
+	endpoints := completeConnectBaseURL(context.Background(), driver, "deepseek", "", 10)
+	if !called || len(endpoints) != 1 || endpoints[0].Display != "default" ||
+		endpoints[0].Value != "https://api.deepseek.com/anthropic" || !endpoints[0].NoAuth {
+		t.Fatalf("DeepSeek endpoints = %#v, want the default with reusable auth", endpoints)
+	}
 }

@@ -6,84 +6,69 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
+	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func TestDisconnectTargetsStopsAtFailureAndReportsCommittedPrefix(t *testing.T) {
-	wantErr := errors.New("removal interrupted")
-	for _, outcome := range []appserver.Outcome{appserver.OutcomeRejected, appserver.OutcomeUnknown, appserver.OutcomeCommitted} {
-		t.Run(string(outcome), func(t *testing.T) {
-			var calls []string
-			completed, err := disconnectTargets(context.Background(), []string{"first", " FIRST ", "", "second", "third"}, func(_ context.Context, target string) error {
-				calls = append(calls, target)
-				if target == "second" {
-					return &appserver.CommandReceiptError{Receipt: appserver.CommandResult{Outcome: outcome}, Err: wantErr}
+func TestDeleteModelsUsesOneHostRevisionAndReportsConfirmedIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome appserver.Outcome
+		detail  string
+	}{
+		{name: "committed", outcome: appserver.OutcomeCommitted},
+		{name: "committed with warning", outcome: appserver.OutcomeCommitted, detail: "Session reconciliation failed"},
+		{name: "conflicted", outcome: appserver.OutcomeConflicted, detail: "Host revision changed"},
+		{name: "unknown", outcome: appserver.OutcomeUnknown, detail: "readback unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &modelBatchConfigurationProbe{result: appserver.CommandResult{Outcome: tc.outcome, Detail: tc.detail}}
+			adapter := &SessionClientAdapter{sessionClient: client, configClient: client, statusClient: client, sessionID: "selected"}
+			ids := []string{"provider:one", "acp:codex:two"}
+			confirmed, err := adapter.DeleteModels(t.Context(), append(slices.Clone(ids), " PROVIDER:one ", ""))
+			if (err != nil) != (tc.detail != "") {
+				t.Fatalf("DeleteModels error = %v", err)
+			}
+			if err != nil {
+				var receipt *appserver.CommandReceiptError
+				if !errors.As(err, &receipt) || receipt.Receipt.Outcome != tc.outcome {
+					t.Fatalf("missing receipt: %v", err)
 				}
-				return nil
-			})
-			want := []string{"first"}
-			if outcome == appserver.OutcomeCommitted {
-				want = append(want, "second")
 			}
-			if !slices.Equal(completed, want) || !slices.Equal(calls, []string{"first", "second"}) {
-				t.Fatalf("completed/called = %v/%v, want %v/[first second]", completed, calls, want)
+			if tc.outcome == appserver.OutcomeCommitted && !slices.Equal(confirmed, ids) || tc.outcome != appserver.OutcomeCommitted && len(confirmed) != 0 {
+				t.Fatalf("confirmed IDs = %v", confirmed)
 			}
-			var receipt *appserver.CommandReceiptError
-			if !errors.Is(err, wantErr) || !errors.As(err, &receipt) || receipt.Receipt.Outcome != outcome {
-				t.Fatalf("batch lost receipt: %v", err)
+			if len(client.status) != 1 || client.status[0].SessionID != "" || client.status[0].IncludeDiagnostics {
+				t.Fatalf("Host revision reads = %#v", client.status)
+			}
+			if len(client.requests) != 1 || client.requests[0].ExpectedRevision == nil || *client.requests[0].ExpectedRevision != 10 || !slices.Equal(client.requests[0].ProfileIDs, ids) {
+				t.Fatalf("batch requests = %#v", client.requests)
 			}
 		})
 	}
 }
 
-func TestDisconnectTargetsStopsAfterCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var calls []string
-	completed, err := disconnectTargets(ctx, []string{"first", "second"}, func(_ context.Context, target string) error {
-		calls = append(calls, target)
-		cancel()
-		return nil
-	})
-	if !errors.Is(err, context.Canceled) || !slices.Equal(completed, []string{"first"}) || !slices.Equal(calls, completed) {
-		t.Fatalf("completed/called/error = %v/%v/%v", completed, calls, err)
-	}
+type modelBatchConfigurationProbe struct {
+	appserver.SessionClient
+	appserver.ConfigurationClient
+	status   []appserver.StatusRequest
+	requests []appserver.DeleteModelsRequest
+	result   appserver.CommandResult
 }
 
-type disconnectBatchAgentClient struct {
-	appserver.AgentClient
-	revision uint64
-	agentIDs []string
-	requests []appserver.DisconnectACPRequest
+func (*modelBatchConfigurationProbe) Initialize(context.Context) (appserver.ServerInfo, error) {
+	return appserver.ServerInfo{Capabilities: []string{appserver.CapabilityDeleteModels}}, nil
 }
 
-func (c *disconnectBatchAgentClient) DisconnectCandidates(context.Context, appserver.AgentRequest) (appserver.DisconnectCandidatesSnapshot, error) {
-	snapshot := appserver.DisconnectCandidatesSnapshot{Revision: c.revision}
-	for _, id := range c.agentIDs {
-		snapshot.Candidates = append(snapshot.Candidates, agents.DisconnectCandidate{AgentID: id, ConnectionID: "shared", LastOnConnection: len(c.agentIDs) == 1})
-	}
-	return snapshot, nil
+func (p *modelBatchConfigurationProbe) SessionStatus(_ context.Context, req appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
+	p.status = append(p.status, req)
+	var result controlstatus.StatusSnapshot
+	result.Configuration.Revision = 10
+	return result, nil
 }
 
-func (c *disconnectBatchAgentClient) DisconnectACP(_ context.Context, req appserver.DisconnectACPRequest) (appserver.CommandResult, error) {
-	c.requests = append(c.requests, req)
-	if req.ExpectedRevision == nil || *req.ExpectedRevision != c.revision {
-		return appserver.CommandResult{Outcome: appserver.OutcomeRejected}, errors.New("stale revision")
-	}
-	c.revision++
-	c.agentIDs = slices.DeleteFunc(c.agentIDs, func(id string) bool { return id == req.AgentID })
-	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: c.revision}, nil
-}
-
-func TestDisconnectACPAgentsReadsFreshRevisionForEachSelection(t *testing.T) {
-	client := &disconnectBatchAgentClient{revision: 10, agentIDs: []string{"codex", "grok"}}
-	adapter := &SessionClientAdapter{agentClient: client, surface: "tui"}
-	completed, err := adapter.DisconnectACPAgents(context.Background(), []string{"codex", "grok"})
-	if err != nil || !slices.Equal(completed, []string{"codex", "grok"}) || len(client.agentIDs) != 0 {
-		t.Fatalf("completed = %v, remaining = %v, error = %v", completed, client.agentIDs, err)
-	}
-	if len(client.requests) != 2 || client.requests[0].OperationID == client.requests[1].OperationID {
-		t.Fatalf("disconnect requests = %#v", client.requests)
-	}
+func (p *modelBatchConfigurationProbe) DeleteModels(_ context.Context, req appserver.DeleteModelsRequest) (appserver.CommandResult, error) {
+	p.requests = append(p.requests, req)
+	p.result.OperationID = req.OperationID
+	return p.result, nil
 }

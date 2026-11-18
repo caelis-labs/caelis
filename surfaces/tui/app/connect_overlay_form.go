@@ -21,9 +21,6 @@ func (m *Model) initConnectFields() {
 	switch m.wizardStepKey() {
 	case "baseurl":
 		add("baseurl", "Endpoint", "https://…/v1", false)
-		if state["_noauth"] != "true" {
-			add("apikey", "API key", "Paste key", true)
-		}
 	case "apikey":
 		add("apikey", "API key", "Paste key", true)
 	case "acp_command":
@@ -73,19 +70,6 @@ func (m *Model) fillConnectEndpointDefault() {
 	}
 }
 
-func (m *Model) connectKeyOptional() bool {
-	if m.wizard.state["_noauth"] == "true" || m.wizard.state["_reuseauth"] == "true" {
-		return true
-	}
-	for _, field := range m.wizardOverlay.fields {
-		if field.key == "baseurl" || field.key == "endpoint" {
-			candidate := m.connectEndpointCandidate(field.value)
-			return candidate != nil && candidate.NoAuth || modelconfig.EndpointUsesNoAuth(m.wizard.state["provider"], field.value)
-		}
-	}
-	return false
-}
-
 func (m *Model) openConnectCustomModel() {
 	s := m.wizardOverlay
 	if s == nil || m.wizardStepKey() != "model" || m.slashArgLoadPending {
@@ -109,9 +93,6 @@ func (m *Model) openConnectCustomEndpoint() {
 		value = m.slashArgQuery
 	}
 	fields := []wizardField{{key: "endpoint", label: "Endpoint", value: value, placeholder: "https://…/v1"}}
-	if m.wizard.state["_noauth"] != "true" {
-		fields = append(fields, wizardField{key: "apikey", label: "API key", placeholder: "Paste key", secret: true})
-	}
 	m.openConnectCustomForm(fields)
 }
 
@@ -144,7 +125,7 @@ func (m *Model) submitConnectForm() tea.Cmd {
 				issue = "Enter an http:// or https:// endpoint."
 			}
 		case "apikey":
-			if value == "" && !m.connectKeyOptional() {
+			if value == "" && m.wizard.state["_reuseauth"] != "optional" {
 				issue = "Enter an API key."
 			}
 		case "model":
@@ -200,9 +181,9 @@ func (m *Model) submitConnectForm() tea.Cmd {
 		if m.wizard.def.OnStepConfirm != nil {
 			m.wizard.def.OnStepConfirm(step.Key, value, candidate, m.wizard.state)
 		}
-		if (step.Key == "baseurl" || step.Key == "endpoint") && values["apikey"] != "" {
-			// An explicitly entered key takes precedence over saved credentials.
-			delete(m.wizard.state, "_reuseauth")
+		if candidate != nil && candidate.NoAuth && !modelconfig.EndpointUsesNoAuth(m.wizard.state["provider"], value) {
+			// A manually entered endpoint with saved credentials still allows a replacement key.
+			m.wizard.state["_reuseauth"] = "optional"
 		}
 		if !m.advanceWizardCursor() {
 			return m.wizardSubmit()
@@ -214,6 +195,6 @@ func (m *Model) submitConnectForm() tea.Cmd {
 	m.slashArgCandidates, m.slashArgCandidateCommand = nil, ""
 	m.slashArgCompletionSettled = false
 	s.formAdvancing = false
-	m.openWizardStep("")
+	m.openWizardStep("", nil)
 	return m.beginSlashArgLoad()
 }

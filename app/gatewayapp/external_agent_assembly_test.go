@@ -42,6 +42,37 @@ func TestExternalAgentAssemblyDoesNotOwnModelDefaults(t *testing.T) {
 	}
 }
 
+func TestRetiredAntigravityConnectionRemainsReadableButCannotMaterialize(t *testing.T) {
+	t.Parallel()
+
+	store := newAppConfigStore(t.TempDir())
+	legacy := controlagents.Connection{ID: "antigravity", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: "agy_acp_server.par"}}
+	custom := legacy
+	custom.ID = controlagents.CustomConnectionID(custom.Launcher.Command, custom.Launcher)
+	if err := store.Save(AppConfig{ExternalAgents: controlagents.Configuration{
+		Connections: []controlagents.Connection{legacy, custom},
+		Agents:      []controlagents.Agent{{ID: legacy.ID, ConnectionID: legacy.ID}, {ID: custom.ID, ConnectionID: custom.ID}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
+	resolved, err := stack.composition.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
+	if err != nil || len(resolved.Agents) != 1 || resolved.Agents[0].Name != custom.ID {
+		t.Fatalf("withExternalACPAgents() = %+v, %v; want only the custom connection", resolved.Agents, err)
+	}
+	doc, err := store.LoadContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, connection, err := controlagents.ResolveAgent(doc.ExternalAgents, legacy.ID)
+	if err != nil || connection.Launcher.Command != legacy.Launcher.Command {
+		t.Fatalf("persisted Agent = %+v, %+v, %v", agent, connection, err)
+	}
+	if cfg, err := stack.composition.materializeExternalAgent(agent, connection); err == nil || !strings.Contains(err.Error(), "Antigravity ACP connection is retired") || cfg.Command != "" {
+		t.Fatalf("materializeExternalAgent() = %+v, %v; want retired connection rejection", cfg, err)
+	}
+}
+
 func TestExternalAgentAssemblyRejectsParallelLegacyTargetName(t *testing.T) {
 	t.Parallel()
 

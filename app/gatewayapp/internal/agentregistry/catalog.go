@@ -1,12 +1,10 @@
 package agentregistry
 
 import (
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
 
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/acpinstall"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -22,8 +20,6 @@ type ConnectableAgent struct {
 	Priority    int
 	Preferred   controlagents.LauncherChoice
 	Launchers   []controlagents.LauncherChoice
-	// Installation is an optional user-confirmed official archive entry point.
-	Installation *acpinstall.Source
 }
 
 type installedConnectableAgent struct {
@@ -33,7 +29,6 @@ type installedConnectableAgent struct {
 }
 
 var installedConnectableAgents = []installedConnectableAgent{
-	antigravityACPAgent(runtime.GOOS),
 	nativeACPAgent("grok", "Grok Build", "xAI's coding agent with a native ACP stdio command", 10, "grok", "agent", "stdio"),
 	nativeACPAgent("kimi", "Kimi CLI", "Kimi coding agent with a native ACP stdio command", 20, "kimi", "acp"),
 	nativeACPAgent("opencode", "OpenCode", "Open source coding agent with a native ACP stdio command", 30, "opencode", "acp"),
@@ -62,7 +57,7 @@ var installedConnectableAgents = []installedConnectableAgent{
 
 var hostedConnectableAgents = []ConnectableAgent{{
 	ID:          controladapterhost.CodexAdapterID,
-	DisplayName: "Codex CLI (built in)",
+	DisplayName: "Codex CLI",
 	Description: "Codex CLI through the Caelis built-in app-server adapter",
 	Priority:    5,
 	Preferred:   controlagents.LauncherChoiceHosted,
@@ -235,10 +230,6 @@ func nativeACPAgentSpec(
 
 func cloneConnectableAgent(in ConnectableAgent) ConnectableAgent {
 	out := in
-	if in.Installation != nil {
-		source := *in.Installation
-		out.Installation = &source
-	}
 	out.ID = strings.ToLower(strings.TrimSpace(in.ID))
 	out.DisplayName = strings.TrimSpace(in.DisplayName)
 	out.Launchers = append([]controlagents.LauncherChoice(nil), in.Launchers...)

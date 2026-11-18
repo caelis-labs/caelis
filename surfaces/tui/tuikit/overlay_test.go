@@ -10,6 +10,22 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func TestRenderBreadcrumbKeepsCurrentStepOnOneLine(t *testing.T) {
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{40, "/connect › 自定义 › Models"},
+		{16, "/conne… › Models"},
+		{6, "Models"},
+	} {
+		got := ansi.Strip(RenderBreadcrumb(DefaultTheme(), tc.width, []string{"/connect", "自定义"}, "Models"))
+		if got != tc.want || ansi.StringWidth(got) > tc.width {
+			t.Errorf("breadcrumb at %d columns = %q, want %q", tc.width, got, tc.want)
+		}
+	}
+}
+
 func TestPaintLineBackgroundPreservesTerminalDefault(t *testing.T) {
 	line := lipgloss.NewStyle().Foreground(lipgloss.Color("#242a35")).Render("readable on a light terminal")
 	line += lipgloss.NewStyle().Background(lipgloss.Color("#f0f0f0")).Render(" selected")

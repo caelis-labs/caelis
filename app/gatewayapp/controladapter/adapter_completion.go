@@ -144,6 +144,10 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 	switch normalizedCommand {
 	case "model":
 		return d.completeModelAliases(ctx, query, limit)
+	case "disconnect-models":
+		return d.completeDisconnectModels(ctx, query, limit)
+	// The remaining disconnect selectors serve older TUI clients that still
+	// use the separate provider and whole-Agent menus.
 	case "disconnect-provider":
 		return d.completeDisconnectProviderModels(ctx, query, limit)
 	case "disconnect":
@@ -436,6 +440,14 @@ func modelChoiceConfig(choice ModelChoice) modelconfig.Config {
 	}
 }
 
+func modelChoiceDisplay(choice ModelChoice, cfg modelconfig.Config) string {
+	display := strings.TrimSpace(firstNonEmpty(choice.DisplayName, modelconfig.DisplayName(cfg), choice.Alias, choice.ID))
+	if display != "" && choice.Backend == string(modelprofile.BackendACP) {
+		return "ACP · " + display
+	}
+	return display
+}
+
 func modelChoiceConfigs(choices []ModelChoice) []modelconfig.Config {
 	configs := make([]modelconfig.Config, 0, len(choices))
 	for _, choice := range choices {
@@ -452,7 +464,7 @@ func modelChoiceCandidates(choices []ModelChoice, query string, limit int) ([]co
 	for _, choice := range choices {
 		cfg := modelChoiceConfig(choice)
 		value := modelconfig.PublicSelector(cfg)
-		display := strings.TrimSpace(firstNonEmpty(choice.DisplayName, modelconfig.DisplayName(cfg), choice.Alias, choice.ID))
+		display := modelChoiceDisplay(choice, cfg)
 		if display == "" {
 			continue
 		}

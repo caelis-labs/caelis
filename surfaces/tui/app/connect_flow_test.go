@@ -25,7 +25,7 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 		},
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			if command == "connect-presets" {
+			if command == "connect-options" {
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			}
 			return nil, nil
@@ -43,7 +43,7 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
-	if strings.TrimSpace(m.slashArgCommand) != "connect-presets" {
+	if strings.TrimSpace(m.slashArgCommand) != "connect-options" {
 		t.Fatalf("slashArgCommand = %q, want connect", m.slashArgCommand)
 	}
 	if got := m.textarea.Value(); got != "" {
@@ -64,7 +64,7 @@ func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
 		},
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			if command == "connect-presets" {
+			if command == "connect-options" {
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
 			}
 			return nil, nil
@@ -109,7 +109,7 @@ func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 		},
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch {
-			case command == "connect-presets":
+			case command == "connect-options":
 				return []SlashArgCandidate{{Value: "acp", Display: "Local ACP Agent"}}, nil
 			case command == "connect-acp-agent":
 				return []SlashArgCandidate{{Value: "grok", Display: "Grok Build"}}, nil
@@ -271,7 +271,7 @@ func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance
 		Wizards:       DefaultWizards(),
 		SlashArgComplete: func(ctx context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "account", Display: "Sign in with an account"}}, nil
 			case "connect-provider-account":
 				return []SlashArgCandidate{{Value: "codex", Display: "codex", NoAuth: true}}, nil
@@ -595,7 +595,7 @@ func TestConnectWizardInstalledLauncherDoesNotAskForCommand(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "acp"}}, nil
 			case "connect-acp-agent":
 				return []SlashArgCandidate{{Value: "grok"}}, nil
@@ -628,7 +628,7 @@ func TestConnectWizardOllamaLocalEndpointSkipsAPIKey(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
@@ -679,7 +679,7 @@ func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
@@ -703,12 +703,9 @@ func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
 	} else {
 		runConnectTestCmd(m, cmd)
 	}
-	m.slashArgQuery = customBaseURL
-	handled, cmd := m.handleWizardEnter()
-	if !handled {
-		t.Fatal("custom endpoint entry was not handled")
-	}
-	runConnectTestCmd(m, cmd)
+	connectPaste(m, customBaseURL)
+	connectPress(m, "enter") // open custom endpoint editor
+	connectPress(m, "enter") // confirm custom address
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
 	if state.Provider != "ollama" || state.BaseURL != customBaseURL || state.TokenRef != "" {
 		t.Fatalf("connect model state after custom Ollama endpoint = %#v, want no API-key step", state)
@@ -720,7 +717,7 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
@@ -755,7 +752,7 @@ func TestConnectWizardKeepsBaseURLStepForOpenAIProtocolProviders(t *testing.T) {
 				Wizards: DefaultWizards(),
 				SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 					switch command {
-					case "connect-presets":
+					case "connect-options":
 						return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 					case "connect-provider-api-key":
 						return []SlashArgCandidate{{Value: provider, Display: provider}}, nil
@@ -789,7 +786,7 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
@@ -829,10 +826,12 @@ func TestConnectWizardSkipsAPIKeyForReusableDefaultProviderAuth(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek", Detail: "configured auth", NoAuth: true}}, nil
+			case "connect-baseurl:deepseek":
+				return []SlashArgCandidate{{Value: "https://api.deepseek.com/anthropic", Display: "default", NoAuth: true}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "deepseek" && state.TokenRef == "" {
@@ -852,9 +851,18 @@ func TestConnectWizardSkipsAPIKeyForReusableDefaultProviderAuth(t *testing.T) {
 		t.Fatal("provider selection was not handled")
 	}
 	runConnectTestCmd(m, cmd)
+	connectPress(m, "enter") // default endpoint with saved credentials
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "deepseek" || state.TokenRef != "" {
+	if state.Provider != "deepseek" || state.BaseURL != "https://api.deepseek.com/anthropic" || state.TokenRef != "" {
 		t.Fatalf("connect model state = %#v, want reusable DeepSeek auth without API-key input", state)
+	}
+	connectPress(m, "esc")
+	m.slashArgIndex = len(m.slashArgCandidates)
+	connectPress(m, "enter") // custom endpoint editor
+	connectPaste(m, "https://other.example/anthropic")
+	connectPress(m, "enter") // confirm custom address
+	if m.wizardStepKey() != "apikey" || m.wizardOverlay.fields[0].value != "" {
+		t.Fatal("custom DeepSeek endpoint inherited default credentials")
 	}
 }
 
@@ -863,7 +871,7 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -906,7 +914,7 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -981,7 +989,7 @@ func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			if command == "connect-presets" {
+			if command == "connect-options" {
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			}
 			if command == "connect-provider-api-key" {
@@ -1027,7 +1035,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -1109,7 +1117,7 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -1151,10 +1159,12 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
+			case "connect-baseurl:deepseek":
+				return []SlashArgCandidate{{Value: "https://api.deepseek.com/anthropic", Display: "default"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
@@ -1165,11 +1175,12 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 		},
 	})
 	openModelConnectWizard(t, m)
-	handled, cmd := m.handleWizardEnter() // provider -> apikey
+	handled, cmd := m.handleWizardEnter() // provider -> endpoint
 	if !handled {
 		t.Fatal("provider selection was not handled")
 	}
 	runConnectTestCmd(m, cmd)
+	connectPress(m, "enter") // endpoint
 	m.slashArgQuery = "sk-test"
 	handled, cmd = m.handleWizardEnter() // api key -> model
 	if !handled {
@@ -1193,7 +1204,7 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect deepseek deepseek-flash - %d sk-test - - auto",
+		"/connect deepseek deepseek-flash https://api.deepseek.com/anthropic %d sk-test - - auto",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {
@@ -1211,10 +1222,12 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch {
-			case command == "connect-presets":
+			case command == "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case command == "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
+			case command == "connect-baseurl:deepseek":
+				return []SlashArgCandidate{{Value: "https://api.deepseek.com/anthropic", Display: "default"}}, nil
 			case strings.HasPrefix(command, "connect-image-input:"):
 				return []SlashArgCandidate{{Value: "false"}, {Value: "true"}}, nil
 			default:
@@ -1237,6 +1250,7 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 	} else {
 		runConnectTestCmd(m, cmd)
 	}
+	connectPress(m, "enter") // endpoint
 	m.slashArgQuery = "sk-test"
 	if handled, cmd := m.handleWizardEnter(); !handled {
 		t.Fatal("api key was not handled")
@@ -1271,7 +1285,7 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect deepseek account-catalog-model - %d sk-test - - auto - true",
+		"/connect deepseek account-catalog-model https://api.deepseek.com/anthropic %d sk-test - - auto - true",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {
@@ -1289,10 +1303,12 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
+			case "connect-baseurl:deepseek":
+				return []SlashArgCandidate{{Value: "https://api.deepseek.com/anthropic", Display: "default"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
@@ -1312,6 +1328,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	} else {
 		runConnectTestCmd(m, cmd)
 	}
+	connectPress(m, "enter") // endpoint
 	m.slashArgQuery = "sk-test"
 	if handled, cmd := m.handleWizardEnter(); !handled {
 		t.Fatal("api key was not handled")
@@ -1384,7 +1401,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect deepseek deepseek-v4-pro,deepseek-flash - %d sk-test - - auto",
+		"/connect deepseek deepseek-v4-pro,deepseek-flash https://api.deepseek.com/anthropic %d sk-test - - auto",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {
@@ -1403,7 +1420,7 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
@@ -1506,10 +1523,12 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect-presets":
+			case "connect-options":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
+			case "connect-baseurl:deepseek":
+				return []SlashArgCandidate{{Value: "https://api.deepseek.com/anthropic", Display: "default"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
 				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
@@ -1520,11 +1539,12 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		},
 	})
 	openModelConnectWizard(t, m)
-	handled, cmd := m.handleWizardEnter() // provider -> apikey
+	handled, cmd := m.handleWizardEnter() // provider -> endpoint
 	if !handled {
 		t.Fatal("provider selection was not handled")
 	}
 	runConnectTestCmd(m, cmd)
+	connectPress(m, "enter") // endpoint
 	m.slashArgQuery = "sk-test"
 	handled, cmd = m.handleWizardEnter() // api key -> model
 	if !handled {
@@ -1549,7 +1569,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect deepseek deepseek-flash - %d sk-test - - auto",
+		"/connect deepseek deepseek-flash https://api.deepseek.com/anthropic %d sk-test - - auto",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {

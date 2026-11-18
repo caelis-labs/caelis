@@ -34,12 +34,15 @@ Control. Cancelled discovery cannot reopen the overlay; uncertain save outcomes
 require checking `/model` before reconnecting. Success closes the overlay and
 preserves the composer draft. Credentials never enter composer history.
 
-`/disconnect` shares this overlay: choose Provider or ACP Agent, search and
-select targets with Space or click, then Enter disconnects the selection. Back
-preserves selections across searches. `/plugin` uses the same navigation for
-installation, removal and marketplace actions; installation sources are entered
-in a form. Enable/disable uses the shared multi-select prompt. Completed commands
-leave the composer clear; full commands with arguments remain available.
+`/disconnect` uses the overlay to search connected provider and ACP models in
+one list. Select models with Space or click, then press Enter to disconnect
+them. See [Disconnect](../../docs/external-acp-agents.md#disconnect) for Host
+requirements.
+
+`/plugin` uses the same navigation for installation, removal and marketplace
+actions; installation sources are entered in a form. Enable/disable uses the
+shared multi-select prompt. Completed commands leave the composer clear; full
+commands with arguments remain available.
 
 `/resume` searches inside its overlay. Search survives catalog refreshes and
 never changes the composer draft. Up/Down selects, Enter opens, and Esc closes.

@@ -81,7 +81,7 @@ func (m *Model) collectWizardReadonlyText(body []string, controls []int) {
 		if interactive || strings.HasPrefix(plain, "─") {
 			continue
 		}
-		s.lines[y] = plain
+		s.lines[y] = strings.ReplaceAll(plain, wizardURLSeparator, "://")
 		s.rows = append(s.rows, wizardTextRow{y: y, line: y, width: displayColumns(plain)})
 	}
 }
@@ -101,29 +101,4 @@ func (m *Model) finishWizardTextSelection(mouse tea.Mouse) tea.Cmd {
 		return m.copySelectionToClipboard(text)
 	}
 	return nil
-}
-
-func (m *Model) wizardSelectionScrollDelta(mouse tea.Mouse) int {
-	s, g := &m.wizardOverlay.text, m.wizardOverlay.geometry
-	if !s.selecting || !m.isACPManualSetup() || len(s.rows) == 0 {
-		return 0
-	}
-	if mouse.Y <= g.contentY+s.rows[0].y {
-		return -1
-	}
-	if mouse.Y >= g.contentY+s.rows[len(s.rows)-1].y {
-		return 1
-	}
-	return 0
-}
-
-func (m *Model) scrollWizardSelectionBy(delta int, mouse tea.Mouse) (bool, tea.Cmd) {
-	s := m.wizardOverlay
-	previous := s.window
-	s.window = max(0, s.window+delta)
-	m.renderWizardOverlay()
-	if point, ok := m.wizardTextPoint(mouse, true); ok {
-		s.text.end = point
-	}
-	return previous != s.window, nil
 }

@@ -20,8 +20,6 @@ func (m *Model) wizardMouseTarget(mouse tea.Mouse) string {
 		return "back"
 	case g.actionWidth > 0 && m.wizardActionEnabled() && mouse.Y == g.actionY && mouse.X >= g.actionX && mouse.X < g.actionX+g.actionWidth:
 		return "action"
-	case g.sendWidth > 0 && m.canSendACPInstallPrompt() && mouse.Y == g.sendY && mouse.X >= g.sendX && mouse.X < g.sendX+g.sendWidth:
-		return "send"
 	case !m.wizardBusy() && !s.blocked:
 		if index := subagentRowAtY(g.rows, mouse.Y); index >= 0 {
 			return wizardRowTarget(index)
@@ -46,9 +44,7 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 			if point, ok := m.wizardTextPoint(mouse, true); ok {
 				s.text.end = point
 			}
-			m.selectionAutoScroll.mouse = mouse
-			m.selectionAutoScroll.active = m.wizardSelectionScrollDelta(mouse) != 0
-			return m.ensureSelectionAutoScrollTick()
+			return nil
 		}
 		s.hovered = target
 		if s.pressed != target {
@@ -75,10 +71,6 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 		if delta == 0 {
 			return nil
-		}
-		if s.text.selecting && m.isACPManualSetup() {
-			_, cmd := m.scrollWizardSelectionBy(delta, mouse)
-			return cmd
 		}
 		m.moveWizardSelection(delta)
 	case tea.MouseClickMsg:
@@ -108,22 +100,15 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 		switch target {
 		case "close":
-			if m.isWizardAuthChoice() {
+			if s.pending || m.isWizardAuthChoice() {
 				return m.backWizardOverlay()
 			}
 			m.clearWizard()
 			return nil
 		case "back":
-			if s.pending {
-				m.clearWizard()
-				return nil
-			}
 			return m.backWizardOverlay()
 		case "action":
-			s.footerFocus = "action"
 			return m.acceptWizardOverlay()
-		case "send":
-			return m.sendACPInstallPrompt()
 		}
 		if index := subagentRowAtY(g.rows, mouse.Y); index >= 0 {
 			if m.isWizardAuthChoice() {

@@ -13,8 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/modelprofile"
-	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/discovery"
 )
 
@@ -135,11 +133,7 @@ func (s *controlCommandBackend) prepareACPAtRevision(
 	}
 
 	if connection.ID == "" {
-		if prepared.Install != nil {
-			connection, result.EffectStarted, err = installACPConnection(ctx, prepared)
-		} else {
-			connection, err = s.resolveACPConnectionLauncher(ctx, connectRequestFromACPPrepare(prepared))
-		}
+		connection, err = s.resolveACPConnectionLauncher(ctx, connectRequestFromACPPrepare(prepared))
 		if err != nil {
 			return result, err
 		}
@@ -298,74 +292,6 @@ func (s *controlCommandBackend) prepareACPAuthenticationAtRevision(
 	return result, nil
 }
 
-func (s *controlCommandBackend) connectPreparedACPAtRevision(
-	ctx context.Context,
-	principal appserver.Principal,
-	req appserver.ConnectACPRequest,
-) (externalAgentMutationResult, modelprofile.ModelProfile, error) {
-	mutation := externalAgentMutationResult{Revision: expectedConfigurationRevision(req.ExpectedRevision)}
-	preparation, err := s.ownedACPPreparation(ctx, principal.ID, req.PreparationRef, req.PreparationDigest)
-	if err != nil {
-		return mutation, modelprofile.ModelProfile{}, err
-	}
-	if preparation.State != controlagents.PreparationStateReady {
-		return mutation, modelprofile.ModelProfile{}, errors.New("gatewayapp: ACP preparation is not ready")
-	}
-	model, defaults, err := controlagents.ResolveDiscoverySelection(
-		preparation.Discovery,
-		preparation.Request.ModelID,
-		req.ConfigValues,
-	)
-	if err != nil {
-		return mutation, modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: %w", err)
-	}
-
-	doc, err := s.composition.authorities.store.LoadContext(ctx)
-	if err != nil {
-		return mutation, modelprofile.ModelProfile{}, err
-	}
-	mutation.Revision = doc.ConfigurationRevision
-	expected := expectedConfigurationRevision(req.ExpectedRevision)
-	if doc.ConfigurationRevision != expected {
-		return mutation, modelprofile.ModelProfile{}, &configstore.ConfigurationRevisionConflict{Expected: expected, Actual: doc.ConfigurationRevision}
-	}
-	next, agent, err := controlagents.UpsertExternalConnection(
-		doc.ExternalAgents,
-		preparation.Connection,
-		preparation.Discovery,
-		externalAgentNameAllowed,
-	)
-	if err != nil {
-		return mutation, modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: update external Agent configuration: %w", err)
-	}
-	profile, err := modelprofilebuilder.FromACP(agent, preparation.Connection, model, defaults, preparation.Discovery)
-	if err != nil {
-		return mutation, modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: build ACP model profile: %w", err)
-	}
-	doc.ExternalAgents = next
-	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profile)
-	if err != nil {
-		return mutation, modelprofile.ModelProfile{}, fmt.Errorf("gatewayapp: update model profile catalog: %w", err)
-	}
-	saved, persistErr := s.composition.authorities.store.CompareAndSave(ctx, expected, doc)
-	if persistErr != nil && !configstore.WriteCommitted(persistErr) {
-		mutation.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
-		return mutation, modelprofile.ModelProfile{}, persistErr
-	}
-	mutation.EffectStarted = true
-	mutation.Revision = configurationErrorRevision(persistErr, saved.ConfigurationRevision)
-	if saved.ConfigurationRevision == 0 {
-		reconcileErr := s.reconcileCommittedExternalAgents(ctx)
-		return mutation, profile, errors.Join(
-			persistErr,
-			errors.New("gatewayapp: committed external Agent configuration revision is unknown"),
-			wrapOptionalError("gatewayapp: reconcile unobserved external Agent configuration", reconcileErr),
-		)
-	}
-	mutation.Warning = wrapOptionalError("gatewayapp: external Agent configuration durability warning", persistErr)
-	return mutation, profile, nil
-}
-
 func (s *controlCommandBackend) preflightACPPreparation(ctx context.Context, expected uint64) error {
 	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
@@ -410,7 +336,14 @@ func (s *controlCommandBackend) ownedACPPreparation(ctx context.Context, princip
 	if s == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation is unavailable")
 	}
-	return ownedACPPreparation(s.acpPreparations, ctx, principalID, ref, digest)
+	preparation, err := ownedACPPreparation(s.acpPreparations, ctx, principalID, ref, digest)
+	if err != nil {
+		return controlagents.ACPPreparation{}, err
+	}
+	if isRetiredAntigravityConnection(preparation.Connection.ID) || preparation.Request.AdapterID == "antigravity" {
+		return controlagents.ACPPreparation{}, errorcode.New(errorcode.FailedPrecondition, "The Antigravity ACP connection is retired.")
+	}
+	return preparation, nil
 }
 
 func ownedACPPreparation(store *acpPreparationStore, ctx context.Context, principalID, ref, digest string) (controlagents.ACPPreparation, error) {
@@ -432,6 +365,9 @@ func ownedACPPreparation(store *acpPreparationStore, ctx context.Context, princi
 
 func validateACPPrepareLauncher(request controlagents.ACPPrepareRequest) error {
 	request = controlagents.NormalizeACPPrepareRequest(request)
+	if request.Install != nil {
+		return errorcode.New(errorcode.InvalidArgument, "ACP runtime installation is no longer supported.")
+	}
 	if request.AdapterID == "" {
 		return errors.New("gatewayapp: ACP adapter is required")
 	}

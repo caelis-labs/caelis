@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -328,10 +329,17 @@ func cloneCommandResult(in CommandResult) CommandResult {
 		resource := *in.Resource
 		out.Resource = &resource
 	}
+	if in.ACPConnect != nil {
+		out.ACPConnect = &ACPConnectReceipt{Profiles: slices.Clone(in.ACPConnect.Profiles)}
+	}
 	return out
 }
 
 func sameCommandResult(left, right CommandResult) bool {
+	if !reflect.DeepEqual(left.ACPConnect, right.ACPConnect) {
+		return false
+	}
+	left.ACPConnect, right.ACPConnect = nil, nil
 	if !reflect.DeepEqual(left.BackgroundGrant, right.BackgroundGrant) {
 		return false
 	}

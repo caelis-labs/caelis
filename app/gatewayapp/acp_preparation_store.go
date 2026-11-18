@@ -505,11 +505,13 @@ func sameACPPreparationOwnership(current, next controlagents.ACPPreparation) boo
 	if current.State == controlagents.PreparationStatePlanned && !storedACPPreparationConnectionPresent(current.Connection) {
 		return true
 	}
-	currentConnection := current.Connection
-	nextConnection := next.Connection
-	currentConnection.Authentication = controlagents.Authentication{}
-	nextConnection.Authentication = controlagents.Authentication{}
-	return reflect.DeepEqual(currentConnection, nextConnection)
+	return sameACPConnectionOwnership(current.Connection, next.Connection)
+}
+
+func sameACPConnectionOwnership(current, next controlagents.Connection) bool {
+	current.Authentication = controlagents.Authentication{}
+	next.Authentication = controlagents.Authentication{}
+	return reflect.DeepEqual(current, next)
 }
 
 func storedACPPreparationConnectionPresent(connection controlagents.Connection) bool {

@@ -120,6 +120,11 @@ func (c *Client) UseModel(ctx context.Context, req appserver.UseModelRequest) (a
 func (c *Client) DeleteModel(ctx context.Context, req appserver.DeleteModelRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/configuration/delete-model", req.WriteBase, req)
 }
+
+// DeleteModels removes a batch of model profiles through one Host command.
+func (c *Client) DeleteModels(ctx context.Context, req appserver.DeleteModelsRequest) (appserver.CommandResult, error) {
+	return c.doCommand(ctx, http.MethodPost, "/configuration/delete-models", req.WriteBase, req)
+}
 func (c *Client) SetWorkspaceTrust(ctx context.Context, req appserver.WorkspaceTrustRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/configuration/workspace-trust", req.WriteBase, req)
 }

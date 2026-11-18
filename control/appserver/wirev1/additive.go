@@ -64,6 +64,7 @@ func knownWireFields(raw []byte, target any) ([]byte, error) {
 		*appserver.CreateAgentRoleRequest,
 		*appserver.DeleteAgentRoleRequest,
 		*appserver.DeleteModelRequest,
+		*appserver.DeleteModelsRequest,
 		*appserver.DisablePluginRequest,
 		*appserver.DisconnectACPRequest,
 		*appserver.EnablePluginRequest,

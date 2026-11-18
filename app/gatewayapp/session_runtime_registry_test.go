@@ -752,6 +752,7 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 		Model:               "same-id-reconnect-model",
 		BaseURL:             "http://same-id.example",
 		ReasoningLevels:     []string{"high"},
+		ReasoningEffort:     "high",
 		ContextWindowTokens: 65536,
 	}
 	profile, err := stack.connectTestModel(oldConfig)
@@ -806,6 +807,7 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 	newConfig := oldConfig
 	newConfig.ContextWindowTokens = 131072
 	newConfig.ReasoningLevels = []string{"low"}
+	newConfig.ReasoningEffort = "low"
 	reconnected, err := stack.connectTestModel(newConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -844,6 +846,13 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 	}
 	if got := runtime.instance.activeRuntime.ModelProfileEffort; strings.EqualFold(got, "high") {
 		t.Fatalf("live Runtime reasoning after same-ID reconnect = %q, want stale high cleared", got)
+	}
+	resolved, err := runtime.instance.currentGateway().Resolver().ResolveTurn(ctx, kernelimpl.TurnIntent{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatalf("resolve next Turn after same-ID reconnect: %v", err)
+	}
+	if got := resolved.RunRequest.AgentSpec.Metadata["reasoning_effort"]; got != "low" {
+		t.Fatalf("next Turn reasoning after same-ID reconnect = %q, want low", got)
 	}
 	child, err := startGatewayAppTestSession(ctx, stack, "same-id-stale-pin-child")
 	if err != nil {

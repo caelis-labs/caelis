@@ -456,6 +456,8 @@ func validateCommandRequest(action Action, request any) error {
 		return validateUseModelRequest(typed)
 	case DeleteModelRequest:
 		return validateDeleteModelRequest(typed)
+	case DeleteModelsRequest:
+		return validateDeleteModelsRequest(typed)
 	case ExperimentalRequest:
 		return validateExperimentalRequest(typed)
 	case PolicyRuleRequest:

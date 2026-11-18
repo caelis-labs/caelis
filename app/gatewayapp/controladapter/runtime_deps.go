@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/control/adapterhost"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -169,10 +170,10 @@ type AgentRuntimeDeps struct {
 	// SessionStateFn observes the canonical Control state using the adapter's
 	// complete bound principal, including live Turn and participant identities.
 	SessionStateFn         func(context.Context, session.SessionRef) (appserver.SessionState, error)
-	InstalledCommandFn     func(context.Context, string) (string, error)
 	ControllerStatusFn     func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	DisconnectCandidatesFn func(context.Context) ([]controlagents.DisconnectCandidate, error)
 	ListFn                 func() []ACPAgentInfo
+	InspectHostedAdapterFn func(context.Context, string) (adapterhost.Descriptor, error)
 }
 
 // ModelRuntimeDeps carries model catalog and authentication capabilities.

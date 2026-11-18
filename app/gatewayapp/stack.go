@@ -660,7 +660,7 @@ type stackBaseMetadata struct {
 	SkillCatalog skill.Catalog
 }
 
-func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, sandboxPolicy sandbox.PolicySnapshot, skillDirs []string, pluginSkills []skill.PluginBundle) (stackBaseMetadata, error) {
+func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, sandboxCfg SandboxConfig, sandboxPolicy sandbox.PolicySnapshot, skillDirs []string, pluginSkills []skill.PluginBundle) (stackBaseMetadata, error) {
 	baseMetadata := map[string]any{}
 	result, err := buildSystemPromptResult(promptConfig{
 		AppName:       appName,
@@ -675,9 +675,6 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model Mode
 	}
 	if strings.TrimSpace(result.Prompt) != "" {
 		baseMetadata["system_prompt"] = result.Prompt
-	}
-	if reasoning := strings.TrimSpace(model.ReasoningEffort); reasoning != "" {
-		baseMetadata["reasoning_effort"] = reasoning
 	}
 	return stackBaseMetadata{
 		Metadata:     sandboxpolicy.WithPolicyMetadata(baseMetadata, sandboxCfg),

@@ -49,7 +49,6 @@ func statusRuntimeDeps(status gatewayapp.StatusService) controladapter.StatusRun
 func agentRuntimeDeps(agents gatewayapp.AgentService) controladapter.AgentRuntimeDeps {
 	return controladapter.AgentRuntimeDeps{
 		ControllerStatusFn:     agents.ControllerStatus,
-		InstalledCommandFn:     agents.InstalledCommand,
 		DisconnectCandidatesFn: agents.DisconnectCandidates,
 		ListFn:                 agents.List,
 	}

@@ -49,6 +49,23 @@ func RenderResponsiveOverlayFrame(theme Theme, m ResponsiveOverlayFrameModel) st
 	return paintBlockBackground(frame, lipgloss.Width(frame), tok.OverlayBg.GetBackground())
 }
 
+// RenderBreadcrumb lays out a single-line path and reserves space for the
+// current step before truncating its ancestors.
+func RenderBreadcrumb(theme Theme, width int, ancestors []string, current string) string {
+	if width <= 0 {
+		return ""
+	}
+	const separator = " › "
+	current = ansi.Truncate(current, width, "…")
+	step := theme.TitleStyle().Render(current)
+	ancestorWidth := width - ansi.StringWidth(current) - ansi.StringWidth(separator)
+	if len(ancestors) == 0 || ancestorWidth <= 0 {
+		return step
+	}
+	trail := ansi.Truncate(strings.Join(ancestors, separator), ancestorWidth, "…")
+	return theme.HelpHintTextStyle().Render(trail+separator) + step
+}
+
 // PaintLineBackground makes background paint survive nested ANSI resets. It
 // fills only transparent cells, preserving explicit backgrounds such as text
 // selection and inline code.

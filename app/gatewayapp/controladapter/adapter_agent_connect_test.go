@@ -11,40 +11,37 @@ import (
 func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testing.T) {
 	candidates := completeConnectACPAgents("", 20)
 	nativeAgents := []string{
-		"antigravity", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
 		"auggie", "cline", "factory-droid", "goose", "kilo",
 	}
-	if len(candidates) < 2 || candidates[0].Value != "codex" || candidates[1].Value != "antigravity" || candidates[1].Display != "Google Antigravity" {
-		t.Fatalf("ACP catalog must lead with Codex and Google Antigravity: %#v", candidates)
+	if len(candidates) == 0 || candidates[0].Value != "codex" {
+		t.Fatalf("ACP catalog must lead with Codex: %#v", candidates)
 	}
 	for _, want := range append(append([]string{"codex"}, nativeAgents...), "custom") {
 		if !slashCandidatesHaveValue(candidates, want) {
 			t.Fatalf("ACP Agent candidates = %#v, want %q", candidates, want)
 		}
 	}
-	for _, removed := range []string{"claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+	for _, removed := range []string{"antigravity", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
 		if slashCandidatesHaveValue(candidates, removed) {
 			t.Fatalf("ACP Agent candidates = %#v, removed Registry entry %q remains", candidates, removed)
 		}
 	}
-	codex := completeConnectACPLaunchers("codex", "", 10, "installed-command")
+	codex := completeConnectACPLaunchers("codex", "", 10)
 	if len(codex) != 1 || codex[0].Value != "hosted" || !strings.Contains(codex[0].Display, "Recommended") {
 		t.Fatalf("codex launchers = %#v, want built-in Host adapter only", codex)
 	}
 	for _, native := range nativeAgents {
-		if native == "antigravity" {
-			continue
-		}
-		launchers := completeConnectACPLaunchers(native, "", 10, "installed-command")
+		launchers := completeConnectACPLaunchers(native, "", 10)
 		if len(launchers) != 1 || launchers[0].Value != "installed" || !strings.Contains(launchers[0].Display, "Recommended") {
 			t.Fatalf("%s launchers = %#v, want installed command only", native, launchers)
 		}
 	}
-	qoder := completeConnectACPLaunchers("qoder", "", 10, "installed-command")
+	qoder := completeConnectACPLaunchers("qoder", "", 10)
 	if len(qoder) != 1 || !strings.Contains(qoder[0].Detail, `"qoder" or "qodercli"`) {
 		t.Fatalf("qoder launchers = %#v, want both official PATH command names", qoder)
 	}
-	custom := completeConnectACPLaunchers("custom", "", 10, "installed-command")
+	custom := completeConnectACPLaunchers("custom", "", 10)
 	if len(custom) != 1 || custom[0].Value != "command" {
 		t.Fatalf("custom launchers = %#v, want custom command only", custom)
 	}
@@ -73,15 +70,5 @@ func TestAdapterListsControlOwnedDisconnectCandidates(t *testing.T) {
 	agents, err := driver.CompleteSlashArg(context.Background(), "disconnect-acp", "", 10)
 	if err != nil || len(agents) != 1 || agents[0].Value != "codex" || agents[0].Display != "/codex" {
 		t.Fatalf("CompleteSlashArg(disconnect Agent) = %#v, err=%v", agents, err)
-	}
-}
-
-func TestConnectSetupUsesTheConfiguredRuntimeRead(t *testing.T) {
-	driver := &assembler{deps: &runtimeDeps{Agent: AgentRuntimeDeps{
-		InstalledCommandFn: func(context.Context, string) (string, error) { return "/user/tools/agy_acp_server.par", nil },
-	}}}
-	choices, err := completeConnectArgs(t.Context(), driver, "connect-acp-launcher:antigravity", "", 10)
-	if err != nil || len(choices) != 1 || choices[0].Value != "installed" || choices[0].RuntimeSetup != nil {
-		t.Fatalf("configured directory must skip installation: %#v, %v", choices, err)
 	}
 }

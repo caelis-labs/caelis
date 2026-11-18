@@ -8,6 +8,29 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+func TestDisconnectCatalogUsesStableProfileIDsAndMarksOnlyACP(t *testing.T) {
+	t.Parallel()
+	choices := []ModelChoice{
+		{ID: "direct-config", ProfileID: "provider:direct-config", DisplayName: "Codex / Shared model", Provider: "codex", Model: "shared", Backend: "provider"},
+		{ID: "acp:codex:shared", ProfileID: "acp:codex:shared", DisplayName: "Codex / Shared model", Provider: "codex", Model: "shared", Backend: "acp"},
+	}
+	driver := newHostAssembler(&runtimeDeps{Model: ModelRuntimeDeps{
+		ListChoicesFn: func(context.Context, session.SessionRef) ([]ModelChoice, error) { return choices, nil },
+	}}, "", "")
+	for _, command := range []string{"disconnect-models", "model"} {
+		candidates, err := driver.CompleteSlashArg(context.Background(), command, "shared model", 10)
+		if err != nil || len(candidates) != 2 {
+			t.Fatalf("%s: candidates = %#v, err = %v", command, candidates, err)
+		}
+		if candidates[0].Display != "Codex / Shared model" || candidates[1].Display != "ACP · Codex / Shared model" {
+			t.Fatalf("%s: wrong presentation: %#v", command, candidates)
+		}
+		if command == "disconnect-models" && !slices.Equal(slashCandidateValues(candidates), []string{"provider:direct-config", "acp:codex:shared"}) {
+			t.Fatalf("disconnect targets = %#v", candidates)
+		}
+	}
+}
+
 func TestDisconnectProviderCatalogGroupsProvidersAndExcludesACP(t *testing.T) {
 	t.Parallel()
 

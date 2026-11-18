@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
 func TestHTTPStatusMappingUsesTypedErrorsNotMessages(t *testing.T) {
@@ -203,6 +205,9 @@ func TestHTTPErrorDetailKeepsInternalCausesPrivate(t *testing.T) {
 		{errorcode.Wrap(errorcode.Unsupported, "model example does not support service_tier priority", errors.New("credential=private-sentinel")), http.StatusBadRequest, "model example does not support service_tier priority"},
 		{errors.New("provider failed: credential=private-sentinel unsupported"), http.StatusInternalServerError, "internal server error"},
 		{errorcode.New(errorcode.Unavailable, "provider failed: credential=private-sentinel"), http.StatusServiceUnavailable, "service unavailable"},
+		{errorcode.New(errorcode.NotFound, "provider failed: credential=private-sentinel"), http.StatusNotFound, "not found"},
+		{fmt.Errorf("%w: private-sentinel", modelconfig.ErrOllamaUnreachable), http.StatusServiceUnavailable, modelconfig.ErrOllamaUnreachable.Error()},
+		{fmt.Errorf("%w: private-sentinel", modelconfig.ErrOllamaAPINotFound), http.StatusNotFound, modelconfig.ErrOllamaAPINotFound.Error()},
 	} {
 		recorder := httptest.NewRecorder()
 		writeMappedError(recorder, test.err)

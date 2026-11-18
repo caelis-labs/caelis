@@ -12,6 +12,15 @@ use the `/agents/*` endpoints in the [OpenAPI contract](../api/control/v1/openap
 These operations update the ordinary Host configuration shared with the TUI.
 They do not select a private team for each Worker.
 
+Hosts advertising `delete-models-v1` accept a `profile_ids` array at
+`POST /configuration/delete-models`. Use stable ModelProfile IDs and the observed
+Host revision. The command removes the whole selection in one configuration
+commit. An unknown profile rejects the selection. A committed receipt confirms
+all requested removals and may include a reconciliation warning in `detail`.
+ACP connections remain available for re-adding models. The `delete-model` route
+continues to accept a single provider selector, and `POST /agents/disconnect-acp`
+removes a whole ACP Agent connection dependency chain.
+
 `POST /agents/binding-status?include=eligible_profile_ids` returns the current
 profile catalog in `Targets` and each handle's allowed choices in
 `eligible_profile_ids`. Resolve those IDs against `Targets`; an empty array
@@ -30,11 +39,13 @@ The native presets are `codex`, `grok`, `deepseek` and `xiaomi` (MiMo).
 `custom` offers one protocol choice: Responses, Chat Completions, Anthropic
 Messages or System One. External ACP Agent onboarding remains separate.
 
-The TUI `/connect` menu lists these connections directly. Authentication follows
-the selected connection. Its Magpie model menu includes chat and judgment models;
-model type is confirmed after model selection. Type follows the advertised
-protocol rather than an arbitrary user classification. The existing `judgment`
-Profile field and role eligibility remain the public contract.
+The TUI `/connect` menu lists these connections directly. The endpoint picker
+preselects the default and offers other presets when available. Choose
+`+ Custom endpoint` to enter a URL. When a key is needed, enter it in the next
+step. The Magpie model menu includes chat and judgment models. Connect directly
+from the model picker after selecting models with complete metadata. The Host
+uses each model’s advertised protocol to determine its type. The `judgment`
+Profile field and role eligibility define where a judgment model can be used.
 
 `control/modelconfig` owns connection policy, discovery and assembly. The TUI
 and HTTP commands use the same `AssembleConnect` path. Accepted model settings
@@ -209,8 +220,7 @@ authentication methods, model choices and configuration options. Legacy launcher
 values remain readable but should not be offered as new choices.
 
 The ACP prepare, authenticate and connect commands remain separate from model
-provider OAuth. In particular, Antigravity runtime preparation and installation
-follow its advertised setup steps. See [External ACP Agents](external-acp-agents.md)
-for the existing preparation, authentication, terminal-login and disconnect
-contracts. Clients must not infer that an arbitrary Agent supports browser or
-terminal authentication from its display name.
+provider OAuth. Clients must use the advertised methods to determine whether
+an Agent supports browser or terminal authentication. See
+[External ACP Agents](external-acp-agents.md) for preparation, authentication,
+terminal login and disconnect.

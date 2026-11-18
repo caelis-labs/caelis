@@ -25,14 +25,16 @@ const (
 	LauncherChoiceHosted LauncherChoice = "hosted"
 )
 
-// ConnectRequest carries one guided local-ACP onboarding selection. One
-// request creates or updates exactly one Agent so model-dependent session
-// options cannot be shared accidentally across several Agent identities.
+// ConnectRequest carries a guided local ACP onboarding selection for one Agent.
 type ConnectRequest struct {
-	AdapterID    string               `json:"adapter_id,omitempty"`
-	Launcher     LauncherChoice       `json:"launcher,omitempty"`
-	CommandLine  string               `json:"command_line,omitempty"`
-	ModelID      string               `json:"model_id,omitempty"`
+	AdapterID   string         `json:"adapter_id,omitempty"`
+	Launcher    LauncherChoice `json:"launcher,omitempty"`
+	CommandLine string         `json:"command_line,omitempty"`
+	ModelID     string         `json:"model_id,omitempty"`
+	// ModelIDs selects declared models for one atomic connect using each model's
+	// discovered defaults. ModelID and ConfigValues are exclusive of ModelIDs.
+	// Discovery addresses a single model through ModelID.
+	ModelIDs     []string             `json:"model_ids,omitempty"`
 	ConfigValues map[string]string    `json:"config_values,omitempty"`
 	CWD          string               `json:"cwd,omitempty"`
 	Install      *RuntimeInstallation `json:"install,omitempty"`
@@ -47,6 +49,9 @@ func NormalizeConnectRequest(in ConnectRequest) ConnectRequest {
 		ModelID:     strings.TrimSpace(in.ModelID),
 		CWD:         strings.TrimSpace(in.CWD),
 		Install:     NormalizeRuntimeInstallation(in.Install),
+	}
+	for _, id := range in.ModelIDs {
+		out.ModelIDs = append(out.ModelIDs, strings.TrimSpace(id))
 	}
 	out.ConfigValues = NormalizeSessionOptions(SessionOptions{ConfigValues: in.ConfigValues}).ConfigValues
 	return out

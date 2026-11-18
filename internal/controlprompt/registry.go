@@ -91,7 +91,7 @@ func defaultSharedSpecs() []CommandSpec {
 func defaultTUISpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "connect", Usage: "/connect", Description: "Connect a model provider or local ACP Agent", DynamicCompleter: true},
-		{Name: "disconnect", Usage: "/disconnect", Description: "Disconnect provider models or local ACP Agents", DynamicCompleter: true},
+		{Name: "disconnect", Usage: "/disconnect", Description: "Remove connected models", DynamicCompleter: true},
 		{Name: "team", Aliases: []string{"subagent"}, Usage: "/team", Description: "Configure participant profiles and system Agents"},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "experimental", Usage: "/experimental", Description: "Configure experimental Runtime features", AvailableWhileRunning: true},

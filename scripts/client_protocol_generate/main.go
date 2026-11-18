@@ -106,8 +106,8 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 113 {
-		return fmt.Errorf("operation count = %d, want 113", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 114 {
+		return fmt.Errorf("operation count = %d, want 114", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "SessionInterruptRequest", "CompactSessionRequest", "RecordInteractionRequest", "PromptRequest", "SteerRequest", "CancelRequest",

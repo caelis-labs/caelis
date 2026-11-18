@@ -12,7 +12,7 @@ import (
 
 func (s *controlCommandBackend) executeConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
 	switch typed := request.(type) {
-	case appserver.ConnectModelRequest, appserver.UseModelRequest, appserver.DeleteModelRequest:
+	case appserver.ConnectModelRequest, appserver.UseModelRequest, appserver.DeleteModelRequest, appserver.DeleteModelsRequest:
 		return s.executeHostModelConfigurationCommand(ctx, action, request)
 	case appserver.ExperimentalRequest:
 		return s.executeExperimentalCommand(ctx, typed)

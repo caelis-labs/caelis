@@ -24,11 +24,8 @@ func TestWizardLoadingAnimatesCatalogHandshakeAndSubmission(t *testing.T) {
 						if command == "connect-acp-launcher:codex" {
 							return []SlashArgCandidate{{Value: "hosted", Display: "Built in"}, {Value: "command", Display: "Custom command"}}, nil
 						}
-						if strings.HasPrefix(command, "disconnect") {
-							if command == "disconnect" {
-								return []SlashArgCandidate{{Value: "acp", Display: "ACP Agents"}}, nil
-							}
-							return []SlashArgCandidate{{Value: "antigravity", Display: "Antigravity"}}, nil
+						if command == "disconnect-models" {
+							return []SlashArgCandidate{{Value: "acp:codex:test", Display: "ACP · Codex model"}}, nil
 						}
 						return complete(ctx, command, query, limit)
 					}
@@ -52,7 +49,6 @@ func TestWizardLoadingAnimatesCatalogHandshakeAndSubmission(t *testing.T) {
 					case "disconnect submit":
 						m.clearWizard()
 						runConnectTestCmd(m, m.openSlashArgPicker("disconnect"))
-						connectPress(m, "enter")
 						_, cmd = m.Update(connectKey("enter"))
 						label = "Disconnecting"
 					}
