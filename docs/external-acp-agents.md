@@ -562,7 +562,8 @@ Session totals.
 `/disconnect` opens one searchable list of connected models. Rows backed by an
 external Agent carry an `ACP` label. Use Space to select models and Enter to
 apply the selection. The Host commits the complete selection against one
-configuration revision.
+configuration revision. If the connected Host lacks `delete-models-v1`, the TUI
+asks you to upgrade the Host before using `/disconnect`.
 
 Removing an ACP model preserves its Agent connection for later use. Control
 revokes the selected profile from live Runtime catalogs, detaches participants

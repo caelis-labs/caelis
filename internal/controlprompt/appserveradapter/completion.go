@@ -58,6 +58,11 @@ func (a *SessionClientAdapter) CompleteSlashArg(ctx context.Context, command, qu
 		return nil, err
 	}
 	request.Command = trimmedCommand
+	if request.Command == "disconnect-models" {
+		if err := a.requireDeleteModels(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if request.Command == "connect-options" && request.Query == "" {
 		candidates, err := a.completionClient.CompleteSlashArg(ctx, request)
 		if err != nil || len(candidates) > 0 {

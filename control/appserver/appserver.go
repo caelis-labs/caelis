@@ -109,6 +109,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	if err != nil {
 		return AppServerClients{}, err
 	}
+	bound.capabilities = append(bound.capabilities, CapabilityDeleteModels)
 	agents, err := BindAgentClient(services.Agents, principal)
 	if err != nil {
 		return AppServerClients{}, err

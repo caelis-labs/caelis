@@ -178,6 +178,7 @@ func (s *controlCommandBackend) deleteModelSelection(ctx context.Context, doc Ap
 			persistErr = errors.Join(
 				persistErr,
 				wrapOptionalError("gatewayapp: commit retired provider credentials", credentialTxn.commit()),
+				s.observeCommittedModelConfiguration(ctx, saved),
 				wrapOptionalError("gatewayapp: reconcile active Session model removal", s.reconcileDeletedModelProfiles(ctx, saved.ConfigurationRevision, removed)),
 			)
 		}
@@ -189,13 +190,15 @@ func (s *controlCommandBackend) deleteModelSelection(ctx context.Context, doc Ap
 	result.Warning = errors.Join(
 		persistWarning,
 		credentialCommitWarning,
+		s.observeCommittedModelConfiguration(ctx, saved),
 		s.reconcileDeletedModelProfiles(ctx, saved.ConfigurationRevision, removed),
 	)
 	return result, nil
 }
 
-// Revoke selected profiles with one Runtime refresh and one Session sweep per
-// observed revision. A concurrent Host update can invalidate the cut.
+// The Host catalog and pins are published before waiting on Runtime activation.
+// Under that fence, repair live Runtimes and durable Sessions from the current
+// configuration, which may already include a reconnected model.
 func (s *controlCommandBackend) reconcileDeletedModelProfiles(ctx context.Context, committedRevision uint64, removed removedModelProfiles) error {
 	// The write is durable. Finish revocation even if the initiating client
 	// disconnects, while holding the Runtime activation fence.
@@ -240,7 +243,6 @@ func (s *controlCommandBackend) reconcileDeletedModelProfiles(ctx context.Contex
 				missingACP[id] = struct{}{}
 			}
 		}
-		s.composition.installCanonicalModelLookup(doc, catalog)
 		var reconcileErr error
 		if runtimes != nil {
 			for _, runtime := range runtimes.snapshot() {

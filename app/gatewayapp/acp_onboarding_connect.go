@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -34,6 +33,17 @@ func (s *controlCommandBackend) connectPreparedACPAtRevision(
 		}
 	}
 
+	connection := preparation.Connection
+	authenticatedAt := preparation.Discovery.DiscoveredAt
+	for _, selection := range selections {
+		// A probe that needed no chosen method does not supersede a completed login.
+		if selection.Connection.Authentication.MethodID != "" &&
+			(connection.Authentication.MethodID == "" || selection.Discovery.DiscoveredAt.After(authenticatedAt)) {
+			connection.Authentication = selection.Connection.Authentication
+			authenticatedAt = selection.Discovery.DiscoveredAt
+		}
+	}
+
 	doc, err := s.composition.authorities.store.LoadContext(ctx)
 	if err != nil {
 		return mutation, nil, err
@@ -50,11 +60,11 @@ func (s *controlCommandBackend) connectPreparedACPAtRevision(
 		if err != nil {
 			return mutation, nil, fmt.Errorf("gatewayapp: %w", err)
 		}
-		next, agent, err := controlagents.UpsertExternalConnection(doc.ExternalAgents, preparation.Connection, selection.Discovery, externalAgentNameAllowed)
+		next, agent, err := controlagents.UpsertExternalConnection(doc.ExternalAgents, connection, selection.Discovery, externalAgentNameAllowed)
 		if err != nil {
 			return mutation, nil, fmt.Errorf("gatewayapp: update external Agent configuration: %w", err)
 		}
-		profile, err := modelprofilebuilder.FromACP(agent, preparation.Connection, model, defaults, selection.Discovery)
+		profile, err := modelprofilebuilder.FromACP(agent, connection, model, defaults, selection.Discovery)
 		if err != nil {
 			return mutation, nil, fmt.Errorf("gatewayapp: build ACP model profile: %w", err)
 		}
@@ -121,7 +131,7 @@ func (s *controlCommandBackend) loadACPConnectSelections(
 				return nil, errors.New("gatewayapp: ACP model preparation belongs to another roster")
 			}
 		}
-		if !reflect.DeepEqual(selection.Connection, roster.Connection) || selection.Discovery.CWD != roster.Discovery.CWD {
+		if !sameACPConnectionOwnership(selection.Connection, roster.Connection) || selection.Discovery.CWD != roster.Discovery.CWD {
 			return nil, errors.New("gatewayapp: ACP model preparation belongs to another connection or workspace")
 		}
 		seen[modelID] = true

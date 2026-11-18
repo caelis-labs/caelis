@@ -125,7 +125,7 @@ func (r *sessionModelRecovery) repairSessionModelSelection(
 				return active, nil
 			}
 			if retained, ok := catalog.Config(removedID); ok && strings.EqualFold(retained.ID, removedID) {
-				return active, nil
+				currentConfig, currentConfigured = retained, true
 			}
 		}
 		currentEffort := modelcatalog.NormalizeReasoningEffort(kernel.CurrentReasoningEffort(state))
@@ -163,7 +163,7 @@ func (r *sessionModelRecovery) repairSessionModelSelection(
 					return next, nil
 				}
 				next[kernel.StateCurrentModelAlias] = fallback.ID
-				next[kernel.StateCurrentModelFastMode] = false
+				next[kernel.StateCurrentModelFastMode] = currentConfigured && currentFastMode && modelconfig.SupportsSpeedMode(currentConfig, "fast")
 				if currentEffort == "" || !modelConfigSupportsReasoningEffort(fallback, currentEffort) {
 					delete(next, kernel.StateCurrentReasoningEffort)
 				} else {

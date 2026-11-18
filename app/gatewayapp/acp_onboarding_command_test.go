@@ -226,6 +226,94 @@ func TestACPPrepareAndAuthenticationCommandsPersistExplicitChallenge(t *testing.
 	}
 }
 
+func TestConnectPreparedACPBatchPersistsLatestAuthentication(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	commands := stack.AgentCommands()
+	principal := appserver.Principal{ID: stack.composition.authorities.userID}
+	ctx := t.Context()
+	marker := filepath.Join(t.TempDir(), "starts")
+	expected := currentConfigurationRevision(t, stack)
+	writeBase := func() appserver.WriteBase {
+		return appserver.WriteBase{OperationID: uuid.NewString(), ExpectedRevision: &expected}
+	}
+	readPreparation := func(receipt appserver.CommandResult, err error) controlagents.ACPPreparation {
+		t.Helper()
+		if err != nil || receipt.Outcome != appserver.OutcomeCommitted || receipt.Resource == nil {
+			t.Fatalf("prepare command = %#v, %v", receipt, err)
+		}
+		prepared, err := stack.commandBackend.acpPreparations.Get(ctx, receipt.Resource.Ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return prepared
+	}
+	request := controlagents.ACPPrepareRequest{
+		AdapterID: "custom", Launcher: controlagents.LauncherChoiceCommand,
+		CommandLine: gatewayACPOnboardingHelperCommand("multimodel-reauth", marker),
+		CWD:         stack.composition.workspace.CWD,
+	}
+	roster := readPreparation(commands.PrepareACP(ctx, principal, appserver.PrepareACPRequest{WriteBase: writeBase(), Request: request}))
+	if roster.State != controlagents.PreparationStateReady || roster.Connection.Authentication.MethodID != "" {
+		t.Fatalf("roster preparation = %#v", roster)
+	}
+	request.ParentRef = roster.Ref
+	prepareModel := func(modelID, methodID string) controlagents.ACPPreparation {
+		t.Helper()
+		if err := os.WriteFile(marker+".auth", []byte(methodID), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		request.ModelID = modelID
+		prepared := readPreparation(commands.PrepareACP(ctx, principal, appserver.PrepareACPRequest{WriteBase: writeBase(), Request: request}))
+		if methodID == "" {
+			if prepared.State != controlagents.PreparationStateReady || prepared.Connection.Authentication.MethodID != "" || prepared.ParentRef != roster.Ref {
+				t.Fatalf("unchallenged model preparation = %#v", prepared)
+			}
+			return prepared
+		}
+		if prepared.State != controlagents.PreparationStateNeedsAuth || prepared.ParentRef != roster.Ref {
+			t.Fatalf("model authentication challenge = %#v", prepared)
+		}
+		ready := readPreparation(commands.PrepareACPAuthentication(ctx, principal, appserver.PrepareACPAuthenticationRequest{
+			WriteBase: writeBase(), PreparationRef: prepared.Ref, PreparationDigest: prepared.ContentDigest, MethodID: methodID,
+		}))
+		if ready.State != controlagents.PreparationStateReady || ready.ParentRef != prepared.Ref || ready.Connection.Authentication.MethodID != methodID {
+			t.Fatalf("authenticated model preparation = %#v", ready)
+		}
+		return ready
+	}
+	alpha := prepareModel("vendor/alpha", "alpha-login")
+	beta := prepareModel("vendor/beta", "beta-login")
+	unchallengedAlpha := prepareModel("vendor/alpha", "")
+	for _, tc := range []struct {
+		name  string
+		alpha controlagents.ACPPreparation
+	}{
+		{name: "older method last in selection order", alpha: alpha},
+		{name: "newer preparation with no method", alpha: unchallengedAlpha},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			receipt, err := commands.ConnectACP(ctx, principal, appserver.ConnectACPRequest{
+				WriteBase: writeBase(), PreparationRef: roster.Ref, PreparationDigest: roster.ContentDigest,
+				ModelPreparations: []appserver.ACPModelPreparationRef{
+					{Ref: beta.Ref, Digest: beta.ContentDigest}, {Ref: tc.alpha.Ref, Digest: tc.alpha.ContentDigest},
+				},
+			})
+			if err != nil || receipt.Outcome != appserver.OutcomeCommitted || receipt.Revision != expected+1 || receipt.ACPConnect == nil || len(receipt.ACPConnect.Profiles) != 2 {
+				t.Fatalf("batch ConnectACP() = %#v, %v", receipt, err)
+			}
+			expected = receipt.Revision
+			doc, err := stack.composition.authorities.store.LoadContext(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			connection, ok := controlagents.LookupConnection(doc.ExternalAgents, roster.Connection.ID)
+			if !ok || len(doc.ExternalAgents.Connections) != 1 || connection.Authentication != beta.Connection.Authentication {
+				t.Fatalf("persisted connections = %#v, want one with authentication %#v", doc.ExternalAgents.Connections, beta.Connection.Authentication)
+			}
+		})
+	}
+}
+
 func TestACPPrepareCancellationIsUnknownAndNeverRepeatsEffect(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
@@ -608,6 +696,18 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 			Options: []acpclient.SessionConfigSelectOption{{Value: effort, Name: effort}},
 		}}
 	}
+	multiModel := mode == "multimodel" || mode == "multimodel-reauth"
+	var authMethod string
+	switch mode {
+	case "needs-auth", "multimodel":
+		authMethod = "agent-login"
+	case "multimodel-reauth":
+		data, err := os.ReadFile(marker + ".auth")
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		authMethod = string(data)
+	}
 	authenticated := false
 	connection := jsonrpc.New(os.Stdin, os.Stdout)
 	err = connection.Serve(context.Background(), func(requestCtx context.Context, message jsonrpc.Message) (any, *jsonrpc.RPCError) {
@@ -622,22 +722,22 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 					SessionCapabilities: map[string]json.RawMessage{"close": json.RawMessage(`{}`)},
 				},
 			}
-			if mode == "needs-auth" || mode == "multimodel" {
-				response.AuthMethods = []json.RawMessage{json.RawMessage(`{"id":"agent-login","name":"Agent login"}`)}
+			if authMethod != "" {
+				response.AuthMethods = []json.RawMessage{json.RawMessage(fmt.Sprintf(`{"id":%q,"name":"Agent login"}`, authMethod))}
 			}
 			return response, nil
 		case acpclient.MethodAuthenticate:
 			var request acpclient.AuthenticateRequest
-			if err := json.Unmarshal(message.Params, &request); err != nil || request.MethodId != "agent-login" {
+			if err := json.Unmarshal(message.Params, &request); err != nil || authMethod == "" || string(request.MethodId) != authMethod {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected authenticate request"}
 			}
 			authenticated = true
 			return acpclient.AuthenticateResponse{}, nil
 		case acpclient.MethodSessionNew:
-			if (mode == "needs-auth" || mode == "multimodel") && !authenticated {
+			if authMethod != "" && !authenticated {
 				return nil, &jsonrpc.RPCError{Code: acpclient.ErrorCodeAuthRequired, Message: "Authentication required"}
 			}
-			if mode == "multimodel" {
+			if multiModel {
 				return acpclient.NewSessionResponse{SessionID: "onboarding-session", ConfigOptions: modelOptions("vendor/alpha", "low")}, nil
 			}
 			return acpclient.NewSessionResponse{
@@ -649,7 +749,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 			}, nil
 		case acpclient.MethodSessionSetConfig:
 			var request acpclient.SetSessionConfigOptionRequest
-			if mode == "multimodel" && json.Unmarshal(message.Params, &request) == nil && request.ValueId != nil {
+			if multiModel && json.Unmarshal(message.Params, &request) == nil && request.ValueId != nil {
 				option := request.ValueId
 				if option.ConfigId == "model" && option.Value == "vendor/beta" || option.ConfigId == "effort" && option.Value == "high" {
 					return acpclient.SetSessionConfigOptionResponse{ConfigOptions: modelOptions("vendor/beta", "high")}, nil

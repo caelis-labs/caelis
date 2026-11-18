@@ -23,7 +23,7 @@ func TestDeleteModelsUsesOneHostRevisionAndReportsConfirmedIDs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &modelBatchConfigurationProbe{result: appserver.CommandResult{Outcome: tc.outcome, Detail: tc.detail}}
-			adapter := &SessionClientAdapter{configClient: client, statusClient: client, sessionID: "selected"}
+			adapter := &SessionClientAdapter{sessionClient: client, configClient: client, statusClient: client, sessionID: "selected"}
 			ids := []string{"provider:one", "acp:codex:two"}
 			confirmed, err := adapter.DeleteModels(t.Context(), append(slices.Clone(ids), " PROVIDER:one ", ""))
 			if (err != nil) != (tc.detail != "") {
@@ -49,10 +49,15 @@ func TestDeleteModelsUsesOneHostRevisionAndReportsConfirmedIDs(t *testing.T) {
 }
 
 type modelBatchConfigurationProbe struct {
+	appserver.SessionClient
 	appserver.ConfigurationClient
 	status   []appserver.StatusRequest
 	requests []appserver.DeleteModelsRequest
 	result   appserver.CommandResult
+}
+
+func (*modelBatchConfigurationProbe) Initialize(context.Context) (appserver.ServerInfo, error) {
+	return appserver.ServerInfo{Capabilities: []string{appserver.CapabilityDeleteModels}}, nil
 }
 
 func (p *modelBatchConfigurationProbe) SessionStatus(_ context.Context, req appserver.StatusRequest) (controlstatus.StatusSnapshot, error) {
