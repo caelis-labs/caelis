@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"image/color"
 	"reflect"
 	"strings"
 	"testing"
@@ -294,9 +295,9 @@ func TestWelcomeBlockActionRowsCarryStableTokens(t *testing.T) {
 		}
 		want := []string{
 			welcomeActionTokenResume,
-			welcomeActionTokenModel,
-			welcomeActionTokenTeam,
 			welcomeActionTokenConnect,
+			welcomeActionTokenModel,
+			welcomeActionTokenQuit,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("%dx%d click tokens = %#v, want %#v", size.width, size.height, got, want)
@@ -428,26 +429,23 @@ func TestWelcomeMouseActionsMatchManualSlashSubmission(t *testing.T) {
 		}
 	})
 
-	t.Run("team opens the same overlay", func(t *testing.T) {
-		manual := newWelcomeTestModel(t, 80, 24, Config{
-			ControlService: &subagentDelegationStub{status: subagentTestStatus()},
-		})
-		clicked := newWelcomeTestModel(t, 80, 24, Config{
-			ControlService: &subagentDelegationStub{status: subagentTestStatus()},
-		})
+	t.Run("quit uses the same exit command", func(t *testing.T) {
+		manual := newWelcomeTestModel(t, 80, 24, Config{})
+		clicked := newWelcomeTestModel(t, 80, 24, Config{})
 
-		_ = submitManualWelcomeCommand(manual, "/team")
-		_ = clickWelcomeAction(t, clicked, welcomeActionTokenTeam)
+		manualCmd := submitManualWelcomeCommand(manual, "/quit")
+		clickedCmd := clickWelcomeAction(t, clicked, welcomeActionTokenQuit)
 
-		if manual.subagentOverlay == nil || clicked.subagentOverlay == nil {
-			t.Fatalf("team overlay active: manual=%v clicked=%v", manual.subagentOverlay != nil, clicked.subagentOverlay != nil)
-		}
-		if modelHasBlockKind(manual, BlockWelcome) || modelHasBlockKind(clicked, BlockWelcome) {
-			t.Fatal("opening team configuration retained the welcome card")
-		}
-		if manual.subagentOverlay.loading != clicked.subagentOverlay.loading || manual.textarea.Value() != clicked.textarea.Value() {
-			t.Fatalf("team state differs: manual=(loading:%v,input:%q) clicked=(loading:%v,input:%q)",
-				manual.subagentOverlay.loading, manual.textarea.Value(), clicked.subagentOverlay.loading, clicked.textarea.Value())
+		for _, result := range []struct {
+			model *Model
+			cmd   tea.Cmd
+		}{{manual, manualCmd}, {clicked, clickedCmd}} {
+			if !result.model.quit || result.cmd == nil {
+				t.Fatal("quit did not request exit")
+			}
+			if _, ok := result.cmd().(tea.QuitMsg); !ok {
+				t.Fatal("quit did not return a terminal exit message")
+			}
 		}
 	})
 }
@@ -509,25 +507,80 @@ func TestWelcomeMouseHitTestingRejectsRightOutsidePaddedRows(t *testing.T) {
 		{width: 80, height: 24},
 		{width: 35, height: 16},
 	} {
-		model := newWelcomeTestModel(t, size.width, size.height, Config{
-			ControlService: &subagentDelegationStub{status: subagentTestStatus()},
-		})
-		inside := welcomeActionMousePoint(t, model, welcomeActionTokenTeam)
-		contentLine := welcomeActionContentLine(t, model, welcomeActionTokenTeam)
+		model := newWelcomeTestModel(t, size.width, size.height, Config{})
+		inside := welcomeActionMousePoint(t, model, welcomeActionTokenQuit)
+		contentLine := welcomeActionContentLine(t, model, welcomeActionTokenQuit)
 		clickBounds := model.viewportClickBounds[contentLine]
 		outside := inside
 		outside.X = model.mainColumnX() + tuikit.GutterNarrative + clickBounds.end + 3
 
 		clickWelcomePoint(model, outside)
-		if model.subagentOverlay != nil {
-			t.Fatalf("%dx%d click right of padded team row opened the overlay", size.width, size.height)
+		if model.quit {
+			t.Fatalf("%dx%d click right of padded quit row exited the TUI", size.width, size.height)
 		}
 
 		_, _ = model.Update(tea.MouseClickMsg(outside))
 		_, _ = model.Update(tea.MouseReleaseMsg(inside))
-		if model.subagentOverlay != nil {
-			t.Fatalf("%dx%d outside press and inside release opened the team overlay", size.width, size.height)
+		if model.quit {
+			t.Fatalf("%dx%d outside press and inside release exited the TUI", size.width, size.height)
 		}
+	}
+}
+
+func TestWelcomeHoverPhysicalFrame(t *testing.T) {
+	for _, size := range [][2]int{{80, 24}, {35, 16}} {
+		width, height := size[0], size[1]
+		t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+			model := newWelcomeTestModel(t, width, height, Config{})
+			model.applyTheme(tuikit.ResolveSelectedTheme("catppuccin-mocha", nil, true, false, colorprofile.ANSI256))
+			baseline := model.View()
+			if baseline.MouseMode != tea.MouseModeAllMotion {
+				t.Fatal("welcome screen does not request hover events")
+			}
+
+			point := welcomeActionMousePoint(t, model, welcomeActionTokenConnect)
+			point.Button = tea.MouseNone
+			_, _ = model.Update(tea.MouseMotionMsg(point))
+			hovered := model.View().Content
+			if ansi.Strip(hovered) != ansi.Strip(baseline.Content) {
+				t.Fatal("hover changed the text or layout of the welcome screen")
+			}
+
+			line := welcomeActionContentLine(t, model, welcomeActionTokenConnect)
+			bounds := model.viewportClickBounds[line]
+			left := model.mainColumnX() + tuikit.GutterNarrative + bounds.start
+			right := left + bounds.end - bounds.start
+			point.X = right
+			_, _ = model.Update(tea.MouseMotionMsg(point))
+			cleared := model.View().Content
+			if cleared != baseline.Content {
+				t.Fatal("moving outside the click bounds did not restore the idle frame")
+			}
+
+			terminal := vt.NewSafeEmulator(width, height)
+			t.Cleanup(func() { _ = terminal.Close() })
+			for i, output := range renderFullscreenFramesForTest(t, width, height, baseline.Content, hovered, cleared) {
+				if _, err := terminal.Write([]byte(output)); err != nil {
+					t.Fatal(err)
+				}
+				for x := left - 1; x <= right; x++ {
+					want := model.theme.AppBg
+					if i == 1 && x >= left && x < right {
+						want = model.theme.SelectionStyle().GetBackground()
+					}
+					cell := terminal.CellAt(x, point.Y)
+					if cell == nil || !colorInSet(cell.Style.Bg, []color.Color{colorprofile.ANSI256.Convert(want)}) {
+						t.Fatalf("frame %d cell (%d,%d) = %#v, want background %v", i, x, point.Y, cell, want)
+					}
+				}
+			}
+
+			model.appendMainTranscriptBlock(NewTranscriptBlock("started", tuikit.LineStyleDefault))
+			model.syncViewportContent()
+			if model.View().MouseMode != tea.MouseModeCellMotion {
+				t.Fatal("dismissed welcome screen retained all-motion mouse mode")
+			}
+		})
 	}
 }
 

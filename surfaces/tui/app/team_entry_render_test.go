@@ -18,13 +18,13 @@ func TestTeamEntryPhysicalFrames(t *testing.T) {
 				Version: "dev", Workspace: "/workspace/caelis", ControlService: service,
 			})
 			frames := []string{model.View().Content}
-			for _, label := range []string{"Resume Session", "Switch Model", "Configure Team", "Connect Model / Agent"} {
+			for _, label := range []string{"Resume Session", "Connect Model", "Switch Model", "Quit"} {
 				if !strings.Contains(ansi.Strip(frames[0]), label) {
 					t.Fatalf("welcome frame omitted %q:\n%s", label, ansi.Strip(frames[0]))
 				}
 			}
-			if strings.Contains(ansi.Strip(frames[0]), "Quit") {
-				t.Fatal("welcome retained the Quit action")
+			if strings.Contains(ansi.Strip(frames[0]), "Configure Team") {
+				t.Fatal("welcome retained the Team action")
 			}
 
 			for _, ch := range "/sub" {
@@ -49,7 +49,7 @@ func TestTeamEntryPhysicalFrames(t *testing.T) {
 			}
 			frames = append(frames, model.View().Content)
 			for _, frame := range frames[2:] {
-				if strings.Contains(ansi.Strip(frame), "type / for commands") || strings.Contains(ansi.Strip(frame), "Configure Team") {
+				if strings.Contains(ansi.Strip(frame), "type / for commands") || strings.Contains(ansi.Strip(frame), "Resume Session") {
 					t.Fatalf("configuration entry retained stale welcome content:\n%s", ansi.Strip(frame))
 				}
 			}

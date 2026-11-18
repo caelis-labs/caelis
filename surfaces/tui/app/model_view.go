@@ -37,7 +37,7 @@ func (m *Model) View() tea.View {
 	var sections []string
 
 	// 1. Viewport (scrollable history + streaming + spinner) with left gutter.
-	vpView := m.renderViewportView()
+	vpView := m.renderWelcomeHover(m.renderViewportView())
 	if tuikit.GutterNarrative > 0 {
 		vpView = indentBlock(vpView, tuikit.GutterNarrative)
 	}
@@ -218,6 +218,9 @@ func (m *Model) desiredMouseMode() tea.MouseMode {
 		return tea.MouseModeAllMotion
 	}
 	if m.subagentOutputOverlay != nil && m.activePrompt == nil && m.subagentOverlay == nil {
+		return tea.MouseModeAllMotion
+	}
+	if m.hasWelcomeCard() {
 		return tea.MouseModeAllMotion
 	}
 	return tea.MouseModeCellMotion

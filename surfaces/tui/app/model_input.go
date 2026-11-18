@@ -13,6 +13,7 @@ import (
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	m.welcomeMouse = nil
 	if m.sessionPicker != nil {
 		return m, m.handleSessionPickerMouse(msg)
 	}
@@ -297,6 +298,9 @@ func (m *Model) handleViewportMousePress(mouse tea.Mouse) tea.Cmd {
 
 func (m *Model) handleViewportMouseMotion(mouse tea.Mouse) tea.Cmd {
 	if !m.selecting {
+		if mouse.Button == tea.MouseNone && m.hasWelcomeCard() {
+			m.welcomeMouse = &mouse
+		}
 		return nil
 	}
 	m.selectionAutoScroll.mouse = mouse
@@ -374,8 +378,11 @@ func (m *Model) tryHandleViewportClick(mouse tea.Mouse) tea.Cmd {
 			m.syncViewportContent()
 			return nil
 		}
-		if _, ok := welcomeActionForToken(token); ok {
-			return m.tryTriggerWelcomeActionToken(bid, token, contentLine)
+		if m.selectionStart.line == contentLine {
+			if action, ok := m.welcomeActionAt(m.selectionStart); ok && action.token == token {
+				_, cmd := m.submitInteractiveLine(action.command, action.command, nil)
+				return cmd
+			}
 		}
 	}
 	return nil
