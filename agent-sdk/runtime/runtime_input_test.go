@@ -10,12 +10,12 @@ import (
 func TestSteeringInputCorrelationDoesNotAdoptSubmissionIdentity(t *testing.T) {
 	t.Parallel()
 	metadata := map[string]any{
-		"operation_id": "operation-one", "steering_operation_id": "operation-one",
+		"operation_id": "operation-one", "steering_operation_id": "operation-one", "display_input": "display guide",
 		"actor": "forged-actor", "message_id": "forged-message", "participant_id": "forged-participant",
 		"caelis": map[string]any{"agent_communication": true},
 	}
 	events, err := buildSteeringInputEvents(session.Session{}, "active-turn", agent.Submission{
-		Kind: agent.SubmissionKindConversation, Text: "guide", DisplayInput: "display guide", Metadata: metadata,
+		Kind: agent.SubmissionKindConversation, Text: "guide", Metadata: metadata,
 	})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("buildSteeringInputEvents = %#v, %v", events, err)

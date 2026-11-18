@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -363,5 +364,81 @@ func TestBuildRunInputEventsCarriesSuppliedAgentCorrelationOnly(t *testing.T) {
 		if strings.Contains(event.IdempotencyKey, "mail-1") {
 			t.Fatalf("correlation leaked into Turn identity: %q", event.IdempotencyKey)
 		}
+	}
+}
+
+func TestTrustedCompletionNoticeSurvivesActiveTurnAndReopen(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	cfg := sessionfile.Config{RootDir: t.TempDir()}
+	store := sessionfile.NewStore(cfg)
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "notice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := &steerRuntimeModel{started: make(chan struct{}), releaseFirst: make(chan struct{})}
+	request := agent.RunRequest{SessionRef: active.SessionRef, Input: "start", AgentSpec: agent.AgentSpec{Name: "chat", Model: probe}}
+	run, err := rt.Run(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-probe.started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	notice := agent.Submission{
+		Kind: runtimeinput.ModelContext, Text: "Participant @reviewer is completed.",
+		Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer", Name: "@reviewer"},
+	}
+	err = run.Handle.(*runner).submitRuntimeModelContext(ctx, notice)
+	close(probe.releaseFirst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	requests := probe.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("parent made %d model calls", len(requests))
+	}
+	want := model.NewTextMessage(model.RoleUser, notice.Text)
+	if got := userMessages(requests[1].Messages); len(got) != 2 || !reflect.DeepEqual(got[1], want) {
+		t.Fatalf("parent did not consume the notice exactly once: %#v", got)
+	}
+	reopened := sessionfile.NewStore(cfg)
+	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := contextEvents(loaded.Events)
+	if len(events) != 1 {
+		t.Fatalf("persisted %d context events", len(events))
+	}
+	e := events[0]
+	if e.Actor != notice.Actor || e.Visibility != session.VisibilityCanonical || e.Protocol != nil || session.IsClientReplayEvent(e) {
+		t.Fatalf("notice lost its source or became visible: %#v", e)
+	}
+	resumed, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := &durableIdentityModel{text: "done"}
+	request.AgentSpec.Model, request.Input = next, "continue"
+	run, err = resumed.Run(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	live := userMessages(requests[1].Messages)
+	if got := userMessages(next.messages); len(got) != len(live)+1 || !reflect.DeepEqual(got[:len(live)], live) {
+		t.Fatalf("reopened model context = %#v, live = %#v", got, live)
 	}
 }

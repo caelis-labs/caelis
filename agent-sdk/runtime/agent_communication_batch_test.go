@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -163,5 +164,22 @@ func TestRuntimeRunRejectsMixedSingularAndBatchAgentCommunication(t *testing.T) 
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("Run(mixed) error = %v, want combined-field rejection", err)
+	}
+}
+
+func TestRuntimeRejectsPartiallyEmptyInputBatchBeforeStarting(t *testing.T) {
+	store, active := newTestSessionService(t, "empty-batch-member")
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer"}
+	result, err := rt.Run(t.Context(), agent.RunRequest{
+		SessionRef: active.SessionRef, InputKind: agent.SubmissionKindAgentCommunication,
+		Inputs:    []agent.AgentCommunicationInput{{Source: source, Input: "valid"}, {Source: source, Input: "  "}},
+		AgentSpec: agent.AgentSpec{Name: "chat", Model: staticModel{text: "unexpected"}},
+	})
+	if !errorcode.Is(err, errorcode.InvalidArgument) || result.Handle != nil {
+		t.Fatalf("partially empty batch admitted: handle=%v, err=%v", result.Handle, err)
 	}
 }

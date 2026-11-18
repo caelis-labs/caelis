@@ -325,13 +325,11 @@ func validateRunInput(req agent.RunRequest) error {
 		return nil
 	case agent.SubmissionKindAgentCommunication:
 		if len(req.Inputs) > 0 {
-			if agentCommunicationSingularFieldsSet(req.Input, req.DisplayInput, req.ContentParts, req.InputActor) {
-				return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: batch and singular Agent communication cannot be combined")
-			}
-			for _, item := range req.Inputs {
-				if err := session.ValidateAgentCommunicationActor(item.Source); err != nil {
-					return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: invalid Agent communication", err)
-				}
+			if err := agent.ValidateSubmissionInputs(agent.Submission{
+				Kind: req.InputKind, Text: strings.TrimSpace(req.Input), DisplayInput: strings.TrimSpace(req.DisplayInput),
+				ContentParts: req.ContentParts, Actor: req.InputActor, Inputs: req.Inputs,
+			}); err != nil {
+				return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: invalid Agent communication", err)
 			}
 			return nil
 		}
