@@ -8,6 +8,8 @@ import (
 
 func (phase runningActivityPhase) label() string {
 	switch phase {
+	case runningPhaseCommand:
+		return "Running command"
 	case runningPhaseModelWait:
 		return "Waiting for response"
 	case runningPhaseThinking:

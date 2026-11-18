@@ -11,7 +11,26 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
-// appendUserNarrativeBlock appends an observed user message to the transcript.
+// slashCommandEcho selects the transcript text for commands that complete in
+// the TUI. Agent, Skill, and prompt input take their echo from Control.
+func (m *Model) slashCommandEcho(execLine, displayLine string) string {
+	name, _, _, ok := controlprompt.ParseSlash(execLine)
+	if !ok || !m.isCommandAvailable(name) {
+		return ""
+	}
+	switch name {
+	case "help", "status", "doctor", "model", "compact", "disconnect":
+		if _, known := controlprompt.Lookup(name); known {
+			return firstNonEmpty(displayLine, execLine)
+		}
+	case "connect", "plugin":
+		// Credentials, wizard payloads, and plugin sources can contain secrets.
+		return "/" + name
+	}
+	return ""
+}
+
+// appendUserNarrativeBlock appends a user line to the transcript.
 func (m *Model) appendUserNarrativeBlock(block *UserNarrativeBlock) {
 	m.mainTimelineBarrier()
 	userLine := userNarrativePrefix + block.Raw

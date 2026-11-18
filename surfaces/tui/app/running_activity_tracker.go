@@ -11,6 +11,7 @@ import (
 type runningActivityPhase string
 
 const (
+	runningPhaseCommand    runningActivityPhase = "command"
 	runningPhaseModelWait  runningActivityPhase = "waiting"
 	runningPhaseThinking   runningActivityPhase = "thinking"
 	runningPhaseResponding runningActivityPhase = "responding"

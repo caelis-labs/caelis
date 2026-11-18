@@ -1264,13 +1264,8 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 		m.quit = true
 		return m, tea.Quit
 	}
-	if execLine == "/resume" {
-		m.resetComposerAfterOverlayOpen()
-		return m, m.openSessionPicker()
-	}
 	if isSessionSelectionLine(execLine) {
-		m.resetComposerAfterOverlayOpen()
-		return m, m.executeLineCmd(Submission{Text: execLine})
+		return m.submitLineWithDisplayAndAttachments(execLine, displayLine, attachments)
 	}
 	if execLine == "" && len(attachments) == 0 {
 		return m, nil
@@ -1411,15 +1406,21 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		return m, tea.Quit
 	}
 	if m.sessionSwitchPending {
-		return m, m.showHint("Switching Session…", hintOptions{priority: HintPriorityHigh})
+		return m, nil
 	}
-	if strings.TrimSpace(execLine) == "/resume" {
+	if strings.EqualFold(strings.TrimSpace(execLine), "/resume") {
 		m.resetComposerAfterOverlayOpen()
 		return m, m.openSessionPicker()
 	}
 	if isSessionSelectionLine(execLine) {
 		m.resetComposerAfterOverlayOpen()
-		return m, m.executeLineCmd(Submission{Text: execLine})
+		m.dismissWelcomeCard()
+		m.setViewportFollowState(viewportFollowTail)
+		m.appendUserNarrativeBlock(NewUserNarrativeBlock(strings.TrimSpace(firstNonEmpty(displayLine, execLine))))
+		cmd := m.executeLineCmd(Submission{Text: execLine})
+		m.ensureViewportLayout()
+		m.syncViewportContent()
+		return m, cmd
 	}
 	if m.sessionObservationRecovering {
 		return m, m.showHint(sessionObservationRecoveryHint, hintOptions{priority: HintPriorityHigh})
@@ -1503,7 +1504,13 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		return m, tea.Quit
 	}
 	if !alreadyRunning && mode != SubmissionModeOverlay {
-		m.beginLiveTurn(mode, mode == SubmissionModeDefault && !m.isConfiguredSlashControlLine(execLine), time.Now())
+		startedAt := time.Now()
+		m.beginLiveTurn(mode, mode == SubmissionModeDefault && !m.isConfiguredSlashControlLine(execLine), startedAt)
+		if echo := m.slashCommandEcho(submission.Text, submission.DisplayText); echo != "" && m.cfg.ExecuteLine != nil {
+			m.appendUserNarrativeBlock(NewUserNarrativeBlock(echo))
+			m.runningHintTracker.setFocus(runningPhaseCommand, "", "slash-command", startedAt)
+			m.refreshRunningActivity()
+		}
 	} else {
 		m.ensureViewportLayout()
 	}
@@ -1580,6 +1587,8 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 		}
 		if slashCommandName(submission.Text) == "resume" {
 			loading = m.showSessionHistoryLoading()
+		} else {
+			loading = m.scheduleSpinnerTick()
 		}
 	}
 	submission.viewGeneration = m.viewGeneration
