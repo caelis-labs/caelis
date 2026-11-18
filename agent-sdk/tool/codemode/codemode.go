@@ -226,8 +226,8 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 // Runtime appends partial catalog hints separately.
 const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
-const description = `Set exactly one of code, file or reset:true. Example: { const body = await Read(args); return body.json().content; }. Also: await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Top-level await and return work; omitted return is null. console.log, console.warn and console.error are no-ops; use return for output.
-Use block-local let/const for temporary values. Top-level bindings persist in the active host Session; resume/release/reset clears them. Assign to let, not const. Redeclare only if both declarations are var/function.
+const description = `Set exactly one of code, file or reset:true. Example: { const body = await Read(args); return body.json().content; }. Also: await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Top-level await is supported. Use return for the final output; omitted return is null.
+Use block-local let/const for temporary values. Top-level bindings usually persist across script calls, but may be cleared. Assign to let, not const. Redeclare only if both declarations are var/function.
 
 Tools return a Body. result.text() joins reply text/JSON with newlines, preserving JSON tokens. result.json() reads validated data or parses the whole text as one JSON document. Both reads are repeatable. Return the original Body for the whole reply, or select fields and original result.media references. Copies grant no media identity. Numbers may round; omit undefined and stringify BigInt.
 

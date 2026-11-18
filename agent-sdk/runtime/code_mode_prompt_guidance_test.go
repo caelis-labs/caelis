@@ -44,8 +44,8 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 		}
 	}
 	for _, contract := range []string{
-		"Top-level await and return", "omitted return is null", "console.log, console.warn and console.error are no-ops; use return for output",
-		"Use block-local let/const", "Top-level bindings persist", "resume/release/reset clears them",
+		"Top-level await", "Use return for the final output", "omitted return is null",
+		"Use block-local let/const", "Top-level bindings usually persist across script calls, but may be cleared",
 		"Assign to let, not const", "Redeclare only if both declarations are var/function",
 		"{ const body = await Read(args); return body.json().content; }", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)",
 		"tools.search({name})", "{query} for capabilities", "input_schema", "output_schema", "call_path",
@@ -60,6 +60,11 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 	for _, legacy := range []string{"tools.unpack", "{parts:", "tools.describe", "output.text", "output.image"} {
 		if strings.Contains(description, legacy) {
 			t.Fatalf("legacy workflow still advertised: %s", legacy)
+		}
+	}
+	for _, detail := range []string{"console.", "host Session", "resume", "release"} {
+		if strings.Contains(description, detail) {
+			t.Fatalf("js_exec description exposes unnecessary detail %q", detail)
 		}
 	}
 	if strings.Index(description, "await Read(args)") > strings.Index(description, "tools.search(") {
