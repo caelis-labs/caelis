@@ -226,13 +226,14 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 // Runtime appends partial catalog hints separately.
 const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
-const description = `Run JavaScript using exactly one of code, file or reset:true. Call tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), or await context7['query-docs'](args). Top-level await and return work; omitted return is null. Bindings persist only in the active host Session; resume/release/reset clears them. let/const cannot be redeclared; update let by assignment. const is read-only; var/function may repeat.
+const description = `Set exactly one of code, file or reset:true. Example: { const body = await Read(args); return body.json().content; }. Also: await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Top-level await and return work; omitted return is null. console.log, console.warn and console.error are no-ops; use return for output.
+Use block-local let/const for temporary values. Top-level bindings persist in the active host Session; resume/release/reset clears them. Assign to let, not const. Redeclare only if both declarations are var/function.
 
-Tools return a Body; reads are repeatable. result.text() joins reply text/JSON entries with newlines, preserving JSON tokens. result.json() uses successful schema-validated structured content or parses the whole text as one JSON document; multiple documents fail. For Read file text, use result.json().content. result.media holds original media references. Return result for the whole reply without parsing, or select JSON and original media. Copied handles grant no identity. Numbers may round. Omit undefined; convert BigInt to string.
+Tools return a Body. result.text() joins reply text/JSON with newlines, preserving JSON tokens. result.json() reads validated data or parses the whole text as one JSON document. Both reads are repeatable. Return the original Body for the whole reply, or select fields and original result.media references. Copies grant no media identity. Numbers may round; omit undefined and stringify BigInt.
 
-tools.search(selector) accepts {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}. Its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Pass next as after; use call_path for conflicts. tools.call(name,args) returns a Body.
+tools.search({name}) finds an exact schema; use {query} for capabilities, {server,tool,plugin?} for an exact method, or {server,plugin?,after?} to list. Its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Pass next as after. Follow call_path, e.g. tools.call(name,args).
 
-Inspect error.message, error.code and error.result when present (reply alias). Failed Bodies are unverified diagnostics; json() only parses text. On stale_revision, search again; never replay unknown outcomes. runtime.state() reports generation/execution on demand. reset:true aborts the old script and clears bindings without replaying effects.`
+Inspect error.message, error.code and error.result (reply alias) when present. Failed Bodies are diagnostics; json() only parses text. On stale_revision, refresh the exact schema and rebuild args. Check child outcomes before retrying; never replay unknown outcomes. runtime.state() reports generation/execution.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.
@@ -247,8 +248,13 @@ type Tool struct {
 func (t *Tool) Definition() tool.Definition {
 	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path relative to the working directory."}, "reset": map[string]any{"type": "boolean", "const": true, "description": "Replace the environment, interrupting any active script."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait in milliseconds; yielding keeps the original Task running."}},
-		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}, map[string]any{"required": []string{"reset"}}},
+		"properties": map[string]any{
+			"code":          map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body."},
+			"file":          map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path relative to the working directory."},
+			"reset":         map[string]any{"type": "boolean", "const": true, "description": "Clear bindings and interrupt any active script without undoing its effects."},
+			"yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait in milliseconds, not an execution timeout. After yield, use Task outside the VM with the original script handle, not a child command handle."},
+		},
+		"oneOf": []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}, map[string]any{"required": []string{"reset"}}},
 	}}
 }
 
