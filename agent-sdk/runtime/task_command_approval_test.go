@@ -125,15 +125,6 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if identity.SessionID != active.SessionID || identity.TurnID != approval.TurnID || identity.ItemID == "" {
 		t.Fatalf("approval invocation identity = %#v", identity)
 	}
-	pendingEvents, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, event := range pendingEvents {
-		if event.Type == session.EventTypeToolResult && event.Tool != nil {
-			t.Fatalf("execution journal started before approval: %#v", event.Tool)
-		}
-	}
 	var pendingRequest *model.Request
 	select {
 	case pendingRequest = <-continued:
@@ -142,6 +133,27 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	}
 	if state := mustFindTaskState(t, pendingRequest, mustFindTaskHandle(t, pendingRequest)); state != taskapi.StateWaitingApproval {
 		t.Fatalf("state = %s", state)
+	}
+	// The model has received the durable Task handle and is paused. Approval
+	// is still blocked, so this snapshot must contain only the pending receipt.
+	pendingEvents, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingResults := 0
+	for _, event := range pendingEvents {
+		if event.Type != session.EventTypeToolResult {
+			continue
+		}
+		pendingResults++
+		fact := event.Tool
+		if fact == nil || fact.ID != approval.Call.ID || fact.Execution != identity ||
+			fact.Status != string(taskapi.StateWaitingApproval) || fact.Output["handle"] != handle {
+			t.Fatalf("unexpected tool result before approval: %+v", fact)
+		}
+	}
+	if pendingResults != 1 {
+		t.Fatalf("pending Task receipts = %d, want one", pendingResults)
 	}
 	state, err := r.RunState(ctx, active.SessionRef)
 	if err != nil || state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval {
