@@ -67,12 +67,6 @@ func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
 	if len(got.Sources) != 1 || got.Sources[0].Root != root || len(got.MCPServerSpecs) != 1 || got.MCPServerSpecs[0].PackageRoot != root || got.MCPServerSpecs[0].Command != "must-never-launch" || len(got.SkillBundles) != 1 || got.SkillBundles[0].PluginRoot != root {
 		t.Fatal("explicit Session package and its bound host launch were split or duplicated")
 	}
-	resource := &applicationMCPResource{plugins: selected.Plugins}
-	changed := selected
-	changed.Plugins = []sessionprofile.Plugin{{Root: globalRoot}}
-	if resource.matches(changed) {
-		t.Fatal("source change reused the old Session connection")
-	}
 	for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
 		got, err = applicationRuntimePluginContributions(sessionprofile.Profile{Plugins: optional}, paths, defaults...)
 		if err != nil || len(got.Sources) != 1 || got.Sources[0].Root != globalRoot || got.MCPServerSpecs[0].PackageRoot != globalRoot || got.SkillBundles[0].PluginRoot != globalRoot {

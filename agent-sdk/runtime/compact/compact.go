@@ -242,6 +242,7 @@ func replacementTextEvent(source *session.Event) *session.Event {
 	}
 	cloned := session.CloneEvent(source)
 	return &session.Event{
+		ID:         source.ID,
 		Type:       session.EventTypeCompact,
 		Visibility: session.VisibilityCanonical,
 		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},

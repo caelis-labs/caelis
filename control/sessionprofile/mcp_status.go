@@ -11,10 +11,12 @@ type MCPStatus struct {
 	Servers               []MCPServerStatus `json:"servers"`
 	Plugins               []PluginStatus    `json:"plugins,omitempty"`
 	Skills                []SkillStatus     `json:"skills"`
+	Warning               string            `json:"warning,omitempty"`
 }
 
 // MCPServerStatus keeps connection state separate from catalog refresh health.
 type MCPServerStatus struct {
+	Ready         bool                `json:"ready"` // the current tool catalog can be used
 	PluginID      string              `json:"plugin_id,omitempty"`
 	Refreshing    bool                `json:"refreshing"`
 	Stale         bool                `json:"stale"`

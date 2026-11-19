@@ -1698,10 +1698,10 @@ type SessionFeedDelivery struct {
 }
 
 type SessionInheritance struct {
-	CwdInstructions bool `json:"cwd_instructions"`
-	Mcp             bool `json:"mcp"`
-	Skills          bool `json:"skills"`
-	WorkspaceMemory bool `json:"workspace_memory"`
+	CwdInstructions *bool `json:"cwd_instructions,omitempty"`
+	Mcp             *bool `json:"mcp,omitempty"`
+	Skills          *bool `json:"skills,omitempty"`
+	WorkspaceMemory *bool `json:"workspace_memory,omitempty"`
 }
 
 type SessionInterruptRequest struct {
@@ -1743,6 +1743,7 @@ type SessionMCPServer struct {
 type SessionMCPServerStatus struct {
 	Name          string          `json:"name"`
 	PluginId      *string         `json:"plugin_id,omitempty"`
+	Ready         *bool           `json:"ready,omitempty"`
 	RefreshFailed *bool           `json:"refresh_failed,omitempty"`
 	Refreshing    *bool           `json:"refreshing,omitempty"`
 	Stale         *bool           `json:"stale,omitempty"`
@@ -1758,6 +1759,7 @@ type SessionMCPStatus struct {
 	Servers               []SessionMCPServerStatus `json:"servers"`
 	SessionId             string                   `json:"session_id"`
 	Skills                []SessionSkillStatus     `json:"skills"`
+	Warning               *string                  `json:"warning,omitempty"`
 }
 
 type SessionModeRequest struct {
@@ -1833,7 +1835,7 @@ type SessionPresentationModeRequest struct {
 type SessionProfile struct {
 	Execution       string                  `json:"execution"`
 	ExecutionConfig *ExecutionConfig        `json:"execution_config,omitempty"`
-	Inherit         SessionInheritance      `json:"inherit"`
+	Inherit         *SessionInheritance     `json:"inherit,omitempty"`
 	Instructions    string                  `json:"instructions"`
 	McpServers      []SessionMCPServer      `json:"mcp_servers,omitempty"`
 	Model           string                  `json:"model"`

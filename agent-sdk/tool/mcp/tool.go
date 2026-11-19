@@ -16,6 +16,7 @@ import (
 type MCPTool struct {
 	client     *Client
 	manager    *Manager
+	server     *managedServer
 	bindingID  uint64
 	pluginID   string
 	serverName string
@@ -68,11 +69,6 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	if err := tool.ValidateMCPArguments(t.def, call.Input); err != nil {
 		return tool.Result{}, err
 	}
-	if t.manager != nil {
-		if err := t.manager.admitCatalogTool(ctx, t); err != nil {
-			return tool.Result{}, err
-		}
-	}
 	var args map[string]any
 	if len(call.Input) > 0 {
 		decoder := json.NewDecoder(bytes.NewReader(call.Input))
@@ -82,6 +78,13 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		}
 	}
 
+	if t.manager != nil {
+		release, err := t.manager.borrowClient(ctx, t)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		defer release()
+	}
 	resp, err := t.client.CallTool(ctx, &mcpsdk.CallToolParams{
 		Name:      t.origName,
 		Arguments: args,

@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"reflect"
-	"slices"
 	"strconv"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -137,35 +136,18 @@ func (s *runtimeComposition) nativePluginContributions(configs []PluginConfig) (
 	return contributions, &configuration, err
 }
 
-func nativePluginStatus(configuration *sessionprofile.Configuration, contributions plugin.Contributions, manager *mcp.Manager, specs []mcp.ServerSpec) func(uint64) sessionprofile.MCPStatus {
-	if configuration == nil {
-		return nil
-	}
+func nativePluginStatus(configuration *sessionprofile.Configuration, contributions plugin.Contributions, manager *mcp.Manager) func(uint64) sessionprofile.MCPStatus {
 	// Read metadata only during assembly. Status reads never touch packages.
 	metas, _ := applicationPluginSkills(contributions.SkillBundles)
-	// Configured MCP servers do not have a plugin Source. Retain their
-	// assembly-time namespaces too; status reads only the existing manager.
-	var namespaces []string
-	for _, spec := range specs {
-		if !slices.Contains(namespaces, spec.PluginID) {
-			namespaces = append(namespaces, spec.PluginID)
-		}
-	}
 	return func(revision uint64) sessionprofile.MCPStatus {
 		status := sessionprofile.MCPStatus{ConfigurationRevision: strconv.FormatUint(revision, 10)}
-		if revision != configuration.Revision {
+		if configuration != nil && revision != configuration.Revision {
 			return status
 		}
 		for _, source := range contributions.Sources {
 			status.Plugins = append(status.Plugins, pluginSourceStatus(source))
 		}
-		for _, namespace := range namespaces {
-			for _, info := range manager.GetServerInfos(namespace) {
-				server := applicationMCPServerStatus(info)
-				server.PluginID = namespace
-				status.Servers = append(status.Servers, server)
-			}
-		}
+		status.Servers = mcpServerStatuses(manager)
 		for _, meta := range metas {
 			status.Skills = append(status.Skills, sessionprofile.SkillStatus{Path: meta.Path, Name: meta.Name, Kind: "skill", Status: "ready"})
 		}

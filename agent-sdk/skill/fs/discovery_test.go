@@ -241,11 +241,7 @@ func TestParseMetaCacheIsBounded(t *testing.T) {
 		dir := filepath.Join(root, name)
 		writeSkillForDiscoveryTest(t, dir, name, "cache bounded")
 		path := filepath.Join(dir, "SKILL.md")
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		meta, _, err := parseMetaHashCached(path, info)
+		meta, _, err := parseMetaHashCached(path)
 		if err != nil || meta.Name != name {
 			t.Fatalf("parseMetaHashCached(%s) = %#v, %v", path, meta, err)
 		}

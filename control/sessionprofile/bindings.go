@@ -20,8 +20,8 @@ import (
 var toolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
 var mcpServerName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
-// ValidateProfile requires a complete profile. Execution authority is separate
-// from hot configuration; Host instructions, models and catalogs are not inherited.
+// ValidateProfile requires a complete profile. Core supplies default Skills and
+// MCP discovery. The profile selects its model, instructions and callback catalog.
 // Process environment inheritance follows the separate SDK execution contract.
 func ValidateProfile(p Profile) error {
 	if !validID(p.Version) || !validID(p.Model) || !validID(p.ToolsVersion) {
@@ -36,8 +36,8 @@ func ValidateProfile(p Profile) error {
 	if err := sandbox.ValidateExecutionConfig(p.ExecutionConfig); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	if p.Inherit != (Inheritance{}) {
-		return fmt.Errorf("%w: configuration inheritance is unavailable", ErrUnsupported)
+	if p.Inherit.CWDInstructions || p.Inherit.WorkspaceMemory {
+		return fmt.Errorf("%w: workspace instructions and memory inheritance are unavailable", ErrUnsupported)
 	}
 	if p.Workspace.CWD != "" && (!filepath.IsAbs(p.Workspace.CWD) || strings.TrimSpace(p.Workspace.CWD) != p.Workspace.CWD) {
 		return fmt.Errorf("%w: workspace cwd must be an absolute path", ErrInvalid)
@@ -131,7 +131,7 @@ func ValidateProfile(p Profile) error {
 		if def.Name == codemode.ToolName || def.Name == "Task" {
 			return fmt.Errorf("%w: callback collides with fixed Code Mode/Task entry", ErrInvalid)
 		}
-		if (len(p.SkillDirs)+len(p.SkillRoots)+len(p.Plugins) > 0 && def.Name == "Skill") || (len(p.MCPServers)+len(p.Plugins) > 0 && (def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName)) {
+		if def.Name == "Skill" || def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName {
 			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
 		}
 		for _, server := range p.MCPServers {

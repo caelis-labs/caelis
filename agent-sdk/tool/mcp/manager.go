@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -18,8 +19,11 @@ import (
 )
 
 type MCPServerInfo struct {
-	Name        string
-	Status      string
+	PluginID string
+	Name     string
+	Status   string
+	// Ready reports whether the current connection has a dispatchable directory.
+	Ready       bool
 	Tools       []string
 	ToolDetails []MCPToolDetail
 	Warning     string
@@ -50,6 +54,9 @@ type ServerFailure struct {
 
 type managedServer struct {
 	spec         ServerSpec
+	cancel       context.CancelFunc
+	inFlight     int
+	drained      chan struct{}
 	client       *Client
 	listed       []*mcpsdk.Tool
 	err          error
@@ -71,16 +78,19 @@ type Manager struct {
 	toolsByName    map[string]*MCPTool
 	warnings       map[string][]string
 	cancel         context.CancelFunc
+	ctx            context.Context
+	start          clientStarter
 	initialized    chan struct{}
 	closed         bool
 	closeOnce      sync.Once
 	refreshWorkers sync.WaitGroup
+	workers        sync.WaitGroup
 	owners         map[string]string
 	nextBinding    uint64
 	onFailure      func(ServerFailure)
 }
 
-// Initialized closes after every server has either initialized or failed.
+// Initialized closes after the initial set of servers has initialized or failed.
 // Tool consumers do not need to wait: Tools returns only ready definitions.
 func (m *Manager) Initialized() <-chan struct{} { return m.initialized }
 
@@ -112,32 +122,115 @@ func NewManager(ctx context.Context, specs []ServerSpec, onFailure func(ServerFa
 type clientStarter func(context.Context, ServerSpec) (*Client, error)
 
 func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, onFailure func(ServerFailure)) (*Manager, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	mgr := &Manager{warnings: make(map[string][]string), ctx: ctx, cancel: cancel, start: start, initialized: make(chan struct{}), onFailure: onFailure}
+	var initial sync.WaitGroup
+	if err := mgr.reconcile(specs, &initial); err != nil {
+		cancel()
+		return nil, err
+	}
+	go func() { initial.Wait(); close(mgr.initialized) }()
+	return mgr, nil
+}
+
+// Reconcile applies a complete desired connection set. Equal specs keep their
+// clients, tool bindings and revocation state. Replaced or removed clients
+// drain dispatched calls while new clients connect independently.
+func (m *Manager) Reconcile(specs []ServerSpec) error {
+	return m.reconcile(specs, nil)
+}
+
+func (m *Manager) reconcile(specs []ServerSpec, initial *sync.WaitGroup) error {
 	seen := make(map[string]bool, len(specs))
 	for _, spec := range specs {
 		if err := ValidateServerIdentity(spec); err != nil {
-			return nil, err
+			return err
 		}
 		key := spec.PluginID + "/" + spec.Name
 		if seen[key] {
-			return nil, fmt.Errorf("mcp manager: duplicate server %s", key)
+			return fmt.Errorf("mcp manager: duplicate server %s", key)
 		}
 		seen[key] = true
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	mgr := &Manager{warnings: make(map[string][]string), cancel: cancel, initialized: make(chan struct{}), onFailure: onFailure}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.ctx.Err() != nil {
+		return errors.New("MCP manager is closed")
+	}
+	current := make(map[string]*managedServer, len(m.servers))
+	for _, server := range m.servers {
+		current[server.spec.PluginID+"/"+server.spec.Name] = server
+	}
+	next := make([]*managedServer, 0, len(specs))
+	changed := len(m.servers) != len(specs)
 	for _, spec := range specs {
 		spec.Args = append([]string(nil), spec.Args...)
 		spec.ReplaySourceIDs = append([]string(nil), spec.ReplaySourceIDs...)
 		spec.Env = maps.Clone(spec.Env)
 		spec.Headers = maps.Clone(spec.Headers)
-		mgr.servers = append(mgr.servers, &managedServer{spec: spec, refreshGate: make(chan struct{}, 1)})
+		key := spec.PluginID + "/" + spec.Name
+		old := current[key]
+		delete(current, key)
+		if old != nil && reflect.DeepEqual(old.spec, spec) {
+			changed = changed || old != m.servers[len(next)]
+			next = append(next, old)
+			continue
+		}
+		changed = true
+		if old != nil {
+			m.retireLocked(old)
+		}
+		ctx, cancel := context.WithCancel(m.ctx)
+		server := &managedServer{spec: spec, cancel: cancel, refreshGate: make(chan struct{}, 1)}
+		next = append(next, server)
+		if initial != nil {
+			initial.Add(1)
+		}
+		m.workers.Go(func() {
+			if initial != nil {
+				defer initial.Done()
+			}
+			m.initialize(ctx, server, m.start)
+		})
 	}
-	var workers sync.WaitGroup
-	for _, server := range mgr.servers {
-		workers.Go(func() { mgr.initialize(ctx, server, start) })
+	for key, server := range current {
+		m.retireLocked(server)
+		for name, owner := range m.owners {
+			if strings.HasPrefix(owner, key+"/") {
+				delete(m.owners, name)
+			}
+		}
 	}
-	go func() { workers.Wait(); close(mgr.initialized) }()
-	return mgr, nil
+	if changed {
+		m.servers = next
+		m.rebuildToolsLocked()
+	}
+	return nil
+}
+
+// retireLocked stops admission before waiting for calls which already borrowed
+// the client. A startup that has not published its client cleans up itself.
+func (m *Manager) retireLocked(server *managedServer) {
+	server.revoked = true
+	server.cancel()
+	client := server.client
+	if client == nil {
+		return
+	}
+	var drained <-chan struct{}
+	if server.inFlight != 0 {
+		server.drained = make(chan struct{})
+		drained = server.drained
+	}
+	m.workers.Go(func() {
+		if drained != nil {
+			select {
+			case <-drained:
+			case <-m.ctx.Done():
+			}
+		}
+		_ = client.Close()
+	})
 }
 
 func (m *Manager) initialize(parent context.Context, server *managedServer, start clientStarter) {
@@ -166,7 +259,7 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 		}
 	}
 	m.mu.Lock()
-	if m.closed || parent.Err() != nil {
+	if m.closed || server.revoked || parent.Err() != nil {
 		m.mu.Unlock()
 		if client != nil {
 			_ = client.Close()
@@ -176,6 +269,7 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	server.err = err
 	if err == nil {
 		server.client, server.listed = client, listed
+		server.catalogReady = client.catalog == nil
 	}
 	m.rebuildToolsLocked()
 	m.mu.Unlock()
@@ -185,9 +279,8 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 			refreshErr = client.startupFailure("tools/list", refreshErr)
 		}
 		m.mu.Lock()
-		if m.closed || parent.Err() != nil {
+		if m.closed || server.revoked || parent.Err() != nil {
 			m.mu.Unlock()
-			_ = client.Close()
 			return
 		}
 		server.err = refreshErr
@@ -336,6 +429,7 @@ func (mgr *Manager) rebuildToolsLocked() {
 			t := &MCPTool{
 				client:     client,
 				manager:    mgr,
+				server:     server,
 				pluginID:   spec.PluginID,
 				serverName: spec.Name,
 				origName:   info.Name,
@@ -499,6 +593,7 @@ func (m *Manager) Close() error {
 		m.cancel()
 		m.mu.Unlock()
 		<-m.initialized
+		m.workers.Wait()
 		m.refreshWorkers.Wait()
 		m.mu.Lock()
 		m.tools = nil
@@ -513,6 +608,7 @@ func (m *Manager) Close() error {
 	return nil
 }
 
+// GetServerInfos observes the specified namespace, or all servers when empty.
 func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 	if m == nil {
 		return nil
@@ -522,12 +618,12 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 
 	var infos []MCPServerInfo
 
-	for _, server := range m.servers {
-		if server.spec.PluginID != pluginID {
+	for index, server := range m.servers {
+		if pluginID != "" && server.spec.PluginID != pluginID {
 			continue
 		}
 		serverName, client := server.spec.Name, server.client
-		key := pluginID + "/" + serverName
+		key := server.spec.PluginID + "/" + serverName
 		status := "connecting"
 		warnings := append([]string(nil), m.warnings[key]...)
 		if server.refreshErr != nil {
@@ -572,8 +668,10 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 		sort.Slice(details, func(i, j int) bool { return details[i].Name < details[j].Name })
 
 		infos = append(infos, MCPServerInfo{
+			PluginID:      server.spec.PluginID,
 			Name:          serverName,
 			Status:        status,
+			Ready:         status == "running" && server.catalogReady && !server.revoked && !stale && server.err == nil && !m.awaitingHigherPriorityServer(index),
 			Tools:         tools,
 			ToolDetails:   details,
 			Warning:       strings.Join(warnings, "; "),

@@ -143,6 +143,7 @@ type asyncHarness struct {
 	secondTool    chan struct{}
 	releaseSecond chan struct{}
 	tool          tool.Tool
+	instructions  agent.SessionInstructionsResolver
 }
 
 func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceRef) *asyncHarness {
@@ -192,7 +193,9 @@ func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceR
 
 func (h *asyncHarness) run(t *testing.T) agent.RunResult {
 	t.Helper()
-	run, err := h.rt.Run(h.ctx, agent.RunRequest{SessionRef: h.active.SessionRef, Input: "continue fixture", AgentSpec: agent.AgentSpec{ResolveModelRequest: h.source.resolve}})
+	run, err := h.rt.Run(h.ctx, agent.RunRequest{SessionRef: h.active.SessionRef, Input: "continue fixture", AgentSpec: agent.AgentSpec{
+		ResolveModelRequest: h.source.resolve, ResolveSessionInstructions: h.instructions,
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,8 +270,14 @@ func TestAsyncCompactionFrozenRequestMatchesForeground(t *testing.T) {
 
 func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	h := newAsyncHarness(t, "cas")
+	h.instructions = func(_ context.Context, summaryID string) (string, func(context.Context) error, error) {
+		return "Session instructions from summary=" + summaryID, nil, nil
+	}
 	run := h.run(t)
 	next := h.startCandidate(t)
+	if want := []model.Part{model.NewTextPart("Session instructions from summary=")}; !reflect.DeepEqual(next.request.Instructions, want) {
+		t.Fatalf("request while generating candidate used a different prefix: %+v", next.request.Instructions)
+	}
 	// A second provider request and tool run complete admission while the
 	// summary is deliberately blocked. No write queue is held by generation.
 	h.llm.responses <- asyncToolResponse("second")
@@ -279,6 +288,9 @@ func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	h.completeCandidate(t, next.scope)
 	close(h.releaseSecond)
 	after := receiveSnapshotValue(t, h.llm.foreground).request
+	if want := []model.Part{model.NewTextPart("Session instructions from summary=" + next.scope.job.id)}; !reflect.DeepEqual(after.Instructions, want) {
+		t.Fatalf("first request using the adopted summary did not update instructions: %+v", after.Instructions)
+	}
 	joined := asyncMessagesText(after.Messages)
 	if !strings.Contains(joined, "CONTEXT CHECKPOINT") || !strings.Contains(joined, "steering:") || !strings.Contains(joined, "concurrent CAS tail") {
 		t.Fatalf("adopted request lost checkpoint or tail: %s", joined)
@@ -331,7 +343,9 @@ func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe, err := resumed.Run(h.ctx, agent.RunRequest{SessionRef: h.active.SessionRef, Input: "replay probe", AgentSpec: agent.AgentSpec{ResolveModelRequest: h.source.resolve}})
+	probe, err := resumed.Run(h.ctx, agent.RunRequest{SessionRef: h.active.SessionRef, Input: "replay probe", AgentSpec: agent.AgentSpec{
+		ResolveModelRequest: h.source.resolve, ResolveSessionInstructions: h.instructions,
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

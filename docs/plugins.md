@@ -73,9 +73,9 @@ workspace, then enter this in Caelis's TUI:
 ```
 
 The plugin is enabled when installed. Use `/plugin manage` to enable or disable
-it later. Start a new Session/task for configuration changes to take effect;
-an active Session retains its MCP and Skill snapshot. No plugin files or
-credentials are copied into the project workspace.
+it later. Start a new Session or task to pick up changes to Host plugin selection.
+The `Skill` tool reads current Skills from bundles selected for the active Session.
+No plugin files or credentials are copied into the project workspace.
 
 Trusted external installers can use the local headless entry:
 
@@ -126,10 +126,9 @@ succeeds. It leaves externally owned files and private data available. `status`
 reads the Host registration snapshot and returns `installed:false`
 for an absent ID without activating a Session or starting MCP. An enabled
 registration and its Host-scoped MCP fields do not prove the tool catalog or
-worker readiness of an activated Session. Start a fresh Session
-for changed Skill/MCP configuration; active Runtime snapshots remain fixed
-until release. Changes to files in place can still change bytes read by an active
-process; finish active work before replacing an installer's package files.
+worker readiness of an activated Session. Start a fresh Session to apply changes
+to the selected Host packages. Changes to files in place can change bytes read by
+an active process; finish active work before replacing an installer's package files.
 
 JSON stdout contains one object with `schema_version:"1"`, `action`, `id`,
 `installed`, and, when registered, `plugin`. The `plugin` snapshot includes
@@ -249,8 +248,9 @@ its declared path. Claude stdio servers receive `CLAUDE_PLUGIN_ROOT` in their
 minimal process environment. A malformed Claude server entry is skipped while
 other entries remain available. Plugin files do not replace the separately trusted
 workspace `.mcp.json` overlay.
-Project overlays still require trust of that exact canonical workspace and
-retain their existing priority and Session snapshot behavior.
+Project overlays require trust of that exact canonical workspace and use the
+ordinary MCP priority and [Session reload](session-profiles.md#mcp-discovery-and-upgrades)
+rules.
 
 MCP tool results keep ordered text, validated PNG/JPEG image bytes as inline
 base64 media, bounded resource-link metadata, bounded embedded text, and

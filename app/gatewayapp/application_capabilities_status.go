@@ -31,7 +31,7 @@ func (s *Stack) applicationMCPStatus(_ context.Context, sessionID string, revisi
 	return read(revision)
 }
 
-func (s *Stack) applicationConfigurationCommitted(_ context.Context, sessionID string, configuration sessionprofile.Configuration) {
+func (s *Stack) applicationConfigurationCommitted(ctx context.Context, sessionID string, configuration sessionprofile.Configuration) {
 	if s == nil || s.sessionRuntimes == nil {
 		return
 	}
@@ -48,6 +48,6 @@ func (s *Stack) applicationConfigurationCommitted(_ context.Context, sessionID s
 	update := composition.capabilityUpdated
 	composition.mu.RUnlock()
 	if update != nil {
-		update(configuration)
+		update(context.WithoutCancel(ctx), configuration)
 	}
 }

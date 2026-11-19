@@ -265,6 +265,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		name, args = "Skill", `{"name":"healthy-skill"}`
 	case strings.Contains(latestUser, "BODY_SKILL"):
 		name, args = "Skill", `{"name":"body-skill"}`
+	case strings.Contains(latestUser, "RELOAD_SKILL"):
+		name, args = "Skill", `{"name":"reload-skill"}`
 	case strings.Contains(latestUser, "SKILL"):
 		name, args = "Skill", `{"name":"atomic-skill"}`
 	case strings.Contains(latestUser, "CALLFAIL"):
@@ -537,7 +539,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-body-fail", "BODY_SKILL")
-	if got := provider.lastRequest(); !strings.Contains(got, "body-skill") || !strings.Contains(got, "load skill") {
+	if got := provider.lastRequest(); !strings.Contains(got, "body-skill") || !strings.Contains(got, "skill not found") {
 		t.Fatalf("on-demand body failure was not returned to the model: %.2000s", got)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-basic-after-fail", "BASIC")
@@ -607,12 +609,47 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	promptAtomicCapabilityClient(t, ctx, client, onlySession.SessionID, "skill-isolation-only-basic", "BASIC")
 	onlyStatus, err := client.SessionMCPStatus(ctx, onlySession.SessionID)
 	onlyStatus = optionalCapabilityStatus(onlyStatus)
-	if err != nil || len(onlyStatus.Servers) != 0 || len(onlyStatus.Skills) != 1 || onlyStatus.Skills[0].Status != "failed" {
+	if err != nil || atomicSkillStatusesByPath(onlyStatus)[only].Status != "failed" {
 		t.Fatalf("Skills-only failure blocked dialogue or was hidden: %+v, %v", onlyStatus, err)
 	}
-	if last := provider.lastRequest(); strings.Contains(last, "only-skill") || (!builtinComputerUseSupported() && strings.Contains(provider.lastTools(), "\"name\":\"Skill\"")) {
+	if last := provider.lastRequest(); strings.Contains(last, "only-skill") {
 		t.Fatalf("failed Skills-only root entered the model request: %.2000s", last)
 	}
+	beforeReloadTools := provider.lastTools()
+	beforeReloadPrefix := atomicSystemInstructions(t, provider.lastRequest())
+	reload := filepath.Join(root, "reload")
+	writeAtomicSkill(t, reload, "reload-skill", "RELOAD_SKILL_BODY_413")
+	roots := []string{reload}
+	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(onlySession.SessionID, sessionprofile.UpdateConfigurationRequest{
+		OperationID: "skill-isolation-add", ExpectedConfigurationRevision: 1,
+		Patch: sessionprofile.ConfigurationPatch{SkillRoots: &roots},
+	}))); err != nil {
+		t.Fatal(err)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, onlySession.SessionID, "skill-isolation-load-new", "RELOAD_SKILL")
+	if got := provider.lastRequest(); !strings.Contains(got, "RELOAD_SKILL_BODY_413") || atomicSystemInstructions(t, got) != beforeReloadPrefix || provider.lastTools() != beforeReloadTools {
+		t.Fatalf("new Skill was unavailable or changed the request prefix: %.2000s", got)
+	}
+}
+
+func atomicSystemInstructions(t *testing.T, raw string) string {
+	t.Helper()
+	var request struct {
+		Messages []struct {
+			Role    string
+			Content json.RawMessage
+		}
+	}
+	if err := json.Unmarshal([]byte(raw), &request); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	for _, message := range request.Messages {
+		if message.Role == "system" || message.Role == "developer" {
+			out.Write(message.Content)
+		}
+	}
+	return out.String()
 }
 
 func startAtomicLifecycleSession(t *testing.T, ctx context.Context, root string, provider http.RoundTripper, servers []sessionprofile.MCPServer) (*applicationHTTPHost, *httpclient.Client, string) {
@@ -767,7 +804,7 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	t.Setenv("CAELIS_ATOMIC_MCP_RELEASE", releasePath)
 	blocking := sessionprofile.MCPServer{Name: "blocking", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicBlockingMCPHelper$"}, WorkDir: root}
 	provider := &atomicCapabilityProvider{}
-	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []sessionprofile.MCPServer{blocking})
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, nil)
 	defer host.close(t)
 	defer func() { _ = os.WriteFile(releasePath, []byte("release"), 0o600) }()
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
@@ -775,8 +812,17 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
-	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-warm", "BASIC")
+	initial := []sessionprofile.MCPServer{blocking}
+	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
+		OperationID: "pinned-cold-add", ExpectedConfigurationRevision: 1,
+		Patch: sessionprofile.ConfigurationPatch{MCPServers: &initial},
+	}))); err != nil {
+		t.Fatal(err)
+	}
 	waitAtomicApplicationMCPRunning(t, ctx, client, session, "blocking")
+	if strings.Contains(provider.snapshot(), "js_exec") {
+		t.Fatal("preparing the MCP directory sent a model request")
+	}
 	result, err := client.Prompt(ctx, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{SessionID: session, OperationID: "pinned-old"}, Input: "BLOCK",
 		SourceKind: "user"})
@@ -828,12 +874,24 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	utilities := []sessionprofile.MCPServer{{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root}}
+	expanded := []sessionprofile.MCPServer{blocking, utilities[0]}
 	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
-		OperationID: "pinned-change", ExpectedConfigurationRevision: configuration.Revision,
-		Patch: sessionprofile.ConfigurationPatch{MCPServers: &utilities},
+		OperationID: "pinned-add", ExpectedConfigurationRevision: configuration.Revision,
+		Patch: sessionprofile.ConfigurationPatch{MCPServers: &expanded},
 	})))
 	if err != nil || updated.Revision != configuration.Revision+1 {
-		t.Fatalf("update = %+v, %v", updated, err)
+		t.Fatalf("add = %+v, %v", updated, err)
+	}
+	waitAtomicApplicationMCPRunning(t, ctx, client, session, "utilities")
+	waitAtomicApplicationMCPRunning(t, ctx, client, session, "blocking")
+	if got := atomicAudit(audit); strings.Count(got, "blocking:start:") != 1 || strings.Contains(got, callStop) {
+		t.Fatalf("adding an MCP service replaced the blocked call's connection: %s", got)
+	}
+	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
+		OperationID: "pinned-remove", ExpectedConfigurationRevision: updated.Revision,
+		Patch: sessionprofile.ConfigurationPatch{MCPServers: &utilities},
+	}))); err != nil {
+		t.Fatal(err)
 	}
 	if got := atomicAudit(audit); !strings.Contains(got, callStart) || strings.Contains(got, callStop) {
 		t.Fatalf("MCP process holding admitted call is not alive: %s", got)
@@ -852,9 +910,6 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	}
 	waitApplicationHTTPIdle(t, ctx, client, session)
 	waitAtomicAudit(t, audit, callStop)
-	// The next activation samples the revised selection and initializes it
-	// asynchronously. Wait for its catalog before requesting the new effect.
-	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-new-warm", "BASIC")
 	waitAtomicApplicationMCPRunning(t, ctx, client, session, "utilities")
 	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-new-after-old", "UTIL")
 	waitAtomicAuditCount(t, audit, "utilities:call:", 1)
@@ -1018,7 +1073,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-basic", "BASIC")
 	tools := provider.lastTools()
-	if (!builtinComputerUseSupported() && strings.Contains(tools, "\"name\":\"Skill\"")) || strings.Contains(tools, "\"name\":\"ToolSearch\"") || strings.Contains(tools, "documents__lookup") {
+	if strings.Contains(tools, "\"name\":\"ToolSearch\"") || strings.Contains(tools, "documents__lookup") {
 		t.Fatalf("disabled capabilities remained in new model request: %s", tools)
 	}
 	reenabled, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: "atomic-reenable", ExpectedConfigurationRevision: disabled.Revision, Patch: sessionprofile.ConfigurationPatch{MCPServers: &profile.MCPServers, SkillDirs: &profile.SkillDirs}})))
@@ -1143,10 +1198,10 @@ func waitAtomicApplicationMCPRunning(t *testing.T, ctx context.Context, client *
 			if server.Name != name {
 				continue
 			}
-			if server.Status == "running" {
+			if server.Ready {
 				return
 			}
-			if server.Status == "failed" {
+			if server.Status == "failed" || server.RefreshFailed {
 				t.Fatalf("MCP service %q failed to start: %+v", name, server)
 			}
 		}

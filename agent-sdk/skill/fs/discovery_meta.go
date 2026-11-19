@@ -2,6 +2,7 @@ package fs
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,11 +26,9 @@ var metaCache = struct {
 }
 
 type metaCacheEntry struct {
-	size    int64
-	modTime int64
-	used    uint64
-	meta    Meta
-	hash    string
+	used uint64
+	meta Meta
+	hash string
 }
 
 // DefaultDiscoveryDirs returns workspace and user-global skill roots without
@@ -100,11 +99,7 @@ func DiscoverRootMeta(root string) (Meta, error) {
 		return Meta{}, fmt.Errorf("skill root is not a directory: %s", resolved)
 	}
 	path := filepath.Join(resolved, "SKILL.md")
-	info, err = os.Stat(path)
-	if err != nil {
-		return Meta{}, err
-	}
-	meta, _, err := parseMetaHashCached(path, info)
+	meta, _, err := parseMetaHashCached(path)
 	if err != nil {
 		return Meta{}, err
 	}
@@ -159,19 +154,12 @@ func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, e
 				continue
 			}
 			skillPath := filepath.Join(resolvedDir, entry.Name(), "SKILL.md")
-			info, err := os.Stat(skillPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
-				continue
-			}
 			skillPath = filepath.Clean(skillPath)
 			if _, ok := seenPaths[skillPath]; ok {
 				continue
 			}
 			seenPaths[skillPath] = struct{}{}
-			meta, hash, err := parseMetaHashCached(skillPath, info)
+			meta, hash, err := parseMetaHashCached(skillPath)
 			if err != nil {
 				continue
 			}
@@ -217,17 +205,17 @@ func ResolvePath(path string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func parseMetaHashCached(path string, info os.FileInfo) (Meta, string, error) {
-	if info == nil {
-		return parseMetaHash(path)
+func parseMetaHashCached(path string) (Meta, string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Meta{}, "", err
 	}
-	entry := metaCacheEntry{
-		size:    info.Size(),
-		modTime: info.ModTime().UnixNano(),
-	}
+	// The same path, size, and timestamp can describe different file contents.
+	sum := sha256.Sum256(raw)
+	hash := hex.EncodeToString(sum[:])
 	metaCache.Lock()
 	cached, ok := metaCache.entries[path]
-	if ok && cached.size == entry.size && cached.modTime == entry.modTime {
+	if ok && cached.hash == hash {
 		metaCache.next++
 		cached.used = metaCache.next
 		metaCache.entries[path] = cached
@@ -235,16 +223,13 @@ func parseMetaHashCached(path string, info os.FileInfo) (Meta, string, error) {
 		return cached.meta, cached.hash, nil
 	}
 	metaCache.Unlock()
-	meta, hash, err := parseMetaHash(path)
+	meta, err := parseMetaContent(path, raw)
 	if err != nil {
 		return Meta{}, "", err
 	}
-	entry.meta = meta
-	entry.hash = hash
 	metaCache.Lock()
 	metaCache.next++
-	entry.used = metaCache.next
-	metaCache.entries[path] = entry
+	metaCache.entries[path] = metaCacheEntry{used: metaCache.next, meta: meta, hash: hash}
 	pruneMetaCacheLocked()
 	metaCache.Unlock()
 	return meta, hash, nil
@@ -265,19 +250,6 @@ func pruneMetaCacheLocked() {
 		}
 		delete(metaCache.entries, oldestPath)
 	}
-}
-
-func parseMetaHash(path string) (Meta, string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return Meta{}, "", err
-	}
-	meta, err := parseMetaContent(path, raw)
-	if err != nil {
-		return Meta{}, "", err
-	}
-	sum := sha256.Sum256(raw)
-	return meta, fmt.Sprintf("%x", sum[:]), nil
 }
 
 func parseMetaContent(path string, raw []byte) (Meta, error) {

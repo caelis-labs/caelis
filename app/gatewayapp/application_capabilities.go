@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -24,61 +22,65 @@ import (
 // ordinary and application paths share SDK MCP/Skill mechanics and the same
 // Runtime; only Control's explicit selection and lifetime differ.
 type applicationCapabilities struct {
-	catalog    skill.Catalog
-	skills     []sessionprofile.SkillStatus
-	plugins    []sessionprofile.PluginStatus
-	skillTool  tool.Tool
-	searchTool tool.Tool
-	source     tool.Source
-	resource   *applicationMCPResource
-}
-
-// The resolver owns the current MCP configuration; each model snapshot also
-// holds a reference until its response and tool calls have completed.
-type applicationMCPResource struct {
-	servers []sessionprofile.MCPServer
-	plugins []sessionprofile.Plugin
-	specs   []mcp.ServerSpec
-	manager *mcp.Manager
-	refs    int
-	retired bool
-	closed  bool
-}
-
-func (r *applicationMCPResource) matches(profile sessionprofile.Profile) bool {
-	return reflect.DeepEqual(r.servers, profile.MCPServers) && reflect.DeepEqual(r.plugins, profile.Plugins)
+	skillBundles []skill.PluginBundle
+	skills       []sessionprofile.SkillStatus
+	plugins      []sessionprofile.PluginStatus
+	searchTool   tool.Tool
+	source       tool.Source
 }
 
 type applicationMCPSource struct {
-	manager   *mcp.Manager
-	store     *sessionprofile.Store
-	scope     sessionprofile.Scope
-	sessionID string
-	revision  uint64
+	selection mcp.Selection
+	resolver  *applicationTurnResolver
 }
 
-// CheckSearchScope closes schema reads and result publication when a lease is
-// revoked or this Application's desired catalog revision has changed.
+// CheckSearchScope checks the durable profile before using the resident graph.
 func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
-	if err := s.store.CheckActive(ctx, s.scope); err != nil {
-		return err
-	}
-	current, err := s.store.Configuration(ctx, s.scope, s.sessionID)
-	if err != nil {
-		return err
-	}
-	if current.Revision != s.revision {
-		return fmt.Errorf("ToolSearch Application configuration changed: %w", sessionprofile.ErrConfigurationStale)
-	}
-	return nil
+	return s.resolver.checkAppliedMCPConfiguration(ctx)
 }
 
 func (s applicationMCPSource) Tools() []tool.Tool {
-	ready := s.manager.Tools()
+	return s.leaseTools(s.selection.Tools())
+}
+
+func (s applicationMCPSource) leaseTools(ready []tool.Tool) []tool.Tool {
 	for i, item := range ready {
-		ready[i] = applicationLeasedTool{Tool: item, store: s.store, scope: s.scope}
+		ready[i] = applicationMCPTool{Tool: item, source: s}
 	}
 	return ready
+}
+
+type applicationMCPTool struct {
+	tool.Tool
+	source applicationMCPSource
+}
+
+func (t applicationMCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if err := t.source.CheckSearchScope(ctx); err != nil {
+		return tool.Result{}, err
+	}
+	return t.Tool.Call(ctx, call)
+}
+
+// New calls require a graph for the latest committed revision. Checking the
+// applied revision rather than the request's original revision lets an
+// unchanged binding continue after a successful reload.
+func (r *applicationTurnResolver) checkAppliedMCPConfiguration(ctx context.Context) error {
+	r.capabilitiesMu.Lock()
+	revision, closed := r.desiredRevision, r.capabilitiesClosed
+	r.capabilitiesMu.Unlock()
+	if closed {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP configuration is unavailable")
+	}
+	release, err := r.composition.authorities.sessionProfiles.GuardConfiguration(ctx, r.binding.Scope, r.binding.SessionID, revision)
+	if errors.Is(err, sessionprofile.ErrConfigurationStale) {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "committed MCP configuration is awaiting reconciliation")
+	}
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
 }
 
 func applicationSkillCatalog(profile sessionprofile.Profile) (skill.Catalog, error) {
@@ -124,6 +126,14 @@ func assembleApplicationSkills(profile sessionprofile.Profile, strict bool, bund
 		info, err := os.Stat(dir)
 		if err == nil && !info.IsDir() {
 			err = fmt.Errorf("not a directory")
+		}
+		if err == nil {
+			if _, rootErr := os.Lstat(filepath.Join(dir, "SKILL.md")); rootErr == nil {
+				if err := addRoot(dir, true); err != nil {
+					return skill.Catalog{}, nil, err
+				}
+				continue
+			}
 		}
 		var entries []os.DirEntry
 		if err == nil {
@@ -178,17 +188,27 @@ func applicationSkillWarning(err error) string {
 	return "selected Skill metadata is invalid or unreadable"
 }
 
-func applicationSkillMetadata(catalog skill.Catalog) string {
-	metas := catalog.Metas()
-	if len(metas) == 0 {
-		return ""
+func (s *runtimeComposition) applicationSkills(profile sessionprofile.Profile, bundles ...skill.PluginBundle) (skill.Catalog, []sessionprofile.SkillStatus, error) {
+	catalog, statuses, err := assembleApplicationSkills(profile, false, bundles...)
+	if err != nil {
+		return catalog, statuses, err
 	}
-	var b strings.Builder
-	b.WriteString("## Skills\nUse the Skill tool to load a matching skill before following its instructions. Only the Skill tool result contains its body.\n### Available skills\n")
+	workspace := s.workspace.CWD
+	metas, err := DiscoverSkillMetaRequest(skill.DiscoverRequest{
+		Dirs: stackSkillDiscoveryDirs(workspace, s.runtimeProcessSnapshot().runtime.SkillDirs), WorkspaceDir: workspace, PluginBundles: bundles,
+	})
+	if err != nil {
+		return skill.Catalog{}, nil, err
+	}
+	combined := catalog.Metas()
 	for _, meta := range metas {
-		fmt.Fprintf(&b, "- %s: %s\n", strings.Join(strings.Fields(meta.Name), " "), strings.Join(strings.Fields(meta.Description), " "))
+		if _, status := catalog.Resolve(meta.Name); meta.Source == skill.SourcePlugin || status != skill.ResolveNotFound {
+			continue
+		}
+		combined = append(combined, meta)
+		statuses = append(statuses, sessionprofile.SkillStatus{Path: meta.Path, Kind: "skill", Name: meta.Name, Status: "ready"})
 	}
-	return strings.TrimSpace(b.String())
+	return skill.NewCatalog(combined), statuses, nil
 }
 
 func applicationMCPSpecs(profile sessionprofile.Profile) []mcp.ServerSpec {
@@ -203,216 +223,248 @@ func applicationMCPSpecs(profile sessionprofile.Profile) []mcp.ServerSpec {
 	return specs
 }
 
-func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, configuration sessionprofile.Configuration) (*applicationCapabilities, func(), error) {
+func (r *applicationTurnResolver) capabilitiesFor(ctx context.Context, configuration sessionprofile.Configuration) (*applicationCapabilities, error) {
 	r.capabilitiesMu.Lock()
 	defer r.capabilitiesMu.Unlock()
+	return r.reconcileCapabilitiesLocked(ctx, configuration)
+}
+
+func (r *applicationTurnResolver) currentCapabilities(ctx context.Context) (sessionprofile.Configuration, *applicationCapabilities, error) {
+	for {
+		configuration, err := r.composition.authorities.sessionProfiles.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
+		if err != nil {
+			return sessionprofile.Configuration{}, nil, err
+		}
+		capabilities, err := r.capabilitiesFor(ctx, configuration)
+		if !errors.Is(err, agent.ErrModelRequestSnapshotStale) {
+			return configuration, capabilities, err
+		}
+		if err := ctx.Err(); err != nil {
+			return sessionprofile.Configuration{}, nil, err
+		}
+	}
+}
+
+func (r *applicationTurnResolver) reconcileCapabilitiesLocked(ctx context.Context, configuration sessionprofile.Configuration) (*applicationCapabilities, error) {
 	if r.capabilitiesClosed {
-		return nil, nil, fmt.Errorf("application capabilities are closed")
+		return nil, fmt.Errorf("application capabilities are closed")
 	}
-	var obsolete *mcp.Manager
-	if configuration.Revision > r.desiredRevision {
-		obsolete = r.setDesiredCapabilitiesLocked(configuration)
+	if configuration.Revision < r.desiredRevision {
+		return nil, agent.ErrModelRequestSnapshotStale
 	}
-	if obsolete != nil {
-		// No admitted snapshot references this manager. Closing while holding
-		// the resolver lock keeps a later acquisition from racing its shutdown.
-		_ = obsolete.Close()
-	}
-	if existing := r.capabilities[configuration.Revision]; existing != nil {
-		return existing, r.retainCapabilitiesLocked(existing), nil
+	if configuration.Revision == r.desiredRevision && r.capabilities != nil {
+		return r.capabilities, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	catalog, skills, err := assembleApplicationSkills(configuration.Profile, false, contributions.SkillBundles...)
+	_, skills, err := r.composition.applicationSkills(configuration.Profile, contributions.SkillBundles...)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	assembled := &applicationCapabilities{catalog: catalog, skills: skills}
+	assembled := &applicationCapabilities{skillBundles: contributions.SkillBundles, skills: skills}
 	r.composition.reportPluginFailures(contributions)
 	for _, source := range contributions.Sources {
 		assembled.plugins = append(assembled.plugins, pluginSourceStatus(source))
 	}
-	specs := append(applicationMCPSpecs(configuration.Profile), contributions.MCPServerSpecs...)
-	if len(catalog.Metas()) != 0 {
-		assembled.skillTool = skilltool.New(skilltool.Config{Loader: skillfs.Loader{}, Catalog: catalog})
+	if err := r.reconcileMCPLocked(ctx, configuration, contributions); err != nil {
+		return nil, err
 	}
-	if len(specs) != 0 {
-		resource := r.currentMCP
-		if resource == nil || !reflect.DeepEqual(resource.specs, specs) {
-			if resource != nil && configuration.Revision >= r.desiredRevision {
-				r.currentMCP = nil
-				resource.retired = true
-				if resource.refs == 0 && !resource.closed {
-					resource.closed = true
-					_ = resource.manager.Close()
-				}
-			}
-			manager, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), specs, nil, mcp.ManagerOptions{})
-			if err != nil {
-				return nil, nil, err
-			}
-			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), plugins: slices.Clone(configuration.Profile.Plugins), specs: specs, manager: manager, retired: configuration.Revision < r.desiredRevision}
-			if !resource.retired {
-				r.currentMCP = resource
-			}
-		}
-		assembled.resource = resource
-		assembled.source = applicationMCPSource{manager: resource.manager, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope, sessionID: r.binding.SessionID, revision: configuration.Revision}
-		assembled.searchTool = toolsearch.NewSource(assembled.source, newBoundToolSearchRanker(r.composition))
-	}
-	if configuration.Revision >= r.desiredRevision && r.capabilities == nil {
-		r.capabilities = map[uint64]*applicationCapabilities{}
-	}
-	if configuration.Revision >= r.desiredRevision {
-		r.capabilities[configuration.Revision] = assembled
-	}
-	return assembled, r.retainCapabilitiesLocked(assembled), nil
+	r.bindApplicationMCP(assembled)
+	r.capabilities = assembled
+	return assembled, nil
 }
 
-func (r *applicationTurnResolver) retainCapabilitiesLocked(capability *applicationCapabilities) func() {
-	if capability.resource == nil {
-		return func() {}
+func (r *applicationTurnResolver) liveSkillCatalog(ctx context.Context) (skill.Catalog, error) {
+	configuration, capabilities, err := r.currentCapabilities(ctx)
+	if err != nil {
+		return skill.Catalog{}, err
 	}
-	resource := capability.resource
-	resource.refs++
-	return func() {
-		r.capabilitiesMu.Lock()
-		resource.refs--
-		closeManager := resource.retired && resource.refs == 0 && !resource.closed
-		if closeManager {
-			resource.closed = true
-			// Serialize shutdown with activation close and new acquisitions.
-			_ = resource.manager.Close()
-		}
-		r.capabilitiesMu.Unlock()
+	catalog, statuses, err := r.composition.applicationSkills(configuration.Profile, capabilities.skillBundles...)
+	if err != nil {
+		return skill.Catalog{}, err
 	}
+	r.capabilitiesMu.Lock()
+	if r.capabilities == capabilities {
+		capabilities.skills = statuses
+	}
+	r.capabilitiesMu.Unlock()
+	return catalog, nil
 }
 
-func (r *applicationTurnResolver) setDesiredCapabilitiesLocked(configuration sessionprofile.Configuration) *mcp.Manager {
+func (r *applicationTurnResolver) reconcileMCPLocked(ctx context.Context, configuration sessionprofile.Configuration, contributions plugin.Contributions) error {
+	declared := append(applicationMCPSpecs(configuration.Profile), contributions.MCPServerSpecs...)
+	specs := overlayApplicationMCP(r.inheritedMCP, declared)
+	var err error
+	if r.mcpManager == nil {
+		r.mcpManager, err = mcp.NewManager(context.WithoutCancel(ctx), specs, nil)
+	} else {
+		err = r.mcpManager.Reconcile(specs)
+	}
+	if err != nil {
+		return err
+	}
+	r.declaredMCP = declared
 	r.desiredRevision = configuration.Revision
-	for revision := range r.capabilities {
-		if revision < configuration.Revision {
-			delete(r.capabilities, revision)
-		}
-	}
-	current := r.currentMCP
-	if current == nil || current.matches(configuration.Profile) {
+	r.failedMCPRevision = 0
+	return nil
+}
+
+func (r *applicationTurnResolver) bindApplicationMCP(capabilities *applicationCapabilities) {
+	capabilities.source = applicationMCPSource{selection: r.mcpManager.Selection(), resolver: r}
+	capabilities.searchTool = toolsearch.NewSource(capabilities.source, newBoundToolSearchRanker(r.composition))
+}
+
+func (r *applicationTurnResolver) updateInheritedMCP(specs []mcp.ServerSpec) error {
+	r.capabilitiesMu.Lock()
+	defer r.capabilitiesMu.Unlock()
+	if r.capabilitiesClosed {
 		return nil
 	}
-	r.currentMCP = nil
-	current.retired = true
-	if current.refs == 0 {
-		current.closed = true
-		return current.manager
+	if err := r.mcpManager.Reconcile(overlayApplicationMCP(specs, r.declaredMCP)); err != nil {
+		return err
+	}
+	r.inheritedMCP = specs
+	if r.capabilities != nil {
+		// In-flight requests keep the bindings they already received.
+		updated := *r.capabilities
+		r.bindApplicationMCP(&updated)
+		r.capabilities = &updated
 	}
 	return nil
 }
 
-func (r *applicationTurnResolver) configurationCommitted(configuration sessionprofile.Configuration) {
-	r.capabilitiesMu.Lock()
-	if !r.capabilitiesClosed && configuration.Revision > r.desiredRevision {
-		if obsolete := r.setDesiredCapabilitiesLocked(configuration); obsolete != nil {
-			_ = obsolete.Close()
+func overlayApplicationMCP(inherited, declared []mcp.ServerSpec) []mcp.ServerSpec {
+	combined := append([]mcp.ServerSpec(nil), declared...)
+	for _, server := range inherited {
+		prefix := mcp.ServerToolNamePrefix(server.Name)
+		shadowed := false
+		for _, override := range declared {
+			other := mcp.ServerToolNamePrefix(override.Name)
+			if strings.HasPrefix(prefix, other) || strings.HasPrefix(other, prefix) {
+				shadowed = true
+				break
+			}
+		}
+		if !shadowed {
+			combined = append(combined, server)
 		}
 	}
-	r.capabilitiesMu.Unlock()
+	return combined
+}
+
+func (r *applicationTurnResolver) configurationCommitted(ctx context.Context, configuration sessionprofile.Configuration) {
+	r.capabilitiesMu.Lock()
+	defer r.capabilitiesMu.Unlock()
+	if r.capabilitiesClosed || configuration.Revision <= r.desiredRevision {
+		return
+	}
+	if err := r.reloadProfileMCPLocked(ctx, configuration); err != nil {
+		r.failedMCPRevision = configuration.Revision
+		if diagnostics := r.composition.authorities.diagnostics; diagnostics != nil {
+			diagnostics.WarnContext(ctx, "Committed Session MCP configuration could not be reconciled", "session_id", r.binding.SessionID, "revision", configuration.Revision, "error", err)
+		}
+	}
+}
+
+func (r *applicationTurnResolver) reloadProfileMCPLocked(ctx context.Context, configuration sessionprofile.Configuration) error {
+	if r.capabilitiesClosed {
+		return fmt.Errorf("application capabilities are closed")
+	}
+	if configuration.Revision < r.desiredRevision {
+		return sessionprofile.ErrConfigurationStale
+	}
+	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	if err != nil {
+		return err
+	}
+	if err := r.reconcileMCPLocked(ctx, configuration, contributions); err != nil {
+		return err
+	}
+	// Invalidate the old selection. The model-facing Skill list is pinned
+	// separately in the Session's request instructions.
+	r.capabilities = nil
+	return nil
 }
 
 func (r *applicationTurnResolver) closeCapabilities() {
 	r.capabilitiesMu.Lock()
 	r.capabilitiesClosed = true
-	r.capabilities = nil
-	current := r.currentMCP
-	r.currentMCP = nil
-	if current != nil {
-		current.retired = true
-	}
-	closeManager := current != nil && current.refs == 0 && !current.closed
-	if closeManager {
-		current.closed = true
-		_ = current.manager.Close()
-	}
+	manager := r.mcpManager
+	r.mcpManager, r.capabilities = nil, nil
 	r.capabilitiesMu.Unlock()
+	_ = manager.Close()
 }
 
 func (r *applicationTurnResolver) capabilityStatus(revision uint64) sessionprofile.MCPStatus {
 	r.capabilitiesMu.Lock()
 	defer r.capabilitiesMu.Unlock()
-	capability := r.capabilities[revision]
-	current := r.currentMCP
-	status := sessionprofile.MCPStatus{}
-	if capability != nil {
-		current = capability.resource
-		status.Skills = append([]sessionprofile.SkillStatus(nil), capability.skills...)
-		status.Plugins = append([]sessionprofile.PluginStatus(nil), capability.plugins...)
-	} else if revision != r.desiredRevision {
-		current = nil
-	}
-	if current == nil {
-		return status
-	}
-	seen := map[string]bool{}
-	for _, spec := range current.specs {
-		if seen[spec.PluginID] {
-			continue
+	if revision != r.desiredRevision {
+		if revision == r.failedMCPRevision {
+			return sessionprofile.MCPStatus{Warning: "MCP configuration could not be applied. New calls are blocked pending reconciliation."}
 		}
-		seen[spec.PluginID] = true
-		for _, info := range current.manager.GetServerInfos(spec.PluginID) {
-			server := applicationMCPServerStatus(info)
-			if spec.PluginID != "application" {
-				server.PluginID = spec.PluginID
-			}
-			status.Servers = append(status.Servers, server)
-		}
+		return sessionprofile.MCPStatus{}
+	}
+	status := sessionprofile.MCPStatus{
+		Servers: mcpServerStatuses(r.mcpManager),
+	}
+	if r.capabilities != nil {
+		status.Skills = append([]sessionprofile.SkillStatus(nil), r.capabilities.skills...)
+		status.Plugins = append([]sessionprofile.PluginStatus(nil), r.capabilities.plugins...)
 	}
 	return status
+}
+
+func mcpServerStatuses(manager *mcp.Manager) []sessionprofile.MCPServerStatus {
+	var servers []sessionprofile.MCPServerStatus
+	for _, info := range manager.GetServerInfos("") {
+		server := applicationMCPServerStatus(info)
+		if info.PluginID != "application" {
+			server.PluginID = info.PluginID
+		}
+		servers = append(servers, server)
+	}
+	return servers
 }
 
 func applicationMCPServerStatus(info mcp.MCPServerInfo) sessionprofile.MCPServerStatus {
 	return sessionprofile.MCPServerStatus{
 		Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning,
-		Refreshing: info.Refreshing, Stale: info.Stale, RefreshFailed: info.RefreshFailed,
+		Ready: info.Ready, Refreshing: info.Refreshing, Stale: info.Stale, RefreshFailed: info.RefreshFailed,
 	}
 }
 
-// Borrow only the manager already owned by this activation. A remote retry must
-// not start a dormant catalog or resurrect one retired by configuration removal.
+// Refresh an already-applied directory, or reconcile the current profile.
 func (r *applicationTurnResolver) refreshMCPTools(ctx context.Context, pluginID, serverName string) error {
-	if err := r.composition.authorities.sessionProfiles.CheckActive(ctx, r.binding.Scope); err != nil {
+	store := r.composition.authorities.sessionProfiles
+	if err := store.CheckActive(ctx, r.binding.Scope); err != nil {
 		return err
 	}
-	configuration, err := r.composition.authorities.sessionProfiles.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
+	configuration, err := store.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
 	if err != nil {
 		return err
 	}
 	r.capabilitiesMu.Lock()
-	current := r.currentMCP
-	if r.capabilitiesClosed || current == nil || current.retired || configuration.Revision != r.desiredRevision || !current.matches(configuration.Profile) {
+	manager := r.mcpManager
+	if r.capabilitiesClosed || manager == nil || configuration.Revision != r.desiredRevision {
 		r.capabilitiesMu.Unlock()
 		return fmt.Errorf("active MCP directory is unavailable")
 	}
-	release := r.retainCapabilitiesLocked(&applicationCapabilities{resource: current})
 	r.capabilitiesMu.Unlock()
-	defer release()
-	return current.manager.RefreshTools(ctx, pluginID, serverName)
+	return manager.RefreshTools(ctx, pluginID, serverName)
 }
 
 func (s applicationMCPSource) SearchTools() []tool.Tool {
-	ready := s.manager.SearchTools()
-	for i, item := range ready {
-		ready[i] = applicationLeasedTool{Tool: item, store: s.store, scope: s.scope}
-	}
-	return ready
+	return s.leaseTools(s.selection.SearchTools())
 }
 
 func (s applicationMCPSource) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
 	if err := s.CheckSearchScope(ctx); err != nil {
 		return err
 	}
-	return s.manager.CheckToolBinding(ctx, binding)
+	return s.selection.CheckToolBinding(ctx, binding)
 }

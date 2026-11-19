@@ -41,13 +41,16 @@ type Profile struct {
 	Tools           []ToolDefinition `json:"tools,omitempty"`
 	NativeTools     []string         `json:"native_tools,omitempty"`
 	MCPServers      []MCPServer      `json:"mcp_servers,omitempty"`
-	SkillDirs       []string         `json:"skill_dirs,omitempty"`
-	SkillRoots      []string         `json:"skill_roots,omitempty"`
-	Plugins         []Plugin         `json:"plugins,omitempty"`
-	Execution       string           `json:"execution"` // tools-only or workspace-write
-	Inherit         Inheritance      `json:"inherit"`
-	Workspace       Workspace        `json:"workspace,omitempty"`
-	Permissions     Permissions      `json:"permissions,omitempty"`
+	// SkillDirs adds Skill roots and directories of Skills to default discovery.
+	SkillDirs []string `json:"skill_dirs,omitempty"`
+	// SkillRoots carries legacy exact roots for existing profiles and clients.
+	// New requests use SkillDirs.
+	SkillRoots  []string    `json:"skill_roots,omitempty"`
+	Plugins     []Plugin    `json:"plugins,omitempty"`
+	Execution   string      `json:"execution"` // tools-only or workspace-write
+	Inherit     Inheritance `json:"inherit"`
+	Workspace   Workspace   `json:"workspace,omitempty"`
+	Permissions Permissions `json:"permissions,omitempty"`
 	// ExecutionConfig is creation-bound process configuration, independent of
 	// workspace permissions and the revisioned model/tool configuration.
 	ExecutionConfig *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
@@ -182,8 +185,9 @@ type ConfigurationPatch struct {
 	NativeTools     *[]string         `json:"native_tools,omitempty"`
 	MCPServers      *[]MCPServer      `json:"mcp_servers,omitempty"`
 	SkillDirs       *[]string         `json:"skill_dirs,omitempty"`
-	SkillRoots      *[]string         `json:"skill_roots,omitempty"`
-	Plugins         *[]Plugin         `json:"plugins,omitempty"`
+	// SkillRoots carries legacy exact-root updates. New requests use SkillDirs.
+	SkillRoots *[]string `json:"skill_roots,omitempty"`
+	Plugins    *[]Plugin `json:"plugins,omitempty"`
 }
 
 // UnmarshalJSON rejects null fields rather than treating them as absence.
@@ -279,12 +283,14 @@ type Permissions struct {
 	ApprovalMode string `json:"approval_mode,omitempty"`
 }
 
-// Inheritance makes omitted configuration authority explicit. Version 1 rejects
-// true values; Host configuration never implicitly enters an application Session.
+// Inheritance retains the original wire fields for persisted profiles and
+// operation receipts. MCP and Skills are always discovered by Core.
 type Inheritance struct {
 	CWDInstructions bool `json:"cwd_instructions"`
-	MCP             bool `json:"mcp"`
-	Skills          bool `json:"skills"`
+	// Deprecated: Core always adds the Host and trusted workspace MCP configuration.
+	MCP bool `json:"mcp"`
+	// Deprecated: Core always adds the Host and workspace Skill discovery directories.
+	Skills bool `json:"skills"`
 	// Deprecated: Core Memory is retired. Retained for wire compatibility; must be false.
 	WorkspaceMemory bool `json:"workspace_memory"`
 }

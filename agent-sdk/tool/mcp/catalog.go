@@ -54,6 +54,25 @@ func (m *Manager) admitCatalogTool(ctx context.Context, remote *MCPTool) error {
 	return err
 }
 
+func (m *Manager) borrowClient(ctx context.Context, remote *MCPTool) (func(), error) {
+	unlock, err := m.guardCatalogTool(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	server := remote.server
+	server.inFlight++
+	unlock()
+	return func() {
+		m.mu.Lock()
+		server.inFlight--
+		if server.inFlight == 0 && server.drained != nil {
+			close(server.drained)
+			server.drained = nil
+		}
+		m.mu.Unlock()
+	}, nil
+}
+
 func (m *Manager) guardCatalogTool(ctx context.Context, remote *MCPTool) (func(), error) {
 	m.mu.Lock()
 	c := remote.client.catalog
@@ -94,6 +113,9 @@ func (m *Manager) checkCatalogToolLocked(ctx context.Context, remote *MCPTool) e
 	}
 	if m.closed {
 		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
+	}
+	if remote.server != nil && remote.server.revoked {
+		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
 	}
 	if c != nil && c.revoked {
 		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
@@ -213,7 +235,7 @@ func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, 
 		}
 		m.mu.Lock()
 		c.mu.Lock()
-		if m.closed || c.revoked || ctx.Err() != nil {
+		if m.closed || server.revoked || c.revoked || ctx.Err() != nil {
 			c.mu.Unlock()
 			m.mu.Unlock()
 			return errors.New("MCP refresh cancelled")

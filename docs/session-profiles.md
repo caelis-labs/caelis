@@ -138,9 +138,9 @@ explicit-profile Session is rejected; use its configuration patch.
 
 Creation requires `version`, `model`, `tools_version` and `execution`. It may
 supply instructions, callback definitions, selected MCP servers and Skill roots,
-workspace access, permissions and process configuration. Explicit
-profiles do not inherit workspace instructions, ambient business tools. A Bot can provide its private memory through an explicit MCP,
-Skill or callback integration. Control still owns history, tools, approvals,
+workspace access, permissions and process configuration. Workspace instructions
+stay outside Profile assembly. A Bot can provide its private memory through an
+explicit MCP, Skill or callback integration. Control still owns history, tools, approvals,
 sandbox policy and recovery.
 
 `execution: tools-only` exposes selected callbacks and extensions without native
@@ -170,13 +170,36 @@ creation profile/revision remains evidence; `configuration.profile` is the sole
 current desired configuration. `last_request` records the revision and native
 request/Turn identity actually admitted. Rejected updates alter neither desired
 configuration nor an already issued request. A successful update affects the next
-model request, including a continuation in the same Turn. It does not replace
+model request, including a continuation in the same Turn, subject to the pinned
+Skill metadata described below. It does not replace
 in-flight callback names, arguments, catalog version or permission decisions.
 
-MCP and Skills use standard assembly and progressive disclosure. Selection does
-not call remote tools or load Skill bodies. Metadata is discoverable first;
-ToolSearch/Skill loading exposes bodies on demand. Standard MCP grant ownership
+Application Sessions discover Skills in Core's workspace and global directories.
+They also load the Host MCP catalog and MCP files in a trusted workspace. Use
+`skill_dirs` to add absolute directory paths. A directory containing `SKILL.md`
+selects that Skill, and other directories are scanned for immediate child Skills.
+`mcp_servers` adds Server definitions. Explicit names take priority over defaults.
+Clearing an explicit list leaves default discovery available. The resident Runtime
+watches MCP files and applies changes per server. If a committed configuration
+cannot be applied, Core blocks new MCP calls until reconciliation succeeds and
+reports a status warning. Calls already dispatched can finish. `plugins` selects
+packages independently.
+
+Core accepts old `inherit.skills` and `inherit.mcp` fields for wire compatibility.
+Both values use default discovery. Existing `skill_roots` entries still select
+exact roots. Use `skill_dirs` for new requests.
+
+MCP and Skills use standard assembly and progressive disclosure. `ToolSearch`
+exposes the current MCP catalog. `Skill` resolves known names against the current
+explicit profile and selected directories at call time, including Skills added
+after the Session started. The system prompt retains the advertised names and
+descriptions through ordinary requests. The first admitted main provider request
+that uses a new compaction summary pins its updated list. Standard MCP grant ownership
 is shared across Surfaces using the same Host/workspace/server configuration.
+Default MCP discovery in a `tools-only` Session uses the Host and workspace
+trust rules. MCP servers use their configured transports and processes. The
+product source policy still governs each tool call, including remembered grants
+and the Desktop World application scope.
 There is no Bot-specific MCP permission owner. Status reads do not activate
 Runtime, start servers or scan new directories. Failed selected roots/servers
 remain visible rather than being silently replaced by ambient capabilities.
@@ -262,6 +285,19 @@ SDK embedders without Code Mode use fixed `tool_search` and `mcp_call` entries;
 `mcp_call` resolves a previously discovered real tool before policy, approval and
 execution. Discovering or refreshing MCP does not add tools to the model
 declaration. Surfaces present the actual target name and arguments.
+
+An explicit Session configuration commit applies MCP changes automatically.
+A configuration write can prepare an observed Session before its first prompt.
+In ordinary Sessions, the Runtime notices Host MCP and overlay file changes
+while resident and applies their connection changes automatically.
+`POST /sessions/{session_id}/mcp/refresh` refreshes a named connected Server's
+tool directory.
+
+Use `GET /sessions/{session_id}/mcp-status` to observe the desired revision
+and the target Server. A configuration receipt can precede tool readiness.
+`ready: true` reports that the current connection has published
+a dispatchable directory. Check the expected tool in that directory before
+using it. Tool authorization still applies at invocation.
 
 Historical Sessions retain readable tool calls and results. Name-only history
 does not authorize non-Code Mode `mcp_call`; that entry needs a current search

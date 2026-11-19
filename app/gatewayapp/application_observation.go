@@ -44,10 +44,11 @@ func (a *workspaceConfigAssembler) assembleObservationSnapshot(ctx context.Conte
 		}
 		backend = string(route.Backend)
 	}
+	process := a.deps.processConfig.snapshot().runtime
 	return &sessionRuntimeInstance{runtimeComposition: runtimeComposition{
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		activation: &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
-		activeRuntime: stackRuntimeConfig{ContextWindow: a.deps.processConfig.snapshot().runtime.ContextWindow,
+		activeRuntime: stackRuntimeConfig{ContextWindow: process.ContextWindow, SkillDirs: process.SkillDirs,
 			ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode},
 		sandbox: SandboxConfig{RequestedType: backend},
 	}}, nil
@@ -76,8 +77,8 @@ func (s *runtimeComposition) applicationRuntimeState(ctx context.Context, bindin
 		SessionMode: sessionprofile.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode}, nil
 }
 
-// applicationCompletionSkills shares the Skill catalog scanner, including its
-// exact explicit selections and damaged-item behavior, without starting MCP.
+// applicationCompletionSkills uses the Application Skill catalog without
+// starting MCP or activating the Session.
 func (s *runtimeComposition) applicationCompletionSkills() (skill.Catalog, bool) {
 	if s == nil || s.activation == nil || s.authorities.sessionProfiles == nil {
 		return skill.Catalog{}, false
@@ -98,6 +99,6 @@ func (s *runtimeComposition) applicationCompletionSkills() (skill.Catalog, bool)
 	if err != nil {
 		return skill.Catalog{}, true
 	}
-	catalog, _, _ := assembleApplicationSkills(configuration.Profile, false, contributions.SkillBundles...)
+	catalog, _, _ := s.applicationSkills(configuration.Profile, contributions.SkillBundles...)
 	return catalog, true
 }

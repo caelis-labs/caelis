@@ -1585,6 +1585,7 @@ type gatewayAppCompactionOllamaServer struct {
 	client          *http.Client
 	compactionCalls atomic.Int64
 	normalCalls     atomic.Int64
+	lastNormal      atomic.Pointer[string]
 }
 
 func newGatewayAppCompactionOllamaServer(t *testing.T) *gatewayAppCompactionOllamaServer {
@@ -1613,6 +1614,7 @@ func newGatewayAppCompactionOllamaServer(t *testing.T) *gatewayAppCompactionOlla
 			return
 		}
 		out.normalCalls.Add(1)
+		out.lastNormal.Store(&joined)
 		fmt.Fprint(w, `{"model":"compact-test","message":{"role":"assistant","content":"app turn ok"},"done":true,"prompt_eval_count":32,"eval_count":8}`)
 	})
 	out.URL = "http://gatewayapp.test"

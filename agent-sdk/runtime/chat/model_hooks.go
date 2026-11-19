@@ -84,6 +84,10 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 						next.Request.Messages, err = messagesFromEventsChecked(ctx.Session(), projected)
 						req.Messages = model.CloneMessages(next.Request.Messages)
 						if err == nil {
+							a.summaryID = ""
+							if len(projected) > 0 {
+								a.summaryID = promptSummaryID(projected[0])
+							}
 							hookrun.FromContext(ctx).RecordRequestEdit(e.LogicalRequestID, h.Name)
 							e.ContextSource, err = editor.ContextEditSource()
 						}

@@ -24,6 +24,16 @@ func messagesFromContextChecked(ctx agent.Context) ([]model.Message, error) {
 	return messagesFromEventsChecked(ctx.Session(), events)
 }
 
+func promptSummaryID(event *session.Event) string {
+	if session.EventTypeOf(event) == session.EventTypeCompact && session.EventText(event) != "" {
+		data, _ := session.CheckpointDataFromEvent(event)
+		if data.Purpose != session.CheckpointReplacement {
+			return event.ID
+		}
+	}
+	return ""
+}
+
 func messagesFromEvents(activeSession session.Session, events []*session.Event) []model.Message {
 	messages, _ := messagesFromEventsChecked(activeSession, events)
 	return messages

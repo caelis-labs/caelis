@@ -89,7 +89,7 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	dirs, roots := []string{selectedDir}, []string{selectedRoot}
 	profile := generated.SessionProfile{
 		Version: "generated-wire/1", Instructions: "Use the selected abilities.", Model: "custom/gpt-4.1",
-		ToolsVersion: "generated-wire-tools/1", Execution: "tools-only", Inherit: generated.SessionInheritance{},
+		ToolsVersion: "generated-wire-tools/1", Execution: "tools-only",
 		NativeTools: []string{}, McpServers: services, SkillDirs: dirs, SkillRoots: roots,
 	}
 	createID := "generated-wire-create"

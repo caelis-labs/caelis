@@ -164,7 +164,12 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	// is still connecting. Hold its startup to make this ordering deterministic.
 	health, err := client.SessionMCPStatus(ctx, child)
 	health = optionalCapabilityStatus(health)
-	if err != nil || health.SessionID != child || health.ConfigurationRevision == "" || len(health.Servers) != 1 || health.Servers[0].Name != "documents" || health.Servers[0].Status != "connecting" || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
+	childSkillReady := func(status sessionprofile.MCPStatus) bool {
+		return slices.ContainsFunc(status.Skills, func(item sessionprofile.SkillStatus) bool {
+			return item.Name == "profile-child-skill" && item.Status == "ready"
+		})
+	}
+	if err != nil || health.SessionID != child || health.ConfigurationRevision == "" || len(health.Servers) != 1 || health.Servers[0].Name != "documents" || health.Servers[0].Status != "connecting" || !childSkillReady(health) {
 		t.Fatalf("held child MCP/Skill assembly: %+v %v", health, err)
 	}
 	healthRevision := health.ConfigurationRevision
@@ -190,7 +195,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		}
 	}
 	server := health.Servers[0]
-	if !slices.Equal(server.Tools, []string{"lookup"}) || len(server.ToolDetails) != 1 || server.ToolDetails[0].Name != "lookup" || !strings.Contains(server.ToolDetails[0].Description, "Look up a synthetic documents value") || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
+	if !slices.Equal(server.Tools, []string{"lookup"}) || len(server.ToolDetails) != 1 || server.ToolDetails[0].Name != "lookup" || !strings.Contains(server.ToolDetails[0].Description, "Look up a synthetic documents value") || !childSkillReady(health) {
 		t.Fatalf("child MCP/Skill assembly: %+v", health)
 	}
 	if _, err = client.SessionToolCall(ctx, created.SessionID, call.ID); err == nil {

@@ -77,7 +77,7 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 				}
 			}
 			skillPath = filepath.Clean(skillPath)
-			meta, hash, err := parseMetaHashCached(skillPath, info)
+			meta, hash, err := parseMetaHashCached(skillPath)
 			if err != nil {
 				continue
 			}
