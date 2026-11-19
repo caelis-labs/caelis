@@ -137,16 +137,7 @@ The limit controls new PR creation, not CI reruns or already-open PRs.
 
 ## Change-scoped checks
 
-ToolSearch's offline selector fixtures assert the complete scoped catalog,
-on-demand schema messages, no business call, inherited model settings, budget
-errors, invalid names, and distinct empty results. The Application and plugin
-HTTP fixtures use synthetic providers and MCP servers to exercise revision,
-Worker isolation, search admission, and recovery. These do not measure real
-model recall or provider cost.
-The Runtime fixture also checks that selector calls bypass the main Session's
-compaction watermark while retaining admission and durable usage receipts.
-Application fixtures cover a consistent activation model catalog and explicit
-ToolSearch Fast/standard provider request encoding.
+Code Mode discovery fixtures exercise pagination, keyword filtering, exact schemas and same-execution readiness without an auxiliary model.
 
 Async compaction is a default-off experiment with SDK and Control opt-ins. Embedders enable it on
 an isolated Runtime with `Compaction.Enabled = true` and
@@ -188,7 +179,6 @@ The following Jev evaluations are opt-in and send only repository synthetic fixt
 `JEV_API_KEY` in the test process environment and run the scenarios in order:
 
 ```bash
-CAELIS_JEV_EVAL=1 go test ./agent-sdk/tool/builtin/toolsearch -run '^TestToolSearchJevEvaluation$' -count=1 -v
 ```
 
 These tests report outcomes, token counts and elapsed time. A passing test means
@@ -413,25 +403,19 @@ concurrent replacement and explicit-stop/instance fences.
 
 ## MCP fixed entry points and lifecycle
 
-Fixtures require no user configuration or credentials. They cover complete
-normalized schemas, whole-entry search budgets, fixed provider tools bytes over
-500 catalog definitions, rejection of legacy discovery and guessed names,
-validation and version changes, same-batch isolation, real target display, source
-approval, revocation and unknown-effect recovery.
+Fixtures cover paginated name/description summaries, exact schemas, stable
+model declarations, binding refresh, source approval and unknown-effect recovery.
 
 ```bash
 GOWORK=off go test ./agent-sdk/tool/... ./agent-sdk/runtime/chat ./agent-sdk/model/providers ./agent-sdk/session/... -count=1
-GOWORK=off go test ./agent-sdk/runtime -run 'TestFixedMCP|TestRuntimeLateMCP|TestRuntimeMCPToolSearch|TestMCP' -count=1 -timeout=8m
+GOWORK=off go test ./agent-sdk/runtime -run 'TestCodeModeSearchContract|TestCodeModeDirectBinding|TestMCP' -count=1 -timeout=8m
 go test ./control/toolpolicy ./agent-sdk/runtime -run 'TestProductPolicy|TestPolicyIsOnlyMCP|TestAuthorization|TestSessionConsent' -count=1
 go test -race ./control/toolpolicy ./agent-sdk/runtime -run 'TestProductPolicy|TestAuthorization' -count=1
 GOWORK=off go test ./control/appserver/projection ./surfaces/tui/app -run 'TestRoutedMCP' -count=1
 GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sessionprofile -run 'TestExperimental|TestAsyncCompaction|TestCatalog|TestMCP|TestConfigurationCheckpoint' -count=1
 ```
 
-The 500-tool stdio fixture discovers and calls 200 distinct tools, then reopens
-its file Store and calls a previously discovered binding. It checks actual model
-tools bytes, real policy identity, per-operation invocation identity and exact
-receipt effects. Catalog fixtures use loopback HTTP and cover notifications,
+Catalog fixtures use loopback HTTP and cover notifications,
 pagination, failed refresh, schema replacement, disconnects and pinned handles.
 Generic asynchronous and idle compaction retain their own coverage/CAS,
 cancellation, embedding-validator and uncertain-write regressions. MCP catalog

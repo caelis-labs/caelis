@@ -5,24 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-type searchContractRanker func(context.Context, string, []tool.Definition, int, toolsearch.SearchModel) ([]string, error)
-
-func (f searchContractRanker) Rank(ctx context.Context, query string, definitions []tool.Definition, limit int, selected toolsearch.SearchModel) ([]string, error) {
-	return f(ctx, query, definitions, limit, selected)
-}
-
-func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool, ranker toolsearch.Ranker, code string) (*session.Event, []*session.Event) {
+func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool, code string) (*session.Event, []*session.Event) {
 	t.Helper()
 	store, active, _ := codeModeStore(t)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -32,7 +26,7 @@ func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool
 		return nil
 	}}
 	tools := append([]tool.Tool(nil), extra...)
-	tools = append(tools, toolsearch.NewSource(source, ranker), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}})
+	tools = append(tools, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}})
 	runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: tools, DeferredTools: source}, nil, nil)
 	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
@@ -48,9 +42,9 @@ func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool
 	return nil, nil
 }
 
-func runSearchContract(t *testing.T, source tool.Source, extra []tool.Tool, ranker toolsearch.Ranker, code string) []*session.Event {
+func runSearchContract(t *testing.T, source tool.Source, extra []tool.Tool, code string) []*session.Event {
 	t.Helper()
-	event, events := runSearchContractResult(t, source, extra, ranker, code)
+	event, events := runSearchContractResult(t, source, extra, code)
 	if event.Meta[codemode.MetadataScriptCompletion] != "completed" {
 		t.Fatalf("contract script did not complete: %+v", event.Tool.Output)
 	}
@@ -102,15 +96,15 @@ func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
 	metadata, _ := json.Marshal(map[string]string{"name": canonical, "server": server, "tool": remote, "plugin": plugin})
 	code := fmt.Sprintf(`
 const expected=%s;
+const page=(await tools.search()).json();
+if(page.tools.length!==1||page.tools[0].name!==expected.name||page.next!==null)throw Error("direct tool leaked into directory");
 if(typeof Date.now!=='function')throw Error('Date global overwritten');
-const date=((await tools.search({name:'Date'})).json()).tools[0];
+const date=((await tools.search({name:'Date'})).json());
 if(date.name!=='Date'||'server' in date||'tool' in date||'plugin' in date)throw Error('Date metadata');
 let args={value:1};
 const first=await eval(date.call_path);
 if(first.json().value!==1)throw Error('Date template result');
-const found=(await tools.search({server:expected.server,tool:expected.tool,plugin:expected.plugin})).json();
-if(found.count!==1)throw Error('exact metadata selector');
-const entry=found.tools[0];
+const entry=(await tools.search({name:expected.name})).json();
 for(const key of Object.keys(expected))if(entry[key]!==expected[key])throw Error('metadata fidelity '+key);
 if(entry.input_schema.required[0]!=='value')throw Error('incomplete schema');
 if(typeof tools.plugins[expected.plugin][expected.server][expected.tool]!=='function')throw Error('original object names lost');
@@ -119,7 +113,7 @@ const second=await eval(entry.call_path);
 if(second.json().value!==2)throw Error('quoted template result');
 if(typeof Date.now!=='function')throw Error('Date global changed');
 return {contract:true};`, metadata)
-	runSearchContract(t, source, []tool.Tool{date}, exactMCPRanker{}, code)
+	runSearchContract(t, source, []tool.Tool{date}, code)
 	if !reflect.DeepEqual(effects, []string{"Date", canonical}) {
 		t.Fatalf("templates executed wrong canonical targets: %q", effects)
 	}
@@ -144,14 +138,15 @@ func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
 		source.publish(late)
 		return tool.Result{}, nil
 	}}
-	runSearchContract(t, source, []tool.Tool{publish}, exactMCPRanker{}, `
+	runSearchContract(t, source, []tool.Tool{publish}, `
 if('late-server' in tools.mcp)throw Error('tool was ready before VM snapshot');
 await PublishReadyTool({});
-const found=(await tools.search({server:'late-server',tool:'read'})).json();
-if(found.count!==1||found.tools[0].name!=='late__read')throw Error('new tool not discovered');
+const page=(await tools.search({query:'LATE irrelevant'})).json();
+if(page.tools.length!==1||page.next!==null||Object.keys(page.tools[0]).sort().join(',')!=='description,name')throw Error('unexpected directory');
+const found=(await tools.search({name:page.tools[0].name})).json();
 if('late-server' in tools.mcp)throw Error('search mutated frozen namespace');
 const args={};
-const reply=await eval(found.tools[0].call_path);
+const reply=await eval(found.call_path);
 if(reply.json().ready!==true)throw Error('new tool template failed');
 if('late-server' in tools.mcp)throw Error('call mutated frozen namespace');
 return {contract:true};`)
@@ -160,101 +155,28 @@ return {contract:true};`)
 	}
 }
 
-func TestCodeModeSearchContractSelectorsKeepExactAndCapabilityModes(t *testing.T) {
-	source := &h1Source{}
-	for _, name := range []string{"docs__read", "capability__selected"} {
-		def := fixtureMCPDefinition("search-contract-selector-v1")
-		def.Name = name
-		def.Metadata[tool.MetadataMCPTool] = name
-		source.items = append(source.items, tool.NamedTool{Def: def})
+func TestCodeModeSearchContractPagination(t *testing.T) {
+	source := &runtimeDeferredSource{}
+	for index := 0; index < 20; index++ {
+		def := fixtureMCPDefinition("v1")
+		def.Name = fmt.Sprintf("docs__%02d", index)
+		source.ready = append(source.ready, tool.NamedTool{Def: def})
 	}
-	var ranked []string
-	ranker := searchContractRanker(func(_ context.Context, query string, definitions []tool.Definition, _ int, _ toolsearch.SearchModel) ([]string, error) {
-		ranked = append(ranked, query)
-		if len(definitions) != 2 {
-			t.Errorf("capability selector received wrong eligible source: %+v", definitions)
-		}
-		return []string{"capability__selected"}, nil
-	})
-	events := runSearchContract(t, source, nil, ranker, `
-let caught=false;
-try {(await tools.search({name:'missing'})).json();}catch(e) {
-  if(e.code!=='not_found'||!e.reply)throw Error('exact miss lost typed failure reply');
-  caught=true;
-}
-if(!caught)throw Error('exact miss did not reject');
-const exact=(await tools.search({name:'docs__read'})).json();
-if(exact.count!==1||exact.tools[0].name!=='docs__read')throw Error('exact name selected wrong target');
-const capability=(await tools.search({query:'docs__read'})).json();
-if(capability.count!==1||capability.tools[0].name!=='capability__selected')throw Error('explicit query used exact lookup');
-const legacy=(await tools.search('docs__read')).json();
-if(legacy.count!==1||legacy.tools[0].name!=='docs__read')throw Error('legacy string lost exact-first behavior');
-return {contract:true};`)
-	if !reflect.DeepEqual(ranked, []string{"docs__read"}) {
-		t.Fatalf("exact modes invoked ranking or capability mode skipped it: %q", ranked)
-	}
-	failedSearches := 0
-	for _, event := range events {
-		if event.Type != session.EventTypeToolResult || event.Tool == nil {
-			continue
-		}
-		record := event.Tool
-		if record.Name != tool.ToolSearchToolName || record.Status != "failed" || record.Parent == nil || record.Parent.Kind != codemode.ToolKind {
-			continue
-		}
-		var input map[string]any
-		if err := json.Unmarshal(factJSON(record.Input), &input); err != nil {
-			t.Fatal(err)
-		}
-		if input["name"] != "missing" || record.Error == "" {
-			t.Fatalf("caught miss lost original failed search receipt: %+v", record)
-		}
-		failedSearches++
-	}
-	if failedSearches != 1 {
-		t.Fatalf("caught exact miss retained %d failed search receipts, want one", failedSearches)
-	}
+	runSearchContract(t, source, nil, `
+ const page=(await tools.search()).json();
+ if(page.tools.length!==16||page.next!==page.tools[15].name)throw Error("bad first page");
+ const tail=(await tools.search({after:page.next})).json();
+ if(tail.tools.length!==4||tail.next!==null||tail.tools[0].name!== "docs__16")throw Error("bad tail");
+ const empty=(await tools.search({query:"no_such_keyword"})).json();
+ return {contract:empty.tools.length===0&&empty.next===null};`)
 }
 
-func TestCodeModeSearchContractExactMissNeverRanks(t *testing.T) {
-	for _, selector := range []string{`{name:'missing'}`, `{server:'docs',tool:'missing'}`} {
-		t.Run(selector, func(t *testing.T) {
-			source := &runtimeDeferredSource{}
-			def := fixtureMCPDefinition("search-contract-miss-v1")
-			def.Description = "missing"
-			source.publish(tool.NamedTool{Def: def})
-			ranked := 0
-			ranker := searchContractRanker(func(context.Context, string, []tool.Definition, int, toolsearch.SearchModel) ([]string, error) {
-				ranked++
-				return []string{def.Name}, nil
-			})
-			event, _ := runSearchContractResult(t, source, nil, ranker, "return await tools.search("+selector+");")
-			if ranked != 0 {
-				t.Fatalf("exact miss invoked capability ranking %d times", ranked)
-			}
-			if event.Tool.Status != "failed" || event.Meta[codemode.MetadataScriptCompletion] != "failed" {
-				t.Fatalf("exact miss did not reject: status=%s output=%+v", event.Tool.Status, event.Tool.Output)
-			}
-		})
+func TestCodeModeExactNameDoesNotFallBackToFilter(t *testing.T) {
+	source := &runtimeDeferredSource{}
+	def := fixtureMCPDefinition("v1")
+	source.publish(tool.NamedTool{Def: def})
+	event, _ := runSearchContractResult(t, source, nil, `return await tools.search({name:"docs"});`)
+	if event.Tool.Status != "failed" || !strings.Contains(fmt.Sprint(event.Tool.Output), "not_found") {
+		t.Fatalf("exact miss = %+v", event.Tool.Output)
 	}
-}
-
-func TestCodeModeSearchContractAmbiguityCanBeQualified(t *testing.T) {
-	source := &h1Source{}
-	for _, plugin := range []string{"one", "two"} {
-		def := fixtureMCPDefinition("search-contract-ambiguous-v1")
-		def.Name = plugin + "__read"
-		def.Metadata[tool.MetadataPluginID] = plugin
-		source.items = append(source.items, tool.NamedTool{Def: def})
-	}
-	runSearchContract(t, source, nil, exactMCPRanker{}, `
-let caught=false;
-try {(await tools.search({server:'docs',tool:'read'})).json();}catch(e) {
-  if(e.code!=='too_many_matches'||!e.reply)throw Error('ambiguity lost typed failure');
-  caught=true;
-}
-if(!caught)throw Error('ambiguous selector succeeded');
-const found=(await tools.search({server:'docs',tool:'read',plugin:'two'})).json();
-if(found.count!==1||found.tools[0].name!=='two__read')throw Error('qualified recovery failed');
-return {contract:true};`)
 }

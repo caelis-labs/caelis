@@ -4,7 +4,7 @@ Caelis accepts [Agent Plugins 1.0](https://agent-plugins.org/specification)
 packages with root `plugin.json`, optional root `mcp.json`, and `skills/`.
 It also accepts Claude plugins with `.claude-plugin/plugin.json`, root
 `.mcp.json`, and an inline `mcpServers` map. Both formats use the existing
-Plugin manager, MCP client, Skill catalog, and ToolSearch. A root standard
+Plugin manager, MCP client, Skill catalog, and Code Mode discovery. A root standard
 manifest takes precedence over legacy manifests in the same package; there is
 only one copy of each declared server. For a Claude package, an inline server
 entry overrides the root `.mcp.json` entry with the same name. An existing

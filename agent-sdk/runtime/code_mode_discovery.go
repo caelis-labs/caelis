@@ -3,107 +3,51 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"sync"
+	"slices"
+	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/google/uuid"
 )
 
-type codeModeSearchKey struct{}
-type codeModeModelAdmissionKey struct{}
-
-// Nested search uses canonical admission before the existing tool facts
-// full schemas/bindings. Ordinary native ToolSearch keeps its Chat owner.
 type codeModeDiscoveryTool struct {
-	base    tool.Tool
-	lookup  func(context.Context, string) (tool.Tool, bool, error)
-	runtime *Runtime
-	active  session.Session
-	turnID  string
-	admit   func(context.Context, agent.ModelRequestAdmission) error
+	lookup func(context.Context, string) (tool.Tool, bool, error)
 }
 
-func (t codeModeDiscoveryTool) Definition() tool.Definition { return t.base.Definition() }
-func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (returned tool.Result, callErr error) {
-	nested, _ := ctx.Value(codeModeSearchKey{}).(bool)
-	ctx = toolsearch.WithDiscoveryFilter(ctx, func(ctx context.Context, candidate tool.Definition) (bool, error) {
-		one, found, err := t.lookup(ctx, candidate.Name)
-		if err != nil {
-			return false, tool.WrapError(errorcode.CodeOf(err), err, "tool source lookup failed")
-		}
-		if !found || one == nil {
-			return false, nil
-		}
-		current := one.Definition()
-		return tool.IsMCPDefinition(current) && current.AvailableForModel(call.RuntimeModel) && tool.BindingForDefinition(current) == tool.BindingForDefinition(candidate), nil
-	})
-	if nested {
-		// The producer owns this sink through completion, including after the
-		// foreground yields. Chat's per-step buffer cannot own late receipts.
-		var mu sync.Mutex
-		var attempts []model.Invocation
-		ctx = toolsearch.WithInvocationAccounting(ctx, func(in model.Invocation) {
-			mu.Lock()
-			attempts = append(attempts, in)
-			mu.Unlock()
-		}, func(ctx context.Context, _ *model.Request) error {
-			if t.admit == nil {
-				return nil
-			}
-			return t.admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString(), TurnID: t.turnID})
-		})
-		defer func() {
-			mu.Lock()
-			records := append([]model.Invocation(nil), attempts...)
-			mu.Unlock()
-			active := t.active
-			persistErr := t.runtime.persistModelInvocations(ctx, &active, t.turnID, records, "tool")
-			if record, ok := ctx.Value(codeModeProducerErrorKey{}).(func(error)); ok && persistErr != nil {
-				record(persistErr)
-			}
-			callErr = errors.Join(callErr, persistErr)
-		}()
+func (t codeModeDiscoveryTool) Definition() tool.Definition {
+	return tool.Definition{
+		Name:        tool.ToolSearchToolName,
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}, "required": []string{"name"}},
+		Metadata:    map[string]any{tool.MetadataToolKind: tool.MetadataToolKindToolSearch},
 	}
-	result, err := t.base.Call(ctx, call)
-	if err != nil || result.IsError {
-		return result, err
+}
+
+func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	var request struct{ Name string }
+	if err := json.Unmarshal(call.Input, &request); err != nil {
+		return tool.Result{}, err
 	}
-	if !nested {
-		return result, nil
+	one, ok, err := t.lookup(ctx, request.Name)
+	if err != nil {
+		return tool.Result{}, err
 	}
-	var selected tool.ToolSearchResult
-	for _, p := range result.Content {
-		if p.JSON != nil {
-			var raw map[string]any
-			if json.Unmarshal(p.JSON.Value, &raw) == nil {
-				selected = tool.ParseToolSearchOutput(raw)
-			}
-			break
-		}
+	if !ok || one == nil {
+		return tool.Result{}, tool.NewError(errorcode.NotFound, "tool not found")
 	}
-	current := map[string]tool.Tool{}
-	for _, entry := range selected.Tools {
-		one, found, lookupErr := t.lookup(ctx, entry.Name)
-		if lookupErr != nil {
-			return result, lookupErr
-		}
-		if found && one != nil {
-			def := one.Definition()
-			if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) && entry.Binding != nil && *entry.Binding == tool.BindingForDefinition(def) {
-				current[def.Name] = one
-			}
-		}
+	def := one.Definition()
+	if def.Name != request.Name || !tool.IsMCPDefinition(def) || !def.AvailableForModel(call.RuntimeModel) {
+		return tool.Result{}, tool.NewError(errorcode.NotFound, "tool not found")
 	}
-	return mcpdiscovery.Admit(selected, current, result, call.Input)
+	selected := tool.NewToolSearchResult([]tool.Definition{def})
+	if tool.EstimateToolSearchResultPromptTokens(selected) > tool.MaxToolSearchResultPromptTokens {
+		return tool.Result{}, tool.NewError(errorcode.ResourceExhausted, "complete schema exceeds budget")
+	}
+	raw, err := json.Marshal(selected)
+	return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, err
 }
 
 type codeModeSearchEntry struct {
@@ -124,18 +68,13 @@ func codeModeSearchEntryFor(def tool.Definition) codeModeSearchEntry {
 }
 
 func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchRequest) (reply codemode.Reply, discoveryErr error) {
-	query := request.Query
-	service := request.Server != ""
 	name := request.Name
-	if request.LegacyString {
-		name = query
-	}
 	failureRecorded := false
 	h.mu.Lock()
 	closed := h.closed || h.ctx.Err() != nil
 	h.mu.Unlock()
 	defer func() {
-		discoveryErr = mcpdiscovery.WithEntryHint(discoveryErr, "tools.search(name)")
+		discoveryErr = mcpdiscovery.WithEntryHint(discoveryErr, "tools.search({name})")
 		if discoveryErr != nil {
 			h.mu.Lock()
 			h.isError = true
@@ -154,60 +93,28 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 	if err := request.Validate(); err != nil {
 		return reply, err
 	}
-	var one tool.Tool
-	var found bool
-	var err error
-	if name != "" {
-		one, found, err = h.owner.lookup(ctx, name)
-		if err != nil {
-			return reply, err
-		}
+	if name == "" {
+		return h.listTools(ctx, request)
 	}
-	exact := request.Name != "" || request.Tool != ""
-	if found && one != nil {
-		def := one.Definition()
-		exact = exact || def.Name == name && tool.IsMCPDefinition(def)
-		if def.Name == name && !tool.IsMCPDefinition(def) && !tool.IsToolSearchDefinition(def) && !tool.IsMCPCallDefinition(def) && def.Metadata[tool.MetadataToolKind] != codemode.ToolKind {
-			if !def.AvailableForModel(h.parent.RuntimeModel) {
-				return reply, codemode.NewPublicPermissionError("tool is not callable from JavaScript")
-			}
-			h.mu.Lock()
-			h.calls++
-			over := h.calls > h.limits.Calls
-			h.mu.Unlock()
-			if over {
-				return reply, tool.NewError(errorcode.ResourceExhausted, "search call budget exceeded")
-			}
-			return h.searchReply("", []codeModeSearchEntry{codeModeSearchEntryFor(def)}, false, 0, "")
-		}
-	}
-	search, available, err := h.owner.lookup(ctx, tool.ToolSearchToolName)
+	one, found, err := h.owner.lookup(ctx, name)
 	if err != nil {
 		return reply, err
 	}
-	if !available || search == nil || !tool.IsToolSearchDefinition(search.Definition()) {
-		if request.Name != "" {
-			return reply, tool.NewError(tool.ErrorCodeNotFound, "tool name was not found")
-		}
-		return reply, tool.NewError(tool.ErrorCodeNotFound, "no tool search source is configured")
+	if !found || one == nil {
+		return reply, tool.NewError(errorcode.NotFound, "tool not found")
 	}
-	args := map[string]any{"query": query, "limit": 4}
-	if service {
-		args = map[string]any{"server": request.Server, "limit": 16}
-		if request.Tool != "" {
-			args["tool"] = request.Tool
-		}
-		if request.Plugin != "" {
-			args["plugin"] = request.Plugin
-		}
-		if request.After != "" {
-			args["after"] = request.After
-		}
-	} else if exact {
-		args = map[string]any{"name": name}
+	def := one.Definition()
+	if !h.eligibleTarget(def) || def.Name != name {
+		return reply, tool.NewError(errorcode.NotFound, "tool not found")
 	}
-	raw, _ := json.Marshal(args)
-	reply, err = h.call(context.WithValue(ctx, codeModeSearchKey{}, true), search.Definition().Name, raw, true)
+	if !tool.IsMCPDefinition(def) {
+		if err := h.chargeDiscovery(); err != nil {
+			return reply, err
+		}
+		return h.discoveryReply("", codeModeSearchEntryFor(def))
+	}
+	raw, _ := json.Marshal(map[string]string{"name": name})
+	reply, err = h.call(ctx, tool.ToolSearchToolName, raw, true)
 	failureRecorded = err != nil || reply.IsError || reply.Outcome == codemode.OutcomeUnknown
 	if err != nil || reply.IsError {
 		return reply, err
@@ -222,40 +129,86 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 			break
 		}
 	}
-	if exact && len(selected.Tools) != 1 {
+	if len(selected.Tools) != 1 {
 		return reply, tool.NewError(errorcode.ResourceExhausted, "complete tool schema is unavailable within the search budget; narrow the query")
 	}
-	entries := make([]codeModeSearchEntry, 0, len(selected.Tools))
-	for _, entry := range selected.Tools {
-		one, exists, lookupErr := h.owner.lookup(ctx, entry.Name)
-		if lookupErr != nil {
-			return reply, lookupErr
-		}
-		if !exists || one == nil || entry.Binding == nil {
-			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
-		}
-		def := one.Definition()
-		if def.Name != entry.Name || *entry.Binding != tool.BindingForDefinition(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
-			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
-		}
-		h.mu.Lock()
-		h.targets[entry.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
-		h.bindings[entry.Name] = *entry.Binding
-		h.mu.Unlock()
-		entries = append(entries, codeModeSearchEntryFor(def))
+	entry := selected.Tools[0]
+	current, exists, err := h.owner.lookup(ctx, name)
+	if err != nil {
+		return reply, err
 	}
-	return h.searchReply(reply.CallID, entries, selected.Truncated, selected.OmittedCount, selected.Next)
+	if !exists || current == nil || entry.Binding == nil {
+		return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
+	}
+	def = current.Definition()
+	if entry.Name != name || def.Name != name || *entry.Binding != tool.BindingForDefinition(def) || !h.eligibleTarget(def) {
+		return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
+	}
+	h.mu.Lock()
+	h.targets[name] = codeModeTarget{tool: current, definition: def, digest: codeModeDefinitionDigest(def)}
+	h.bindings[name] = *entry.Binding
+	h.mu.Unlock()
+	return h.discoveryReply(reply.CallID, codeModeSearchEntryFor(def))
 }
 
-// Schemas are complete or the search fails; no partial schema is advertised.
-func (h *codeModeHost) searchReply(id string, entries []codeModeSearchEntry, truncated bool, omitted int, next string) (codemode.Reply, error) {
-	raw, err := json.Marshal(struct {
-		Tools        []codeModeSearchEntry `json:"tools"`
-		Count        int                   `json:"count"`
-		Truncated    bool                  `json:"truncated"`
-		OmittedCount int                   `json:"omitted_count,omitempty"`
-		Next         string                `json:"next,omitempty"`
-	}{entries, len(entries), truncated, omitted, next})
+type toolSummary struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+func (h *codeModeHost) chargeDiscovery() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls++
+	if h.calls > h.limits.Calls {
+		return tool.NewError(errorcode.ResourceExhausted, "search call budget exceeded")
+	}
+	return nil
+}
+func (h *codeModeHost) listTools(ctx context.Context, request codemode.SearchRequest) (codemode.Reply, error) {
+	if err := h.chargeDiscovery(); err != nil {
+		return codemode.Reply{}, err
+	}
+
+	terms := strings.Fields(strings.ToLower(request.Query))
+	entries := []toolSummary{}
+	for _, one := range h.owner.availableTools() {
+		if err := ctx.Err(); err != nil {
+			return codemode.Reply{}, err
+		}
+		if one == nil {
+			continue
+		}
+		def := one.Definition()
+		if !tool.IsMCPDefinition(def) || !h.eligibleTarget(def) || def.Name <= request.After {
+			continue
+		}
+		content := strings.ToLower(def.Name + " " + def.Description)
+		if len(terms) > 0 && !slices.ContainsFunc(terms, func(term string) bool { return strings.Contains(content, term) }) {
+			continue
+		}
+		entries = append(entries, toolSummary{def.Name, def.Description})
+	}
+	if h.owner.validate != nil {
+		release, err := h.owner.validate(ctx)
+		if release != nil {
+			defer release()
+		}
+		if err != nil {
+			return codemode.Reply{}, err
+		}
+	}
+	slices.SortFunc(entries, func(left, right toolSummary) int { return strings.Compare(left.Name, right.Name) })
+	var next *string
+	const pageSize = 16
+	if len(entries) > pageSize {
+		entries = entries[:pageSize]
+		next = &entries[pageSize-1].Name
+	}
+	return h.discoveryReply("", map[string]any{"tools": entries, "next": next})
+}
+func (h *codeModeHost) discoveryReply(id string, value any) (codemode.Reply, error) {
+	raw, err := json.Marshal(value)
 	if err != nil {
 		return codemode.Reply{}, fmt.Errorf("encode search result: %w", err)
 	}

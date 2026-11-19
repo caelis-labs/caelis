@@ -12,9 +12,7 @@ explicit Runtime/Manager options.
 
 MCP catalog refresh is always enabled and independent of compaction. MCP-enabled
 product Sessions use fixed `js_exec` with original-name Session routes plus
-`tools.search` and `tools.call`; SDK entry points without Code Mode use fixed
-`tool_search` and `mcp_call` declarations. Non-Code Mode discovery bindings come
-from canonical search receipts. Code Mode also records direct MCP call bindings
+`tools.search` and `tools.call`. Code Mode records direct MCP call bindings
 in typed nested ToolCall facts for Code Mode tool executions, and restores both
 kinds across fresh workers, compaction and resume. A Code Mode call needs no search
 when its schema is known; search

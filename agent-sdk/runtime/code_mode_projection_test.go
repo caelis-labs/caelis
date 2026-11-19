@@ -140,7 +140,7 @@ func TestJSExecFixedFileBytesInContinuousVM(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "script.js")
-	if err = os.WriteFile(path, []byte(`const s=(await tools.search("Read")).json();if(s.count!==1||s.tools[0].name!=="Read"||!s.tools[0].input_schema)throw Error("native exact search");return await tools.call("Read",{path:"input.txt"});`), 0600); err != nil {
+	if err = os.WriteFile(path, []byte(`const s=(await tools.search({name:"Read"})).json();if(s.name!=="Read"||!s.input_schema)throw Error("native exact search");return await tools.call("Read",{path:"input.txt"});`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
@@ -180,7 +180,7 @@ func TestReviewSimpleReturnJSONDoesNotBecomeMedia(t *testing.T) {
 		{"plain_parts", `return {parts:["one","two"]};`},
 		{"extracted_payload", `const r=await tools.call("Data",{});return r.json();`},
 		{"wrapped_payload_control", `return await tools.call("Data",{});`},
-		{"search_schema_data", `return (await tools.search("Data")).json();`},
+		{"search_schema_data", `return (await tools.search({name:"Data"})).json();`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)

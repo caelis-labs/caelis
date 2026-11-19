@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
 
 // The custom /v1 route uses the OpenAI-compatible adapter, not the Anthropic
@@ -83,43 +81,5 @@ func TestDeepSeekCustomCompatStreamingEffortWire(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestToolSearchDeepSeekCustomCompatKeepsLowEffort(t *testing.T) {
-	requests := 0
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if body["reasoning_effort"] != "low" || body["stream"] != true {
-			t.Errorf("selector wire effort=%v stream=%v", body["reasoning_effort"], body["stream"])
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"tools\\\":[\\\"docs__lookup\\\"]}\"},\"finish_reason\":null}]}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n")
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
-	defer server.Close()
-	llm := newDeepSeek(Config{Provider: "deepseek", Model: "deepseek-flash", BaseURL: server.URL + "/v1", HTTPClient: server.Client()}, "synthetic")
-	reads := 0
-	var receipts []model.Invocation
-	ctx := model.WithInvocationObserver(t.Context(), func(in model.Invocation) { receipts = append(receipts, in) })
-	names, err := toolsearch.NewAgentRanker().Rank(ctx, "lookup", []tool.Definition{{Name: "docs__lookup", Description: "Lookup"}}, 1, toolsearch.SearchModel{
-		Model: llm, Reasoning: model.ReasoningConfig{Effort: "low"},
-		ReadSchema: func(context.Context, string) (tool.Definition, error) {
-			reads++
-			return tool.Definition{}, fmt.Errorf("unexpected schema read")
-		},
-	})
-	if err != nil || len(names) != 1 || names[0] != "docs__lookup" || requests != 1 || reads != 0 {
-		t.Fatalf("names=%v err=%v requests=%d reads=%d", names, err, requests, reads)
-	}
-	if len(receipts) != 1 || receipts[0].Outcome != "completed" || receipts[0].Usage.TotalTokens != 18 {
-		t.Fatalf("receipts=%+v", receipts)
 	}
 }

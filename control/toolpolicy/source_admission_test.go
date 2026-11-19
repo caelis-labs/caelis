@@ -3,6 +3,13 @@ package toolpolicy
 import (
 	"context"
 	"fmt"
+	"iter"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -12,15 +19,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"iter"
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 // Actual HTTP MCP -> fixed search/mcp_call -> shared product Policy -> durable
@@ -65,10 +67,7 @@ func TestProductPolicyPendingCapabilityChange(t *testing.T) {
 			}
 			llm := &fixedPolicyModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"dtw__look"}`}}
-				}
-				if i == 1 {
-					return []model.ToolCall{{ID: "original-look", Name: tool.MCPCallToolName, Args: `{"tool_name":"dtw__look","arguments":{"app":"com.example.A"}}`}}
+					return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: `{"code":"return await dtw.look({app:'com.example.A'});"}`}}
 				}
 				return nil
 			}}
@@ -110,7 +109,7 @@ func TestProductPolicyPendingCapabilityChange(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "test", ApprovalRequester: req, AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(mgr, exactPolicyRanker{})}, DeferredTools: mgr}})
+			run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "test", ApprovalRequester: req, AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: mgr}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -130,17 +129,6 @@ func TestProductPolicyPendingCapabilityChange(t *testing.T) {
 			}
 		})
 	}
-}
-
-type exactPolicyRanker struct{}
-
-func (exactPolicyRanker) Rank(_ context.Context, query string, defs []tool.Definition, _ int, _ toolsearch.SearchModel) ([]string, error) {
-	for _, def := range defs {
-		if def.Name == query {
-			return []string{query}, nil
-		}
-	}
-	return nil, nil
 }
 
 type fixedPolicyModel struct {

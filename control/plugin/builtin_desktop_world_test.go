@@ -17,7 +17,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
@@ -121,22 +120,6 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 	if !slices.Equal(names, []string{"apps", "capture", "click", "drag", "focus", "keypress", "look", "move", "quit", "readText", "scroll", "setValue", "typeText", "wait", "waitForNewWindow"}) {
 		t.Fatalf("builtin tools = %v", names)
 	}
-	search := toolsearch.NewWithRanker(manager.SearchTools(), builtinAtomicRanker{})
-	if search == nil {
-		t.Fatal("selected package is absent from ToolSearch")
-	}
-	found, err := search.Call(ctx, tool.Call{ID: "selected-package-search", Name: tool.ToolSearchToolName, Input: []byte(`{"query":"Desktop World app scripting","limit":2}`)})
-	if err != nil || found.IsError || len(found.Content) != 1 || found.Content[0].JSON == nil {
-		t.Fatalf("selected package search = %+v, %v", found, err)
-	}
-	var discovery struct {
-		Count int                     `json:"count"`
-		Tools []struct{ Name string } `json:"tools"`
-	}
-	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 || discovery.Tools[0].Name != mcp.ServerToolNamePrefix(spec.Name)+"look" {
-		t.Fatalf("selected package discovery = %+v, %v", discovery, err)
-	}
-	t.Logf("desktop-world %s: source=%s command=%s binary_sha256=%x tools=%v ToolSearch=%s; native stdio, no desktop RPC", version, contributions.Sources[0].Status, spec.Command, sha256.Sum256(binary), names, discovery.Tools[0].Name)
 	if runtime.GOOS == "windows" {
 		for _, candidate := range manager.Tools() {
 			if candidate.Definition().Name != mcp.ServerToolNamePrefix(spec.Name)+"apps" {
@@ -299,17 +282,3 @@ func pinnedDesktopWorldTestVersion(t *testing.T) string {
 
 // The offline selector reads one actual atomic schema rather than inventing a name.
 type builtinAtomicRanker struct{}
-
-func (builtinAtomicRanker) Rank(ctx context.Context, _ string, definitions []tool.Definition, _ int, selected toolsearch.SearchModel) ([]string, error) {
-	for _, def := range definitions {
-		if strings.HasSuffix(def.Name, "__look") {
-			schema, err := selected.ReadSchema(ctx, def.Name)
-			if err != nil {
-				return nil, err
-			}
-			_ = schema
-			return []string{def.Name}, nil
-		}
-	}
-	return nil, nil
-}

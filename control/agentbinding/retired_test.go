@@ -7,8 +7,8 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
-func TestRetiredMemoryBindingsCannotActivate(t *testing.T) {
-	for _, handle := range []Handle{HandleSteward, HandleMemoryVerifier} {
+func TestRetiredBindingsCannotActivate(t *testing.T) {
+	for _, handle := range []Handle{HandleSteward, HandleMemoryVerifier, HandleToolSearch} {
 		legacy := Configuration{Bindings: []Binding{{Handle: handle, ProfileID: "missing", Effort: "unknown"}}, Sets: []BindingSet{{Name: "old", Bindings: []Binding{{Handle: handle}}}}}
 		profiles := modelprofile.Configuration{}
 		if err := ValidateConfiguration(legacy, profiles); err != nil {
@@ -34,7 +34,7 @@ func TestRetiredMemoryBindingsCannotActivate(t *testing.T) {
 		}
 		applied, err := ApplyBindingSet(legacy, "old", profiles)
 		if err != nil || len(applied.Bindings) != 0 {
-			t.Fatalf("legacy set activated Memory: %#v, %v", applied, err)
+			t.Fatalf("legacy set activated retired binding: %#v, %v", applied, err)
 		}
 	}
 }

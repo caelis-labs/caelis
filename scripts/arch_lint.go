@@ -995,7 +995,7 @@ func isAllowedSkillDiscoveryTarget(target string) bool {
 }
 
 func builtinStatelessLeafPackages() []string {
-	return []string{"plan", "task", "spawn", "toolsearch", "filesystem", "shell", "web", "skill"}
+	return []string{"plan", "task", "spawn", "filesystem", "shell", "web", "skill"}
 }
 
 func sandboxMovedBackendHelperNames() []string {

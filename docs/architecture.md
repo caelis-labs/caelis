@@ -351,7 +351,7 @@ identity collisions, workspace trust errors, and Store decoding errors remain
 fatal. MCP servers initialize independently in the background with a
 30-second budget per server for connection and tool listing. Runtime startup
 and other servers do not wait for that work. Only complete, validated ready
-lists enter ToolSearch. An initialization failure emits one transient Session
+lists enter the Code Mode directory. An initialization failure emits one transient Session
 Notice; it does not fail the Turn or enter canonical history or model context.
 The TUI's Session presence subscription displays these notices during active
 and idle periods; Turn and reconnect views omit duplicate presentation.

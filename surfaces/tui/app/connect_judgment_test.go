@@ -113,7 +113,7 @@ func TestTeamOffersJudgmentOnlyForEvaluationScenes(t *testing.T) {
 				found = true
 			}
 		}
-		want := handle == agentbinding.HandleToolSearch || handle == agentbinding.HandleGuardianScreen
+		want := handle == agentbinding.HandleGuardianScreen
 		if found != want {
 			t.Fatalf("Jev choice for %s = %v", handle, found)
 		}

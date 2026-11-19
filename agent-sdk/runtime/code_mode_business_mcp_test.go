@@ -23,7 +23,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -69,7 +68,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 		{"nested_copied_fallback_handle", `const r=await live.fallback({});return {record:{media:r.media.map(p=>({...p}))}};`, "record", false},
 		{"copied_fallback_references", `return {...await live.fallback({})};`, "media", true},
 		{"selected_after_delete", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {record:r,image:response.media[0]};`, "record", true},
-		{"schema", `const s=(await tools.search({server:'live',tool:'value'})).json();if(s.tools[0].output_format!=='body'||!s.tools[0].output_schema.properties.name)throw Error('output contract missing');return await live.value({});`, "9223372036854775807", true},
+		{"schema", `const s=(await tools.search({name:'live__value'})).json();if(s.output_format!=='body'||!s.output_schema.properties.name)throw Error('output contract missing');return await live.value({});`, "9223372036854775807", true},
 		{"invalid_schema", `try{await live.invalid({});throw Error('resolved invalid output');}catch(e){if(!e.result||e.result!==e.reply||typeof e.result.text!=='function'||!e.result.text().includes('outputSchema'))throw Error('invalid diagnostic contract');let rejected=false;try{e.result.json()}catch(parseError){rejected=true}if(!rejected)throw Error('promoted unverified structured content');return {caught:true,diagnostic:e.result.text()};}`, "unverified", false},
 		{"failed_schema", `try{await live.failed({});throw Error('resolved failed output');}catch(e){if(!e.result||!e.result.text().includes('business'))throw Error('failed diagnostic contract');return {caught:true,diagnostic:e.result.text()};}`, "caught", false},
 		{"raw_json_collision", `const r=await live.collision({});if(r.json().raw_json!=='business-raw')throw Error('lost business field');return r;`, "business-raw", true},
@@ -151,7 +150,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				t.Fatal(err)
 			}
 			driver := &codeModeBusinessModel{LLM: llm}
-			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
+			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
 			if effects.Load() != 1 || len(driver.requests) != len(stages)+1 {
 				t.Fatalf("effects=%d requests=%d", effects.Load(), len(driver.requests))
 			}

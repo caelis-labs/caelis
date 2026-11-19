@@ -1,5 +1,4 @@
-/team · Team Configuration                             ×
-/ ▏Type to search
+/team › Team Configuration                           [x]
 ────────────────────────────────────────────────────────
 Configuration
  · Binding set  Custom  ›
@@ -9,7 +8,6 @@ Participant profiles
  · orbit        openai-codex/gpt-…
  · zenith       Unbound
 System Agents
- · ToolSearch   Main Agent model
  › Guardian     openai-codex/gpt-…  Classifier Disable…
  · Reviewer     Main Agent default
 Custom roles

@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
@@ -44,7 +43,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 			return nil
 		}}
 		runCodeMode(t, sessions, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{
-			toolsearch.NewSource(source, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}},
+			&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}},
 		}, DeferredTools: source}, nil, nil)
 		return driver
 	}
@@ -85,7 +84,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 	if !strings.Contains(string(raw), "schema changed") || !strings.Contains(string(raw), "tools.search") {
 		t.Fatalf("missing explicit refresh diagnostic: %s", raw)
 	}
-	run(reopened, `const schema=(await tools.search({name:"docs__read"})).json();if(schema.count!==1)throw Error('schema unavailable');const args={value:"new"};return await eval(schema.tools[0].call_path);`)
+	run(reopened, `const schema=(await tools.search({name:"docs__read"})).json();if(schema.name!=="docs__read")throw Error('schema unavailable');const args={value:"new"};return await eval(schema.call_path);`)
 	if effects != 4 {
 		t.Fatalf("explicit refresh did not admit new arguments: effects=%d", effects)
 	}

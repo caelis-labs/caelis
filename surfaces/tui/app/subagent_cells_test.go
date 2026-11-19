@@ -263,7 +263,7 @@ func TestTeamCellFocusRenderedFrames(t *testing.T) {
 func TestTeamRetiredMemoryHandlesAreAbsent(t *testing.T) {
 	m, _ := teamCellTestModel(t)
 	// Even an older Host projection must not recreate retired controls.
-	for _, handle := range []agentbinding.Handle{"steward", "memory-verifier"} {
+	for _, handle := range []agentbinding.Handle{"steward", "memory-verifier", "tool-search"} {
 		m.subagentOverlay.status.Handles = append(m.subagentOverlay.status.Handles, agentbinding.HandleStatus{Definition: agentbinding.Definition{Handle: handle, Name: string(handle), Class: agentbinding.HandleClassSystem, Configurable: true}})
 	}
 	for _, row := range m.subagentMainRows() {

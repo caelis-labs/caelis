@@ -40,26 +40,16 @@ await dtw.apps(args);
 await context7['query-docs'](args);
 ```
 
-Use `tools.search(selector)` when a schema is unknown or to find a tool. It
-accepts these selectors:
+Use `(await tools.search()).json()` for a directory page. Each page contains
+`{tools:[{name,description}],next:string|null}`. Pass `{query}` to match any
+whitespace-separated keyword in a name or description (case-insensitive).
+Pass `{query,after:next}` to continue the same filter in name order. Pages show
+ready deferred tools, not tools already exposed directly. An empty page does
+not establish that a connecting service has no tools.
 
-- `{name}` looks up one exact tool name. A miss returns `not_found` and does not
-  fall back to capability search.
-- `{server,tool,plugin?}` looks up an exact method. An ambiguous match fails with
-  `too_many_matches`; add `plugin` or use an exact name.
-- `{query}` performs capability search only.
-- `{server,plugin?,after?}` lists a server's tools. When `next` is present, pass
-  it as `after` with the same `server` and `plugin` to continue.
-- A legacy string tries an exact name first, then searches capabilities.
-
-Read a search Body with `(await tools.search(selector)).json()`. Its JSON has the shape
-`{tools:[{name,description,input_schema,output_schema?,output_format,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}`.
-Each tool includes its complete schema. `server`, `tool`, and `plugin` preserve
-original names when present. `call_path` is a JavaScript template such as
-`tools.call("returned_name", args)`; supply your argument object for `args` and
-use the path as returned. This handles special or conflicting names, including
-names found during the current execution. `truncated`, `omitted_count`, and `next`
-describe remaining results and pagination. Search uses the same repeatable Body API as every other tool entry.
+Use `(await tools.search({name})).json()` for one exact entry with its complete
+input schema, optional output schema, original service metadata and call path.
+Unknown names fail without falling back to a keyword query.
 
 Every tool call returns the same Body object, through direct functions and
 `tools.call` alike:

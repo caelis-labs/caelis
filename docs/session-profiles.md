@@ -88,10 +88,10 @@ permanent, including after later proof resolves an unknown. Never turn admission
 ## Runtime Agent Team and legacy reviewers
 
 `runtime-agent-team-v1` makes Runtime AppConfig the single model authority for
-breeze, orbit, zenith, tool-search, guardian and guardian-screen, including their
+breeze, orbit, zenith, guardian and guardian-screen, including their
 effort and speed. TUI Team and Control agent binding commands edit that same
 configuration. Main conversation/Worker model selection remains Session-local;
-`self` uses that main selection. An unbound Guardian or tool-search uses the
+`self` uses that main selection. An unbound Guardian uses the
 existing Session main-model fallback; resetting a delegation role removes it.
 
 Native `self` resolves its profile, capabilities and provider from the same
@@ -189,8 +189,8 @@ Core accepts old `inherit.skills` and `inherit.mcp` fields for wire compatibilit
 Both values use default discovery. Existing `skill_roots` entries still select
 exact roots. Use `skill_dirs` for new requests.
 
-MCP and Skills use standard assembly and progressive disclosure. `ToolSearch`
-exposes the current MCP catalog. `Skill` resolves known names against the current
+MCP and Skills use standard assembly and progressive disclosure. `tools.search()` inside `js_exec`
+lists the current MCP catalog. `Skill` resolves known names against the current
 explicit profile and selected directories at call time, including Skills added
 after the Session started. The system prompt retains the advertised names and
 descriptions through ordinary requests. The first admitted main provider request
@@ -280,10 +280,8 @@ is created. Package assembly status is distinct from MCP connection readiness.
 
 Product model declarations use the fixed `js_exec` entry. Code Mode can call a
 currently available Session tool by its original name when its schema is known;
-`tools.search` returns complete schemas and explicitly refreshes stale bindings.
-SDK embedders without Code Mode use fixed `tool_search` and `mcp_call` entries;
-`mcp_call` resolves a previously discovered real tool before policy, approval and
-execution. Discovering or refreshing MCP does not add tools to the model
+`tools.search({name})` returns the complete schema and refreshes a stale binding.
+Discovering or refreshing MCP does not add tools to the model
 declaration. Surfaces present the actual target name and arguments.
 
 An explicit Session configuration commit applies MCP changes automatically.
@@ -306,9 +304,8 @@ without an existing binding pins the current real Tool identity/version. Canonic
 search receipts and typed nested ToolCall bindings for Code Mode tool executions
 remain reusable across fresh workers, compaction and resume. A change to the bound
 Code Mode source/schema fails stale
-until `tools.search(name)` explicitly refreshes the complete schema and binding.
-Without Code Mode, a search in the same model response cannot authorize an
-undiscovered sibling `mcp_call`. Discovery grants no permission and never
+until `tools.search({name})` explicitly refreshes the complete schema and binding.
+Discovery grants no permission and never
 authorizes replay of an unknown external effect.
 
 ## Sources, children and approvals

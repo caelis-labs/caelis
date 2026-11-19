@@ -45,7 +45,6 @@ type HookPurpose string
 
 const (
 	HookPurposeChat        HookPurpose = "chat"
-	HookPurposeToolSearch  HookPurpose = "tool_search"
 	HookPurposeCompaction  HookPurpose = "compaction"
 	HookPurposeSystemAgent HookPurpose = "system_agent"
 )

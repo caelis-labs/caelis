@@ -20,7 +20,6 @@ func TestAgentBindingStatusProjectsNativeProfileEligibility(t *testing.T) {
 		agentbinding.HandleSelf:           {},
 		agentbinding.HandleBreeze:         {"acp:agent", "provider:model"},
 		agentbinding.HandleGuardian:       {"provider:model"},
-		agentbinding.HandleToolSearch:     {"provider:judge", "provider:model"},
 		agentbinding.HandleGuardianScreen: {"provider:judge"},
 		"reviewer":                        {"acp:agent", "provider:model"},
 	}

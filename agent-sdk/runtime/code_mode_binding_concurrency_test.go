@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
@@ -104,7 +103,7 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 				}
 				return nil
 			}}
-			_, rt := runCodeMode(t, files, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(source, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
+			_, rt := runCodeMode(t, files, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
 			events, err := files.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -188,13 +187,13 @@ func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
 		checked.Store(true)
 		return []byte(`{}`), nil
 	})}
-	_, _ = runCodeMode(t, files, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, toolsearch.NewSource(source, exactMCPRanker{})}, DeferredTools: source}, mcpAskFixturePolicy(), requester)
+	_, _ = runCodeMode(t, files, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration}, DeferredTools: source}, mcpAskFixturePolicy(), requester)
 
 	fresh := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 		_, err := host.Call(ctx, "docs__read", []byte(`{}`))
 		return []byte(`{}`), err
 	})}
-	runCodeMode(t, files, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{fresh, toolsearch.NewSource(source, exactMCPRanker{})}, DeferredTools: source}, mcpAskFixturePolicy(), requester)
+	runCodeMode(t, files, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{fresh}, DeferredTools: source}, mcpAskFixturePolicy(), requester)
 	if !checked.Load() || oldEffects.Load() != 0 || newEffects.Load() != 1 {
 		t.Fatalf("checked=%v old=%d new=%d", checked.Load(), oldEffects.Load(), newEffects.Load())
 	}

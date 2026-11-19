@@ -147,26 +147,16 @@
         throw new ErrorType("tools.call(name,args) requires a name string and JSON object");
       return then(rpc("call",name,encode(args)),decode);
     },
-    search(query) {
-      let request;
-      if(typeof query==="string") {
-        if(query.length===0||query.length>1024)throw new ErrorType("tools.search requires a non-empty name or capability string");
-        request={query,legacy_string:true};
-      } else {
-        if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires a selector object or query string");
-        const names=keys(query);
-        request={};
-        for(let i=0;i<names.length;i++) {
-          const key=names[i];
-          if(key!=="name"&&key!=="query"&&key!=="server"&&key!=="tool"&&key!=="plugin"&&key!=="after")throw new ErrorType("unsupported tools.search field: "+key);
-          const value=query[key];
-          if(typeof value!=="string"||value.length===0||value.length>1024)throw new ErrorType("tools.search fields require non-empty strings");
-          request[key]=value;
-        }
-        if(own(request,"name")?names.length!==1:
-          own(request,"query")?names.length!==1:
-          !own(request,"server")||(own(request,"tool")&&own(request,"after")))throw new ErrorType("tools.search requires {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}");
+    search(query={}) {
+      if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires an object");
+      const names=keys(query), request={};
+      for(let i=0;i<names.length;i++){
+        const key=names[i], value=query[key];
+        if(key!=="name"&&key!=="query"&&key!=="after")throw new ErrorType("unsupported tools.search field: "+key);
+        if(typeof value!=="string"||!value.length||value.length>1024)throw new ErrorType("expected non-empty search field");
+        request[key]=value;
       }
+      if(own(request,"name")&&names.length!==1)throw new ErrorType("name requires exact lookup");
       return then(rpc("search","",encode(request)),decode);
     }
   });

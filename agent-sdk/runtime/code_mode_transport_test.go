@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -127,7 +126,7 @@ func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
 		checked.Store(true)
 		return []byte(`{}`), nil
 	})}
-	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeModel(true), Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration}, DeferredTools: manager}, nil, nil)
+	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeModel(true), Tools: []tool.Tool{declaration}, DeferredTools: manager}, nil, nil)
 	idle := &mcpScriptModel{steps: func(int, *model.Request) []model.ToolCall { return nil }}
 	runCodeMode(t, store, active, agent.AgentSpec{Model: idle, Tools: []tool.Tool{declaration}, DeferredTools: manager}, nil, nil)
 	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})

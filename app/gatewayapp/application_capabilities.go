@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -25,7 +24,6 @@ type applicationCapabilities struct {
 	skillBundles []skill.PluginBundle
 	skills       []sessionprofile.SkillStatus
 	plugins      []sessionprofile.PluginStatus
-	searchTool   tool.Tool
 	source       tool.Source
 }
 
@@ -316,7 +314,6 @@ func (r *applicationTurnResolver) reconcileMCPLocked(ctx context.Context, config
 
 func (r *applicationTurnResolver) bindApplicationMCP(capabilities *applicationCapabilities) {
 	capabilities.source = applicationMCPSource{selection: r.mcpManager.Selection(), resolver: r}
-	capabilities.searchTool = toolsearch.NewSource(capabilities.source, newBoundToolSearchRanker(r.composition))
 }
 
 func (r *applicationTurnResolver) updateInheritedMCP(specs []mcp.ServerSpec) error {

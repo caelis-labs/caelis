@@ -296,7 +296,6 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessi
 	}
 	tools = append(tools,
 		applicationLeasedTool{Tool: skilltool.New(skilltool.Config{ResolveCatalog: r.liveSkillCatalog}), store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope},
-		applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope},
 	)
 	children, err := r.composition.applicationChildren.tools(ctx)
 	if err != nil {

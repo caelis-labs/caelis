@@ -18,13 +18,13 @@ func TestReviewStaticMCPDiscoveryAcrossVMs(t *testing.T) {
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`return (await tools.search("a__target")).json();`)
+			return h1Script(`return (await tools.search({name:"a__target"})).json();`)
 		case 1:
 			return h1Script(`return await tools.call("a__target",{value:1});`)
 		}
 		return nil
 	}}
-	spec := agent.AgentSpec{Model: m, Tools: []tool.Tool{s.items[0], h1Search(s), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}
+	spec := agent.AgentSpec{Model: m, Tools: []tool.Tool{s.items[0], &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}
 	events, _ := runCodeMode(t, store, active, spec, nil, nil)
 	if s.snapshot().Effects != 1 {
 		for _, e := range events {

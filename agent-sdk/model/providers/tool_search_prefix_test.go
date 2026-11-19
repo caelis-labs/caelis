@@ -8,17 +8,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 type changingSearchSource struct{ tools []tool.Tool }
 
 func (s *changingSearchSource) Tools() []tool.Tool { return s.tools }
-
-func TestToolSearchProviderDeclarationStable(t *testing.T) {
-	testFixedProviderDeclarationStable(t, false)
-}
 
 func TestJSExecProviderDeclarationStable(t *testing.T) {
 	testFixedProviderDeclarationStable(t, true)
@@ -27,10 +22,7 @@ func TestJSExecProviderDeclarationStable(t *testing.T) {
 func testFixedProviderDeclarationStable(t *testing.T, codeMode bool) {
 	t.Helper()
 	source := &changingSearchSource{}
-	entry := toolsearch.NewSource(source)
-	if codeMode {
-		entry = &codemode.Tool{Name: codemode.ToolName}
-	}
+	entry := &codemode.Tool{Name: codemode.ToolName}
 	wire := func() map[string][]byte {
 		t.Helper()
 		req := &model.Request{Tools: tool.ModelSpecs(append([]tool.Tool{entry}, source.tools...))}

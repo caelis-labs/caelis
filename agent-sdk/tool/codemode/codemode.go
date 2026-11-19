@@ -109,41 +109,24 @@ type NamedHost interface {
 	ToolNames(context.Context) ([]ToolRoute, error)
 }
 
-// SearchRequest selects an exact Name, exact Server/Tool, capability Query, or
-// Server listing. Plugin qualifies Server; After continues only a listing.
-// LegacyString preserves exact-name-first lookup for the string script syntax.
+// SearchRequest selects one exact schema or a filtered directory page.
 type SearchRequest struct {
-	Name         string `json:"name,omitempty"`
-	Query        string `json:"query,omitempty"`
-	Server       string `json:"server,omitempty"`
-	Tool         string `json:"tool,omitempty"`
-	Plugin       string `json:"plugin,omitempty"`
-	After        string `json:"after,omitempty"`
-	LegacyString bool   `json:"legacy_string,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Query string `json:"query,omitempty"`
+	After string `json:"after,omitempty"`
 }
 
 // Validate checks the mutually exclusive search selectors at the Host boundary.
 func (r SearchRequest) Validate() error {
-	for _, value := range []string{r.Name, r.Query, r.Server, r.Tool, r.Plugin, r.After} {
+	for _, value := range []string{r.Name, r.Query, r.After} {
 		if len(value) > 1024 {
 			return tool.NewError(tool.ErrorCodeInvalidInput, "search fields must be at most 1024 bytes")
 		}
 	}
-	switch {
-	case r.Name != "":
-		if r.Query == "" && r.Server == "" && r.Tool == "" && r.Plugin == "" && r.After == "" && !r.LegacyString {
-			return nil
-		}
-	case r.Server != "":
-		if r.Query == "" && !r.LegacyString && (r.Tool == "" || r.After == "") {
-			return nil
-		}
-	case r.Query != "":
-		if r.Tool == "" && r.Plugin == "" && r.After == "" {
-			return nil
-		}
+	if r.Name != "" && (r.Query != "" || r.After != "") {
+		return tool.NewError(tool.ErrorCodeInvalidInput, "name requires exact lookup")
 	}
-	return tool.NewError(tool.ErrorCodeInvalidInput, "supply {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}")
+	return nil
 }
 
 // DiscoveryHost adds the existing scoped discovery owner to the bridge.
@@ -231,7 +214,7 @@ Use block-local let/const for temporary values. Top-level bindings usually persi
 
 Tools return a Body. result.text() joins reply text/JSON with newlines, preserving JSON tokens. result.json() reads validated data or parses the whole text as one JSON document. Both reads are repeatable. Return the original Body for the whole reply, or select fields and original result.media references. Copies grant no media identity. Numbers may round; omit undefined and stringify BigInt.
 
-tools.search({name}) finds an exact schema; use {query} for capabilities, {server,tool,plugin?} for an exact method, or {server,plugin?,after?} to list. Its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Pass next as after. Follow call_path, e.g. tools.call(name,args).
+(await tools.search()).json() lists deferred tools: {tools:[{name,description}],next:string|null}. Pass {query?,after?} to match any keyword or continue with next. (await tools.search({name})).json() returns one exact {name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}.
 
 Inspect error.message, error.code and error.result when present (reply alias). Failed Bodies are diagnostics; json() only parses text. On stale_revision, refresh the exact schema and rebuild args. Check child outcomes before retrying; never replay unknown outcomes. runtime.state() reports generation/execution.`
 

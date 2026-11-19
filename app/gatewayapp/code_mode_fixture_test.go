@@ -17,18 +17,7 @@ func CodeModeFixtureCall(enabled bool, name, args string) (string, string) {
 	var source string
 	switch name {
 	case tool.ToolSearchToolName:
-		var input struct {
-			Query string `json:"query"`
-			Name  string `json:"name"`
-		}
-		_ = json.Unmarshal([]byte(args), &input)
-		if input.Name != "" {
-			value, _ := json.Marshal(input.Name)
-			source = "return await tools.search(" + string(value) + ");"
-		} else {
-			value, _ := json.Marshal(input.Query)
-			source = "return await tools.search(" + string(value) + ");"
-		}
+		source = "return await tools.search(" + args + ");"
 	case tool.MCPCallToolName:
 		var input struct {
 			Name string          `json:"tool_name"`
@@ -39,7 +28,7 @@ func CodeModeFixtureCall(enabled bool, name, args string) (string, string) {
 		if len(input.Args) == 0 {
 			input.Args = []byte(`{}`)
 		}
-		source = "await tools.search(" + string(nameJSON) + ");return await tools.call(" + string(nameJSON) + "," + string(input.Args) + ");"
+		source = "await tools.search({name:" + string(nameJSON) + "});return await tools.call(" + string(nameJSON) + "," + string(input.Args) + ");"
 	default:
 		return name, args
 	}

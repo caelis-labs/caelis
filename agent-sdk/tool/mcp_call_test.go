@@ -34,7 +34,7 @@ func TestMCPDefinitionsNeverJoinFixedModelTools(t *testing.T) {
 		tools = append(tools, NamedTool{Def: Definition{Name: "remote", Metadata: map[string]any{MetadataToolKind: MetadataToolKindMCP}}})
 	}
 	got := toolSpecNames(ModelSpecs(tools))
-	if !equalStrings(got, []string{"Read", ToolSearchToolName, MCPCallToolName}) {
+	if !equalStrings(got, []string{"Read"}) {
 		t.Fatalf("fixed tools=%v", got)
 	}
 	visibility := NewToolVisibility(tools)

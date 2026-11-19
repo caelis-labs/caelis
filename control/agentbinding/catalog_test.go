@@ -9,7 +9,7 @@ func TestDefinitionsAreTheSingleCanonicalHandleCatalog(t *testing.T) {
 	t.Parallel()
 
 	definitions := Definitions()
-	wantHandles := []Handle{HandleSelf, HandleBreeze, HandleOrbit, HandleZenith, HandleToolSearch, HandleGuardian, HandleGuardianScreen, HandleReviewer}
+	wantHandles := []Handle{HandleSelf, HandleBreeze, HandleOrbit, HandleZenith, HandleGuardian, HandleGuardianScreen, HandleReviewer}
 	gotHandles := make([]Handle, 0, len(definitions))
 	for _, definition := range definitions {
 		gotHandles = append(gotHandles, definition.Handle)
@@ -26,7 +26,7 @@ func TestDefinitionsAreTheSingleCanonicalHandleCatalog(t *testing.T) {
 	if got := definitionHandles(DelegationDefinitions()); !reflect.DeepEqual(got, []Handle{HandleSelf, HandleBreeze, HandleOrbit, HandleZenith}) {
 		t.Fatalf("DelegationDefinitions() = %#v", got)
 	}
-	if got := definitionHandles(SystemDefinitions()); !reflect.DeepEqual(got, []Handle{HandleToolSearch, HandleGuardian, HandleGuardianScreen, HandleReviewer}) {
+	if got := definitionHandles(SystemDefinitions()); !reflect.DeepEqual(got, []Handle{HandleGuardian, HandleGuardianScreen, HandleReviewer}) {
 		t.Fatalf("SystemDefinitions() = %#v", got)
 	}
 
@@ -49,7 +49,6 @@ func TestHandleClassificationComesFromCatalog(t *testing.T) {
 		{handle: HandleBreeze, delegation: true, direct: true},
 		{handle: HandleOrbit, delegation: true, direct: true},
 		{handle: HandleZenith, delegation: true, direct: true},
-		{handle: HandleToolSearch, system: true},
 		{handle: HandleGuardian, system: true},
 		{handle: HandleGuardianScreen, system: true},
 		{handle: HandleReviewer, system: true},

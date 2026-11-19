@@ -21,11 +21,15 @@ func (m *Model) wizardActionEnabled() bool {
 }
 
 func (m *Model) wizardButtonStyle(target string, enabled, focused bool) lipgloss.Style {
+	state := m.wizardOverlay
+	return m.overlayButtonStyle(enabled, state.hovered == target || state.pressed == target || focused)
+}
+
+func (m *Model) overlayButtonStyle(enabled, active bool) lipgloss.Style {
 	if !enabled {
 		return m.theme.HelpHintTextStyle()
 	}
-	s := m.wizardOverlay
-	if s.hovered == target || s.pressed == target || focused {
+	if active {
 		return m.theme.CommandActiveStyle().Padding(0)
 	}
 	return m.theme.CommandStyle().Padding(0).Bold(true)

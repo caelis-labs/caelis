@@ -25,7 +25,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -203,7 +202,7 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 		return codemode.Output{Value: raw, Parts: []codemode.Part{selected}}, err
 	})}
 	llm := codeModeModel(true)
-	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration, read}, DeferredTools: manager}, registry, nil)
+	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{declaration, read}, DeferredTools: manager}, registry, nil)
 	if effects.Load() != 2 || !reflect.DeepEqual(policyNames, []string{"live__read", "live__read", "Read"}) {
 		t.Fatalf("effects=%d policy=%v", effects.Load(), policyNames)
 	}
@@ -278,7 +277,6 @@ func TestCodeModeAssembledToolsDoNotRequireSearch(t *testing.T) {
 				effects.Add(1)
 				return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
 			}})
-			search := toolsearch.NewSource(source, exactMCPRanker{})
 			declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 				_, err := host.Call(ctx, "docs__read", []byte(`{}`))
 				if err != nil {
@@ -306,7 +304,7 @@ func TestCodeModeAssembledToolsDoNotRequireSearch(t *testing.T) {
 				}
 				return nil
 			}}
-			runCodeMode(t, store, active, agent.AgentSpec{Model: llm, Tools: []tool.Tool{search, declaration}, DeferredTools: source}, nil, nil)
+			runCodeMode(t, store, active, agent.AgentSpec{Model: llm, Tools: []tool.Tool{declaration}, DeferredTools: source}, nil, nil)
 			if effects.Load() != 1 {
 				t.Fatalf("effects=%d want=1", effects.Load())
 			}

@@ -93,6 +93,7 @@ type subagentOverlayState struct {
 	index        int
 	rows         []subagentOverlayRow
 	geometry     subagentOverlayGeometry
+	closeHovered bool
 	pressedKey   string
 	pressedField subagentField
 	pressedDelta int
@@ -309,8 +310,7 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 	switch handle {
 	case agentbinding.HandleGuardianScreen:
 		resetDetail = "Use Guardian Agent review directly"
-	case agentbinding.HandleToolSearch:
-		resetDetail = "Use the Main Agent model for MCP discovery"
+
 	case agentbinding.HandleGuardian:
 		resetDetail = "Use the Main Agent model"
 	case agentbinding.HandleReviewer:
@@ -456,8 +456,7 @@ func subagentBindingDetail(item agentbinding.HandleStatus) string {
 		switch item.Definition.Handle {
 		case agentbinding.HandleGuardianScreen:
 			return "Disabled"
-		case agentbinding.HandleToolSearch:
-			return "Main Agent model"
+
 		case agentbinding.HandleGuardian:
 			return "Main Agent default"
 		default:

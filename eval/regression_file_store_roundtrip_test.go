@@ -2,7 +2,6 @@ package eval
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"testing"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	filestore "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 )
 
@@ -135,136 +133,6 @@ func TestRegressionFileStoreRoundTripMinimalToolLoop(t *testing.T) {
 	}
 	if canonicalFromReloaded[0].Type != session.EventTypeAssistant {
 		t.Fatalf("reloaded event type = %q, want assistant", canonicalFromReloaded[0].Type)
-	}
-}
-
-func TestRegressionFileStoreRoundTripFixedMCPEntry(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	store := newFileStoreForTest(t)
-
-	sess, err := store.StartSession(ctx, session.StartSessionRequest{
-		AppName:            "caelis",
-		UserID:             "test-user",
-		PreferredSessionID: "sess-file-fixed-mcp-tool",
-	})
-
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-
-	effects := 0
-	const mcpToolName = "mcp__calendar__demo__create_event"
-	mcpTool := tool.NamedTool{
-		Def: tool.Definition{
-			Name:        mcpToolName,
-			Description: "Create calendar events",
-			InputSchema: map[string]any{"type": "object"},
-			Metadata: map[string]any{
-				tool.MetadataToolKind:             tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:             "calendar",
-				tool.MetadataMCPServer:            "demo",
-				tool.MetadataMCPTool:              "create_event",
-				tool.MetadataMCPSourceFingerprint: "calendar-v1",
-			},
-		},
-		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			effects++
-			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart(evalharness.MustJSON(map[string]any{"value": "created"})),
-				},
-			}, nil
-		},
-	}
-	searchTool := toolsearch.NewWithRanker([]tool.Tool{mcpTool}, toolsearch.NewLexicalRanker())
-	if searchTool == nil {
-		t.Fatal("toolsearch.New(MCP tool) = nil")
-	}
-	tools := []tool.Tool{searchTool, mcpTool}
-
-	liveScripted := evalharness.NewScriptedModel("live-file-fixed-mcp",
-		evalharness.ToolCallStep("", model.ToolCall{
-			ID:   "call-search",
-			Name: tool.ToolSearchToolName,
-			Args: `{"query":"calendar event"}`,
-		}),
-		evalharness.ToolCallStep("", model.ToolCall{
-			ID:   "call-mcp",
-			Name: tool.MCPCallToolName,
-			Args: `{"tool_name":"mcp__calendar__demo__create_event","arguments":{}}`,
-		}),
-		evalharness.TextStep("created"),
-	)
-	liveRun, err := evalharness.RunChatScenario(ctx, evalharness.ChatScenario{
-		Name:      "live-file-fixed-mcp",
-		SessionID: sess.SessionID,
-		Prompt:    "create a calendar event",
-		Model:     liveScripted,
-		Tools:     tools,
-	})
-	if err != nil {
-		t.Fatalf("RunChatScenario(live) error = %v", err)
-	}
-	if got, want := len(liveRun.Requests), 3; got != want {
-		t.Fatalf("live request count = %d, want %d", got, want)
-	}
-	if got, want := requestToolNames(liveRun.Requests[0]), []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !slices.Equal(got, want) {
-		t.Fatalf("initial request tools = %v, want %v", got, want)
-	}
-	if effects != 1 {
-		t.Fatalf("live effects = %d", effects)
-	}
-	livePostSearchTools := requestToolNames(liveRun.Requests[1])
-	if want := []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !slices.Equal(livePostSearchTools, want) {
-		t.Fatalf("post-search request tools = %v, want %v", livePostSearchTools, want)
-	}
-
-	userEvent := &session.Event{
-		Type:    session.EventTypeUser,
-		Text:    "create a calendar event",
-		Message: &model.Message{Role: model.RoleUser, Parts: []model.Part{{Kind: model.PartKindText, Text: &model.TextPart{Text: "create a calendar event"}}}},
-	}
-	allEvents := append([]*session.Event{userEvent}, liveRun.Events...)
-	for _, event := range evalharness.CanonicalEvents(allEvents) {
-		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
-			t.Fatalf("AppendEvent() error = %v", err)
-		}
-	}
-
-	loaded, err := store.Events(ctx, session.EventsRequest{
-		SessionRef: session.SessionRef{SessionID: sess.SessionID},
-	})
-	if err != nil {
-		t.Fatalf("Events() error = %v", err)
-	}
-	reloadedScripted := evalharness.NewScriptedModel("reloaded-file-fixed-mcp",
-		evalharness.ToolCallStep("", model.ToolCall{ID: "call-resumed", Name: tool.MCPCallToolName, Args: `{"tool_name":"mcp__calendar__demo__create_event","arguments":{}}`}),
-		evalharness.TextStep("ok"),
-	)
-	reloadedRun, err := evalharness.RunChatScenario(ctx, evalharness.ChatScenario{
-		Name:      "reloaded-file-fixed-mcp",
-		SessionID: sess.SessionID,
-		Prompt:    "continue",
-		Model:     reloadedScripted,
-		Tools:     tools,
-		Events:    loaded,
-	})
-	if err != nil {
-		t.Fatalf("RunChatScenario(reloaded) error = %v", err)
-	}
-	if got, want := len(reloadedRun.Requests), 2; got != want {
-		t.Fatalf("reloaded request count = %d, want %d", got, want)
-	}
-	if effects != 2 {
-		t.Fatalf("resumed discovered target effects = %d, want 2", effects)
-	}
-	if got := requestToolNames(reloadedRun.Requests[0]); !slices.Equal(got, livePostSearchTools) {
-		t.Fatalf("reloaded request tools = %v, want runtime post-search tools %v", got, livePostSearchTools)
 	}
 }
 

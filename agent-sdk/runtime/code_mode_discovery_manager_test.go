@@ -14,7 +14,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -67,13 +66,13 @@ func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`return (await tools.search("live__read")).json();`)
+					return h1Script(`return (await tools.search({name:"live__read"})).json();`)
 				case 1:
 					return h1Script(`await tools.call("live__read",{value:1});`)
 				}
 				return nil
 			}}
-			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(source, toolsearch.NewLexicalRanker()), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
+			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
 			if effects.Load() != 0 || source.checks.Load() != 2 {
 				t.Fatalf("final boundary bypass: effects=%d checks=%d", effects.Load(), source.checks.Load())
 			}

@@ -276,7 +276,7 @@ func (h *codeModeHost) Call(ctx context.Context, name string, args json.RawMessa
 
 func (h *codeModeHost) call(requestCtx context.Context, name string, arguments json.RawMessage, discovery bool) (returned codemode.Reply, callError error) {
 	defer func() {
-		callError = mcpdiscovery.WithEntryHint(callError, "tools.search(name)")
+		callError = mcpdiscovery.WithEntryHint(callError, "tools.search({name})")
 		if callError != nil || returned.IsError || returned.Outcome == codemode.OutcomeUnknown {
 			h.mu.Lock()
 			h.isError = true
@@ -340,9 +340,6 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	callID := fmt.Sprintf("%s/%s/host-%d", h.parent.Execution.TurnID, h.parent.Execution.ItemID, ordinal)
 	h.mu.Unlock()
 	ctx, cancel := context.WithCancel(h.ctx)
-	if discovery {
-		ctx = context.WithValue(ctx, codeModeSearchKey{}, requestCtx.Value(codeModeSearchKey{}))
-	}
 	defer cancel()
 	stop := context.AfterFunc(requestCtx, cancel)
 	defer stop()
@@ -402,7 +399,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		}
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
-		if h.ctx.Err() == nil && persistErr == nil && settledCodeModeToolError(callErr) {
+		if h.ctx.Err() == nil && persistErr == nil && (settledCodeModeToolError(callErr) || discovery && errorcode.Is(callErr, errorcode.ResourceExhausted)) {
 			reply, projectErr := h.project(callID, result, outcome, target.definition)
 			if projectErr == nil {
 				reply.IsError = true
