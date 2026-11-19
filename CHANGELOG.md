@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.83.1](https://github.com/caelis-labs/caelis/compare/v0.83.0...v0.83.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **runtime:** unify Task observations under bounded waits ([#261](https://github.com/caelis-labs/caelis/issues/261)) ([f48a4da](https://github.com/caelis-labs/caelis/commit/f48a4daeaf3d32f41e47f8456a85119bc65cf8d7))
+* **tui:** preserve Markdown table alignment and line breaks ([#262](https://github.com/caelis-labs/caelis/issues/262)) ([09bbebd](https://github.com/caelis-labs/caelis/commit/09bbebd870e3d196ef5d020fa6aba38de0220ebb))
+
 ## [0.83.0](https://github.com/caelis-labs/caelis/compare/v0.82.0...v0.83.0) (2026-11-19)
 
 
