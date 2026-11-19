@@ -11,7 +11,7 @@ import (
 func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testing.T) {
 	candidates := completeConnectACPAgents("", 20)
 	nativeAgents := []string{
-		"grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"antigravity", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
 		"auggie", "cline", "factory-droid", "goose", "kilo",
 	}
 	if len(candidates) == 0 || candidates[0].Value != "codex" {
@@ -22,7 +22,7 @@ func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testi
 			t.Fatalf("ACP Agent candidates = %#v, want %q", candidates, want)
 		}
 	}
-	for _, removed := range []string{"antigravity", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+	for _, removed := range []string{"claude", "deepagents", "glm-acp-agent", "pi-acp"} {
 		if slashCandidatesHaveValue(candidates, removed) {
 			t.Fatalf("ACP Agent candidates = %#v, removed Registry entry %q remains", candidates, removed)
 		}

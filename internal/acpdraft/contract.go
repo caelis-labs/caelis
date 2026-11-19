@@ -26,6 +26,14 @@ type conditionalCapability struct {
 	IdleOnly   bool `json:"idleOnly"`
 }
 
+// ReplayComplete marks the end of Session history before live updates resume.
+func ReplayComplete(sessionID v2.SessionId) v2.UpdateSessionNotification {
+	return v2.UpdateSessionNotification{
+		SessionId: sessionID,
+		Update:    v2.SessionUpdate{ReplayComplete: &v2.SessionUpdateReplayComplete{SessionUpdate: "replay_complete"}},
+	}
+}
+
 // ActiveOnlyGuard selects either insertion into an identified existing Activity
 // or admission while idle. Neither guard authorizes replacement work after its
 // condition changes. The wire key is retained within this unpublished profile.

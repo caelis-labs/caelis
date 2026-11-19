@@ -10,6 +10,8 @@ import (
 	"time"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
 )
 
 const (
@@ -117,6 +119,11 @@ func (a *agent) loadSessionWithReplay(ctx context.Context, request acp.LoadSessi
 	if a.draft != nil {
 		if err := a.draft.acceptHistoryState(route, thread); err != nil {
 			return fail(err, replayStarted)
+		}
+		if replay {
+			if err := a.draft.connection.SessionUpdate(ctx, acpdraft.ReplayComplete(v2.SessionId(request.SessionId))); err != nil {
+				return fail(err, true)
+			}
 		}
 	}
 	for {

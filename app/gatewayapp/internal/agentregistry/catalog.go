@@ -29,6 +29,7 @@ type installedConnectableAgent struct {
 }
 
 var installedConnectableAgents = []installedConnectableAgent{
+	nativeACPAgent("antigravity", "Google Antigravity", "Google's coding agent with a native ACP stdio command", 6, "agy", "acp"),
 	nativeACPAgent("grok", "Grok Build", "xAI's coding agent with a native ACP stdio command", 10, "grok", "agent", "stdio"),
 	nativeACPAgent("kimi", "Kimi CLI", "Kimi coding agent with a native ACP stdio command", 20, "kimi", "acp"),
 	nativeACPAgent("opencode", "OpenCode", "Open source coding agent with a native ACP stdio command", 30, "opencode", "acp"),

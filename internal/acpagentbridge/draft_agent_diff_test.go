@@ -49,6 +49,15 @@ func TestDraftDiffProjectionConvertsLegacyFilesAndPreservesStructuredFacts(t *te
 			if err := draftJSONConvert(update, &fields); err != nil {
 				t.Fatal(err)
 			}
+			if tc.operation == "" {
+				if fields.Content == nil || len(fields.Content) != 0 {
+					t.Fatalf("diff without changes must produce an empty content replacement: %s", fields.Content)
+				}
+				return
+			}
+			if len(fields.Content) != 1 {
+				t.Fatalf("content=%s", fields.Content)
+			}
 			item := fields.Content[0]
 			for _, field := range []string{"path", "oldText", "newText"} {
 				if _, leaked := item[field]; leaked {
@@ -59,11 +68,7 @@ func TestDraftDiffProjectionConvertsLegacyFilesAndPreservesStructuredFacts(t *te
 			if err := json.Unmarshal(item["changes"], &gotChanges); err != nil {
 				t.Fatal(err)
 			}
-			if tc.operation == "" {
-				if string(item["changes"]) != "[]" {
-					t.Fatalf("explicit empty changes=%s", item["changes"])
-				}
-			} else if len(gotChanges) != 1 || gotChanges[0].Operation != tc.operation {
+			if len(gotChanges) != 1 || gotChanges[0].Operation != tc.operation {
 				t.Fatalf("changes=%s", item["changes"])
 			}
 			var gotPatch *eventstream.ToolDiffPatch

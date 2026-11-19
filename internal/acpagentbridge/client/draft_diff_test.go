@@ -52,7 +52,7 @@ func TestDraftOutboundFileDiffPreservesStructuredChangesAndPatch(t *testing.T) {
 	}
 }
 
-func TestDraftOutboundFileDiffEmptyAndNullableContent(t *testing.T) {
+func TestDraftOutboundFileDiffRequiresChangesAndRetainsContentClears(t *testing.T) {
 	agent := &draftTestAgent{}
 	client, ctx, updates := newOutboundDraftFixture(t, agent, Config{})
 	if _, err := client.Initialize(ctx); err != nil {
@@ -63,8 +63,9 @@ func TestDraftOutboundFileDiffEmptyAndNullableContent(t *testing.T) {
 		content json.RawMessage
 		diff    bool
 	}{
-		{name: "omitted patch", content: json.RawMessage(`[{"type":"diff","changes":[]}]`), diff: true},
-		{name: "null patch and metadata", content: json.RawMessage(`[{"type":"diff","changes":[],"patch":null,"_meta":null}]`), diff: true},
+		{name: "empty changes", content: json.RawMessage(`[{"type":"diff","changes":[]}]`)},
+		{name: "invalid changes", content: json.RawMessage(`[{"type":"diff","changes":[{"operation":"modify"}]}]`)},
+		{name: "null patch and metadata", content: json.RawMessage(`[{"type":"diff","changes":[{"operation":"modify","path":"/tmp/file"}],"patch":null,"_meta":null}]`), diff: true},
 		{name: "null content", content: json.RawMessage(`null`)},
 		{name: "empty content", content: json.RawMessage(`[]`)},
 	} {
@@ -77,12 +78,8 @@ func TestDraftOutboundFileDiffEmptyAndNullableContent(t *testing.T) {
 				t.Fatal("content replacement presence lost")
 			}
 			if test.diff {
-				if len(got.Content) != 1 || got.Content[0].Changes == nil || len(*got.Content[0].Changes) != 0 || got.Content[0].Patch != nil || got.Content[0].Meta != nil {
-					t.Fatalf("empty diff facts changed: %#v", got.Content)
-				}
-				var restored ToolCallContent
-				if err := json.Unmarshal(mustDiffJSON(t, got.Content[0]), &restored); err != nil || restored.Changes == nil || len(*restored.Changes) != 0 {
-					t.Fatalf("explicit empty changes lost: %#v, %v", restored, err)
+				if len(got.Content) != 1 || got.Content[0].Changes == nil || len(*got.Content[0].Changes) != 1 || got.Content[0].Patch != nil || got.Content[0].Meta != nil {
+					t.Fatalf("diff with a null patch or metadata = %#v", got.Content)
 				}
 			} else if len(got.Content) != 0 {
 				t.Fatalf("clear retained file diff: %#v", got.Content)

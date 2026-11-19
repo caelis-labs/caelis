@@ -170,6 +170,7 @@ func TestDraftResumePreservesExactSpoolNarrative(t *testing.T) {
 			t.Fatalf("%s metadata=%v", label, transcript.meta)
 		}
 		var deltas []string
+		replayMarkers := 0
 		var metadataPatch, metadataClear, bodyClear bool
 		for _, update := range updates {
 			var fields map[string]json.RawMessage
@@ -179,6 +180,12 @@ func TestDraftResumePreservesExactSpoolNarrative(t *testing.T) {
 			var kind, id string
 			_ = json.Unmarshal(fields["sessionUpdate"], &kind)
 			_ = json.Unmarshal(fields["messageId"], &id)
+			if kind == "replay_complete" {
+				replayMarkers++
+			}
+			if replayMarkers != 0 && id != "" {
+				t.Fatalf("%s replayed message followed replay_complete: %s", label, id)
+			}
 			if id == messageID && kind == "agent_message_chunk" {
 				deltas = append(deltas, draftReplayBlockText(t, fields["content"]))
 			}
@@ -190,6 +197,9 @@ func TestDraftResumePreservesExactSpoolNarrative(t *testing.T) {
 			if _, leaked := fields["replacedFields"]; leaked {
 				t.Fatal("native metadata presence leaked into standard draft")
 			}
+		}
+		if (label == "live" && replayMarkers != 0) || (label != "live" && replayMarkers != 1) {
+			t.Fatalf("%s replay_complete count=%d", label, replayMarkers)
 		}
 		if exact && !reflect.DeepEqual(deltas, []string{"Hello ", "world"}) {
 			t.Fatalf("%s exact spool deltas=%v", label, deltas)

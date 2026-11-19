@@ -42,7 +42,7 @@ func TestExternalAgentAssemblyDoesNotOwnModelDefaults(t *testing.T) {
 	}
 }
 
-func TestRetiredAntigravityConnectionRemainsReadableButCannotMaterialize(t *testing.T) {
+func TestAntigravityAssemblyRequiresNativeLauncherForBuiltInConnection(t *testing.T) {
 	t.Parallel()
 
 	store := newAppConfigStore(t.TempDir())
@@ -68,9 +68,34 @@ func TestRetiredAntigravityConnectionRemainsReadableButCannotMaterialize(t *test
 	if err != nil || connection.Launcher.Command != legacy.Launcher.Command {
 		t.Fatalf("persisted Agent = %+v, %+v, %v", agent, connection, err)
 	}
-	if cfg, err := stack.composition.materializeExternalAgent(agent, connection); err == nil || !strings.Contains(err.Error(), "Antigravity ACP connection is retired") || cfg.Command != "" {
+	if cfg, err := stack.composition.materializeExternalAgent(agent, connection); err == nil || !strings.Contains(err.Error(), "standalone Antigravity ACP launcher is retired") || cfg.Command != "" {
 		t.Fatalf("materializeExternalAgent() = %+v, %v; want retired connection rejection", cfg, err)
 	}
+
+	native := legacy
+	native.Launcher.Command = "agy"
+	native.Launcher.Args = []string{"acp"}
+	updated, reconnected, err := controlagents.UpsertExternalConnection(doc.ExternalAgents, native, controlagents.DiscoverySnapshot{}, nil)
+	if err != nil || reconnected.ID != agent.ID {
+		t.Fatalf("reconnect Agent = %+v, %v; want stable identity %q", reconnected, err, agent.ID)
+	}
+	doc.ExternalAgents = updated
+	if err := store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = stack.composition.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
+	if err != nil || len(resolved.Agents) != 2 {
+		t.Fatalf("withExternalACPAgents() = %+v, %v; want native and custom connections", resolved.Agents, err)
+	}
+	for _, cfg := range resolved.Agents {
+		if cfg.Name == agent.ID {
+			if cfg.Command != "agy" || len(cfg.Args) != 1 || cfg.Args[0] != "acp" {
+				t.Fatalf("native launcher = %s %v", cfg.Command, cfg.Args)
+			}
+			return
+		}
+	}
+	t.Fatalf("native Agent %q missing from assembly", agent.ID)
 }
 
 func TestExternalAgentAssemblyRejectsParallelLegacyTargetName(t *testing.T) {

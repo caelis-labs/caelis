@@ -19,6 +19,9 @@ func (d *draftAgent) Prompt(ctx context.Context, request v2.PromptRequest) (v2.P
 	if err := d.ready(); err != nil {
 		return v2.PromptResponse{}, err
 	}
+	if request.IdempotencyKey != nil {
+		return v2.PromptResponse{}, acp.NewInvalidParams(map[string]any{"error": "prompt idempotency keys are unsupported"})
+	}
 	guard, err := acpdraft.ParseActiveOnly(request.Meta)
 	if err != nil {
 		return v2.PromptResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})

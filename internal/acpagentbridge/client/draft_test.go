@@ -405,7 +405,10 @@ func TestDraftOutboundReplayBarrierAndConfigIDNormalization(t *testing.T) {
 		if err := agent.echo(ctx, string(request.SessionId), "persisted-canonical"); err != nil {
 			return v2.ResumeSessionResponse{}, err
 		}
-		return v2.ResumeSessionResponse{}, nil
+		if err := agent.conn.SessionUpdate(ctx, acpdraft.ReplayComplete(request.SessionId)); err != nil {
+			return v2.ResumeSessionResponse{}, err
+		}
+		return v2.ResumeSessionResponse{}, agent.echo(ctx, string(request.SessionId), "live-before-response")
 	}
 	agent.config = func(request v2.SetSessionConfigOptionRequest) (v2.SetSessionConfigOptionResponse, error) {
 		if request.Id == nil || request.Id.ConfigId != "model" || request.Id.Value != "model-a" {
@@ -421,15 +424,24 @@ func TestDraftOutboundReplayBarrierAndConfigIDNormalization(t *testing.T) {
 	if _, err := client.Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
+	boundaries := 0
 	replayed := false
 	_, err := client.LoadSessionWithReplayEnd(ctx, "session", "/tmp", nil, func(context.Context) error {
 		update := requireDraftUpdate(t, ctx, updates)
 		chunk, ok := update.Update.(ContentChunk)
+		boundaries++
 		replayed = ok && chunk.MessageID == "persisted-canonical" && chunk.Replacement
+		if len(updates) != 0 {
+			return errors.New("live update preceded the replay boundary")
+		}
 		return nil
 	})
-	if err != nil || !replayed {
-		t.Fatalf("replay=%t %v", replayed, err)
+	if err != nil || !replayed || boundaries != 1 {
+		t.Fatalf("replay=%t boundaries=%d: %v", replayed, boundaries, err)
+	}
+	live, ok := requireDraftUpdate(t, ctx, updates).Update.(ContentChunk)
+	if !ok || live.MessageID != "live-before-response" {
+		t.Fatalf("live update=%+v", live)
 	}
 	response, err := client.SetConfigOption(ctx, "session", "model", "model-a")
 	if err != nil {

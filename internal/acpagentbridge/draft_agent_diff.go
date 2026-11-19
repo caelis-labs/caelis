@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff"
+	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -17,13 +18,27 @@ func draftDiffToolContent(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &contents); err != nil {
 		return nil, err
 	}
+	kept := contents[:0]
 	for _, item := range contents {
 		var kind string
 		_ = json.Unmarshal(item["type"], &kind)
 		if kind != "diff" {
+			kept = append(kept, item)
 			continue
 		}
-		if _, structured := item["changes"]; !structured {
+		if rawChanges, structured := item["changes"]; structured {
+			var diff v2.ToolCallContentDiff
+			if err := draftJSONConvert(item, &diff); err != nil {
+				continue
+			}
+			var original []json.RawMessage
+			if err := json.Unmarshal(rawChanges, &original); err != nil {
+				return nil, err
+			}
+			if len(diff.Changes) != len(original) {
+				item["changes"] = draftRaw(diff.Changes)
+			}
+		} else {
 			var legacy struct {
 				Path    string  `json:"path"`
 				OldText *string `json:"oldText"`
@@ -55,8 +70,9 @@ func draftDiffToolContent(raw json.RawMessage) (json.RawMessage, error) {
 		delete(item, "path")
 		delete(item, "oldText")
 		delete(item, "newText")
+		kept = append(kept, item)
 	}
-	return json.Marshal(contents)
+	return json.Marshal(kept)
 }
 
 func draftDiffPathLabel(path string) string {

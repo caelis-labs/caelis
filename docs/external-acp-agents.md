@@ -17,7 +17,7 @@ Application integrations keep their existing stable types independently of the
 ACP wire profile.
 
 Repo-owned subprocess children use the explicitly selected
-`schema-v2.0.0-alpha.15` profile. The hosted Codex adapter keeps stable v1 by
+`schema-v2.0.0-alpha.17` profile. The hosted Codex adapter keeps stable v1 by
 default. Direct native main/child delegation stays
 inside Control and Runtime and does not acquire an ACP transport. User-provided
 process overrides remain stable unless their link explicitly selects a draft.
@@ -25,10 +25,10 @@ The Host-owned adapter descriptor, one-use channel grant and helper invocation
 carry the same exact schema. An unsupported schema fails before granting or
 serving the channel; the selected draft never falls back to v1.
 
-`caelis acp --acp-draft=schema-v2.0.0-alpha.15` serves product Sessions through the
+`caelis acp --acp-draft=schema-v2.0.0-alpha.17` serves product Sessions through the
 existing principal-bound Control clients. Initialization negotiates v2 from a
 client offering protocol version 2 or a newer major, using the v2 `info` shape.
-The controlled product channel requires an exact alpha.15
+The controlled product channel requires an exact alpha.17
 `_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session
 capabilities and the conditional-prompt profile described below. Initialization
 may repeat before any other request; concurrent attempts and
@@ -41,7 +41,7 @@ or additional directories that their existing owner cannot apply.
 
 The separate Core initialization/capability probe (`ServeDraftStdio`) also
 negotiates newer offered majors down to v2. Its schema tag is optional in the
-request; when explicitly provided it must match alpha.15. The response always
+request; when explicitly provided it must match alpha.17. The response always
 identifies the pinned schema. This probe advertises no Session or auth work;
 omitting its tag does not relax the controlled product channel's requirements.
 
@@ -66,7 +66,9 @@ null-valued keys are removed, and nested values replace rather than merge.
 An empty object is a no-op; top-level null clears entity metadata. Message-chunk
 metadata annotates only that contribution and does not patch the entity's
 metadata. Numeric tokens in these opaque annotations are preserved through
-aggregation, canonical events, and live/replay projection.
+aggregation, canonical events, and live/replay projection. A draft diff needs
+at least one valid file change. An empty content replacement clears the prior
+tool content.
 
 The Codex draft channel requires native app-server 0.160.0 or newer with
 `clientUserMessageId` correlation. The adapter assigns a private submission token
@@ -90,8 +92,11 @@ state settles the internal synchronous producer. `session/cancel` requests
 cancellation and still waits for the actual state. Each Session has independent
 foreground state, receipt and permission ownership. Reconnect uses standard
 `session/resume`, with `replayFrom: {type: "start"}` when replay is needed, and
-keeps the existing ordered replay barrier. Transport loss before settlement
-remains `unknown_outcome`; there is no automatic resubmission.
+emits `replay_complete` before live updates resume. The bridge finishes replay
+at that marker, with the ordered response as a fallback for peers that omit it.
+Draft endpoints reject prompts carrying an idempotency key before insertion.
+Transport loss before settlement remains `unknown_outcome`. Caelis does not
+automatically resubmit the prompt.
 
 Native permission requests keep the same original options and resolution owner.
 Where the selected draft cannot express completeness, sensitivity or per-option
@@ -620,6 +625,7 @@ Custom command:
 
 | Catalog ID | Command |
 | --- | --- |
+| `antigravity` | `agy acp` |
 | `grok` | `grok agent stdio` |
 | `kimi` | `kimi acp` |
 | `opencode` | `opencode acp` |
@@ -639,13 +645,18 @@ commands and arguments. Use Custom for other ACP stdio commands.
 Executable discovery does not make an Agent available as a collaborator. Open
 `/team` to choose its participant profile and binding in the Team overlay.
 
-### Retired Antigravity connection
+### Antigravity
 
-Antigravity's standalone ACP runtime is retired. The Host keeps saved
-connections, model profiles, and Session history readable, and skips the old
-built-in connection when assembling executable Agents. Choose another model in
-`/model` to continue working or remove the old profiles with `/disconnect`.
-Caelis leaves the installed runtime directory and files in place.
+The preset uses the native [Antigravity CLI ACP server](https://antigravity.google/docs/cli/acp).
+Select Google Antigravity in `/connect` to discover the models advertised by
+the installed server. The model roster comes from the ACP server.
+A model selectable through the standalone CLI may be absent from that roster.
+
+The Host preserves saved standalone Antigravity profiles and Session history.
+Reconnect Google Antigravity through `/connect` to replace the standalone
+launcher. Remove obsolete profiles through `/disconnect`. The Host can retire
+this launcher guard once stores with standalone Antigravity connections are
+outside the supported upgrade window.
 
 ## Compatibility
 

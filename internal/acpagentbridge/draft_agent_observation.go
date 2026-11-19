@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
 )
 
 func (a *DraftAgent) observe(ctx context.Context, sessionID string, replay bool) (*draftSession, error) {
@@ -174,6 +175,12 @@ func (s *draftSession) relay(replay bool, ready chan<- error) {
 				if err := s.emitCurrentRuntimeState(); err != nil {
 					fail(err)
 					return
+				}
+				if replay {
+					if err := s.agent.callbacks.SessionUpdate(s.ctx, acpdraft.ReplayComplete(v2.SessionId(s.id))); err != nil {
+						fail(err)
+						return
+					}
 				}
 				synced = true
 				ready <- nil

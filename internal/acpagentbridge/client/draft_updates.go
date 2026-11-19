@@ -90,10 +90,22 @@ func (d *draftClient) handleUpdate(raw json.RawMessage) {
 		}
 	}
 	d.mu.Lock()
-	_, allocationErr := d.ensureSessionLocked(envelope.SessionID)
+	session, allocationErr := d.ensureSessionLocked(envelope.SessionID)
 	d.mu.Unlock()
 	if allocationErr != nil {
 		d.fail(allocationErr)
+		return
+	}
+	if update.ReplayComplete != nil {
+		d.mu.Lock()
+		end := session.replayEnd
+		session.narrativeKey = ""
+		d.mu.Unlock()
+		if end != nil {
+			if err := end(); err != nil {
+				d.fail(err)
+			}
+		}
 		return
 	}
 	if kind == "state_update" {
