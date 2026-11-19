@@ -480,11 +480,11 @@ func TestTaskContinuationScopeBoundsAdmissionAndSerializesClaim(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		scope := newTaskContinuationScope()
 		for i := range maxTaskContinuations {
-			if _, err := scope.register(t.Context(), string(rune('a'+i)), 0); err != nil {
+			if _, err := scope.register(t.Context(), string(rune('a'+i)), 0, taskContinuationOrdinary); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if _, err := scope.register(t.Context(), "overflow", 0); err == nil {
+		if _, err := scope.register(t.Context(), "overflow", 0, taskContinuationOrdinary); err == nil {
 			t.Fatal("unbounded admission")
 		}
 		work := scope.active["a"]
@@ -518,7 +518,7 @@ func TestTaskContinuationScopeBoundsAdmissionAndSerializesClaim(t *testing.T) {
 		if err := scope.join(); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := scope.register(t.Context(), "closed", 0); err == nil {
+		if _, err := scope.register(t.Context(), "closed", 0, taskContinuationOrdinary); err == nil {
 			t.Fatal("closed owner admitted work")
 		}
 		if err := work.claim(func() error { return nil }); !errors.Is(err, context.Canceled) {

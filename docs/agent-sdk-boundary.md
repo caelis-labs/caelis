@@ -196,6 +196,9 @@ continuations. Durable effect claim serializes with revocation; a claimed
 operation follows the command producer's cancellation contract. The Run keeps
 input open at its final safe point and joins these continuations before releasing
 execution authority. A returned tool-call observer does not own their lifetime.
+Recoverable command failures settle on the original Task and are available to
+the model through Task observation. A failure to record the outcome still
+reaches the Run.
 
 Each invocation produces one canonical tool result. Later Task observations are
 separate calls, and producer updates use Task output. Pending approvals recovered

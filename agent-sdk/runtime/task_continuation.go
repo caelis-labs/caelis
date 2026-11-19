@@ -28,15 +28,23 @@ type taskContinuationScope struct {
 }
 
 type taskContinuation struct {
-	mu          sync.Mutex
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
-	claimed     bool
-	stopAtFinal bool
-	admitted    chan struct{}
-	admit       sync.Once
-	done        chan struct{}
+	mu       sync.Mutex
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	claimed  bool
+	kind     taskContinuationKind
+	admitted chan struct{}
+	admit    sync.Once
+	done     chan struct{}
 }
+
+type taskContinuationKind uint8
+
+const (
+	taskContinuationOrdinary taskContinuationKind = iota
+	taskContinuationCodeModeScript
+	taskContinuationCodeModeCommand
+)
 
 func newTaskContinuationScope() *taskContinuationScope {
 	return &taskContinuationScope{active: make(map[string]*taskContinuation), changed: make(chan struct{})}
@@ -56,7 +64,7 @@ func (s *taskContinuationScope) currentGeneration() uint64 {
 	return s.generation
 }
 
-func (s *taskContinuationScope) register(ctx context.Context, id string, generation uint64) (*taskContinuation, error) {
+func (s *taskContinuationScope) register(ctx context.Context, id string, generation uint64, kind taskContinuationKind) (*taskContinuation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || ctx.Err() != nil {
@@ -65,6 +73,9 @@ func (s *taskContinuationScope) register(ctx context.Context, id string, generat
 	if generation != s.generation {
 		return nil, errTaskAuthorizationChanged
 	}
+	if kind != taskContinuationOrdinary && s.codeModeClosed {
+		return nil, errCodeModeComplete
+	}
 	if s.active[id] != nil {
 		return nil, errorcode.New(errorcode.Conflict, "task continuation already exists")
 	}
@@ -72,7 +83,7 @@ func (s *taskContinuationScope) register(ctx context.Context, id string, generat
 		return nil, errorcode.New(errorcode.ResourceExhausted, "too many pending task operations; wait for an existing Task")
 	}
 	workCtx, cancel := context.WithCancelCause(ctx)
-	work := &taskContinuation{ctx: workCtx, cancel: cancel, admitted: make(chan struct{}), done: make(chan struct{})}
+	work := &taskContinuation{ctx: workCtx, cancel: cancel, kind: kind, admitted: make(chan struct{}), done: make(chan struct{})}
 	s.active[id] = work
 	return work, nil
 }
@@ -185,7 +196,7 @@ func (s *taskContinuationScope) stopCodeMode() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, work := range s.active {
-		if work.stopAtFinal {
+		if work.kind == taskContinuationCodeModeScript {
 			work.cancel(context.Canceled)
 		}
 	}

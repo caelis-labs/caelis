@@ -245,9 +245,10 @@ A yielded script observes its original Task even while its source or child list
 is folded. Original Task terminal updates settle the script without requiring a
 Task.read call. Returned business data, including a running inner command Task,
 does not own the outer script's lifecycle. Commands and scripts have distinct
-Task handles; cancel the producer that owns a pending command/approval. Canceling
-an already returned outer script does not implicitly cancel an independent
-inner command Task. Existing Run stop/generation boundaries remain authoritative.
+Task handles. An admitted RunCommand can wait for approval or run after the
+script returns. Use the command's original handle to observe or cancel it.
+Closing a script's Host or resetting the VM leaves an already submitted command
+under its original Run and Task authority.
 
 ## Execution and Tasks
 
