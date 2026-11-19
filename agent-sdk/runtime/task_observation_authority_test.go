@@ -99,7 +99,7 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 				if step == 1 {
 					return model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
 						{ID: "terminal-wait", Name: tasktool.ToolName, Args: string(mustJSONRaw(map[string]any{"action": "wait", "handle": started.Handle}))},
-						{ID: "snapshot-read", Name: tasktool.ToolName, Args: string(mustJSONRaw(map[string]any{"action": "read", "handle": started.Handle}))},
+						{ID: "snapshot-read", Name: tasktool.ToolName, Args: string(mustJSONRaw(map[string]any{"action": "wait", "yield_time_ms": 0, "handle": started.Handle}))},
 					}, "")
 				}
 				liveContext = model.CloneMessages(req.Messages)

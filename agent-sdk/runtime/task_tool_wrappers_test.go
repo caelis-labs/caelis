@@ -538,7 +538,7 @@ func TestTaskRejectsParticipantHandlesForEveryAction(t *testing.T) {
 	_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
 	runtime.tasks.subagents["child"] = &subagentTask{ref: taskapi.Ref{TaskID: "child", SessionID: "child-session"}, sessionRef: active.SessionRef, handle: "worker", state: taskapi.StateCompleted}
 	target := runtimeTaskTool{base: tasktool.New(), sessionRef: active.SessionRef, tasks: runtime.tasks}
-	for _, action := range []string{"read", "wait", "write", "cancel"} {
+	for _, action := range []string{"wait", "write", "cancel"} {
 		args := map[string]any{"action": action, "handle": "worker"}
 		if action == "write" {
 			args["input"] = "hello"

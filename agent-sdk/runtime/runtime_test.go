@@ -3560,7 +3560,7 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 		readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-			"action": "read",
+			"action": "wait", "yield_time_ms": 0,
 			"handle": handle,
 		})
 		readyPayload = testToolResultPayload(t, readyResult)
@@ -3587,7 +3587,7 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskReadIsImmediateAndWaitIgnoresNewOutputUntilTerminal(t *testing.T) {
+func TestRuntimeTaskZeroWaitIsImmediateAndPositiveWaitIgnoresNewOutputUntilTerminal(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -3613,7 +3613,7 @@ func TestRuntimeTaskReadIsImmediateAndWaitIgnoresNewOutputUntilTerminal(t *testi
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}, map[string]any{
-		"action": "read",
+		"action": "wait", "yield_time_ms": 0,
 		"handle": handle,
 	})
 	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
@@ -4264,7 +4264,7 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitPassesFixedMaximumYieldToCompletionWait(t *testing.T) {
+func TestRuntimeTaskWaitDefaultsToOneMinute(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -4345,7 +4345,7 @@ func isShortHexTaskID(taskID string) bool {
 	return true
 }
 
-func TestRuntimeTaskWaitRejectsLegacyAgentYield(t *testing.T) {
+func TestRuntimeTaskWaitRejectsNegativeYield(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -4366,7 +4366,7 @@ func TestRuntimeTaskWaitRejectsLegacyAgentYield(t *testing.T) {
 		tasks:      runtime.tasks,
 	}).Call(context.Background(), tool.Call{ID: "task-wait", Name: tasktool.ToolName, Input: raw})
 	if err == nil || !strings.Contains(err.Error(), "yield_"+"time_ms") {
-		t.Fatalf("TASK wait error = %v, want legacy yield timing argument rejection", err)
+		t.Fatalf("TASK wait error = %v, want negative yield rejection", err)
 	}
 	if got := fake.session.lastWait; got != 0 {
 		t.Fatalf("TASK wait invoked sandbox with legacy argument, lastWait = %v", got)
@@ -4388,11 +4388,11 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 		tasks:      runtime.tasks,
 	}, map[string]any{
 		"action": "wait",
-		"handle": taskOne + ", " + taskTwo,
+		"handle": taskOne + ", " + taskTwo, "yield_time_ms": 300000,
 	})
 
-	if fakeOne.session.lastWait != taskWaitMaxYield || fakeTwo.session.lastWait != taskWaitMaxYield {
-		t.Fatalf("completion waits = %v/%v, want %v shared budgets", fakeOne.session.lastWait, fakeTwo.session.lastWait, taskWaitMaxYield)
+	if fakeOne.session.lastWait != 5*time.Minute || fakeTwo.session.lastWait != 5*time.Minute {
+		t.Fatalf("completion waits = %v/%v, want %v shared budgets", fakeOne.session.lastWait, fakeTwo.session.lastWait, 5*time.Minute)
 	}
 	payload := testToolResultPayload(t, taskResult)
 	if got, _ := payload["action"].(string); got != "wait" {
@@ -5069,11 +5069,11 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 	}
 }
 
-func TestRuntimeTaskReadRejectsBatchHandles(t *testing.T) {
+func TestRuntimeTaskWriteRejectsBatchHandles(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
-	raw, err := json.Marshal(map[string]any{"action": "read", "handle": "command-1,command-2"})
+	raw, err := json.Marshal(map[string]any{"action": "write", "input": "hello", "handle": "command-1,command-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5081,7 +5081,7 @@ func TestRuntimeTaskReadRejectsBatchHandles(t *testing.T) {
 		base: tasktool.New(), sessionRef: activeSession.SessionRef, tasks: runtime.tasks,
 	}).Call(context.Background(), tool.Call{ID: "task-read", Name: tasktool.ToolName, Input: raw})
 	if err == nil || !strings.Contains(err.Error(), "accepts exactly one handle") {
-		t.Fatalf("TASK read batch error = %v, want single-handle contract error", err)
+		t.Fatalf("TASK write batch error = %v, want single-handle contract error", err)
 	}
 }
 

@@ -347,7 +347,7 @@ func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return []model.ToolCall{{ID: "yielded", Name: codemode.ToolName, Args: `{"code":"const reply=await tools.call('WaitForNativeTaskWait',{}); const value=reply.json(); await tools.call('Task',{action:'read',handle:value.handle}); return {done:true}","yield_time_ms":0}`}}
+			return []model.ToolCall{{ID: "yielded", Name: codemode.ToolName, Args: `{"code":"const reply=await tools.call('WaitForNativeTaskWait',{}); const value=reply.json(); await tools.call('Task',{action:'wait',yield_time_ms:0,handle:value.handle}); return {done:true}","yield_time_ms":0}`}}
 		case 1:
 			handle := jsExecTaskHandle(req)
 			handles <- handle

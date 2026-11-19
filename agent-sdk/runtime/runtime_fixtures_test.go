@@ -1590,17 +1590,19 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 					FinishReason: model.FinishReasonToolCalls,
 				},
 			}, nil)
-		case taskStateRunning(state):
+		case callIndex <= 18 || taskStateRunning(state):
+			// Repeated observations of one yielded command must survive the tool-loop threshold.
+			args := map[string]any{"action": "wait", "handle": m.handle}
+			if callIndex <= 18 {
+				args["yield_time_ms"] = 0
+			}
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   fmt.Sprintf("task-wait-%d", callIndex-1),
 						Name: tasktool.ToolName,
-						Args: string(mustJSONRaw(map[string]any{
-							"action": "wait",
-							"handle": m.handle,
-						})),
+						Args: string(mustJSONRaw(args)),
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,

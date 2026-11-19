@@ -1,17 +1,13 @@
 package chat
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
@@ -74,7 +70,7 @@ func TestGenerationWatchdogRepeatedTaskWaitIsObservation(t *testing.T) {
 		err := watchdog.finishModelStep(toolStepResponse(
 			"wait-"+fmt.Sprint(step),
 			tasktool.ToolName,
-			`{"action":"wait","task_id":"command-1"}`,
+			`{"action":"wait","handle":"command-1"}`,
 		))
 		if err != nil {
 			t.Fatalf("step %d error = %v, want Task wait excluded", step, err)
@@ -90,7 +86,7 @@ func TestGenerationWatchdogMixedTaskWaitStepRemainsLoopEvidence(t *testing.T) {
 		watchdog.beginModelStep()
 		err := watchdog.finishModelStep(&model.Response{
 			Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
-				{ID: fmt.Sprintf("wait-%d", step), Name: tasktool.ToolName, Args: `{"action":"wait","task_id":"command-1"}`},
+				{ID: fmt.Sprintf("wait-%d", step), Name: tasktool.ToolName, Args: `{"action":"wait","handle":"command-1"}`},
 				{ID: fmt.Sprintf("write-%d", step), Name: "Write", Args: `{"path":"result.txt","content":"same"}`},
 			}, ""),
 			TurnComplete: true,
@@ -107,25 +103,6 @@ func TestGenerationWatchdogMixedTaskWaitStepRemainsLoopEvidence(t *testing.T) {
 				t.Fatalf("second mixed step error = %#v, want non-wait call to remain loop evidence", err)
 			}
 		}
-	}
-}
-
-func TestGenerationWatchdogRepeatedTaskReadRemainsLoopEvidence(t *testing.T) {
-	t.Parallel()
-
-	watchdog := newGenerationWatchdog(50, 3, 8)
-	var err error
-	for step := 1; step <= 3; step++ {
-		watchdog.beginModelStep()
-		err = watchdog.finishModelStep(toolStepResponse(
-			"read-"+fmt.Sprint(step),
-			tasktool.ToolName,
-			`{"action":"read","task_id":"command-1"}`,
-		))
-	}
-	var loopErr *GenerationLoopError
-	if !errors.As(err, &loopErr) || loopErr.Reason != GenerationToolLoop {
-		t.Fatalf("final error = %#v, want repeated immediate Task read counted", err)
 	}
 }
 
@@ -150,85 +127,6 @@ func TestGenerationWatchdogToolEvidenceDoesNotCrossNoToolStep(t *testing.T) {
 	watchdog.beginModelStep()
 	if err := watchdog.finishModelStep(toolStepResponse("after", "Grep", `{"query":"same"}`)); err != nil {
 		t.Fatalf("tool step after a no-tool boundary error = %v, want a new evidence window", err)
-	}
-}
-
-func TestChatAgentGenerationWatchdogTaskReadDuringApproval(t *testing.T) {
-	t.Parallel()
-
-	for _, test := range []struct {
-		name      string
-		state     task.State
-		untrusted bool
-		failed    bool
-		mixed     bool
-		wantLoop  bool
-	}{
-		{name: "approval pending", state: task.StateWaitingApproval},
-		{name: "running", state: task.StateRunning, wantLoop: true},
-		{name: "completed", state: task.StateCompleted, wantLoop: true},
-		{name: "untrusted approval", state: task.StateWaitingApproval, untrusted: true, wantLoop: true},
-		{name: "failed read", state: task.StateWaitingApproval, failed: true, wantLoop: true},
-		{name: "mixed with cancel", state: task.StateWaitingApproval, mixed: true, wantLoop: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			calls := []model.ToolCall{{ID: "read", Name: tasktool.ToolName, Args: `{"action":"read","handle":"command-665"}`}}
-			if test.mixed {
-				calls = append(calls, model.ToolCall{ID: "cancel", Name: tasktool.ToolName, Args: `{"action":"cancel","handle":"command-123"}`})
-			}
-			testModel := &longToolLoopModel{toolCalls: calls}
-			readCount := 0
-			taskTool := tool.NamedTool{
-				Def: tool.Definition{Name: tasktool.ToolName, InputSchema: map[string]any{"type": "object"}},
-				Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-					if call.ID == "read" {
-						readCount++
-					}
-					return tool.Result{
-						Content: []model.Part{model.NewJSONPart([]byte(fmt.Sprintf(`{"state":%q}`, test.state)))},
-						IsError: test.failed,
-						Metadata: mergeEventMeta(runtimeTaskResultSourceMeta(true), map[string]any{
-							"caelis": map[string]any{"runtime": map[string]any{
-								"task": map[string]any{"state": string(test.state)},
-							}},
-						}),
-					}, nil
-				},
-			}
-			var selected tool.Tool = trustedTaskResultTool{NamedTool: taskTool}
-			if test.untrusted {
-				selected = taskTool
-			}
-			chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{selected}, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx := agent.NewContext(agent.ContextSpec{
-				Context: context.Background(),
-				Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-task-read-approval"}},
-				Events: []*session.Event{{
-					Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "observe the command")),
-				}},
-			})
-			var runErr error
-			var final *session.Event
-			for event, eventErr := range chatAgent.Run(ctx) {
-				final, runErr = event, eventErr
-			}
-			if test.wantLoop {
-				var loopErr *GenerationLoopError
-				if !errors.As(runErr, &loopErr) || loopErr.Reason != GenerationToolLoop || loopErr.Streak != defaultToolLoopStreak {
-					t.Fatalf("Run() error = %v, want tool loop at threshold", runErr)
-				}
-				if readCount != defaultToolLoopStreak-1 {
-					t.Fatalf("dispatched %d reads, want %d", readCount, defaultToolLoopStreak-1)
-				}
-				return
-			}
-			if runErr != nil || final == nil || strings.TrimSpace(final.Text) != "done" || readCount <= defaultToolLoopStreak {
-				t.Fatalf("Run() dispatched %d reads; final = %#v, error = %v; want a completed turn beyond the threshold", readCount, final, runErr)
-			}
-		})
 	}
 }
 
@@ -372,5 +270,23 @@ func textDelta(text string) *model.StreamEvent {
 			Kind:      model.PartKindReasoning,
 			TextDelta: text,
 		},
+	}
+}
+
+func TestTaskWaitClearsPriorLoopEvidence(t *testing.T) {
+	d := newDefaultGenerationWatchdog()
+	repeated := toolStepResponse("call", "Search", `{"query":"same"}`)
+	for range 14 {
+		if err := d.finishModelStep(repeated); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 20 {
+		if err := d.finishModelStep(toolStepResponse("observe", "Task", `{"action":"wait","handle":"command-1","yield_time_ms":0}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.finishModelStep(repeated); err != nil {
+		t.Fatal(err)
 	}
 }

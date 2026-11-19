@@ -13,13 +13,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
+
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
 const (
 	defaultTextLoopStreak  = 20
-	defaultToolLoopStreak  = 6
+	defaultToolLoopStreak  = 15
 	defaultMinContentRunes = 32
 	defaultMaxTailRunes    = 4096
 	defaultMinCycleRunes   = 24
@@ -59,8 +59,7 @@ func (e *GenerationLoopError) Error() string {
 func (*GenerationLoopError) ErrorCode() errorcode.Code { return errorcode.Interrupted }
 
 // generationWatchdog belongs to one local Agent.Run invocation. It consumes
-// provider-neutral model output and observes settled tool results to exclude
-// trusted approval reads. It does not monitor Control or external ACP Agents.
+// provider-neutral model output. It does not monitor Control or external ACP Agents.
 type generationWatchdog struct {
 	textStreak int
 	toolStreak int
@@ -248,25 +247,6 @@ func (d *generationWatchdog) resetToolEvidence() {
 	d.lastStepContent = ""
 	d.lastStepTool = ""
 	d.stepStreak = 0
-}
-
-func (d *generationWatchdog) observeSettledToolStep(events []*session.Event) {
-	if len(events) == 0 {
-		return
-	}
-	for _, event := range events {
-		if event == nil || event.Type != session.EventTypeToolResult || event.Tool == nil ||
-			event.Tool.Name != tasktool.ToolName || event.Tool.Status != "completed" ||
-			event.Tool.Outcome != session.ToolOutcomeSucceeded || event.Tool.Error != "" || !isRuntimeTaskResult(event.Meta) {
-			return
-		}
-		action, _ := event.Tool.Input["action"].(string)
-		state, _ := runtimeTaskMetadata(event.Meta)["state"].(string)
-		if !strings.EqualFold(strings.TrimSpace(action), "read") || state != string(task.StateWaitingApproval) {
-			return
-		}
-	}
-	d.resetToolEvidence()
 }
 
 func modelCallsAreOnlyTaskWaits(calls []model.ToolCall) bool {

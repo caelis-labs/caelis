@@ -3530,7 +3530,7 @@ func TestChatAgentAllowsProgressingRawModelToolSteps(t *testing.T) {
 		}
 		final = event
 	}
-	if got, want := testModel.calls, 10; got != want {
+	if got, want := testModel.calls, defaultToolLoopStreak+3; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
 	if final == nil || strings.TrimSpace(final.Text) != "done" {
@@ -4095,7 +4095,7 @@ func (m *longToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.S
 	m.calls++
 	callIndex := m.calls
 	return func(yield func(*model.StreamEvent, error) bool) {
-		if callIndex <= 9 {
+		if callIndex <= defaultToolLoopStreak+2 {
 			calls := m.toolCalls
 			if len(calls) == 0 {
 				args := `{"value":"pong"}`
