@@ -1590,10 +1590,9 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 					FinishReason: model.FinishReasonToolCalls,
 				},
 			}, nil)
-		case callIndex <= 18 || taskStateRunning(state):
-			// Repeated observations of one yielded command must survive the tool-loop threshold.
+		case taskStateRunning(state):
 			args := map[string]any{"action": "wait", "handle": m.handle}
-			if callIndex <= 18 {
+			if callIndex == 2 {
 				args["yield_time_ms"] = 0
 			}
 			yield(&model.StreamEvent{

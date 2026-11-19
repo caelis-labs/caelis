@@ -46,7 +46,7 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 		{"text_handle_field", `const r=await tools.call("PictureA",{});return {kind:"text",text:r.text(),handle:"business handle"};`, nil, false, "business handle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
+			store, active := newTestSessionService(t, "selected-media")
 			var bitmap bytes.Buffer
 			if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
 				t.Fatal(err)
