@@ -13,17 +13,18 @@ import (
 )
 
 type sessionPickerState struct {
-	rows     []ResumeCandidate
-	allRows  []ResumeCandidate
-	query    string
-	index    int
-	offset   int
-	loading  bool
-	err      string
-	request  uint64
-	cancel   context.CancelFunc
-	geometry subagentOverlayGeometry
-	pressed  string
+	closeButton overlayCloseButton
+	rows        []ResumeCandidate
+	allRows     []ResumeCandidate
+	query       string
+	index       int
+	offset      int
+	loading     bool
+	err         string
+	request     uint64
+	cancel      context.CancelFunc
+	geometry    subagentOverlayGeometry
+	pressed     string
 }
 
 type sessionPickerResultMsg struct {
@@ -155,8 +156,10 @@ func (m *Model) renderSessionPicker() string {
 	}
 	width := min(112, maxInt(20, m.width-4))
 	inner := maxInt(1, width-m.overlayBorderChromeWidth())
-	title := m.theme.TitleStyle().Render("/resume · Sessions")
-	body := []string{title + strings.Repeat(" ", maxInt(1, inner-displayColumns(title)-1)) + "×", m.theme.HelpHintTextStyle().Render(state.searchLine(inner))}
+	body := []string{m.overlayHeader(inner, []string{"/resume"}, "Sessions", state.closeButton, true)}
+	if state.query != "" {
+		body = append(body, m.theme.HelpHintTextStyle().Render("/ "+truncateDisplayCellsFromEnd(state.query, inner-3)+"▏"))
+	}
 	count := minInt(len(state.rows), maxInt(1, m.height-9))
 	// Keep visible rows stationary while hovering; scroll only when selection
 	// leaves the window or a resize/refresh changes its bounds.
@@ -234,7 +237,7 @@ func (m *Model) renderSessionPicker() string {
 			rowOffsets[i] = y + inset + offset
 		}
 	}
-	state.geometry = subagentOverlayGeometry{x: x, y: y, width: w, height: h, rows: rowOffsets, closeX: x + w - 1 - m.overlayBorderChromeWidth()/2, closeY: y + inset}
+	state.geometry = subagentOverlayGeometry{x: x, y: y, width: w, height: h, rows: rowOffsets, closeX: overlayCloseX(x+2*inset, inner), closeY: y + inset}
 	return frame
 }
 
@@ -264,7 +267,13 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 	if inside && mouse.X >= g.x+inset && mouse.X < g.x+g.width-inset {
 		row = subagentRowAtY(g.rows, mouse.Y)
 	}
-	closeTarget := inside && mouse.Y == g.closeY && mouse.X == g.closeX
+	if handled, close := state.closeButton.mouse(msg, g.closeX, g.closeY); handled {
+		state.pressed = ""
+		if close {
+			m.closeSessionPicker()
+		}
+		return nil
+	}
 	switch msg.(type) {
 	case tea.MouseMotionMsg:
 		if row >= 0 {
@@ -286,9 +295,7 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 		if !inside || mouse.Button != tea.MouseLeft {
 			return nil
 		}
-		if closeTarget {
-			state.pressed = "close"
-		} else if row >= 0 {
+		if row >= 0 {
 			state.index = row
 			state.pressed = "session:" + state.rows[row].SessionID
 		}
@@ -298,9 +305,7 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 		if !inside || (mouse.Button != tea.MouseLeft && mouse.Button != tea.MouseNone) {
 			return nil
 		}
-		if pressed == "close" && closeTarget {
-			m.closeSessionPicker()
-		} else if row >= 0 && pressed == "session:"+state.rows[row].SessionID {
+		if row >= 0 && pressed == "session:"+state.rows[row].SessionID {
 			state.index = row
 			return m.selectSessionPicker()
 		}
@@ -323,12 +328,4 @@ func (s *sessionPickerState) filterRows() {
 		}
 	}
 	s.index = clampInt(s.index, 0, max(0, len(s.rows)-1))
-}
-
-func (s *sessionPickerState) searchLine(width int) string {
-	value := "/ " + s.query + "▏"
-	if s.query == "" {
-		value += "Search"
-	}
-	return truncateTailDisplay(value, width)
 }

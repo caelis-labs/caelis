@@ -93,7 +93,7 @@ type subagentOverlayState struct {
 	index        int
 	rows         []subagentOverlayRow
 	geometry     subagentOverlayGeometry
-	closeHovered bool
+	closeButton  overlayCloseButton
 	pressedKey   string
 	pressedField subagentField
 	pressedDelta int

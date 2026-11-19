@@ -400,7 +400,7 @@ func TestSessionPickerMouseCloseUsesRenderedTarget(t *testing.T) {
 		openSessionPickerForTest(t, model)
 		frame := ansi.Strip(model.View().Content)
 		g := model.sessionPicker.geometry
-		if got := sliceByDisplayColumns(strings.Split(frame, "\n")[g.closeY], g.closeX, g.closeX+1); got != "×" {
+		if got := sliceByDisplayColumns(strings.Split(frame, "\n")[g.closeY], g.closeX, g.closeX+3); got != "[x]" {
 			t.Fatalf("close geometry points at %q, not ×", got)
 		}
 		model.Update(tea.MouseClickMsg{X: g.closeX, Y: g.closeY, Button: tea.MouseLeft})

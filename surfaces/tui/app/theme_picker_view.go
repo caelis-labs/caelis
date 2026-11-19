@@ -43,7 +43,7 @@ func (m *Model) renderThemePicker() string {
 	p := picker.prompt
 	layout := m.themePickerLayout()
 	p.scrollOffset = layout.start
-	body := []string{m.theme.TitleStyle().Render(p.title), ""}
+	body := []string{m.overlayHeader(layout.innerWidth, []string{"/theme"}, p.title, picker.closeButton, true), ""}
 	for i := layout.start; i < layout.start+layout.count; i++ {
 		gutter := "  "
 		style := m.theme.TextStyle()
@@ -76,6 +76,7 @@ func (m *Model) positionThemePicker(frame string) {
 	x := maxInt(0, (m.width-lipgloss.Width(frame))/2) + 2*layout.border
 	y := maxInt(0, (m.height-lipgloss.Height(frame))/2) + layout.border + 2
 	picker.geometry = themePickerGeometry{
+		closeX: overlayCloseX(x, layout.innerWidth), closeY: y - 2,
 		choices: image.Rect(x, y, minInt(m.width, x+layout.innerWidth), minInt(m.height, y+layout.count)),
 		start:   layout.start,
 	}

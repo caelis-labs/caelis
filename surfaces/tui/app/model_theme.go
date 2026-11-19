@@ -10,6 +10,7 @@ import (
 )
 
 type themePickerState struct {
+	closeButton       overlayCloseButton
 	previous          string
 	prompt            *promptState
 	hoverIndex        int

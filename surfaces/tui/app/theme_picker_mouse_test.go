@@ -65,6 +65,27 @@ func TestThemePickerMouseHoverClickAndKeyboard(t *testing.T) {
 		})
 	}
 }
+func TestThemePickerCloseRestoresPreview(t *testing.T) {
+	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m.submitThemeCommand("/theme dracula")
+	m.submitThemeCommand("/theme")
+	point := themePickerNamedPoint(t, m, "Nord")
+	m.Update(tea.MouseClickMsg(point))
+	m.Update(tea.MouseReleaseMsg(point))
+	settleThemePreview(t, m)
+	frame := ansi.Strip(m.View().Content)
+	g := m.themePicker.geometry
+	if sliceByDisplayColumns(strings.Split(frame, "\n")[g.closeY], g.closeX, g.closeX+3) != "[x]" || m.themeName != "nord" {
+		t.Fatal("missing preview or misplaced close button")
+	}
+	click := tea.Mouse{X: g.closeX + 2, Y: g.closeY, Button: tea.MouseLeft}
+	m.Update(tea.MouseClickMsg(click))
+	m.Update(tea.MouseReleaseMsg(click))
+	if m.themePicker != nil || m.themeName != "dracula" {
+		t.Fatal("close committed preview instead of restoring it")
+	}
+}
 
 func TestThemePickerMouseDragOutsideAndConfirmation(t *testing.T) {
 	t.Setenv("CAELIS_THEME", "auto")

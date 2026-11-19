@@ -456,6 +456,9 @@ func modelHasBlockKind(model *Model, kind BlockKind) bool {
 
 func TestTeamCloseHoverMatchesButtonBounds(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
+	if model.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatal("team does not receive unpressed mouse motion")
+	}
 	idle := model.renderSubagentOverlay()
 	g := model.subagentOverlay.geometry
 	if strings.Contains(ansi.Strip(idle), "Type to search") {
@@ -465,12 +468,12 @@ func TestTeamCloseHoverMatchesButtonBounds(t *testing.T) {
 	for x := g.closeX; x < g.closeX+3; x++ {
 		move(x)
 		hovered := model.renderSubagentOverlay()
-		if !model.subagentOverlay.closeHovered || hovered == idle || ansi.Strip(hovered) != ansi.Strip(idle) {
+		if !model.subagentOverlay.closeButton.hovered || hovered == idle || ansi.Strip(hovered) != ansi.Strip(idle) {
 			t.Fatal("close hover did not change only its style")
 		}
 	}
 	move(g.closeX - 1)
-	if model.subagentOverlay.closeHovered || model.renderSubagentOverlay() != idle {
+	if model.subagentOverlay.closeButton.hovered || model.renderSubagentOverlay() != idle {
 		t.Fatal("hover leaked outside close button")
 	}
 }

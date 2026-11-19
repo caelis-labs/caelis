@@ -211,7 +211,7 @@ func (m *Model) desiredMouseMode() tea.MouseMode {
 	if m.wizardOverlay != nil && (m.activePrompt == nil || m.isWizardAuthChoice()) {
 		return tea.MouseModeAllMotion
 	}
-	if m.sessionPicker != nil {
+	if m.sessionPicker != nil || m.subagentOverlay != nil {
 		return tea.MouseModeAllMotion
 	}
 	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {

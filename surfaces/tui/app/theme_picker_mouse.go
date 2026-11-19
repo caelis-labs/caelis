@@ -1,14 +1,16 @@
 package tuiapp
 
 import (
+	"errors"
 	"image"
 
 	tea "charm.land/bubbletea/v2"
 )
 
 type themePickerGeometry struct {
-	choices image.Rectangle
-	start   int
+	closeX, closeY int
+	choices        image.Rectangle
+	start          int
 }
 
 func (g themePickerGeometry) indexAt(mouse tea.Mouse) int {
@@ -23,6 +25,14 @@ func (g themePickerGeometry) indexAt(mouse tea.Mouse) int {
 func (m *Model) handleThemePickerMouse(msg tea.MouseMsg) tea.Cmd {
 	picker := m.themePicker
 	mouse := msg.Mouse()
+	if handled, close := picker.closeButton.mouse(msg, picker.geometry.closeX, picker.geometry.closeY); handled {
+		picker.hoverIndex = -1
+		picker.pressedName = ""
+		if close {
+			return m.finishPrompt("", errors.New(PromptErrInterrupt))
+		}
+		return nil
+	}
 	index := picker.geometry.indexAt(mouse)
 	switch msg.(type) {
 	case tea.MouseMotionMsg:

@@ -59,7 +59,7 @@ func (m *Model) renderSubagentOverlay() string {
 		}
 	}
 	state.geometry = subagentOverlayGeometry{
-		x: startX, y: startY, closeX: startX + contentInset + innerWidth - 3,
+		x: startX, y: startY, closeX: overlayCloseX(startX+contentInset, innerWidth),
 		closeY: startY + borderInset, width: renderedWidth, height: renderedHeight, rows: screenRows,
 	}
 	state.geometry.cells = make([][]subagentCell, len(state.rows))
@@ -99,9 +99,7 @@ func (m *Model) renderSubagentTitle(width int) string {
 	case subagentPageConfirm:
 		title = "Delete " + state.confirmLabel + "?"
 	}
-	crumb := tuikit.RenderBreadcrumb(m.theme, width-4, path, title)
-	closeStyle := m.overlayButtonStyle(!state.pending && !state.loading, state.closeHovered || state.pressedKey == "close")
-	return padRightDisplay(crumb, width-3) + closeStyle.Render("[x]")
+	return m.overlayHeader(width, path, title, state.closeButton, !state.pending && !state.loading)
 }
 
 // A row's section heading consumes the same viewport budget as its cells.

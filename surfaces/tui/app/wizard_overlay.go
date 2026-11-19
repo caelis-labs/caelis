@@ -29,6 +29,7 @@ type wizardField struct {
 // Configuration overlays share the wizard's commands and catalog requests. Its local history
 // stores presentation drafts only; authentication and mutations stay in Control.
 type wizardOverlayState struct {
+	closeButton   overlayCloseButton
 	parents       []wizardStepDraft
 	drafts        map[string]wizardStepDraft
 	fields        []wizardField

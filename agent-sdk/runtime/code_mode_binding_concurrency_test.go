@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -173,14 +174,25 @@ func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
 	})
 	var checked atomic.Bool
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		finishApproval := sync.OnceFunc(func() { close(release) })
+		defer finishApproval()
 		first := make(chan error, 1)
 		go func() { _, err := host.Call(ctx, "docs__read", []byte(`{}`)); first <- err }()
-		<-asked
+		select {
+		case <-asked:
+		case err := <-first:
+			if err != nil {
+				return nil, fmt.Errorf("call failed before approval: %w", err)
+			}
+			return nil, errors.New("call finished without approval")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 		publish("concurrent-v2", &newEffects)
 		if _, err := host.(codemode.DiscoveryHost).Search(ctx, codemode.SearchRequest{Name: "docs__read"}); err != nil {
 			return nil, err
 		}
-		close(release)
+		finishApproval()
 		if err := <-first; err == nil || (errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision && errorcode.CodeOf(err) != tool.ErrorCodePermissionDenied) {
 			return nil, fmt.Errorf("pending occurrence accepted changed source: %w", err)
 		}
