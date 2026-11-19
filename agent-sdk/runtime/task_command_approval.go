@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -67,13 +69,19 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		return t.observeSubmittedCommand(ctx, call, task, deadline)
 	}
 	scope := taskScopeFromContext(approval.owner)
-	work, err := scope.register(approval.owner, taskID, approval.generation)
+	work, err := approval.registerCommand(ctx, scope, taskID)
 	if err != nil {
-		state, code := taskapi.StateFailed, "task_capacity"
-		if errors.Is(err, errTaskAuthorizationChanged) || approval.owner.Err() != nil {
+		state, code := taskapi.StateFailed, "command_start_failed"
+		switch {
+		case errorcode.Is(err, errorcode.ResourceExhausted):
+			code = "task_capacity"
+		case errors.Is(err, errTaskAuthorizationChanged), errors.Is(err, errCodeModeComplete),
+			errors.Is(err, errCodeModeHostClosed), ctx.Err() != nil, approval.owner.Err() != nil:
 			state, code = taskapi.StateCancelled, "approval_cancelled"
 		}
-		persistErr := t.tasks.finishUnstartedCommandClaimed(ctx, task, state, code, err.Error())
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
+		defer cancel()
+		persistErr := t.tasks.finishUnstartedCommandClaimed(cleanup, task, state, code, err.Error())
 		release()
 		return taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now())), persistErr
 	}
@@ -101,6 +109,65 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		return tool.Result{}, ctx.Err()
 	}
 	return t.observeSubmittedCommand(ctx, call, task, deadline)
+}
+
+func (a *taskApproval) registerCommand(ctx context.Context, scope *taskContinuationScope, taskID string) (*taskContinuation, error) {
+	binding := a.admission
+	if binding == nil {
+		return scope.register(a.owner, taskID, a.generation, taskContinuationOrdinary)
+	}
+	validateTarget := binding.validateTarget
+	if validateTarget == nil {
+		return nil, errors.New("command handoff requires Code Mode target validation")
+	}
+	// Serialize handoff with closing the Host. Registration also checks the
+	// Run generation and trusted completion under the Run's own lock.
+	release, err := binding.validate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	work, err := scope.register(a.owner, taskID, a.generation, taskContinuationCodeModeCommand)
+	if err != nil {
+		return nil, err
+	}
+	a.admission = &codeModeAdmissionBinding{
+		callID: binding.callID, name: binding.name, parent: binding.parent,
+		validate: func(ctx context.Context) (func(), error) {
+			return validateApprovedCommandTarget(ctx, validateTarget)
+		},
+	}
+	return work, nil
+}
+
+func validateApprovedCommandTarget(ctx context.Context, validate func(context.Context) (func(), error)) (func(), error) {
+	release, err := validate(ctx)
+	//nolint:errorlint // Do not classify a joined validation failure as a stale snapshot.
+	if err == agent.ErrModelRequestSnapshotStale {
+		return release, &commandToolError{tool.NewError(tool.ErrorCodeStaleRevision, err.Error())}
+	}
+	// Only plain target rejections are tool failures. An underlying error
+	// can be a store, transport, or hook failure that still needs reporting.
+	//nolint:errorlint // Only plain validation errors establish a recoverable rejection.
+	switch typed := err.(type) {
+	case *tool.ToolError:
+		if typed.Err != nil {
+			return release, err
+		}
+	case *errorcode.Error:
+		if typed.Err != nil {
+			return release, err
+		}
+	default:
+		return release, err
+	}
+	switch errorcode.CodeOf(err) {
+	case tool.ErrorCodeStaleRevision, errorcode.NotFound, errorcode.PermissionDenied,
+		errorcode.InvalidArgument, tool.ErrorCodeInvalidInput:
+		return release, &commandToolError{err}
+	default:
+		return release, err
+	}
 }
 
 func (t runtimeCommandTool) observeSubmittedCommand(ctx context.Context, call tool.Call, task *commandTask, deadline time.Time) (tool.Result, error) {
@@ -140,8 +207,6 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 	default:
 		permitCtx := context.WithValue(work.ctx, taskStartPermitKey{}, taskStartPermit{taskID: task.ref.TaskID, work: work})
 		if approval.admission != nil {
-			// Carry only the invocation binding, never the cancelled Host.Call
-			// context which already returned the waiting_approval Task handle.
 			permitCtx = context.WithValue(permitCtx, codeModeAdmissionKey{}, approval.admission)
 		}
 		task.mu.Lock()
@@ -159,23 +224,22 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 		// A failed admission/claim before Start still has a durable pending intent.
 		// Once claimed, the existing command owner retains its actual outcome.
 		executionFailure = executeErr
-		//nolint:errorlint // Only the exact unclaimed completion rejection is benign; joined persistence errors must still fail the Run.
-		if executeErr == errCodeModeComplete {
-			executionFailure = nil
-		}
 		reason, code = firstNonEmpty(errorText(executeErr), "command could not start"), "command_start_failed"
-		if context.Cause(work.ctx) != nil {
-			state, code, reason = taskapi.StateCancelled, "approval_cancelled", context.Cause(work.ctx).Error()
-			//nolint:errorlint // A joined persistence failure must still fail the Run.
-			if executeErr == context.Canceled || executeErr == context.DeadlineExceeded {
+		if isCommandToolError(executeErr) {
+			executionFailure = nil
+			code = string(errorcode.CodeOf(executeErr))
+		}
+		if cause := context.Cause(work.ctx); cause != nil {
+			state, code, reason = taskapi.StateCancelled, "approval_cancelled", cause.Error()
+			//nolint:errorlint // Cancellation joined with a persistence failure must still fail the Run.
+			if executeErr == cause || executeErr == context.Canceled || executeErr == context.DeadlineExceeded {
 				executionFailure = nil
 			}
-		} else {
-			task.mu.Lock()
-			deadline := task.execution.Approval.Deadline
-			task.mu.Unlock()
-			if !deadline.IsZero() && !time.Now().Before(deadline) {
-				code, reason = "approval_expired", "approval expired before command execution"
+		} else if !deadline.IsZero() && !time.Now().Before(deadline) {
+			code, reason = "approval_expired", "approval expired before command execution"
+			//nolint:errorlint // A persistence failure with a deadline in its chain must still reach the Run.
+			if executeErr == context.DeadlineExceeded {
+				executionFailure = nil
 			}
 		}
 	}

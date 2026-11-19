@@ -8,14 +8,52 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
-// This process-local binding belongs to one Host call, not its short-lived
-// context. Existing Task continuations carry it explicitly while retaining
-// their own Run lifetime, cancellation, approval and receipt ownership.
+// This process-local binding authorizes validation of one specific child call.
+// After command handoff, validation uses the same target and source checks
+// without depending on the submitting script's Host.
 type codeModeAdmissionBinding struct {
-	callID   string
-	name     string
-	parent   tool.ParentCall
-	validate func(context.Context) (func(), error)
+	callID         string
+	name           string
+	parent         tool.ParentCall
+	validate       func(context.Context) (func(), error)
+	validateTarget func(context.Context) (func(), error)
+}
+
+func (t runtimeCodeModeTool) targetAdmission(name string, target codeModeTarget) func(context.Context) (func(), error) {
+	lookup, validate, checkBinding := t.lookup, t.validate, t.checkBinding
+	digest := target.digest
+	binding := tool.BindingForDefinition(target.definition)
+	isMCP := tool.IsMCPDefinition(target.definition)
+	return func(ctx context.Context) (func(), error) {
+		if isMCP && checkBinding != nil {
+			if err := checkBinding(ctx, binding); err != nil {
+				return nil, err
+			}
+		}
+		release := func() {}
+		if validate != nil {
+			guard, err := validate(ctx)
+			if guard != nil {
+				release = guard
+			}
+			if err != nil {
+				release()
+				return nil, err
+			}
+		}
+		one, found, err := lookup(ctx, name)
+		if err == nil && found && one != nil {
+			def := one.Definition()
+			if def.Name == name && codeModeDefinitionDigest(def) == digest {
+				return release, nil
+			}
+		}
+		release()
+		if err != nil {
+			return nil, err
+		}
+		return nil, tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed")
+	}
 }
 
 // claimCodeModeBinding keeps canonical binding comparison and the frozen call

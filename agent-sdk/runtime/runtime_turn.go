@@ -299,6 +299,9 @@ func (r *Runtime) runAttempt(
 					_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
 				}
 			}
+			if normalized.Type == session.EventTypeToolResult && normalized.Tool != nil && normalized.Tool.TurnComplete {
+				taskScopeFromContext(ctx).completeCodeMode(ctx)
+			}
 			source.Append(normalized)
 			batch = append(batch, session.CloneEvent(normalized))
 			if sink != nil {

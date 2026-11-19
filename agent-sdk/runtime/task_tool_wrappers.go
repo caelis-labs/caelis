@@ -255,7 +255,8 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 		return tool.Result{}, err
 	}
 	command := req.Command
-	if _, ok := ctx.Value(taskStartPermitKey{}).(taskStartPermit); ok {
+	_, approved := ctx.Value(taskStartPermitKey{}).(taskStartPermit)
+	if approved {
 		req.Yield = 0
 	} else if started, ok := ctx.Value(taskInvocationStartKey{}).(taskInvocationStart); ok {
 		req.Yield = max(time.Until(started.time.Add(req.Yield)), 0)
@@ -274,7 +275,15 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 			}
 			result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
 			result.IsError = true
+			if approved && !isCommandToolError(err) {
+				// The approval continuation must see claim or persistence errors
+				// even when StartCommand could also return a Task snapshot.
+				return result, err
+			}
 			return result, nil
+		}
+		if approved {
+			return tool.Result{}, err
 		}
 		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
 			return result, nil

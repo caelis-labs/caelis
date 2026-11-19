@@ -25,6 +25,7 @@ type codeModeValidationKey struct{}
 type nestedToolEventSinkKey struct{}
 
 var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
+var errCodeModeHostClosed = errors.New("code mode host admission is closed")
 
 type runtimeCodeModeTool struct {
 	runtime        *Runtime
@@ -233,10 +234,9 @@ func (h *codeModeHost) closeDrainLocked() {
 	}
 }
 
-// admit protects the final source comparison and existing journal's durable
-// execution claim. The caller releases before invoking external tool I/O.
+// admit checks whether this script can dispatch or hand off a child call.
 // Lock order is snapshot guard, then host.mu; no approval wait holds either.
-func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTarget) (func(), error) {
+func (h *codeModeHost) admit(ctx context.Context, validateTarget func(context.Context) (func(), error)) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -248,38 +248,13 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 			return nil, errCodeModeComplete
 		}
 	}
-	release := func() {}
-	var validationErr error
-	if h.owner.checkBinding != nil && tool.IsMCPDefinition(target.definition) {
-		if err := h.owner.checkBinding(ctx, tool.BindingForDefinition(target.definition)); err != nil {
-			return nil, err
-		}
-	}
-	if h.owner.validate != nil {
-		guard, err := h.owner.validate(ctx)
-		validationErr = err
-		if guard != nil {
-			release = guard
-		}
-	}
-	if validationErr == nil {
-		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed")
-		one, found, lookupErr := h.owner.lookup(ctx, name)
-		if lookupErr != nil {
-			validationErr = lookupErr
-		} else if found && one != nil {
-			def := one.Definition()
-			if def.Name == name && codeModeDefinitionDigest(def) == target.digest {
-				validationErr = nil
-			}
-		}
-	}
+	release, validationErr := validateTarget(ctx)
 	h.mu.Lock()
 	switch {
 	case h.turnComplete:
 		validationErr = errCodeModeComplete
 	case h.closed:
-		validationErr = fmt.Errorf("code mode host admission is closed")
+		validationErr = errCodeModeHostClosed
 	case h.ctx.Err() != nil:
 		validationErr = h.ctx.Err()
 	case ctx.Err() != nil:
@@ -287,7 +262,9 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 	}
 	if validationErr != nil {
 		h.mu.Unlock()
-		release()
+		if release != nil {
+			release()
+		}
 		return nil, validationErr
 	}
 	return func() { h.mu.Unlock(); release() }, nil
@@ -369,7 +346,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	defer cancel()
 	stop := context.AfterFunc(requestCtx, cancel)
 	defer stop()
-	admission := func(ctx context.Context) (func(), error) { return h.admit(ctx, name, target) }
+	validateTarget := h.owner.targetAdmission(name, target)
+	admission := func(ctx context.Context) (func(), error) { return h.admit(ctx, validateTarget) }
 	// This eligibility check is advisory; final dispatch repeats it after approval
 	// and retains the guard through its final dispatch admission.
 	release, err := admission(ctx)
@@ -380,7 +358,9 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
 		Parent:       &tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
 		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
-	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, &codeModeAdmissionBinding{callID: call.ID, name: call.Name, parent: *call.Parent, validate: admission})
+	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, &codeModeAdmissionBinding{
+		callID: call.ID, name: call.Name, parent: *call.Parent, validate: admission, validateTarget: validateTarget,
+	})
 	if tool.IsMCPDefinition(target.definition) {
 		binding := tool.BindingForDefinition(target.definition)
 		call.TargetBinding = &binding

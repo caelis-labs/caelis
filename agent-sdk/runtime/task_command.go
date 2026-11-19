@@ -31,6 +31,18 @@ const (
 	commandStreamOutputCursorMeta = "stream_output_cursor"
 )
 
+// commandToolError is a command-local rejection or a process start failure
+// whose outcome has already been recorded on its Task.
+type commandToolError struct{ error }
+
+func (e *commandToolError) Unwrap() error { return e.error }
+
+func isCommandToolError(err error) bool {
+	//nolint:errorlint // A joined error may also contain a failure to settle the Task.
+	_, ok := err.(*commandToolError)
+	return ok
+}
+
 func commandTaskID(ref session.SessionRef, parentCall string) (string, error) {
 	parentCall = strings.TrimSpace(parentCall)
 	if parentCall == "" {
@@ -321,7 +333,8 @@ func (tm *taskRuntime) startClaimedCommand(
 		if terminateErr != nil {
 			return tm.retainCommandAfterFailedInitialPersistence(ctx, task, err, terminateErr)
 		}
-		return tm.finalizeCommandStartCleanup(ctx, task, err)
+		snapshot, cleanupErr := tm.finalizeCommandStartCleanup(ctx, task, err)
+		return snapshot, errors.Join(err, cleanupErr)
 	}
 	if req.Observer != nil {
 		task.mu.Lock()
@@ -443,23 +456,23 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 		return taskapi.Snapshot{}, startErr
 	}
 	if handle == nil {
+		now := tm.runtime.now()
 		task.mu.Lock()
-		task.state = taskapi.StateFailed
-		task.running = false
-		task.metadata["state"] = string(taskapi.StateFailed)
-		task.metadata["running"] = false
-		task.metadata["command_phase"] = commandPhaseStartFailed
-		task.result = map[string]any{"state": string(taskapi.StateFailed), "error": strings.TrimSpace(startErr.Error())}
-		task.emitOutputTerminalLocked(taskapi.StateFailed, sandbox.SessionStatus{UpdatedAt: tm.runtime.now()}, false)
-		task.notifyCommandOutputChangeLocked()
-		failed := task.entrySnapshot(tm.runtime.now())
+		failed := task.entrySnapshot(now)
 		task.mu.Unlock()
-		persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), failed)
+		failed.State, failed.Running, failed.SupportsInput = taskapi.StateFailed, false, false
+		failed.Metadata["state"] = string(taskapi.StateFailed)
+		failed.Metadata["running"] = false
+		failed.Metadata["command_phase"] = commandPhaseStartFailed
+		failed.Result = map[string]any{"state": string(taskapi.StateFailed), "error": strings.TrimSpace(startErr.Error())}
+		if err := tm.persistTaskEntry(context.WithoutCancel(ctx), failed); err != nil {
+			return task.snapshotWithoutSession(now), errors.Join(startErr, err)
+		}
+		applyCommandEntry(task, failed)
 		task.mu.Lock()
-		task.revision = failed.Revision
-		task.lease = taskapi.CloneLease(failed.Lease)
+		task.emitOutputTerminalLocked(taskapi.StateFailed, sandbox.SessionStatus{UpdatedAt: now}, false)
 		task.mu.Unlock()
-		return task.snapshotWithoutSession(tm.runtime.now()), errors.Join(startErr, persistErr)
+		return task.snapshotWithoutSession(now), &commandToolError{startErr}
 	}
 	task.mu.Lock()
 	task.session = handle
@@ -476,6 +489,9 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 		return tm.retainCommandAfterFailedInitialPersistence(ctx, task, startErr, terminateErr)
 	}
 	snapshot, persistErr := tm.finalizeCommandStartCleanup(ctx, task, startErr)
+	if persistErr == nil {
+		return snapshot, &commandToolError{startErr}
+	}
 	return snapshot, errors.Join(startErr, persistErr)
 }
 
@@ -510,7 +526,7 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 	if persistErr == nil {
 		tm.removeCommandTask(task)
 	}
-	return snapshot, errors.Join(cause, persistErr)
+	return snapshot, persistErr
 }
 
 func (tm *taskRuntime) installCommandTask(task *commandTask) {

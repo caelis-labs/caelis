@@ -189,7 +189,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 		var finish func()
 		if scope := taskScopeFromContext(owner); scope != nil {
 			id := r.nextID("approval-producer", nil)
-			continuation, err := scope.register(owner, id, scope.currentGeneration())
+			continuation, err := scope.register(owner, id, scope.currentGeneration(), taskContinuationOrdinary)
 			if err != nil {
 				cancel()
 				r.authorizationMu.Unlock()

@@ -383,10 +383,10 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 		Release: release,
 		Validate: func(ctx context.Context) (func(), error) {
 			unlock, err := store.GuardConfiguration(ctx, r.binding.Scope, r.binding.SessionID, configuration.Revision)
-			if err != nil {
-				return nil, errors.Join(agent.ErrModelRequestSnapshotStale, err)
+			if errors.Is(err, sessionprofile.ErrConfigurationStale) {
+				return nil, agent.ErrModelRequestSnapshotStale
 			}
-			return unlock, nil
+			return unlock, err
 		},
 		Admit: func(ctx context.Context, request agent.ModelRequestAdmission) error {
 			err := store.AdmitRequest(ctx, r.binding.Scope, r.binding.SessionID, sessionprofile.RequestConfiguration{

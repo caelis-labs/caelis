@@ -54,17 +54,9 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 	// This is only an in-memory join registration, never an operation identity,
 	// recovery record, or execution authority. Invocation still owns tool identity.
 	id := "code-mode-producer:" + uuid.NewString()
-	work, err := t.scope.register(t.owner, id, t.scope.currentGeneration())
+	work, err := t.scope.register(t.owner, id, t.scope.currentGeneration(), taskContinuationCodeModeScript)
 	if err != nil {
 		return tool.Result{}, err
-	}
-	t.scope.mu.Lock()
-	work.stopAtFinal = true
-	closed := t.scope.codeModeClosed
-	t.scope.mu.Unlock()
-	if closed {
-		t.scope.complete(id, work, nil)
-		return tool.Result{}, errCodeModeComplete
 	}
 	var done <-chan struct{}
 	var producerError func() error
@@ -109,16 +101,24 @@ func (t codeModeProducerTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 	return toolbinding.IsTaskResultSource(t.base)
 }
 
-// A trusted child completion closes only this Run's script dispatch. Existing
-// in-flight receipts finish under their original producer; no new owner exists.
+// A trusted completion closes this Run's script dispatch and revokes commands
+// handed off by scripts that have not yet claimed their effect.
 func (s *taskContinuationScope) completeCodeMode(ctx context.Context) {
+	if s == nil {
+		return
+	}
 	current, _ := ctx.Value(codeModeProducerIdentityKey{}).(string)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.codeModeClosed = true
 	for id, work := range s.active {
-		if work.stopAtFinal && id != current {
-			work.cancel(errCodeModeComplete)
+		switch work.kind {
+		case taskContinuationCodeModeScript:
+			if id != current {
+				work.cancel(errCodeModeComplete)
+			}
+		case taskContinuationCodeModeCommand:
+			work.revoke(errCodeModeComplete)
 		}
 	}
 }
