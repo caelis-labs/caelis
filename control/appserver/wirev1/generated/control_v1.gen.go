@@ -1759,6 +1759,7 @@ type SessionMCPStatus struct {
 	Servers               []SessionMCPServerStatus `json:"servers"`
 	SessionId             string                   `json:"session_id"`
 	Skills                []SessionSkillStatus     `json:"skills"`
+	Warning               *string                  `json:"warning,omitempty"`
 }
 
 type SessionModeRequest struct {

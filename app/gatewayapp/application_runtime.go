@@ -258,6 +258,7 @@ type applicationTurnResolver struct {
 	inheritedMCP       []mcp.ServerSpec
 	declaredMCP        []mcp.ServerSpec
 	desiredRevision    uint64
+	failedMCPRevision  uint64
 	capabilitiesClosed bool
 }
 

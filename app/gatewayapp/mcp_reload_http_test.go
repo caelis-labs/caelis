@@ -235,7 +235,9 @@ func TestApplicationInheritedCapabilitiesAreAdditiveAndReloadHTTP(t *testing.T) 
 		t.Fatal(err)
 	}
 	waitAtomicApplicationMCPRunning(t, ctx, client, id, "utilities")
-	promptAtomicCapabilityClient(t, ctx, client, id, "inherit-call-new", "UTIL")
+	if approvals := promptAtomicCapabilityClientWithMCPApproval(t, ctx, client, id, "inherit-call-new", "UTIL", "allow_once"); approvals != 1 {
+		t.Fatalf("first tools-only call to a discovered workspace MCP server requested %d approvals, want 1", approvals)
+	}
 	writeAtomicSkill(t, filepath.Join(projectSkills, "reload"), "reload-skill", "INHERITED_RELOAD_BODY")
 	promptAtomicCapabilityClient(t, ctx, client, id, "inherit-load-new", "RELOAD_SKILL")
 	if got := provider.lastRequest(); !strings.Contains(got, "INHERITED_RELOAD_BODY") || atomicSystemInstructions(t, got) != before || provider.lastTools() != beforeTools {

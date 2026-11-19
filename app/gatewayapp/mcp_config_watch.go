@@ -2,10 +2,14 @@ package gatewayapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
+	"io"
 	"os"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
 const mcpConfigPollInterval = time.Second
@@ -33,21 +37,32 @@ func (s *runtimeComposition) watchConfiguredMCP(initial AppConfig, apply func([]
 		defer close(done)
 		ticker := time.NewTicker(mcpConfigPollInterval)
 		defer ticker.Stop()
-		var previous [4]mcpConfigFileStamp
+		var applied, pending [4]mcpConfigFileStamp
+		var appliedOnce bool
+		var retryAt time.Time
+		var retryDelay time.Duration
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				current := mcpConfigFileStamps(paths)
-				if current == previous {
+			case now := <-ticker.C:
+				watchPaths := paths
+				if workspacetrust.Lookup(trust, s.workspace.CWD) != workspacetrust.Trusted {
+					watchPaths[2], watchPaths[3] = "", ""
+				}
+				current := mcpConfigFileStamps(watchPaths)
+				if appliedOnce && retryDelay == 0 && current == applied {
 					continue
 				}
-				previous = current
-				if doc, err := s.authorities.store.LoadContext(ctx); err == nil {
+				if current != pending || retryDelay == 0 {
+					pending, retryAt, retryDelay = current, time.Time{}, mcpConfigPollInterval
+				}
+				if now.Before(retryAt) {
+					continue
+				}
+				doc, loadErr := s.authorities.store.LoadContext(ctx)
+				if loadErr == nil {
 					servers, trust = doc.MCPServers, doc.WorkspaceTrust
-				} else if ctx.Err() == nil && s.authorities.diagnostics != nil {
-					s.authorities.diagnostics.WarnContext(ctx, "MCP reload retained the last valid Host configuration", "error", err)
 				}
 				if ctx.Err() != nil {
 					return
@@ -56,8 +71,14 @@ func (s *runtimeComposition) watchConfiguredMCP(initial AppConfig, apply func([]
 				if err == nil {
 					err = apply(specs)
 				}
-				if err != nil && s.authorities.diagnostics != nil {
-					s.authorities.diagnostics.WarnContext(ctx, "MCP configuration reload failed", "error", err)
+				if err = errors.Join(loadErr, err); err == nil {
+					applied, appliedOnce, retryDelay = current, true, 0
+				} else {
+					retryAt = now.Add(retryDelay)
+					retryDelay = min(2*retryDelay, 15*time.Second)
+					if s.authorities.diagnostics != nil {
+						s.authorities.diagnostics.WarnContext(ctx, "MCP configuration reload will retry", "error", err)
+					}
 				}
 			}
 		}
@@ -69,15 +90,26 @@ func (s *runtimeComposition) watchConfiguredMCP(initial AppConfig, apply func([]
 }
 
 type mcpConfigFileStamp struct {
-	modified time.Time
-	size     int64
+	digest   [sha256.Size]byte
+	readable bool
 }
 
 func mcpConfigFileStamps(paths [4]string) [4]mcpConfigFileStamp {
 	var stamps [4]mcpConfigFileStamp
 	for i, path := range paths {
-		if info, err := os.Stat(path); err == nil {
-			stamps[i] = mcpConfigFileStamp{modified: info.ModTime(), size: info.Size()}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		digest := sha256.New()
+		_, err = io.Copy(digest, file)
+		_ = file.Close()
+		if err == nil {
+			stamps[i] = mcpConfigFileStamp{digest: [sha256.Size]byte(digest.Sum(nil)), readable: true}
 		}
 	}
 	return stamps

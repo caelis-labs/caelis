@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -129,12 +130,16 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier
 		}
 	}
 	tools, _ := body["tools"].([]any)
-	want := 9
-	if builtinComputerUseSupported() {
-		want += 1
+	var names []string
+	for _, declaration := range tools {
+		definition, _ := declaration.(map[string]any)
+		name, _ := definition["name"].(string)
+		names = append(names, name)
 	}
-	if len(tools) != want {
-		t.Fatalf("tools = %#v", body["tools"])
+	slices.Sort(names)
+	want := []string{"ApplicationLookup", "ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("model-facing tools = %v, want %v", names, want)
 	}
 	tool, _ := tools[0].(map[string]any)
 	parameters, _ := tool["parameters"].(map[string]any)

@@ -11,6 +11,7 @@ type MCPStatus struct {
 	Servers               []MCPServerStatus `json:"servers"`
 	Plugins               []PluginStatus    `json:"plugins,omitempty"`
 	Skills                []SkillStatus     `json:"skills"`
+	Warning               string            `json:"warning,omitempty"`
 }
 
 // MCPServerStatus keeps connection state separate from catalog refresh health.

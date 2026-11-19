@@ -1,15 +1,93 @@
 package gatewayapp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
+
+func TestSkillInstructionsRejectedAdmissionDoesNotPinNewSummary(t *testing.T) {
+	ctx := t.Context()
+	store := inmemory.NewStore(inmemory.Config{})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	write := func(description string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("---\nname: admission-test\ndescription: "+description+"\n---\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("previous skill metadata")
+	resolve := sessionSkillInstructions(store, active.SessionRef, func(context.Context) (skill.Catalog, error) {
+		meta, err := skillfs.DiscoverRootMeta(root)
+		return skill.NewCatalog([]skill.Meta{meta}), err
+	})
+	_, persist, err := resolve(ctx, "previous-summary")
+	if err != nil || persist == nil {
+		t.Fatalf("prepare previous Skill instructions: %v", err)
+	}
+	if err := persist(ctx); err != nil {
+		t.Fatal(err)
+	}
+	write("metadata from the rejected assembly")
+	var admissions, starts int
+	var instructions string
+	ctx = model.WithInvocationStart(ctx, func(_ context.Context, _ model.Invocation, req *model.Request) error {
+		starts++
+		instructions = model.Message{Parts: req.Instructions}.TextContent()
+		return nil
+	})
+	chatAgent, err := (chat.Factory{}).NewAgent(ctx, agent.AgentSpec{
+		ResolveSessionInstructions: resolve,
+		ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
+			return agent.ModelRequestSnapshot{Model: systemManagedAgentResponseModel{}, Admit: func(context.Context, agent.ModelRequestAdmission) error {
+				admissions++
+				if admissions == 1 {
+					state, err := store.SnapshotState(ctx, active.SessionRef)
+					if _, pinned := pinnedSkillInstructions(state, "new-summary"); err != nil || pinned {
+						t.Errorf("unadmitted assembly already pinned the new summary: %v, %v", pinned, err)
+					}
+					write("metadata from the admitted assembly")
+					return agent.ErrModelRequestSnapshotStale
+				}
+				return nil
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range chatAgent.Run(agent.NewContext(agent.ContextSpec{Context: ctx, Session: active, Events: []*session.Event{
+		{ID: "new-summary", Type: session.EventTypeCompact, Visibility: session.VisibilityCanonical, Text: "CONTEXT CHECKPOINT"},
+	}})) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if admissions != 2 || starts != 1 || !strings.Contains(instructions, "metadata from the admitted assembly") {
+		t.Fatalf("admissions=%d provider starts=%d instructions=%q", admissions, starts, instructions)
+	}
+	state, err := store.SnapshotState(ctx, active.SessionRef)
+	if text, pinned := pinnedSkillInstructions(state, "new-summary"); err != nil || !pinned || text != instructions {
+		t.Fatalf("persisted instructions = %q, pinned = %v, error = %v", text, pinned, err)
+	}
+}
 
 func TestNativeSkillInstructionsReloadOnFirstRequestUsingCompact(t *testing.T) {
 	ctx := t.Context()

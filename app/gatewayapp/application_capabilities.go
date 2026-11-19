@@ -31,14 +31,12 @@ type applicationCapabilities struct {
 
 type applicationMCPSource struct {
 	selection mcp.Selection
-	store     *sessionprofile.Store
-	scope     sessionprofile.Scope
+	resolver  *applicationTurnResolver
 }
 
-// CheckSearchScope enforces the Application lease. The selected server
-// instances and their current bindings enforce MCP configuration changes.
+// CheckSearchScope checks the durable profile before using the resident graph.
 func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
-	return s.store.CheckActive(ctx, s.scope)
+	return s.resolver.checkAppliedMCPConfiguration(ctx)
 }
 
 func (s applicationMCPSource) Tools() []tool.Tool {
@@ -47,9 +45,42 @@ func (s applicationMCPSource) Tools() []tool.Tool {
 
 func (s applicationMCPSource) leaseTools(ready []tool.Tool) []tool.Tool {
 	for i, item := range ready {
-		ready[i] = applicationLeasedTool{Tool: item, store: s.store, scope: s.scope}
+		ready[i] = applicationMCPTool{Tool: item, source: s}
 	}
 	return ready
+}
+
+type applicationMCPTool struct {
+	tool.Tool
+	source applicationMCPSource
+}
+
+func (t applicationMCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if err := t.source.CheckSearchScope(ctx); err != nil {
+		return tool.Result{}, err
+	}
+	return t.Tool.Call(ctx, call)
+}
+
+// New calls require a graph for the latest committed revision. Checking the
+// applied revision rather than the request's original revision lets an
+// unchanged binding continue after a successful reload.
+func (r *applicationTurnResolver) checkAppliedMCPConfiguration(ctx context.Context) error {
+	r.capabilitiesMu.Lock()
+	revision, closed := r.desiredRevision, r.capabilitiesClosed
+	r.capabilitiesMu.Unlock()
+	if closed {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP configuration is unavailable")
+	}
+	release, err := r.composition.authorities.sessionProfiles.GuardConfiguration(ctx, r.binding.Scope, r.binding.SessionID, revision)
+	if errors.Is(err, sessionprofile.ErrConfigurationStale) {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "committed MCP configuration is awaiting reconciliation")
+	}
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
 }
 
 func applicationSkillCatalog(profile sessionprofile.Profile) (skill.Catalog, error) {
@@ -279,11 +310,12 @@ func (r *applicationTurnResolver) reconcileMCPLocked(ctx context.Context, config
 	}
 	r.declaredMCP = declared
 	r.desiredRevision = configuration.Revision
+	r.failedMCPRevision = 0
 	return nil
 }
 
 func (r *applicationTurnResolver) bindApplicationMCP(capabilities *applicationCapabilities) {
-	capabilities.source = applicationMCPSource{selection: r.mcpManager.Selection(), store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope}
+	capabilities.source = applicationMCPSource{selection: r.mcpManager.Selection(), resolver: r}
 	capabilities.searchTool = toolsearch.NewSource(capabilities.source, newBoundToolSearchRanker(r.composition))
 }
 
@@ -331,7 +363,12 @@ func (r *applicationTurnResolver) configurationCommitted(ctx context.Context, co
 	if r.capabilitiesClosed || configuration.Revision <= r.desiredRevision {
 		return
 	}
-	_ = r.reloadProfileMCPLocked(ctx, configuration)
+	if err := r.reloadProfileMCPLocked(ctx, configuration); err != nil {
+		r.failedMCPRevision = configuration.Revision
+		if diagnostics := r.composition.authorities.diagnostics; diagnostics != nil {
+			diagnostics.WarnContext(ctx, "Committed Session MCP configuration could not be reconciled", "session_id", r.binding.SessionID, "revision", configuration.Revision, "error", err)
+		}
+	}
 }
 
 func (r *applicationTurnResolver) reloadProfileMCPLocked(ctx context.Context, configuration sessionprofile.Configuration) error {
@@ -367,6 +404,9 @@ func (r *applicationTurnResolver) capabilityStatus(revision uint64) sessionprofi
 	r.capabilitiesMu.Lock()
 	defer r.capabilitiesMu.Unlock()
 	if revision != r.desiredRevision {
+		if revision == r.failedMCPRevision {
+			return sessionprofile.MCPStatus{Warning: "MCP configuration could not be applied. New calls are blocked pending reconciliation."}
+		}
 		return sessionprofile.MCPStatus{}
 	}
 	status := sessionprofile.MCPStatus{

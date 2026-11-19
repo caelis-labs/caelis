@@ -108,6 +108,7 @@ func (s *SessionProfileService) SessionMCPStatus(ctx context.Context, p Principa
 		byName[server.Name] = server
 	}
 	status := sessionprofile.MCPStatus{SessionID: sessionID, ConfigurationRevision: strconv.FormatUint(configuration.Revision, 10), Servers: make([]sessionprofile.MCPServerStatus, 0, len(configuration.Profile.MCPServers))}
+	status.Warning = observed.Warning
 	for _, declared := range configuration.Profile.MCPServers {
 		server, ok := byName[declared.Name]
 		if !ok {

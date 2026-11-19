@@ -319,8 +319,12 @@ type AgentSpec struct {
 	// ResolveSessionInstructions supplies additional main-request instructions.
 	// After ModelPrepare, Chat calls it with the compaction summary ID in the
 	// assembled history, or an empty ID if that history has no summary.
-	ResolveSessionInstructions func(ctx context.Context, summaryID string) (string, error) `json:"-"`
+	ResolveSessionInstructions SessionInstructionsResolver `json:"-"`
 }
+
+// SessionInstructionsResolver prepares text for a main request. An optional
+// persist callback runs once after provider admission accepts that assembly.
+type SessionInstructionsResolver func(ctx context.Context, summaryID string) (text string, persist func(context.Context) error, err error)
 
 // ModelRequestOptions controls model request behavior independent of
 // provider implementation.

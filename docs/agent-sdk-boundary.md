@@ -27,8 +27,9 @@ experimental.
 `AgentSpec.ResolveSessionInstructions` appends embedding-owned instructions when
 Chat assembles a main model request. The resolver receives the ID of the
 compaction summary in that request's history. A speculative candidate has no
-effect until Runtime adopts it and Chat builds from the new history. Auxiliary
-model requests use their own assembly or the frozen source request.
+effect until Runtime adopts it and Chat builds from the new history. The
+optional persist callback runs at provider start after admission accepts the
+request. Auxiliary requests use their own assembly or the frozen source request.
 
 `runtime.Config.Hooks` fixes typed registrations for each Run. Every entry has
 an explicit name and timeout (five seconds by default). Independent private

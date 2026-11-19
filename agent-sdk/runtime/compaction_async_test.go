@@ -143,7 +143,7 @@ type asyncHarness struct {
 	secondTool    chan struct{}
 	releaseSecond chan struct{}
 	tool          tool.Tool
-	instructions  func(context.Context, string) (string, error)
+	instructions  agent.SessionInstructionsResolver
 }
 
 func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceRef) *asyncHarness {
@@ -270,8 +270,8 @@ func TestAsyncCompactionFrozenRequestMatchesForeground(t *testing.T) {
 
 func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	h := newAsyncHarness(t, "cas")
-	h.instructions = func(_ context.Context, summaryID string) (string, error) {
-		return "Session instructions from summary=" + summaryID, nil
+	h.instructions = func(_ context.Context, summaryID string) (string, func(context.Context) error, error) {
+		return "Session instructions from summary=" + summaryID, nil, nil
 	}
 	run := h.run(t)
 	next := h.startCandidate(t)

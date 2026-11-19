@@ -180,8 +180,10 @@ They also load the Host MCP catalog and MCP files in a trusted workspace. Use
 selects that Skill, and other directories are scanned for immediate child Skills.
 `mcp_servers` adds Server definitions. Explicit names take priority over defaults.
 Clearing an explicit list leaves default discovery available. The resident Runtime
-watches MCP files and applies changes per server. `plugins` selects packages
-independently.
+watches MCP files and applies changes per server. If a committed configuration
+cannot be applied, Core blocks new MCP calls until reconciliation succeeds and
+reports a status warning. Calls already dispatched can finish. `plugins` selects
+packages independently.
 
 Core accepts old `inherit.skills` and `inherit.mcp` fields for wire compatibility.
 Both values use default discovery. Existing `skill_roots` entries still select
@@ -191,9 +193,13 @@ MCP and Skills use standard assembly and progressive disclosure. `ToolSearch`
 exposes the current MCP catalog. `Skill` resolves known names against the current
 explicit profile and selected directories at call time, including Skills added
 after the Session started. The system prompt retains the advertised names and
-descriptions through ordinary requests. The first main request that uses a new
-compaction summary refreshes this list. Standard MCP grant ownership
+descriptions through ordinary requests. The first admitted main provider request
+that uses a new compaction summary pins its updated list. Standard MCP grant ownership
 is shared across Surfaces using the same Host/workspace/server configuration.
+Default MCP discovery in a `tools-only` Session uses the Host and workspace
+trust rules. MCP servers use their configured transports and processes. The
+product source policy still governs each tool call, including remembered grants
+and the Desktop World application scope.
 There is no Bot-specific MCP permission owner. Status reads do not activate
 Runtime, start servers or scan new directories. Failed selected roots/servers
 remain visible rather than being silently replaced by ambient capabilities.

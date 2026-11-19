@@ -53,7 +53,7 @@ type Agent struct {
 	discoveries         map[string]tool.Binding
 	boundCalls          map[string]boundMCPCall
 
-	resolveSessionInstructions func(context.Context, string) (string, error)
+	resolveSessionInstructions agent.SessionInstructionsResolver
 	summaryID                  string
 }
 
@@ -390,14 +390,16 @@ func (a *Agent) collectCanonicalModelStep(
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
 		}
 		request = prepared
+		var persistInstructions func(context.Context) error
 		if cached == nil && a.resolveSessionInstructions != nil {
-			instructions, err := a.resolveSessionInstructions(ctx, a.summaryID)
+			instructions, persist, err := a.resolveSessionInstructions(ctx, a.summaryID)
 			if err != nil {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 			}
 			if instructions != "" {
 				request.Instructions = append(request.Instructions, model.NewTextPart(instructions))
 			}
+			persistInstructions = persist
 		}
 		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
@@ -408,6 +410,14 @@ func (a *Agent) collectCanonicalModelStep(
 		if admit := a.admitModelRequest; admit != nil {
 			modelCtx = model.WithInvocationAdmission(modelCtx, func(ctx context.Context, _ *model.Request) error {
 				return admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString()})
+			})
+		}
+		if persistInstructions != nil {
+			var once sync.Once
+			var persistErr error
+			modelCtx = model.WithInvocationStart(modelCtx, func(ctx context.Context, _ model.Invocation, _ *model.Request) error {
+				once.Do(func() { persistErr = persistInstructions(ctx) })
+				return persistErr
 			})
 		}
 		modelCtx = modelHookContext(modelCtx, evidence)

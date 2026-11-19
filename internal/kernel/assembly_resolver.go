@@ -108,7 +108,7 @@ type ToolAugmentation struct {
 	DeferredTools              tool.Source
 	Tools                      []tool.Tool
 	Metadata                   map[string]any
-	ResolveSessionInstructions func(context.Context, string) (string, error)
+	ResolveSessionInstructions agent.SessionInstructionsResolver
 }
 
 type modelAliasLister interface {
@@ -350,7 +350,7 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 	modelResolution.FastMode = fastMode
 	tools := append([]tool.Tool(nil), snap.tools...)
 	var deferredTools tool.Source
-	var resolveSessionInstructions func(context.Context, string) (string, error)
+	var resolveSessionInstructions agent.SessionInstructionsResolver
 	if snap.toolAugmenter != nil {
 		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
 			SessionRef: intent.SessionRef,

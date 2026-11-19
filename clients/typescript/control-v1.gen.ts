@@ -1769,6 +1769,7 @@ export interface SessionMCPStatus {
   servers: Array<SessionMCPServerStatus>;
   session_id: string;
   skills: Array<SessionSkillStatus>;
+  warning?: string;
   [key: string]: JSONValue;
 }
 
