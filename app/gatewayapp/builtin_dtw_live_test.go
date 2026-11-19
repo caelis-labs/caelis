@@ -149,6 +149,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 	if _, err := host.host.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: created.SessionID, OperationID: "live-task-prompt"}, Input: prompt, SourceKind: "user"}); err != nil {
 		t.Fatal(redact(err))
 	}
+	const expectedVersion = "0.5.3"
 	approvals := 0
 	selectedRoot := os.Getenv("CAELIS_DTW_LIVE_PLUGIN")
 	for {
@@ -158,8 +159,8 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 		}
 		if active := state.Approval.Active; active != nil {
 			selected, err := host.host.SessionMCPStatus(ctx, created.SessionID)
-			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.5.2" || len(selected.Servers) != 1 || !slices.Contains(selected.Servers[0].Tools, "look") || slices.Contains(selected.Servers[0].Tools, "exec") || len(selected.Skills) != 1 {
-				t.Fatal("live source does not contain one paired 0.5.2 MCP/Skill package")
+			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != expectedVersion || len(selected.Servers) != 1 || !slices.Contains(selected.Servers[0].Tools, "look") || slices.Contains(selected.Servers[0].Tools, "exec") || len(selected.Skills) != 1 {
+				t.Fatalf("live source does not contain one paired %s MCP/Skill package", expectedVersion)
 			}
 			if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" && selected.Plugins[0].Root != root {
 				t.Fatal("explicit package silently fell back to another source")
