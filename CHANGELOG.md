@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.83.0](https://github.com/caelis-labs/caelis/compare/v0.82.0...v0.83.0) (2026-11-19)
+
+
+### Features
+
+* **acp:** upgrade SDK to v1.8.0 and restore Antigravity ([#258](https://github.com/caelis-labs/caelis/issues/258)) ([3c651ff](https://github.com/caelis-labs/caelis/commit/3c651ffaa934084c0db9f147f04a7624b69f1003))
+* **runtime:** hot-reload Session MCP servers and Skills ([#257](https://github.com/caelis-labs/caelis/issues/257)) ([0da4d07](https://github.com/caelis-labs/caelis/commit/0da4d07ea7818db8dc17b7442cd5f6b08c54c124))
+
+
+### Bug Fixes
+
+* **plugin:** bump bundled Desktop World to v0.5.3 ([#259](https://github.com/caelis-labs/caelis/issues/259)) ([768ecbc](https://github.com/caelis-labs/caelis/commit/768ecbc9d46881767b435aad94a30e1ba830f3c5))
+* **runtime:** decouple command Tasks from Code Mode scripts ([#255](https://github.com/caelis-labs/caelis/issues/255)) ([675869f](https://github.com/caelis-labs/caelis/commit/675869fbaa78715ba07068a424f85f77e1a5bb8d))
+
 ## [0.82.0](https://github.com/caelis-labs/caelis/compare/v0.81.2...v0.82.0) (2026-11-18)
 
 
