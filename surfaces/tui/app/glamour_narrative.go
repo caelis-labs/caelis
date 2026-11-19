@@ -55,7 +55,7 @@ func glamourNarrativeRowsWithWrapWidth(blockID, raw, rolePrefix string, roleStyl
 		return nil
 	}
 
-	styledLines := strings.Split(rendered, "\n")
+	styledLines := splitStyledPhysicalLines(rendered)
 
 	// Trim leading/trailing blank lines that glamour may add.
 	for len(styledLines) > 0 && strings.TrimSpace(tuikit.SanitizeLogText(styledLines[0])) == "" {
@@ -295,9 +295,11 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	// Blockquotes
 	// ---------------------------------------------------------------
-	bqIndent := uint(1)
+	// Glamour reserves two cells per margin unit and emits one indent token.
+	// The rail includes its following space, so it occupies two cells.
+	bqMargin := uint(1)
 	bqToken := narrativeBlockquoteRail
-	style.BlockQuote.Indent = &bqIndent
+	style.BlockQuote.Margin = &bqMargin
 	style.BlockQuote.IndentToken = &bqToken
 	style.BlockQuote.Color = bodyHex
 

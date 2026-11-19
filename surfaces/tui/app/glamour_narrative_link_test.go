@@ -44,7 +44,7 @@ func TestGlamourNarrativeUnicodeLinks(t *testing.T) {
 func TestNarrativeMarkdownPreservesNonLinkSource(t *testing.T) {
 	const raw = "# 中文标题\n\n" +
 		"见 [**中文标签**](https://example.com/already%20encoded?q=a&b=c#section)。\n\n" +
-		"`https://example.com/服务`\n\nhttps://example.com/服务\n\n```text\n[源码](https://example.com/服务)\n```\n\n" +
+		"`https://example.com/服务`\n\nhttps://example.com/服务\n\n```text\n[源码](https://a/服务)\n```\n\n" +
 		"> 中文引用\n\n- 列表\n\n| 表格 |\n| --- |\n| [链接](https://example.com) |"
 	for _, width := range []int{24, 40, 80} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {

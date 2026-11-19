@@ -50,7 +50,7 @@ func TestAssistantStreamingTailKeepsRawMarkdownAndSelectionPlane(t *testing.T) {
 
 func TestAssistantSelectionAcrossFormattedPrefixAndRawTailCopiesVisibleText(t *testing.T) {
 	theme := tuikit.DefaultTheme()
-	stable := "# 已稳定\n\n"
+	stable := "# 已稳定\n \t\n"
 	tail := strings.Repeat("**未完成** [链接](https://example.com) 👩‍💻 ", 12)
 	raw := stable + tail
 	stableRaw, tailRaw := splitStableStreamingMarkdown(raw)
@@ -70,7 +70,7 @@ func TestAssistantSelectionAcrossFormattedPrefixAndRawTailCopiesVisibleText(t *t
 		StablePrefixRaw: stableRaw,
 		TailRaw:         tailRaw,
 	}).Rows
-	rows = alignParticipantNarrativeContinuationRows(rows, "  ")
+	rows = alignParticipantNarrativeContinuationRows(rows, tuikit.LineStyleAssistant)
 	if len(rows) < 3 {
 		t.Fatalf("mixed renderer rows = %#v, want prefix, boundary, and tail", rows)
 	}

@@ -221,15 +221,11 @@ func cloneRenderedRows(rows []RenderedRow) []RenderedRow {
 }
 
 func hasStreamingParagraphBoundary(raw string) bool {
-	raw = strings.TrimRight(raw, " \t\r")
-	newlines := 0
-	for i := len(raw) - 1; i >= 0; i-- {
-		if raw[i] != '\n' {
-			break
-		}
-		newlines++
+	last, ok := strings.CutSuffix(raw, "\n")
+	if !ok {
+		return false
 	}
-	return newlines >= 2
+	return strings.HasSuffix(strings.TrimRight(last, " \t\r"), "\n")
 }
 
 // splitStableStreamingMarkdown is only a promotion boundary detector. It does

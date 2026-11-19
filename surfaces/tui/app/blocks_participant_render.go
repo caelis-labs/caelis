@@ -15,10 +15,10 @@ func renderParticipantTurnNarrativeEventRows(blockID string, ev SubagentEvent, l
 }
 
 func renderParticipantTurnNarrativeRowsWithBuffer(blockID string, raw string, activeBuffer *activeNarrativeBuffer, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
-	rolePrefix, continuationPrefix := narrativeLinePrefixes(lineStyle)
+	rolePrefix, _ := narrativeLinePrefixes(lineStyle)
 	if activeBuffer != nil && !activeBuffer.Empty() {
 		rows := activeBuffer.RenderRowsAtWidth(blockID, rolePrefix, lineStyle, width, ctx)
-		return alignParticipantNarrativeContinuationRows(rows, continuationPrefix)
+		return alignParticipantNarrativeContinuationRows(rows, lineStyle)
 	}
 	mode := RenderFinal
 	policy := MarkdownFull
@@ -39,13 +39,16 @@ func renderParticipantTurnNarrativeRowsWithBuffer(blockID string, raw string, ac
 		BlockID:        blockID,
 		LineStyle:      lineStyle,
 	}).Rows
-	return alignParticipantNarrativeContinuationRows(rows, continuationPrefix)
+	return alignParticipantNarrativeContinuationRows(rows, lineStyle)
 }
 
-func alignParticipantNarrativeContinuationRows(rows []RenderedRow, continuationPrefix string) []RenderedRow {
-	if len(rows) <= 1 || continuationPrefix == "" {
+func alignParticipantNarrativeContinuationRows(rows []RenderedRow, lineStyle tuikit.LineStyle) []RenderedRow {
+	// Assistant rows carry the role prefix only on the first row. Reasoning
+	// rows already include their gutter in the plain-text renderer.
+	if lineStyle != tuikit.LineStyleAssistant || len(rows) <= 1 {
 		return rows
 	}
+	_, continuationPrefix := narrativeLinePrefixes(lineStyle)
 	out := append([]RenderedRow(nil), rows...)
 	seenContent := false
 	for i := range out {
@@ -54,9 +57,6 @@ func alignParticipantNarrativeContinuationRows(rows []RenderedRow, continuationP
 		}
 		if !seenContent {
 			seenContent = true
-			continue
-		}
-		if strings.HasPrefix(out[i].Plain, continuationPrefix) {
 			continue
 		}
 		out[i].Plain = continuationPrefix + out[i].Plain
