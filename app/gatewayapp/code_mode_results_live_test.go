@@ -29,7 +29,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -152,7 +151,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 				}}
 			}
 		}
-		tools = append(tools, toolsearch.NewSource(manager))
+
 		policies, e := policy.NewMemory(policy.NamedMode{ID: "local-acceptance", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
 			var args map[string]any
 			_ = json.Unmarshal(in.Call.Input, &args)

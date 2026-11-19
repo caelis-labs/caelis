@@ -70,14 +70,14 @@ func testJSExecConcurrentTargets(t *testing.T, sameTarget bool) {
 				other.Def = tool.CloneDefinition(def)
 				other.Def.Name += "Other"
 			}
-			code := fmt.Sprintf(`(await tools.search(%q)).json(); (await tools.search(%q)).json(); const replies = await Promise.all([tools.call(%q, {}), tools.call(%q, {})]); return {count: replies.length};`, def.Name, other.Def.Name, def.Name, other.Def.Name)
+			code := fmt.Sprintf(`(await tools.search({name:%q})).json(); (await tools.search({name:%q})).json(); const replies = await Promise.all([tools.call(%q, {}), tools.call(%q, {})]); return {count: replies.length};`, def.Name, other.Def.Name, def.Name, other.Def.Name)
 			targets := []tool.Tool{target}
 			if !sameTarget {
 				targets = append(targets, other)
 			}
 			var spec agent.AgentSpec
 			if mcp {
-				source := &h1Source{items: targets, seen: map[string]bool{}}
+				source := &h1Source{items: targets}
 				driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 					if i == 0 {
 						return h1Script(code)

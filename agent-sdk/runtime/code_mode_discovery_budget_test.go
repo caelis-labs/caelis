@@ -9,7 +9,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
@@ -35,9 +34,9 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 					return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
 				}})
 			}
-			code := `const s=(await tools.search("fixture")).json();if(s.count>1||!s.truncated)throw Error("budget result "+JSON.stringify(s));if(s.count){if(s.tools[0].name!=="fixture__small"||s.tools[0].input_schema.type!=="object")throw Error("partial schema");await tools.call("fixture__small",{});}return s;`
+			code := `const s=(await tools.search({query:"fixture"})).json();if(s.tools.length!==2||s.tools.some(t=>"input_schema" in t))throw Error("directory lost summaries");return s;`
 			if exact {
-				code = `let rejected=false;try{(await tools.search("fixture__huge")).json();}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
+				code = `let rejected=false;try{(await tools.search({name:"fixture__huge"})).json();}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
 			}
 			m := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
@@ -46,7 +45,7 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 				}
 				return nil
 			}}
-			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: m, Tools: []tool.Tool{toolsearch.NewSource(source, toolsearch.NewLexicalRanker()), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
+			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: m, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
 			failed := false
 			for _, e := range events {
 				failed = failed || e.Tool != nil && e.Tool.Name == codemode.ToolName && e.Tool.Status == "failed"

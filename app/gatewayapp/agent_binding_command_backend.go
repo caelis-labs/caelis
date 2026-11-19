@@ -50,7 +50,7 @@ func (s *controlCommandBackend) mutateAgentBindingsAtRevision(ctx context.Contex
 	}
 	next, err := update(doc)
 	if errors.Is(err, agentbinding.ErrRetiredHandle) {
-		return result, errorcode.Wrap(errorcode.InvalidArgument, agentbinding.ErrRetiredHandle.Error(), err)
+		return result, errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 	}
 	if err != nil {
 		return result, errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid Agent binding mutation", err)

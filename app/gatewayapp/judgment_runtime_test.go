@@ -2,22 +2,12 @@ package gatewayapp
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -118,7 +108,7 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 	if _, err := modelprofile.SelectDefault(modelprofile.Configuration{Profiles: profiles}, profile.ID, ""); err == nil {
 		t.Fatal("profile accepted judgment default")
 	}
-	for _, handle := range []agentbinding.Handle{agentbinding.HandleToolSearch, agentbinding.HandleGuardianScreen} {
+	for _, handle := range []agentbinding.Handle{agentbinding.HandleGuardianScreen} {
 		if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: "none"}); err != nil {
 			t.Fatalf("bind %s: %v", handle, err)
 		}
@@ -172,123 +162,5 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 	}
 	if len(document.ModelProfiles.Profiles) != 0 || len(document.AgentBindings.Bindings) != 0 || len(document.Models.ProviderEndpoints) != 0 {
 		t.Fatal("disconnect retained judgment profile, bindings or endpoint")
-	}
-}
-
-func TestBoundToolSearchRankerRevokesDeletedProvider(t *testing.T) {
-	stack := newLocalStateTestHost(t)
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		fmt.Fprint(w, `{"model":"jev-1.13.0","answers":{"0":{"type":"score","score":2,"confidence":1,"probabilities":{"0":0,"1":0,"2":1}}},"usage":{"input_tokens":20,"output_tokens":10}}`)
-	}))
-	defer server.Close()
-	profile, err := stack.connectTestModel(ModelConfig{Provider: "typesafe", API: modelconfig.APISystemOne, Model: typesafe.DefaultModel, BaseURL: server.URL, Token: "fixture"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: agentbinding.HandleToolSearch, ProfileID: profile.ID, Effort: "none"}); err != nil {
-		t.Fatal(err)
-	}
-	ranker := boundToolSearchRanker{resolve: func(ctx context.Context) (judgment.Evaluator, error) {
-		return stack.composition.boundJudgment(ctx, agentbinding.HandleToolSearch)
-	}}
-	candidates := []tool.Definition{{Name: "calendar", Description: "List meetings"}}
-	if _, err := ranker.Rank(t.Context(), "appointments", candidates, 1, toolsearch.SearchModel{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := stack.deleteTestHostModel(t.Context(), session.SessionRef{}, profile.Backend.Provider.ModelConfigID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ranker.Rank(t.Context(), "appointments", candidates, 1, toolsearch.SearchModel{}); err == nil {
-		t.Fatal("deleted provider remains reachable through ranker")
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("provider calls after deletion = %d", calls.Load())
-	}
-}
-
-func TestToolSearchProviderBindingUsesSharedModelResolution(t *testing.T) {
-	stack := newLocalStateTestHost(t)
-	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "tool-specialist"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: agentbinding.HandleToolSearch, ProfileID: profile.ID, Effort: "none"}); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := stack.composition.boundToolSearchAgentModel(t.Context())
-	if err != nil || resolved == nil || resolved.Name() != "tool-specialist" {
-		t.Fatalf("bound ToolSearch model = %v, err=%v", resolved, err)
-	}
-	if _, err := stack.testAgentBindings().ResetAgentBinding(t.Context(), agentbinding.HandleToolSearch); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err = stack.composition.boundToolSearchAgentModel(t.Context())
-	if err != nil || resolved != nil {
-		t.Fatalf("reset ToolSearch model = %v, err=%v", resolved, err)
-	}
-}
-
-func TestToolSearchProviderBindingEncodesExplicitSpeed(t *testing.T) {
-	// The canonical OpenAI endpoint advertises Fast. Block any default-client
-	// request if the synthetic transport is accidentally disconnected.
-	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
-	t.Setenv("NO_PROXY", "")
-	stack := newLocalStateTestHost(t)
-	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", Token: "fixture",
-		ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !profile.SupportsFast() {
-		t.Fatalf("connected profile does not advertise Fast: %+v", profile.Speed)
-	}
-	var requests []map[string]any
-	stack.composition.lookup.resolveTransportHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
-		return &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-			raw, err := io.ReadAll(req.Body)
-			if err != nil {
-				return nil, err
-			}
-			var body map[string]any
-			if err := json.Unmarshal(raw, &body); err != nil {
-				return nil, err
-			}
-			requests = append(requests, body)
-			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"gpt-6-sol","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)), Request: req}, nil
-		})}, nil
-	}
-	for _, speed := range []string{"fast", "standard"} {
-		if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{
-			Handle: agentbinding.HandleToolSearch, ProfileID: profile.ID, Effort: "high", Speed: speed,
-		}); err != nil {
-			t.Fatal(err)
-		}
-		llm, err := stack.composition.boundToolSearchAgentModel(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, err := range model.Generate(t.Context(), llm, &model.Request{Reasoning: model.ReasoningConfig{Effort: "low"}, ServiceTier: model.ServiceTierPriority}) {
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		if len(requests) == 0 {
-			t.Fatal("bound ToolSearch model did not reach provider")
-		}
-		body := requests[len(requests)-1]
-		reasoning, _ := body["reasoning"].(map[string]any)
-		if reasoning["effort"] != "high" {
-			t.Fatalf("speed=%s reasoning=%#v, want high", speed, reasoning)
-		}
-		if speed == "fast" && body["service_tier"] != "priority" {
-			t.Fatalf("fast request service_tier=%#v, want priority", body["service_tier"])
-		}
-		if speed == "standard" && body["service_tier"] != nil {
-			t.Fatalf("standard request service_tier=%#v, want omitted", body["service_tier"])
-		}
 	}
 }

@@ -15,7 +15,7 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	frame := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"/team · Team Configuration",
+		"/team", "Team Configuration", "[x]",
 		"Binding set",
 		"Participant profiles",
 		"orbit",
@@ -99,20 +99,6 @@ func TestTeamOverlayShowsConflictingRoleWithoutDroppingIt(t *testing.T) {
 		if service.reset != "" || service.bindRequest.Handle != "" {
 			t.Fatal("displaying a conflict mutated the role")
 		}
-	}
-}
-
-func TestSubagentOverlayToolSearchDefaultUsesMainAgentModel(t *testing.T) {
-	model, _ := newSubagentOverlayTestModel(t)
-	selectSubagentTestRow(t, model, "handle:tool-search")
-	frame := ansi.Strip(model.renderSubagentOverlay())
-	if !strings.Contains(frame, "Main Agent model") || strings.Contains(frame, "Lexical (zero-token)") {
-		t.Fatalf("ToolSearch default row is misleading\n%s", frame)
-	}
-	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	frame = ansi.Strip(model.renderSubagentOverlay())
-	if !strings.Contains(frame, "Use the Main Agent model for MCP discovery") || strings.Contains(frame, "Lexical (zero-token)") {
-		t.Fatalf("ToolSearch reset choice is misleading\n%s", frame)
 	}
 }
 
@@ -466,4 +452,28 @@ func modelHasBlockKind(model *Model, kind BlockKind) bool {
 		}
 	}
 	return false
+}
+
+func TestTeamCloseHoverMatchesButtonBounds(t *testing.T) {
+	model, _ := newSubagentOverlayTestModel(t)
+	if model.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatal("team does not receive unpressed mouse motion")
+	}
+	idle := model.renderSubagentOverlay()
+	g := model.subagentOverlay.geometry
+	if strings.Contains(ansi.Strip(idle), "Type to search") {
+		t.Fatal("empty filter occupies a row")
+	}
+	move := func(x int) { model.handleSubagentOverlayMouse(tea.MouseMotionMsg(tea.Mouse{X: x, Y: g.closeY})) }
+	for x := g.closeX; x < g.closeX+3; x++ {
+		move(x)
+		hovered := model.renderSubagentOverlay()
+		if !model.subagentOverlay.closeButton.hovered || hovered == idle || ansi.Strip(hovered) != ansi.Strip(idle) {
+			t.Fatal("close hover did not change only its style")
+		}
+	}
+	move(g.closeX - 1)
+	if model.subagentOverlay.closeButton.hovered || model.renderSubagentOverlay() != idle {
+		t.Fatal("hover leaked outside close button")
+	}
 }

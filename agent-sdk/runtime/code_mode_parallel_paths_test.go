@@ -29,17 +29,12 @@ func assertScriptSearchOmitsParallelCapability(t *testing.T, events []*session.E
 				if output.JSON == nil {
 					continue
 				}
-				var value struct {
-					Tools []map[string]json.RawMessage `json:"tools"`
-				}
-				if json.Unmarshal(output.JSON.Value, &value) != nil || len(value.Tools) == 0 {
+				var entry map[string]json.RawMessage
+				if json.Unmarshal(output.JSON.Value, &entry) != nil || entry["input_schema"] == nil {
 					continue
 				}
-				for _, entry := range value.Tools {
-					_, present := entry["parallel_safe"]
-					if present || entry["input_schema"] == nil {
-						t.Fatalf("wrong final js_exec search result: %s", output.JSON.Value)
-					}
+				if entry["parallel_safe"] != nil {
+					t.Fatalf("leaked concurrency flag: %s", output.JSON.Value)
 				}
 				found++
 				t.Logf("final model-facing js_exec result: %s", output.JSON.Value)
@@ -68,7 +63,7 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 					} else if !bytes.Equal(nativePrefix, raw) {
 						t.Fatal("parallel flag changed native declaration prefix")
 					}
-					return h1Script(`return (await tools.search("NativeRead")).json();`)
+					return h1Script(`return (await tools.search({name:"NativeRead"})).json();`)
 				}
 				return nil
 			}}
@@ -85,7 +80,7 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 			}
 			driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return h1Script(`return (await tools.search("synthetic lookup value")).json();`)
+					return h1Script(`return (await tools.search({name:"a__target"})).json();`)
 				}
 				return nil
 			}}
@@ -100,15 +95,12 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 			// the current wrapped definition.
 			driver = &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return h1Script(`return (await tools.search("z__target")).json();`)
+					return h1Script(`return (await tools.search({name:"z__target"})).json();`)
 				}
 				return nil
 			}}
 			events, _ = runCodeMode(t, store, active, h1Spec(source, driver), nil, nil)
 			assertScriptSearchOmitsParallelCapability(t, events)
-			if source.snapshot().QueryRequests != 1 || source.snapshot().ExactRequests != 1 {
-				t.Fatalf("paths not exercised: %+v", source.snapshot())
-			}
 		})
 	}
 }

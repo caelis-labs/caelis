@@ -17,7 +17,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -94,7 +93,7 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 			})}
 			llm := codeModeModel(false)
 			spec := agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
-				snapshot := agent.ModelRequestSnapshot{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration}, DeferredTools: manager, Revision: "generation-1", Validate: func(context.Context) (func(), error) {
+				snapshot := agent.ModelRequestSnapshot{Model: llm, Tools: []tool.Tool{declaration}, DeferredTools: manager, Revision: "generation-1", Validate: func(context.Context) (func(), error) {
 					if stale.Load() {
 						return nil, tool.NewError(tool.ErrorCodeStaleRevision, "generation revoked")
 					}

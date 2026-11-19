@@ -28,7 +28,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -193,7 +192,7 @@ func TestCodeModeLive(t *testing.T) {
 		}
 		tools = kept
 	}
-	tools = append(tools, toolsearch.NewSource(manager))
+
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(stateRoot, "sessions")})
 	var active session.Session
 	if resume {

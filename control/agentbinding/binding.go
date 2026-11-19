@@ -257,7 +257,7 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 func Bind(current Configuration, raw Binding, profiles modelprofile.Configuration) (Configuration, error) {
 	binding := Normalize(raw)
 	if IsRetired(binding.Handle) {
-		return Configuration{}, ErrRetiredHandle
+		return Configuration{}, retiredHandleError(binding.Handle)
 	}
 	if !isPersistedHandleIn(current, binding.Handle) {
 		if binding.Handle == HandleSelf {
@@ -285,7 +285,7 @@ func Bind(current Configuration, raw Binding, profiles modelprofile.Configuratio
 func Reset(current Configuration, handle Handle) (Configuration, error) {
 	handle = NormalizeHandle(handle)
 	if IsRetired(handle) {
-		return Configuration{}, ErrRetiredHandle
+		return Configuration{}, retiredHandleError(handle)
 	}
 	if !isPersistedHandleIn(current, handle) {
 		return Configuration{}, fmt.Errorf("control/agentbinding: handle %q cannot be reset", handle)

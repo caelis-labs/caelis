@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
-	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
 
 type mcpRoutingModel struct {
@@ -69,7 +67,7 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 		}
 		return []model.ToolCall{call}
 	}}
-	a, err := NewWithTools("chat", llm, []tool.Tool{toolsearch.NewSource(source, fixtureSearchRanker{})}, "")
+	a, err := NewWithTools("chat", llm, []tool.Tool{tool.NewMCPCallTool()}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +76,6 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 	payload := map[string]any{"tools": []any{map[string]any{"name": remote.Definition().Name, "binding": binding}}}
 	legacy := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "old-search", Name: "ToolSearch", Status: "completed", Output: payload}, Meta: map[string]any{"caelis.tool_exposure.v1": map[string]any{"version": 1, "active": []tool.Binding{binding}}}}
 	failures := 0
-	staleHints := 0
 	ctx := agent.NewContext(agent.ContextSpec{Context: t.Context(), Session: session.Session{SessionRef: session.SessionRef{SessionID: "legacy"}}, Events: []*session.Event{legacy}})
 	for e, err := range a.Run(ctx) {
 		if err != nil {
@@ -86,16 +83,9 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 		}
 		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Status == "failed" {
 			failures++
-			if e.Tool.Output["error_code"] == string(tool.ErrorCodeStaleRevision) {
-				staleHints++
-				hint, _ := e.Tool.Output["system_hint"].(string)
-				if !strings.Contains(hint, "tool_search") || strings.Contains(hint, "tools.search") {
-					t.Fatalf("wrong legacy discovery hint: %+v", e.Tool.Output)
-				}
-			}
 		}
 	}
-	if calls != 2 || failures != 5 || staleHints != 1 {
+	if calls != 0 || failures != 9 {
 		t.Fatalf("calls=%d failures=%d", calls, failures)
 	}
 }
@@ -108,7 +98,7 @@ func TestSameBatchSearchCannotAuthorizeUndiscoveredSibling(t *testing.T) {
 		}
 		return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}, {ID: "call", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__read","arguments":{}}`}}
 	}}
-	a, err := NewWithTools("chat", llm, []tool.Tool{toolsearch.NewSource(source, fixtureSearchRanker{})}, "")
+	a, err := NewWithTools("chat", llm, []tool.Tool{tool.NewMCPCallTool()}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +157,7 @@ func TestMCPRoutingRejectsDuplicateCallIDsBeforeDispatch(t *testing.T) {
 				}
 			}}
 			local := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: invoke}
-			a, err := NewWithTools("chat", llm, []tool.Tool{toolsearch.NewSource(source, fixtureSearchRanker{}), local}, "")
+			a, err := NewWithTools("chat", llm, []tool.Tool{tool.NewMCPCallTool(), local}, "")
 			if err != nil {
 				t.Fatal(err)
 			}

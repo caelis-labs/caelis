@@ -42,13 +42,8 @@ func TestSupportsProfileAllowsACPReviewerButKeepsGuardianProviderOnly(t *testing
 	if !SupportsProfile(HandleGuardian, provider) || SupportsProfile(HandleGuardian, acp) {
 		t.Fatal("Guardian profile eligibility is not provider-only")
 	}
-	if !SupportsProfile(HandleToolSearch, provider) || SupportsProfile(HandleToolSearch, acp) {
-		t.Fatal("ToolSearch did not accept a provider generation model only")
-	}
-	judgment := provider
-	judgment.Judgment = true
-	if !SupportsProfile(HandleToolSearch, judgment) {
-		t.Fatal("ToolSearch did not accept a typed judgment")
+	if SupportsProfile(HandleToolSearch, provider) || !IsRetired(HandleToolSearch) {
+		t.Fatal("retired search remains configurable")
 	}
 }
 

@@ -9,16 +9,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/google/uuid"
 )
-
-type toolSearchInvocationObserverKey struct{}
 
 type toolObserver struct {
 	results chan<- tool.Result
@@ -121,9 +116,6 @@ func (a *Agent) executeToolCallAdmitted(
 	}
 	selectedTool, bindingErr := prepared.target, prepared.err
 	if bindingErr != nil {
-		if call.Name == tool.MCPCallToolName {
-			bindingErr = mcpdiscovery.WithEntryHint(bindingErr, tool.ToolSearchToolName)
-		}
 		rawOutput := tool.ErrorPayload(bindingErr)
 		result := tool.Result{
 			ID:      call.ID,
@@ -138,16 +130,6 @@ func (a *Agent) executeToolCallAdmitted(
 		return message, event, nil
 	}
 
-	if tool.IsToolSearchDefinition(selectedTool.Definition()) {
-		observer, _ := ctx.Value(toolSearchInvocationObserverKey{}).(func(model.Invocation))
-		var admission func(context.Context, *model.Request) error
-		if admit := a.admitModelRequest; admit != nil {
-			admission = func(ctx context.Context, _ *model.Request) error {
-				return admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString()})
-			}
-		}
-		ctx = toolsearch.WithInvocationAccounting(ctx, observer, admission)
-	}
 	invocation := prepared.call
 	invocation.ModelStep = step
 	invocation.RuntimeModel = a.model
@@ -158,15 +140,11 @@ func (a *Agent) executeToolCallAdmitted(
 	complete, _ := tool.CloneResult(result, nil)
 
 	if err != nil {
-		if tool.IsMCPDefinition(selectedTool.Definition()) {
-			err = mcpdiscovery.WithEntryHint(err, tool.ToolSearchToolName)
-		}
 		var normalized *codemode.ExecutionError
 		if selectedTool.Definition().Metadata[tool.MetadataToolKind] != codemode.ToolKind || !errors.As(err, &normalized) {
 			result = modelVisibleToolErrorResult(call, result, err)
 		}
 	}
-	result = a.admitToolSearchResult(ctx, selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	originalView := model.CloneMessage(message)

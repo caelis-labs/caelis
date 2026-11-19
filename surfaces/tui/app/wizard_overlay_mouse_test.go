@@ -60,7 +60,7 @@ func TestWizardHoverAndButtonsAcrossConnectSteps(t *testing.T) {
 				}
 				m.Update(tea.MouseMotionMsg{X: target.x, Y: target.y})
 				hovered := m.View().Content
-				if m.wizardOverlay.hovered != target.name || hovered == baseline.Content {
+				if (target.name == "close" && !m.wizardOverlay.closeButton.hovered || target.name != "close" && m.wizardOverlay.hovered != target.name) || hovered == baseline.Content {
 					t.Fatalf("%s has no hover feedback", target.name)
 				}
 				terminal := vt.NewSafeEmulator(m.width, m.height)

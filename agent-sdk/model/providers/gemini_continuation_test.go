@@ -1,21 +1,18 @@
 package providers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sync/atomic"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
 
 // A dependency update must not turn an incomplete response into additional
 // billed generations hidden inside one Runtime admission and usage receipt.
 func TestGeminiContinuationDoesNotBypassInvocationBoundary(t *testing.T) {
-	for _, mode := range []string{"nonstream", "stream", "toolsearch", "websearch"} {
+	for _, mode := range []string{"nonstream", "stream", "websearch"} {
 		t.Run(mode, func(t *testing.T) {
 			var requests atomic.Int32
 			server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -23,7 +20,7 @@ func TestGeminiContinuationDoesNotBypassInvocationBoundary(t *testing.T) {
 				if requests.Add(1) > 1 {
 					wire = `{"candidates":[{"content":{"role":"model","parts":[{"text":"continued"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":13,"candidatesTokenCount":5,"totalTokenCount":18}}`
 				}
-				if mode == "stream" || mode == "toolsearch" {
+				if mode == "stream" {
 					w.Header().Set("Content-Type", "text/event-stream")
 					_, _ = fmt.Fprintf(w, "data: %s\n\n", wire)
 				} else {
@@ -41,16 +38,6 @@ func TestGeminiContinuationDoesNotBypassInvocationBoundary(t *testing.T) {
 				out, err := llm.(*geminiLLM).SearchWeb(ctx, model.WebSearchRequest{Query: "synthetic"})
 				if err != nil || out.Answer != "partial" || out.Usage.TotalTokens != 18 {
 					t.Fatalf("search=%+v err=%v", out, err)
-				}
-			case "toolsearch":
-				names, err := toolsearch.NewAgentRanker().Rank(ctx, "lookup", []tool.Definition{{Name: "docs__lookup", Description: "Lookup"}}, 1, toolsearch.SearchModel{
-					Model: llm,
-					ReadSchema: func(context.Context, string) (tool.Definition, error) {
-						return tool.Definition{}, fmt.Errorf("unexpected schema read")
-					},
-				})
-				if err == nil || len(names) != 0 {
-					t.Fatalf("incomplete selection: names=%v err=%v", names, err)
 				}
 			default:
 				var final *model.Response

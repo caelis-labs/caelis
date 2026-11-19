@@ -100,14 +100,14 @@ func TestJSExecSerializesDefaultTargetPromiseAll(t *testing.T) {
 				unblock()
 				return tool.Result{}, nil
 			}}
-			code := fmt.Sprintf(`await tools.search(%q); const pending = Array.from({length:%d}, (_, index) => tools.call(%q, {index})); await tools.call("Release", {}); await Promise.all(pending); return {count:pending.length};`, def.Name, count, def.Name)
+			code := fmt.Sprintf(`await tools.search({name:%q}); const pending = Array.from({length:%d}, (_, index) => tools.call(%q, {index})); await tools.call("Release", {}); await Promise.all(pending); return {count:pending.length};`, def.Name, count, def.Name)
 			script := func() []model.ToolCall {
 				raw, _ := json.Marshal(map[string]any{"code": code, "yield_time_ms": 60000})
 				return []model.ToolCall{{ID: "parallel-state", Name: codemode.ToolName, Args: string(raw)}}
 			}
 			var spec agent.AgentSpec
 			if mcp {
-				source := &h1Source{items: []tool.Tool{target}, seen: map[string]bool{}}
+				source := &h1Source{items: []tool.Tool{target}}
 				driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 					if i == 0 {
 						return script()

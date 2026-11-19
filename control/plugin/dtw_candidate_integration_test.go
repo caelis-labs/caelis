@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
@@ -65,22 +64,6 @@ func TestDesktopWorldStandardCandidateInstallAndProtocol(t *testing.T) {
 	var methods map[string]json.RawMessage
 	if err := json.Unmarshal(api["methods"], &methods); err != nil || len(methods) != 1 || methods["windows"] == nil {
 		t.Fatalf("selected api = %s, %v", api["methods"], err)
-	}
-
-	search := toolsearch.NewWithRanker(manager.Tools(), dtwCandidateRanker{})
-	if search == nil {
-		t.Fatal("DTW MCP tools were absent from ToolSearch catalog")
-	}
-	found, err := search.Call(ctx, tool.Call{ID: "search", Name: tool.ToolSearchToolName, Input: []byte(`{"query":"Desktop World tools","limit":2}`)})
-	if err != nil || len(found.Content) != 1 || found.Content[0].JSON == nil {
-		t.Fatalf("ToolSearch = %+v, %v", found, err)
-	}
-	var discovery struct {
-		Count int                     `json:"count"`
-		Tools []struct{ Name string } `json:"tools"`
-	}
-	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 || discovery.Tools[0].Name != all["exec"].Definition().Name {
-		t.Fatalf("ToolSearch discovery = %+v, %v", discovery, err)
 	}
 
 	t.Run("app state and original ledger", func(t *testing.T) {
@@ -152,22 +135,4 @@ func dtwCandidateState(t *testing.T, data map[string]json.RawMessage, want int) 
 	if err := json.Unmarshal(data["value"], &value); err != nil || value.Result != want || value.Calls != 0 || string(data["status"]) != `"completed"` {
 		t.Fatalf("state %d: %+v, %v", want, data, err)
 	}
-}
-
-// Production uses its restricted model selector; this checks the actual
-// package's discoverable exec definition without another model dependency.
-type dtwCandidateRanker struct{}
-
-func (dtwCandidateRanker) Rank(ctx context.Context, _ string, definitions []tool.Definition, _ int, selected toolsearch.SearchModel) ([]string, error) {
-	var names []string
-	for _, definition := range definitions {
-		schema, err := selected.ReadSchema(ctx, definition.Name)
-		if err != nil {
-			return nil, err
-		}
-		if schema.Metadata[tool.MetadataMCPTool] == "exec" {
-			names = append(names, definition.Name)
-		}
-	}
-	return names, nil
 }

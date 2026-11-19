@@ -23,7 +23,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -391,7 +390,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	tools = append(tools, toolsearch.NewSource(mcpMgr, newBoundToolSearchRanker(s)))
 	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{
 		Sandbox: sandboxRuntime,
 	})

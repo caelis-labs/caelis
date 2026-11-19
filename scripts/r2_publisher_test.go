@@ -94,7 +94,7 @@ if [[ "$operation" == head-object ]]; then
   if [[ "$SCENARIO" == *no-such-key ]]; then code=NoSuchKey; fi
   echo "${prefix}An error occurred (${code}) when calling the HeadObject operation: Not Found" >&2; exit 1
  fi
- if [[ "$query" == ContentLength ]]; then wc -c < "$path"; else echo '{}'; fi
+ if [[ "$query" == ContentLength ]]; then printf '%d\n' "$(wc -c < "$path")"; else echo '{}'; fi
 elif [[ "$operation" == put-object ]]; then
  [[ "$condition" == '*' ]] || exit 97
  if [[ "$SCENARIO" == race ]]; then echo competitor > "$path"; fi

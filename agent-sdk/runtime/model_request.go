@@ -41,7 +41,6 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 			}
 		}
 		prepareCtx = context.WithValue(prepareCtx, codeModeValidationKey{}, validateCodeMode)
-		prepareCtx = context.WithValue(prepareCtx, codeModeModelAdmissionKey{}, snapshot.Admit)
 		if r.compaction.Enabled {
 			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, deferredTools: snapshot.DeferredTools, resolveIdle: source}
 			if admit := snapshot.Admit; admit != nil {
@@ -94,9 +93,6 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		}
 		spec.Metadata[codeModeCatalogKey] = catalog
 	}
-	if !hasCodeMode {
-		spec.Tools = tool.WithMCPCallTool(spec.Tools)
-	}
 	modeName, _ := r.policyForName(ctx, r.policyMode(*spec))
 	authority, _ := ctx.Value(modelRequestAuthorityKey{}).(*modelRequestAuthority)
 	if authority == nil && r.compaction.Enabled {
@@ -145,27 +141,27 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		checkBinding = source.CheckToolBinding
 	}
 	validate, _ := ctx.Value(codeModeValidationKey{}).(func(context.Context) (func(), error))
-	admit, _ := ctx.Value(codeModeModelAdmissionKey{}).(func(context.Context, agent.ModelRequestAdmission) error)
+	var discovery tool.Tool
 	for i, one := range spec.Tools {
-		if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
-			spec.Tools[i] = codeModeDiscoveryTool{base: one, lookup: lookup, runtime: r, active: active, turnID: turnID, admit: admit}
-			continue
-		}
 		if declaration, ok := one.(*codemode.Tool); ok {
+			discovery = codeModeDiscoveryTool{lookup: lookup}
 			available := func() []tool.Tool { return codeModeAvailableTools(allTools, spec.DeferredTools) }
 			spec.Tools[i] = runtimeCodeModeTool{runtime: r, tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, availableTools: available, lookup: lookup, validate: validate, checkBinding: checkBinding}
 		}
 	}
-	allTools = wrap(spec.Tools)
-	spec.Tools = allTools
-	if hasCodeMode {
-		visible := make([]tool.Tool, 0, len(allTools))
-		for _, one := range allTools {
-			if one != nil && !tool.IsToolSearchDefinition(one.Definition()) && !tool.IsMCPCallDefinition(one.Definition()) {
-				visible = append(visible, one)
+	if discovery != nil {
+		visible := make([]tool.Tool, 0, len(spec.Tools))
+		for _, candidate := range spec.Tools {
+			if candidate != nil && !tool.IsToolSearchDefinition(candidate.Definition()) && !tool.IsMCPCallDefinition(candidate.Definition()) {
+				visible = append(visible, candidate)
 			}
 		}
 		spec.Tools = visible
+	}
+	spec.Tools = wrap(spec.Tools)
+	allTools = spec.Tools
+	if discovery != nil {
+		allTools = append(allTools, wrap([]tool.Tool{discovery})...)
 	}
 	if spec.DeferredTools != nil {
 		spec.DeferredTools = &deferredToolSource{source: spec.DeferredTools, wrap: wrap}

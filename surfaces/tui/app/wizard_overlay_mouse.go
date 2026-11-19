@@ -14,8 +14,6 @@ func (m *Model) wizardMouseTarget(mouse tea.Mouse) string {
 		return ""
 	}
 	switch {
-	case m.wizardCloseEnabled() && mouse.Y == g.closeY && mouse.X >= g.closeX && mouse.X < g.closeX+3:
-		return "close"
 	case g.backWidth > 0 && mouse.Y == g.backY && mouse.X >= g.backX && mouse.X < g.backX+g.backWidth:
 		return "back"
 	case g.actionWidth > 0 && m.wizardActionEnabled() && mouse.Y == g.actionY && mouse.X >= g.actionX && mouse.X < g.actionX+g.actionWidth:
@@ -32,9 +30,22 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 	s := m.wizardOverlay
 	if !m.wizardCloseEnabled() {
 		s.hovered, s.pressed = "", ""
+		s.closeButton = overlayCloseButton{}
 		return nil
 	}
 	mouse, g := msg.Mouse(), s.geometry
+	if !s.text.selecting {
+		if handled, close := s.closeButton.mouse(msg, g.closeX, g.closeY); handled {
+			s.hovered, s.pressed = "", ""
+			if close {
+				if s.pending || m.isWizardAuthChoice() {
+					return m.backWizardOverlay()
+				}
+				m.clearWizard()
+			}
+			return nil
+		}
+	}
 	target := m.wizardMouseTarget(mouse)
 	inside := mouse.X >= g.contentX && mouse.X < g.contentX+g.contentWidth && mouse.Y >= g.y && mouse.Y < g.y+g.height
 	switch msg.(type) {
@@ -99,12 +110,6 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 			return nil
 		}
 		switch target {
-		case "close":
-			if s.pending || m.isWizardAuthChoice() {
-				return m.backWizardOverlay()
-			}
-			m.clearWizard()
-			return nil
 		case "back":
 			return m.backWizardOverlay()
 		case "action":

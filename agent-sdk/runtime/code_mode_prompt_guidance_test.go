@@ -48,7 +48,7 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 		"Use block-local let/const", "Top-level bindings usually persist across script calls, but may be cleared",
 		"Assign to let, not const", "Redeclare only if both declarations are var/function",
 		"{ const body = await Read(args); return body.json().content; }", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)",
-		"tools.search({name})", "{query} for capabilities", "input_schema", "output_schema", "call_path",
+		"tools.search({name})", "{query?,after?}", "input_schema", "output_schema", "call_path",
 		"Return the original Body for the whole reply", "result.text()", "result.json()", "original result.media references", "omit undefined",
 		"runtime.state()", "reset:true", "error.message, error.code and error.result",
 		"stale_revision, refresh the exact schema and rebuild args", "Check child outcomes before retrying", "never replay unknown outcomes",

@@ -12,12 +12,12 @@ type ToolVisibility struct {
 func NewToolVisibility(tools []Tool) ToolVisibility { return NewToolVisibilityForModel(tools, nil) }
 func NewToolVisibilityForModel(tools []Tool, llm model.LLM) ToolVisibility {
 	v := ToolVisibility{byName: map[string]Tool{}}
-	for _, one := range WithMCPCallTool(tools) {
+	for _, one := range tools {
 		if one == nil {
 			continue
 		}
 		def := one.Definition()
-		if def.Name == "" || IsMCPDefinition(def) || (llm != nil && !AvailableForModel(one, llm)) {
+		if def.Name == "" || IsToolSearchDefinition(def) || IsMCPDefinition(def) || (llm != nil && !AvailableForModel(one, llm)) {
 			continue
 		}
 		v.tools = append(v.tools, one)

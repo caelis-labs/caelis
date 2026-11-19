@@ -514,17 +514,13 @@ collisions use the qualified
 `tools.native[original]`, `tools.mcp[server][remoteTool]`, or
 `tools.plugins[plugin][server][remoteTool]` paths; `tools.call(name,args)` remains
 available by canonical name. Every Goja execution snapshots current Session tool
-names. Search separates exact name/method lookup from capability queries and
-returns complete schemas, original names and a usable `call_path`. It can also
-explicitly refresh a stale schema. SDK entry points without Code Mode expose fixed `tool_search` and
-`mcp_call` definitions; `mcp_call` remains discovery-gated and requires a prior
-canonical search binding.
+names. Directory pages contain only names and descriptions. Exact name lookup returns a complete schema and refreshes its binding. Discovery is available only in Code Mode.
 
 Code Mode reconstructs MCP bindings from canonical search receipts and typed nested ToolCall facts across fresh workers, compaction
 and resume. A
 first direct call with no prior binding pins the current real Tool identity/version.
 A later change to the bound MCP source/schema fails stale until a successful
-`tools.search(name)` explicitly reloads the schema and binding. Historical name-only discovery does not
+`tools.search({name})` explicitly reloads the schema and binding. Historical name-only discovery does not
 authorize non-Code Mode `mcp_call`. Search grants no execution permission, and an
 unknown effect is never replayed. Manager name-collision losers are absent from the
 Session tool set and cannot be restored through qualified paths.
@@ -573,43 +569,9 @@ a single-use permit checks cancellation, revocation and current Policy validity
 under a short owner lock. No permission lock spans MCP I/O. A newer revocation
 or source revision invalidates the old consent; a late response cannot restore it.
 
-ToolSearch defaults to a private model selector. Every ready tool's name and
-description in the current scope is considered, with no initial tool schemas or
-parent conversation. A model request holds at most 96 KiB of catalog metadata
-and respects the declared model context window; larger catalogs are covered in
-bounded batches, then batch selections are compared. A complete catalog above
-4 MiB or a single candidate that cannot fit one request fails explicitly. Its
-only callable tool reads one named candidate's current schema, from that
-request's catalog. One out-of-batch name can receive a paired error for
-correction, with no schema read; repeated violations fail. Invalid attempts
-consume the existing read budget. It can inspect at most four names in five model steps per
-batch.
-The selector inherits the main request's resolved model, reasoning and service
-tier unless Control binds a separate provider model. It never inherits main tools.
-Its model requests stream privately and use only completed responses for schema
-reads and final selection. There is no ToolSearch total-duration deadline. The
-caller can cancel the work; a six-minute period without streamed model progress
-also cancels the current request. Reasoning and tool-argument deltas count as
-progress; empty protocol frames do not. Provider retry and attempt accounting remain in the shared model path. Both
-entry routes admit every selector provider attempt and retain durable private
-usage receipts, including attempts completed after foreground yield or before
-a later request is rejected.
-Provider adapters require their protocol's terminal signal before publishing a
-streamed final response; a transport EOF after partial output is an error.
-
-An explicit ToolSearch Jev binding uses typed relevance scores over the same
-complete name/description catalog. Jev has no conversational tool loop and does
-not inspect schemas. Every candidate is scored once in a batch of at most 24
-questions and 24,000 encoded bytes. At most four batch requests run together;
-each has a 10-second deadline. The complete catalog has the same 4 MiB coverage
-budget. An empty valid selection means no match. MCP Manager retains all ready
-tools without a fixed per-server or aggregate count cap; malformed individual
-definitions still fail their normal validation.
-Model, Jev, schema, budget, and invalid-selection errors remain errors; they do
-not fall back to keyword matching. `NewLexicalRanker` is only an explicit SDK
-auxiliary and is never selected by Core assembly. Returned names must still match
-the current scoped registered definitions before normal Runtime admission.
-Selection never grants execution permission or changes replay authority.
+Code Mode discovery browses the current ready directory without invoking a model.
+Directory pages carry only names and descriptions. Exact lookup returns schema
+and binding information but never grants execution permission. See [Code Mode](code-mode.md).
 
 WebSearch preserves `results` order for legacy
 positional references. Citation ranges use zero-based `result_indices` for

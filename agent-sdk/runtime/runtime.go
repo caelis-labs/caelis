@@ -133,7 +133,7 @@ func New(cfg Config) (*Runtime, error) {
 		cfg.HookPurpose = agent.HookPurposeChat
 	}
 	switch cfg.HookPurpose {
-	case agent.HookPurposeChat, agent.HookPurposeToolSearch, agent.HookPurposeCompaction, agent.HookPurposeSystemAgent:
+	case agent.HookPurposeChat, agent.HookPurposeCompaction, agent.HookPurposeSystemAgent:
 	default:
 		return nil, fmt.Errorf("runtime: invalid hook purpose %q", cfg.HookPurpose)
 	}

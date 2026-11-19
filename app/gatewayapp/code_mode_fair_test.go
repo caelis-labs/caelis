@@ -33,7 +33,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -316,9 +315,6 @@ func (m *fairTrace) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		kind := "main"
-		if len(req.Tools) == 1 && req.Tools[0].Function != nil && req.Tools[0].Function.Name == "InspectToolSchema" {
-			kind = "selector"
-		}
 		link.Generation = id
 		link.Kind = kind
 		ctx = context.WithValue(ctx, fairContextKey{}, link)
@@ -572,7 +568,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 		}
 		kept = append(kept, one)
 	}
-	tools = append(kept, toolsearch.NewSource(manager))
+	tools = kept
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "code-mode-fair", Workspace: session.WorkspaceRef{Key: plan.ID, CWD: workspace}})
 	if err != nil {

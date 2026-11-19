@@ -18,7 +18,7 @@ func TestJSExecStaticDiscoveredUnionStillRejectsDuplicateRegistrations(t *testin
 	driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`return (await tools.search("a__target")).json();`)
+			return h1Script(`return (await tools.search({name:"a__target"})).json();`)
 		case 1:
 			return h1Script(`await tools.call("a__target",{value:1});`)
 		}
@@ -28,7 +28,7 @@ func TestJSExecStaticDiscoveredUnionStillRejectsDuplicateRegistrations(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "duplicate registration", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{s.items[0], s.items[0], h1Search(s), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
+	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "duplicate registration", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{s.items[0], s.items[0], &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
 	if err == nil {
 		err = run.Handle.WaitCompletion(t.Context())
 	}
@@ -46,7 +46,7 @@ func TestJSExecStaticAndDeferredUnionKeepsBothBindings(t *testing.T) {
 	driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`return [(await tools.search("a__target")).json(),(await tools.search("z__target")).json()];`)
+			return h1Script(`return [(await tools.search({name:"a__target"})).json(),(await tools.search({name:"z__target"})).json()];`)
 		case 1:
 			return h1Script(`await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
 		}
@@ -55,7 +55,7 @@ func TestJSExecStaticAndDeferredUnionKeepsBothBindings(t *testing.T) {
 	spec := h1Spec(s, driver)
 	spec.Tools = append([]tool.Tool{s.items[0]}, spec.Tools...)
 	runCodeMode(t, store, active, spec, nil, nil)
-	if stats := s.snapshot(); stats.Effects != 2 || stats.ExactRequests != 2 || stats.QueryRequests != 0 {
+	if stats := s.snapshot(); stats.Effects != 2 {
 		t.Fatalf("static/deferred union lost binding: %+v", stats)
 	}
 }

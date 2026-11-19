@@ -142,6 +142,13 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	geometry := state.geometry
 	inside := mouse.X >= geometry.x && mouse.X < geometry.x+geometry.width &&
 		mouse.Y >= geometry.y && mouse.Y < geometry.y+geometry.height
+	if handled, close := state.closeButton.mouse(msg, geometry.closeX, geometry.closeY); handled {
+		state.pressedKey = ""
+		if close {
+			m.subagentOverlay = nil
+		}
+		return true, nil
+	}
 	switch msg.(type) {
 	case tea.MouseWheelMsg:
 		if !inside {
@@ -171,10 +178,6 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 			state.pressedKey = ""
 			return true, nil
 		}
-		if mouse.Y == geometry.closeY && mouse.X >= geometry.closeX-1 && mouse.X <= geometry.closeX+1 {
-			state.pressedKey = "close"
-			return true, nil
-		}
 		if index := subagentRowAtY(geometry.rows, mouse.Y); index >= 0 && index < len(state.rows) {
 			state.index = index
 			state.pressedKey = state.rows[index].key
@@ -187,10 +190,6 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		pressed := state.pressedKey
 		state.pressedKey = ""
 		if !inside {
-			return true, nil
-		}
-		if pressed == "close" && mouse.Y == geometry.closeY && mouse.X >= geometry.closeX-1 && mouse.X <= geometry.closeX+1 {
-			m.subagentOverlay = nil
 			return true, nil
 		}
 		if index := subagentRowAtY(geometry.rows, mouse.Y); index >= 0 && index < len(state.rows) {

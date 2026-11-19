@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -70,14 +69,14 @@ func TestJSExecMCPReplyPreservesSelectedMediaAndRawJSON(t *testing.T) {
 				continued.Add(1)
 				return tool.Result{}, nil
 			}}
-			code := `(await tools.search("live__diagnose")).json();
+			code := `(await tools.search({name:"live__diagnose"})).json();
 let reply, caught=false;
 try { reply=await tools.call("live__diagnose",{}); }
 catch(e) { reply=e.reply; caught=true; }
 await tools.call("Continue",{});
 return {caught,selected:reply.media[0],raw:reply.text()};`
 			if tc.uncaught {
-				code = `(await tools.search("live__diagnose")).json(); await tools.call("live__diagnose",{}); await tools.call("Continue",{});`
+				code = `(await tools.search({name:"live__diagnose"})).json(); await tools.call("live__diagnose",{}); await tools.call("Continue",{});`
 			} else if tc.copied {
 				code = strings.Replace(code, "selected:reply.media[0]", "selected:{...reply.media[0]}", 1)
 			}
@@ -88,7 +87,7 @@ return {caught,selected:reply.media[0],raw:reply.text()};`
 				}
 				return nil
 			}}
-			runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{next, toolsearch.NewSource(manager, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
+			runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{next, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
 			wantContinued := int32(1)
 			if tc.uncaught {
 				wantContinued = 0

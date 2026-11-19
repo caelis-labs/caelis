@@ -18,28 +18,12 @@ const MCPCallToolName = "mcp_call"
 // NewMCPCallTool declares the fixed MCP invocation envelope. Runtime resolves
 // it to an already discovered real Tool before entering its execution wrappers.
 func NewMCPCallTool() Tool {
-	return NamedTool{Def: Definition{Name: MCPCallToolName, Description: "Call an MCP tool previously returned by tool_search. Use its exact name and arguments matching its input_schema. Search again after a source or schema change. Undiscovered names cannot be called.", InputSchema: map[string]any{
+	return NamedTool{Def: Definition{Name: MCPCallToolName, Description: "Call a previously bound MCP tool by exact name using arguments matching its input_schema.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false, "required": []any{"tool_name", "arguments"}, "properties": map[string]any{
 			"tool_name": map[string]any{"type": "string", "minLength": 1}, "arguments": map[string]any{"type": "object", "additionalProperties": true},
 		}}, Metadata: map[string]any{MetadataToolKind: MCPCallToolName}}, Invoke: func(_ context.Context, _ Call) (Result, error) {
 		return Result{}, NewError(ErrorCodeInvalidInput, "mcp_call requires Runtime discovery and routing")
 	}}
-}
-
-// WithMCPCallTool adds one fixed invocation declaration beside tool_search.
-// The original tool slice and individual tools remain unchanged.
-func WithMCPCallTool(tools []Tool) []Tool {
-	search, call := false, false
-	for _, one := range tools {
-		if one != nil {
-			search = search || IsToolSearchDefinition(one.Definition())
-			call = call || IsMCPCallDefinition(one.Definition())
-		}
-	}
-	if !search || call {
-		return tools
-	}
-	return append(append([]Tool(nil), tools...), NewMCPCallTool())
 }
 
 // IsMCPCallDefinition recognizes the Runtime's fixed MCP envelope declaration.

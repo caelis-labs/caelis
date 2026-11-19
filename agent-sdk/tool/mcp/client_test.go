@@ -22,7 +22,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	builtintoolsearch "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -800,21 +799,6 @@ func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *te
 		t.Fatalf("compact extra definition = %#v, want later unique plugin tool", extra)
 	}
 
-	search := builtintoolsearch.NewWithRanker(tools, builtintoolsearch.NewLexicalRanker())
-	result, err := search.Call(ctx, tool.Call{Name: tool.ToolSearchToolName, Input: json.RawMessage(`{"query":"echo"}`)})
-	if err != nil {
-		t.Fatalf("ToolSearch.Call() error = %v", err)
-	}
-	if len(result.Content) != 1 || result.Content[0].JSON == nil {
-		t.Fatalf("ToolSearch result = %#v, want JSON", result)
-	}
-	var discovered tool.ToolSearchResult
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &discovered); err != nil {
-		t.Fatalf("decode ToolSearch result: %v", err)
-	}
-	if len(discovered.Tools) != 1 || discovered.Tools[0].Name != "context7__echo" {
-		t.Fatalf("ToolSearch tools = %#v, want one compact first-win echo", discovered.Tools)
-	}
 }
 
 func newInitializedTestManager(ctx context.Context, specs []ServerSpec) (*Manager, error) {

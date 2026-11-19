@@ -20,7 +20,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -72,7 +71,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			if len(manager.Tools()) != 1 {
 				t.Fatalf("MCP fixture unavailable: %+v", manager.GetServerInfos("fixture"))
 			}
-			args := map[string]any{"code": `(await tools.search("live__fail")).json();` + tc.body}
+			args := map[string]any{"code": `(await tools.search({name:"live__fail"})).json();` + tc.body}
 			if tc.yield {
 				args["yield_time_ms"] = 0
 			}
@@ -95,7 +94,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 				}
 				return nil
 			}}
-			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
+			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
 			visible := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], resultID)
 			if calls.Load() != 1 {
 				t.Fatalf("domain effect calls=%d; want exactly one; terminal model output=%s", calls.Load(), errorDeliveryJSON(t, visible.Content))

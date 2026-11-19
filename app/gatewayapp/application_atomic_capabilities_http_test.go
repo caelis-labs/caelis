@@ -16,7 +16,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -205,52 +204,6 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		}
 	}
 	name, args := "", ""
-	if len(payload.Tools) == 1 && payload.Tools[0].Function.Name == "InspectToolSchema" {
-		// The private selector sees its structured query, not the main user's
-		// uppercase script sentinel. Decode need independently of candidates.
-		var content string
-		switch value := payload.Messages[len(payload.Messages)-1].Content.(type) {
-		case string:
-			content = value
-		case []any:
-			for _, part := range value {
-				if block, ok := part.(map[string]any); ok {
-					if text, ok := block["text"].(string); ok {
-						content += text
-					}
-				}
-			}
-		}
-		var query struct {
-			Need       string `json:"need"`
-			Candidates []struct {
-				Name string `json:"name"`
-			} `json:"candidates"`
-		}
-		if err := json.Unmarshal([]byte(content), &query); err != nil {
-			return nil, err
-		}
-		selected := map[string]string{"callfail lookup": "callfail__lookup", "blocking lookup": "blocking__lookup", "documents lookup": "documents__lookup", "utilities lookup": "utilities__lookup"}[query.Need]
-		if selected != "" {
-			present := false
-			for _, candidate := range query.Candidates {
-				present = present || candidate.Name == selected
-			}
-			if !present {
-				return nil, fmt.Errorf("selector target %q is absent from catalog", selected)
-			}
-		}
-		selection, _ := json.Marshal(map[string]any{"tools": []string{selected}})
-		if selected == "" {
-			selection = []byte(`{"tools":[]}`)
-		}
-		if !payload.Stream {
-			return nil, fmt.Errorf("ToolSearch selector must request a stream")
-		}
-		encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": string(selection)}, "finish_reason": "stop"}}})
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}},
-			Body: io.NopCloser(strings.NewReader("data: " + string(encoded) + "\n\ndata: [DONE]\n\n")), Request: req}, nil
-	}
 	switch {
 	case latestTool == "tool_search" && strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "callfail__lookup", `{}`
@@ -1127,60 +1080,6 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	promptAtomicCapabilityClient(t, ctx, recovered, created.SessionID, "atomic-recovery-doc", "DOC")
 	if got := strings.Count(atomicAudit(audit), "documents:call"); got != beforeRecoveryCalls+1 {
 		t.Fatalf("recovered Session made %d document calls, want %d", got, beforeRecoveryCalls+1)
-	}
-}
-
-func TestApplicationFirstToolSearchUsesConsistentActivationModelCatalog(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
-	defer cancel()
-	root := t.TempDir()
-	audit := filepath.Join(root, "audit")
-	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
-	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
-	server := sessionprofile.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
-	host, client, sessionID := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []sessionprofile.MCPServer{server})
-	defer host.close(t)
-	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer feed.Subscription.Close()
-	promptAtomicCapabilityClient(t, ctx, client, sessionID, "activate-before-binding", "BASIC")
-	waitAtomicApplicationMCPRunning(t, ctx, client, sessionID, "documents")
-
-	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{
-		OperationID: "late-toolsearch-model", ExpectedRevision: &status.Configuration.Revision,
-	}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
-	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("connect late model = %+v, %v", connected, err)
-	}
-	bindings, err := host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	profileID := ""
-	for _, target := range bindings.Targets {
-		if target.Backend.Provider != nil && strings.HasSuffix(target.Backend.Provider.ModelConfigID, "/gpt-4.2") {
-			profileID = target.ID
-		}
-	}
-	if profileID == "" {
-		t.Fatalf("late model missing from binding targets: %+v", bindings.Targets)
-	}
-	bound, err := host.host.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{WriteBase: appserver.WriteBase{
-		OperationID: "late-toolsearch-binding", ExpectedRevision: &connected.Revision,
-	}, Binding: agentbinding.Binding{Handle: agentbinding.HandleToolSearch, ProfileID: profileID, Effort: "none"}})
-	if err != nil || bound.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("bind late ToolSearch model = %+v, %v", bound, err)
-	}
-
-	promptAtomicCapabilityClient(t, ctx, client, sessionID, "first-search-after-binding", "DOC")
-	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
-		t.Fatalf("first search after Host binding made %d document calls, want 1; audit: %s", got, atomicAudit(audit))
 	}
 }
 

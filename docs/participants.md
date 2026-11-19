@@ -53,14 +53,8 @@ start a conversation:
 
 | Role | Binding behavior |
 | --- | --- |
-| ToolSearch | A restricted selector inherits the Main Agent's resolved provider model when unbound and can consume model tokens when candidates are ready. Bind a separate provider model or Jev judgment to override it. An explicit provider binding retains its effort and Fast setting. Jev scores the scoped name/description catalog; search failures are reported without keyword fallback. |
 | Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
-
-ToolSearch's private model requests use their own context capacity and do not
-trigger the main Session's compaction watermark. Their provider attempts and
-reported usage enter the Session journal without adding selector messages to
-the main model conversation.
 
 On Guardian's row, use Tab or click the main model or auxiliary classifier to
 configure it. A selected classifier runs first, choosing only among the original

@@ -20,10 +20,11 @@ func (m *Model) renderSubagentOverlay() string {
 	m.refreshSubagentRows("")
 	muted := m.theme.HelpHintTextStyle()
 	body := []string{m.renderSubagentTitle(innerWidth)}
-	if state.searchable() {
-		body = append(body, "")
-	}
+
 	body = append(body, muted.Render(strings.Repeat("─", innerWidth)))
+	if state.searchable() && state.query != "" {
+		body = append(body, muted.Render("/ "+truncateDisplayCellsFromEnd(state.query, innerWidth-3)+"▏"))
+	}
 	if state.page == subagentPageBinding && len(state.rows) > 0 && !state.loading {
 		modelWidth, effortWidth, fastWidth := m.subagentBindingColumns(innerWidth - 2)
 		header := padRightDisplay(sliceByDisplayColumns("  Model", 0, modelWidth), modelWidth)
@@ -43,9 +44,6 @@ func (m *Model) renderSubagentOverlay() string {
 	maxHeight := max(8, m.height-4)
 	rowBudget := max(1, maxHeight-2*borderInset-len(body)-len(footer))
 	rowLines, rowOffsets := m.renderSubagentRows(state.rows, innerWidth, len(body), rowBudget)
-	if state.searchable() {
-		body[1] = m.renderSubagentSearch(innerWidth, rowOffsets)
-	}
 	body = append(body, rowLines...)
 	body = append(body, footer...)
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
@@ -61,7 +59,7 @@ func (m *Model) renderSubagentOverlay() string {
 		}
 	}
 	state.geometry = subagentOverlayGeometry{
-		x: startX, y: startY, closeX: startX + contentInset + innerWidth - 1,
+		x: startX, y: startY, closeX: overlayCloseX(startX+contentInset, innerWidth),
 		closeY: startY + borderInset, width: renderedWidth, height: renderedHeight, rows: screenRows,
 	}
 	state.geometry.cells = make([][]subagentCell, len(state.rows))
@@ -75,55 +73,33 @@ func (m *Model) renderSubagentOverlay() string {
 	return frame
 }
 
-func (m *Model) renderSubagentSearch(width int, offsets []int) string {
-	state := m.subagentOverlay
-	hint := ""
-	if len(offsets) > 0 && !state.loading && state.err == "" {
-		if offsets[0] < 0 {
-			hint = "↑ more"
-		}
-		if offsets[len(offsets)-1] < 0 {
-			hint = strings.TrimSpace(hint + "  ↓ more")
-		}
-	}
-	searchWidth := width
-	if hint != "" {
-		searchWidth = max(3, width-displayColumns(hint)-2)
-	}
-	search := "/ " + truncateDisplayCellsFromEnd(state.query, searchWidth-3) + "▏"
-	if state.query == "" {
-		search += "Type to search"
-	}
-	search = padRightDisplay(truncateTailDisplay(search, searchWidth), searchWidth)
-	if hint != "" {
-		search += "  " + hint
-	}
-	return m.theme.HelpHintTextStyle().Render(search)
-}
-
 func (m *Model) renderSubagentTitle(width int) string {
 	state := m.subagentOverlay
-	title := "/team · Team Configuration"
+	path := []string{"/team"}
+	title := "Team Configuration"
 	switch state.page {
 	case subagentPageBinding:
-		title = "/team › " + string(state.bindingHandle) + " · Choose model"
+		role := string(state.bindingHandle)
+		title = "Choose model"
 		switch state.bindingHandle {
-		case agentbinding.HandleGuardianScreen:
-			title = "/team › Guardian · Choose classifier"
 		case agentbinding.HandleGuardian:
-			title = "/team › Guardian · Choose model"
+			role = "Guardian"
+		case agentbinding.HandleGuardianScreen:
+			role = "Guardian"
+			title = "Choose classifier"
 		}
+		path = append(path, role)
 	case subagentPageSets:
-		title = "/team › Binding sets"
+		title = "Binding sets"
 	case subagentPageNewRole:
-		title = "/team › New role"
+		title = "New role"
 	case subagentPageSaveSet:
-		title = "/team › Save binding set"
+		path = append(path, "Binding sets")
+		title = "Save binding set"
 	case subagentPageConfirm:
-		title = "/team › Delete " + state.confirmLabel + "?"
+		title = "Delete " + state.confirmLabel + "?"
 	}
-	title = truncateTailDisplay(title, max(1, width-2))
-	return m.theme.TitleStyle().Render(padRightDisplay(title, width-1)) + m.theme.HelpHintTextStyle().Render("×")
+	return m.overlayHeader(width, path, title, state.closeButton, !state.pending && !state.loading)
 }
 
 // A row's section heading consumes the same viewport budget as its cells.

@@ -27,8 +27,7 @@ func (m *Model) renderWizardOverlay() string {
 	maxHeight := max(8, m.height-7)
 	muted := m.theme.HelpHintTextStyle()
 	path := m.wizardBreadcrumb()
-	title := tuikit.RenderBreadcrumb(m.theme, inner-4, path[:len(path)-1], path[len(path)-1])
-	body := []string{padRightDisplay(title, inner-3) + m.wizardButtonStyle("close", m.wizardCloseEnabled(), false).Render("[×]")}
+	body := []string{m.overlayHeader(inner, path[:len(path)-1], path[len(path)-1], s.closeButton, m.wizardCloseEnabled())}
 	body = append(body, muted.Render(strings.Repeat("─", inner)))
 	if m.isWizardAuthChoice() {
 		body = append(body, muted.Render(truncateTailDisplay(wizardPlainText(m.activePrompt.prompt), inner)))
@@ -107,7 +106,7 @@ func (m *Model) renderWizardOverlay() string {
 		}
 	}
 	s.geometry = wizardOverlayGeometry{
-		x: x, y: y, width: w, height: h, closeX: x + inset + inner - 3, closeY: y + border,
+		x: x, y: y, width: w, height: h, closeX: overlayCloseX(x+inset, inner), closeY: y + border,
 		rows: offsets, actionX: x + inset + inner - buttons.actionWidth, actionY: y + border + actionOffset, actionWidth: buttons.actionWidth,
 		backX: x + inset, backY: y + border + actionOffset, backWidth: buttons.backWidth,
 		contentX: x + inset, contentY: y + border, contentWidth: inner,

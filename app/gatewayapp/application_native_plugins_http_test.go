@@ -97,55 +97,51 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	message := map[string]any{"role": "assistant", "content": "NATIVE_PLUGIN_DONE"}
 	finish := "stop"
-	if len(payload.Tools) == 1 && payload.Tools[0].Function.Name == "InspectToolSchema" {
-		message["content"] = `{"tools":["desktop_world__apps","desktop_world__look"]}`
-	} else {
-		phase := 0
-		app := "fixture.app.one"
-		idle := false
-		for _, m := range payload.Messages {
-			if m.Role == "user" {
-				phase = 0
-				idle = strings.Contains(fmt.Sprint(m.Content), "NATIVE_NO_CALL")
-				app = "fixture.app.one"
-				if strings.Contains(fmt.Sprint(m.Content), "SECOND_APP") {
-					app = "fixture.app.two"
-				}
-			}
-			if m.Role == "tool" {
-				phase++
+	phase := 0
+	app := "fixture.app.one"
+	idle := false
+	for _, m := range payload.Messages {
+		if m.Role == "user" {
+			phase = 0
+			idle = strings.Contains(fmt.Sprint(m.Content), "NATIVE_NO_CALL")
+			app = "fixture.app.one"
+			if strings.Contains(fmt.Sprint(m.Content), "SECOND_APP") {
+				app = "fixture.app.two"
 			}
 		}
-		name := "mcp_call"
-		if idle {
-			phase = 99
+		if m.Role == "tool" {
+			phase++
 		}
-		args := map[string]any{}
-		switch phase {
-		case 0:
-			name = "tool_search"
-			args = map[string]any{"query": "native desktop fixture", "limit": 4}
-		case 1:
-			name = "Skill"
-			args = map[string]any{"name": "desktop-world:desktop-world"}
-		case 2:
-			args = map[string]any{"tool_name": "desktop_world__apps", "arguments": map[string]any{}}
-		case 3, 4:
-			args = map[string]any{"tool_name": "desktop_world__look", "arguments": map[string]any{"app": app}}
-		default:
-			name = ""
+	}
+	name := "mcp_call"
+	if idle {
+		phase = 99
+	}
+	args := map[string]any{}
+	switch phase {
+	case 0:
+		name = "tool_search"
+		args = map[string]any{"query": "native desktop fixture"}
+	case 1:
+		name = "Skill"
+		args = map[string]any{"name": "desktop-world:desktop-world"}
+	case 2:
+		args = map[string]any{"tool_name": "desktop_world__apps", "arguments": map[string]any{}}
+	case 3, 4:
+		args = map[string]any{"tool_name": "desktop_world__look", "arguments": map[string]any{"app": app}}
+	default:
+		name = ""
+	}
+	if name != "" {
+		encoded, _ := json.Marshal(args)
+		hasJS := false
+		for _, one := range payload.Tools {
+			hasJS = hasJS || one.Function.Name == "js_exec"
 		}
-		if name != "" {
-			encoded, _ := json.Marshal(args)
-			hasJS := false
-			for _, one := range payload.Tools {
-				hasJS = hasJS || one.Function.Name == "js_exec"
-			}
-			var encodedArgs string
-			name, encodedArgs = gatewayapp.CodeModeFixtureCall(hasJS, name, string(encoded))
-			message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": fmt.Sprintf("native-%d", phase), "index": 0, "type": "function", "function": map[string]any{"name": name, "arguments": encodedArgs}}}}
-			finish = "tool_calls"
-		}
+		var encodedArgs string
+		name, encodedArgs = gatewayapp.CodeModeFixtureCall(hasJS, name, string(encoded))
+		message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": fmt.Sprintf("native-%d", phase), "index": 0, "type": "function", "function": map[string]any{"name": name, "arguments": encodedArgs}}}}
+		finish = "tool_calls"
 	}
 	encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": message, "finish_reason": finish}}})
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + string(encoded) + "\n\ndata: [DONE]\n\n")), Request: req}, nil

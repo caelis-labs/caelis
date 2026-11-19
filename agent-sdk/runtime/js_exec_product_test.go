@@ -29,7 +29,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
@@ -83,7 +82,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`)), imagePart}}, nil
 	}}}
 	scripts := []string{
-		`const s=(await tools.search("fixture")).json();if(s.count!==1||!s.tools[0].input_schema.properties.script)throw Error("incomplete search schema");return s;`,
+		`const s=(await tools.search({name:"fixture__exec"})).json();if(!s.input_schema.properties.script)throw Error("incomplete search schema");return s;`,
 		`return await tools.call("fixture__exec",{script:"observe"});`,
 		`const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.json().content!=="1: 17,25"||b.json().content!=="1: 17,25")throw Error("Read content shape");return [a,b];`,
 	}
@@ -94,7 +93,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"code": scripts[i]})
 		return []model.ToolCall{{ID: "provider-reused-id", Name: codemode.ToolName, Args: string(raw)}}
 	}}
-	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{read, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}, toolsearch.NewSource(source, toolsearch.NewLexicalRanker())}, DeferredTools: source, Metadata: map[string]any{codemode.MetadataSelectedTools: []string{"fixture__exec"}}}, nil, nil)
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{read, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}, DeferredTools: source, Metadata: map[string]any{codemode.MetadataSelectedTools: []string{"fixture__exec"}}}, nil, nil)
 	// Provider call IDs may repeat in different model steps. Runtime's original
 	// invocation item keeps script Tasks distinct without replaying any invocation.
 	tasks, taskErr := sessionfile.NewTaskStore(store).ListSession(t.Context(), active.SessionRef)
@@ -419,7 +418,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	driver := &mcpScriptModel{steps: func(i int, r *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return (await tools.search('fixture__changing')).json();"}`}}
+			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return (await tools.search({name:'fixture__changing'})).json();"}`}}
 		case 1:
 			next := fixtureMCPDefinition("v2")
 			next.Name = old.Name
@@ -431,7 +430,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 		}
 		return nil
 	}}
-	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(source, toolsearch.NewLexicalRanker()), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}, DeferredTools: source}, nil, nil)
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}, DeferredTools: source}, nil, nil)
 	if effects.Load() != 0 {
 		t.Fatal("old arguments reached a refreshed tool")
 	}

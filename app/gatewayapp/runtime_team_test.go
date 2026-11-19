@@ -13,8 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -107,7 +105,7 @@ func TestRuntimeTeamRevisionAcrossActivatedSessions(t *testing.T) {
 		}}
 		sessions = append(sessions, active{composition: &instance.runtimeComposition, native: native, application: &applicationTurnResolver{composition: &instance.runtimeComposition, binding: binding}, children: children, ref: session.SessionRef{SessionID: id}})
 	}
-	handles := []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleOrbit, agentbinding.HandleZenith, agentbinding.HandleToolSearch, agentbinding.HandleGuardian}
+	handles := []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleOrbit, agentbinding.HandleZenith, agentbinding.HandleGuardian}
 	assertRequest := func(want, effort, speed string) {
 		t.Helper()
 		body := requests[len(requests)-1]
@@ -149,15 +147,6 @@ func TestRuntimeTeamRevisionAcrossActivatedSessions(t *testing.T) {
 				}
 				generate(llm, want, effort, speed)
 			}
-			main, err := current.composition.lookup.ResolveModel(t.Context(), current.application.binding.Profile.Model, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			names, err := newBoundToolSearchRanker(current.composition).Rank(t.Context(), "inspect probe", []tool.Definition{{Name: "ProbeTool", Description: "inspect probe"}}, 1, toolsearch.SearchModel{Model: main.Model, Reasoning: model.ReasoningConfig{Effort: "low"}, ServiceTier: model.ServiceTierPriority, ReadSchema: func(context.Context, string) (tool.Definition, error) { return tool.Definition{Name: "ProbeTool"}, nil }})
-			if err != nil || len(names) != 1 || names[0] != "ProbeTool" {
-				t.Fatalf("native ToolSearch ranking: %v, %v", names, err)
-			}
-			assertRequest(want, effort, speed)
 			_, targets, err := current.composition.delegationSpawnConfiguration(controlplacement.SessionContext{})
 			if err != nil {
 				t.Fatal(err)
@@ -207,16 +196,13 @@ func TestRuntimeTeamRevisionAcrossActivatedSessions(t *testing.T) {
 		if err != nil || llm.Name() != want {
 			t.Fatalf("reset main fallback = %v, %v; want %s", llm, err, want)
 		}
-		if llm, err := current.composition.boundToolSearchAgentModel(t.Context()); err != nil || llm != nil {
-			t.Fatalf("reset tool-search = %v, %v", llm, err)
-		}
 		for _, handle := range handles[:3] {
 			if _, err := current.children.placement(t.Context(), handle); err == nil {
 				t.Fatalf("reset retained %s", handle)
 			}
 		}
 	}
-	if len(requests) != 14 {
+	if len(requests) != 10 {
 		t.Fatalf("unexpected provider attempts: %d", len(requests))
 	}
 }
