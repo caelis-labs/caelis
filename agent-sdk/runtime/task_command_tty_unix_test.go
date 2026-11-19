@@ -73,7 +73,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 		}
 		time.Sleep(5 * time.Millisecond)
 		readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-			"action": "read",
+			"action": "wait", "yield_time_ms": 0,
 			"handle": handle,
 		})
 		readyPayload = testToolResultPayload(t, readyResult)

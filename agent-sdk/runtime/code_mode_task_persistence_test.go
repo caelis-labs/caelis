@@ -53,7 +53,7 @@ func TestJSExecCanonicalCursorCommitsOnlyAdvancement(t *testing.T) {
 				t.Fatalf("selected output checkpoint missing: %+v", entries[0])
 			}
 			revision = entries[0].Revision
-			return []model.ToolCall{{ID: "repeat", Name: "Task", Args: `{"action":"read","handle":"` + handle + `"}`}}
+			return []model.ToolCall{{ID: "repeat", Name: "Task", Args: `{"action":"wait","yield_time_ms":0,"handle":"` + handle + `"}`}}
 		case 2:
 			entries, err := tasks.ListSession(t.Context(), active.SessionRef)
 			if err != nil || entries[0].Revision != revision {

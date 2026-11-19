@@ -1591,16 +1591,17 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 				},
 			}, nil)
 		case taskStateRunning(state):
+			args := map[string]any{"action": "wait", "handle": m.handle}
+			if callIndex == 2 {
+				args["yield_time_ms"] = 0
+			}
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   fmt.Sprintf("task-wait-%d", callIndex-1),
 						Name: tasktool.ToolName,
-						Args: string(mustJSONRaw(map[string]any{
-							"action": "wait",
-							"handle": m.handle,
-						})),
+						Args: string(mustJSONRaw(args)),
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,

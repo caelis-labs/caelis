@@ -305,7 +305,6 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			if terminalTool {
 				return
 			}
-			watchdog.observeSettledToolStep(toolEvents)
 			messages = append(messages, toolMessages...)
 			accepted, drainErr := a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
 				return yield(event, nil)

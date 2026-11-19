@@ -10,11 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
+func TestTaskSchemaExposesBoundedWait(t *testing.T) {
 	def := New().Definition()
-	if want := "Inspect or control asynchronous work using a Task handle. Use read for long-lived servers and watchers, verify readiness with a time-limited probe, then continue once ready. Reserve wait for finite jobs whose completion you need."; def.Description != want {
-		t.Fatalf("Task guidance = %q, want %q", def.Description, want)
-	}
 	props, _ := def.InputSchema["properties"].(map[string]any)
 	if _, ok := props["handle"]; !ok {
 		t.Fatalf("handle property missing: %#v", props)
@@ -25,16 +22,13 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 	if _, ok := props["wait_until_done"]; ok {
 		t.Fatalf("wait_until_done property unexpectedly exposed: %#v", props["wait_until_done"])
 	}
-	if _, ok := props["yield_time_ms"]; ok {
-		t.Fatalf("yield_time_ms property unexpectedly exposed: %#v", props["yield_time_ms"])
+	yield := props["yield_time_ms"].(map[string]any)
+	if yield["maximum"] != 300000 || yield["default"] != 60000 {
+		t.Fatal(yield)
 	}
-	action, _ := props["action"].(map[string]any)
-	if want := "read inspects state/output immediately; wait waits up to one minute for completion, not new output/readiness; write sends supported input; cancel requests cancellation when supported. Participant threads use ReadThread/WaitThread."; action["description"] != want {
-		t.Fatalf("action guidance = %q, want %q", action["description"], want)
-	}
-	enum, _ := action["enum"].([]string)
-	if !slices.Contains(enum, "read") {
-		t.Fatalf("action enum = %#v, want read", enum)
+	enum := props["action"].(map[string]any)["enum"].([]string)
+	if !slices.Equal(enum, []string{"wait", "write", "cancel"}) {
+		t.Fatal(enum)
 	}
 }
 
@@ -101,7 +95,7 @@ func TestTaskCallRejectsUnknownArgsBeforeRuntimeWrapperError(t *testing.T) {
 	}
 }
 
-func TestTaskCallRejectsLegacyYieldTime(t *testing.T) {
+func TestTaskCallRejectsNegativeYieldTime(t *testing.T) {
 	t.Parallel()
 
 	raw, _ := json.Marshal(map[string]any{
@@ -111,9 +105,25 @@ func TestTaskCallRejectsLegacyYieldTime(t *testing.T) {
 	})
 	_, err := New().Call(context.Background(), tool.Call{Name: ToolName, Input: raw})
 	if err == nil {
-		t.Fatal("TASK Call() error = nil, want legacy arg rejection")
+		t.Fatal("TASK Call() error = nil, want negative yield rejection")
 	}
 	if strings.Contains(err.Error(), "runtime wrapper") || !strings.Contains(err.Error(), "yield_time_ms") {
-		t.Fatalf("TASK Call() error = %v, want legacy arg rejection before runtime wrapper error", err)
+		t.Fatalf("TASK Call() error = %v, want negative yield rejection before runtime wrapper error", err)
+	}
+}
+
+func TestTaskWaitYieldValidation(t *testing.T) {
+	for _, value := range []any{float64(0), float64(5000), float64(300000)} {
+		if err := ValidateArgs(map[string]any{"action": "wait", "yield_time_ms": value}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, value := range []any{float64(300001), float64(0.5), "5000", nil} {
+		if err := ValidateArgs(map[string]any{"action": "wait", "yield_time_ms": value}); err == nil {
+			t.Fatalf("accepted yield %v", value)
+		}
+	}
+	if err := ValidateArgs(map[string]any{"action": "cancel", "yield_time_ms": float64(0)}); err == nil {
+		t.Fatal("accepted yield for cancel")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -125,113 +126,117 @@ func TestReviewCodeModeDrainRetainsSessionFence(t *testing.T) {
 			name = "canonical-fence"
 		}
 		t.Run(name, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
-			started, release, hostDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
-			hostResult := make(chan error, 1)
-			var oldEffects, nextEffects atomic.Int32
-			write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-				close(started)
-				<-release // An ordinary Go Tool may ignore cancellation during an effect.
-				oldEffects.Add(1)
-				return tool.Result{}, nil
-			}}
-			declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
-				go func() { defer close(hostDone); _, err := host.Call(ctx, "Write", []byte(`{}`)); hostResult <- err }()
-				<-ctx.Done() // The adapter itself stops promptly and does no more work.
-				return nil, ctx.Err()
-			})}
-			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			var firstFence session.SessionFence
-			if fenced {
-				firstFence, err = store.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "review-host"})
-				if err != nil {
-					t.Fatal(err)
-				}
-				ctx = session.ContextWithRuntimeFence(ctx, firstFence)
-			}
-			run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "cancel while native effect is in flight", AgentSpec: agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, write}}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			<-started
-			cancel()
-			wait, stop := context.WithTimeout(t.Context(), 10*time.Second)
-			defer stop()
-			terminal := run.Handle.WaitCompletion(wait)
-			if errors.Is(terminal, context.DeadlineExceeded) {
-				// A corrected implementation may retain completion until this
-				// producer actually stops. Quiesce it before releasing authority.
-				close(release)
-				<-hostDone
-				_ = run.Handle.WaitCompletion(t.Context())
-				if fenced {
-					if err := store.ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(firstFence)); err != nil {
-						t.Fatal(err)
-					}
-				}
-				return
-			}
-			// This is the existing Host contract: WaitCompletion proves quiescence and
-			// authorizes exact fence release. The test does not force or bypass a fence.
-			if fenced {
-				if err := store.ReleaseSessionFence(wait, session.SessionFenceReleaseRequest(firstFence)); err != nil {
-					t.Fatal(err)
-				}
-			}
-			// Observe a fresh canonical Turn while the old producer is still blocked.
-			nextDeclaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
-				_, err := host.Call(ctx, "NextWrite", []byte(`{}`))
-				return []byte(`{}`), err
-			})}
-			nextWrite := tool.NamedTool{Def: tool.Definition{Name: "NextWrite", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { nextEffects.Add(1); return tool.Result{}, nil }}
-			nextCtx := wait
-			if fenced {
-				nextFence, err := store.AcquireSessionFence(wait, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "review-host"})
-				if err != nil {
-					close(release)
-					t.Fatal(err)
-				}
-				defer func() {
-					_ = store.ReleaseSessionFence(context.WithoutCancel(wait), session.SessionFenceReleaseRequest(nextFence))
-				}()
-				nextCtx = session.ContextWithRuntimeFence(nextCtx, nextFence)
-			}
-			next, nextErr := rt.Run(nextCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: "next turn", AgentSpec: agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{nextDeclaration, nextWrite}}})
-			if nextErr == nil {
-				nextErr = next.Handle.WaitCompletion(wait)
-			}
-			beforeRelease := nextEffects.Load()
-			close(release)
-			select {
-			case <-hostDone:
-			case <-wait.Done():
-				t.Fatal("old Host did not finish after release")
-			}
-			t.Logf("late Host result: %v", <-hostResult)
-			events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, event := range events {
-				if event.Type == session.EventTypeToolResult && event.Tool != nil {
-					r := event.Tool
-					if r.Parent != nil && r.Name == "Write" {
-						t.Logf("original child identity=%s call_id=%s status=%s revision=%d visibility=%s", r.Execution.ItemID, r.ID, r.Status, event.Seq, event.Visibility)
-					}
-				}
-				if session.IsCanonicalHistoryEvent(event) && event.Tool != nil && event.Tool.Parent != nil {
-					t.Error("nested recovery contaminated canonical model protocol")
-				}
-			}
-			if beforeRelease != 0 {
-				t.Fatalf("Session fence released with old Host producer alive: first_terminal=%v next_terminal=%v next_effects=%d old_effects_after_release=%d", terminal, nextErr, beforeRelease, oldEffects.Load())
-			}
+			synctest.Test(t, func(t *testing.T) { testCodeModeDrain(t, fenced) })
 		})
+	}
+}
+
+func testCodeModeDrain(t *testing.T, fenced bool) {
+	store, active, _ := codeModeStore(t)
+	started, release, hostDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	hostResult := make(chan error, 1)
+	var oldEffects, nextEffects atomic.Int32
+	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		close(started)
+		<-release // An ordinary Go Tool may ignore cancellation during an effect.
+		oldEffects.Add(1)
+		return tool.Result{}, nil
+	}}
+	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		go func() { defer close(hostDone); _, err := host.Call(ctx, "Write", []byte(`{}`)); hostResult <- err }()
+		<-ctx.Done() // The adapter itself stops promptly and does no more work.
+		return nil, ctx.Err()
+	})}
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var firstFence session.SessionFence
+	if fenced {
+		firstFence, err = store.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "review-host"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = session.ContextWithRuntimeFence(ctx, firstFence)
+	}
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "cancel while native effect is in flight", AgentSpec: agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, write}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	cancel()
+	wait, stop := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stop()
+	terminal := run.Handle.WaitCompletion(wait)
+	if errors.Is(terminal, context.DeadlineExceeded) {
+		// A corrected implementation may retain completion until this
+		// producer actually stops. Quiesce it before releasing authority.
+		close(release)
+		<-hostDone
+		_ = run.Handle.WaitCompletion(t.Context())
+		if fenced {
+			if err := store.ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(firstFence)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return
+	}
+	// This is the existing Host contract: WaitCompletion proves quiescence and
+	// authorizes exact fence release. The test does not force or bypass a fence.
+	if fenced {
+		if err := store.ReleaseSessionFence(wait, session.SessionFenceReleaseRequest(firstFence)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Observe a fresh canonical Turn while the old producer is still blocked.
+	nextDeclaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		_, err := host.Call(ctx, "NextWrite", []byte(`{}`))
+		return []byte(`{}`), err
+	})}
+	nextWrite := tool.NamedTool{Def: tool.Definition{Name: "NextWrite", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { nextEffects.Add(1); return tool.Result{}, nil }}
+	nextCtx := wait
+	if fenced {
+		nextFence, err := store.AcquireSessionFence(wait, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "review-host"})
+		if err != nil {
+			close(release)
+			t.Fatal(err)
+		}
+		defer func() {
+			_ = store.ReleaseSessionFence(context.WithoutCancel(wait), session.SessionFenceReleaseRequest(nextFence))
+		}()
+		nextCtx = session.ContextWithRuntimeFence(nextCtx, nextFence)
+	}
+	next, nextErr := rt.Run(nextCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: "next turn", AgentSpec: agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{nextDeclaration, nextWrite}}})
+	if nextErr == nil {
+		nextErr = next.Handle.WaitCompletion(wait)
+	}
+	beforeRelease := nextEffects.Load()
+	close(release)
+	select {
+	case <-hostDone:
+	case <-wait.Done():
+		t.Fatal("old Host did not finish after release")
+	}
+	t.Logf("late Host result: %v", <-hostResult)
+	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			r := event.Tool
+			if r.Parent != nil && r.Name == "Write" {
+				t.Logf("original child identity=%s call_id=%s status=%s revision=%d visibility=%s", r.Execution.ItemID, r.ID, r.Status, event.Seq, event.Visibility)
+			}
+		}
+		if session.IsCanonicalHistoryEvent(event) && event.Tool != nil && event.Tool.Parent != nil {
+			t.Error("nested recovery contaminated canonical model protocol")
+		}
+	}
+	if beforeRelease != 0 {
+		t.Fatalf("Session fence released with old Host producer alive: first_terminal=%v next_terminal=%v next_effects=%d old_effects_after_release=%d", terminal, nextErr, beforeRelease, oldEffects.Load())
 	}
 }
 

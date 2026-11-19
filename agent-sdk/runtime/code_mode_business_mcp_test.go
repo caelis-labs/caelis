@@ -74,7 +74,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 		{"raw_json_collision", `const r=await live.collision({});if(r.json().raw_json!=='business-raw')throw Error('lost business field');return r;`, "business-raw", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
+			store, active := newTestSessionService(t, "business-contract")
 			var bitmap bytes.Buffer
 			if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
 				t.Fatal(err)

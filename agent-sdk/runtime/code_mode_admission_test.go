@@ -25,7 +25,7 @@ import (
 func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 	for _, mode := range []string{"allow", "deny", "schema", "revoke", "generation", "missing-validator"} {
 		t.Run(mode, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
+			store, active := newTestSessionService(t, "approval-revalidation")
 			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "admission", Version: "1"}, nil)
 			var effects, approvals atomic.Int32
 			publish := func(kind string) {

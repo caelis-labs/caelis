@@ -3497,44 +3497,55 @@ func TestChatAgentStopsItsOwnRepeatedRawModelToolLoop(t *testing.T) {
 func TestChatAgentAllowsProgressingRawModelToolSteps(t *testing.T) {
 	t.Parallel()
 
-	testModel := &longToolLoopModel{progress: true}
-	echoTool := tool.NamedTool{
-		Def: tool.Definition{
-			Name:        "ECHO",
-			Description: "echo input",
-			InputSchema: map[string]any{"type": "object"},
-		},
-		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			return tool.Result{
-				ID: call.ID, Name: call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
-			}, nil
-		},
-	}
-	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
-		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-progressing-loop"}},
-		Events: []*session.Event{{
-			Type:    session.EventTypeUser,
-			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "make progress")),
-		}},
-	})
-	var final *session.Event
-	for event, runErr := range chatAgent.Run(ctx) {
-		if runErr != nil {
-			t.Fatalf("Run() error = %v, distinct raw args are progress", runErr)
-		}
-		final = event
-	}
-	if got, want := testModel.calls, 10; got != want {
-		t.Fatalf("model calls = %d, want %d", got, want)
-	}
-	if final == nil || strings.TrimSpace(final.Text) != "done" {
-		t.Fatalf("final = %#v, want completed answer", final)
+	for _, tc := range []struct {
+		name     string
+		toolName string
+		driver   *longToolLoopModel
+	}{
+		{"distinct arguments", "ECHO", &longToolLoopModel{progress: true}},
+		{"repeated immediate snapshots", "Task", &longToolLoopModel{toolCalls: []model.ToolCall{{ID: "snapshot", Name: "Task", Args: `{"action":"wait","handle":"command-1","yield_time_ms":0}`}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testModel := tc.driver
+			echoTool := tool.NamedTool{
+				Def: tool.Definition{
+					Name:        tc.toolName,
+					Description: "echo input",
+					InputSchema: map[string]any{"type": "object"},
+				},
+				Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+					return tool.Result{
+						ID: call.ID, Name: call.Name,
+						Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+					}, nil
+				},
+			}
+			chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := agent.NewContext(agent.ContextSpec{
+				Context: context.Background(),
+				Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-progressing-loop"}},
+				Events: []*session.Event{{
+					Type:    session.EventTypeUser,
+					Message: ptrMessage(model.NewTextMessage(model.RoleUser, "make progress")),
+				}},
+			})
+			var final *session.Event
+			for event, runErr := range chatAgent.Run(ctx) {
+				if runErr != nil {
+					t.Fatalf("Run() error = %v, want an uninterrupted turn", runErr)
+				}
+				final = event
+			}
+			if got, want := testModel.calls, defaultToolLoopStreak+3; got != want {
+				t.Fatalf("model calls = %d, want %d", got, want)
+			}
+			if final == nil || strings.TrimSpace(final.Text) != "done" {
+				t.Fatalf("final = %#v, want completed answer", final)
+			}
+		})
 	}
 }
 
@@ -4095,7 +4106,7 @@ func (m *longToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.S
 	m.calls++
 	callIndex := m.calls
 	return func(yield func(*model.StreamEvent, error) bool) {
-		if callIndex <= 9 {
+		if callIndex <= defaultToolLoopStreak+2 {
 			calls := m.toolCalls
 			if len(calls) == 0 {
 				args := `{"value":"pong"}`

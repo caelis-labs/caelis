@@ -123,7 +123,7 @@ needed.
 One script occupies the environment until its execution terminates. Foreground
 yield is not termination: observe the original Task to completion before sending
 the next script, or use `reset:true` to interrupt the occupied environment. A busy
-error is a fallback for overlapping submissions, not a scheduling mechanism. Task read/wait/cancel remains outside the VM. Within one
+error is a fallback for overlapping submissions, not a scheduling mechanism. Task wait/cancel remains outside the VM. Within one
 script, await dependent operations; independent operations may be expressed
 concurrently. Runtime schedules their actual execution.
 Current Run cancellation, approvals, Guardian, tool facts and Task ownership remain
@@ -233,7 +233,7 @@ Replay uses the same direct parents and existing Task/scope routing.
 
 A yielded script observes its original Task even while its source or child list
 is folded. Original Task terminal updates settle the script without requiring a
-Task.read call. Returned business data, including a running inner command Task,
+Task observation. Returned business data, including a running inner command Task,
 does not own the outer script's lifecycle. Commands and scripts have distinct
 Task handles. An admitted RunCommand can wait for approval or run after the
 script returns. Use the command's original handle to observe or cancel it.
@@ -257,7 +257,7 @@ Final safe points cancel script producers before joining them, including an
 approval waiter. Cross-Turn background execution is not promised.
 
 `yield_time_ms` bounds only the foreground wait, not execution. After yielding,
-use Task read/wait/cancel on the original handle; do not resubmit the original
+use Task wait/cancel on the original handle; do not resubmit the original
 script. `reset:true` can interrupt it without waiting for completion.
 Foreground yield transfers observation to the existing Task owner with one
 original handle. Query, wait, cancellation and completion reuse Task control and output cursors.

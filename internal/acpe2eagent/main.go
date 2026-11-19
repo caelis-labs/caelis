@@ -706,7 +706,7 @@ func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.R
 				ID:   "task-read-interactive-1",
 				Name: tasktool.ToolName,
 				Args: string(mustJSON(map[string]any{
-					"action": "read",
+					"action": "wait", "yield_time_ms": 0,
 					"handle": m.taskHandle,
 				})),
 			}}, "")

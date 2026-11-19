@@ -253,7 +253,7 @@ func (t codeModeControlTarget) Wait(ctx context.Context, req taskapi.ControlRequ
 	return t.Read(ctx, req)
 }
 func (t codeModeControlTarget) Write(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return taskapi.Snapshot{}, tool.NewError(errorcode.Unsupported, "js_exec Tasks do not accept input; read/wait/cancel the original handle")
+	return taskapi.Snapshot{}, tool.NewError(errorcode.Unsupported, "js_exec Tasks do not accept input; wait/cancel the original handle")
 }
 func (t codeModeControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	t.task.cancel()

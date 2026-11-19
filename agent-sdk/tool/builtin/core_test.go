@@ -226,7 +226,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[task.ToolName], "handle", 1)
 	requireNoProperty(t, defs[task.ToolName], "task_id")
-	requireNoProperty(t, defs[task.ToolName], "yield_time_ms")
+	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", 0, ptrAny(300000))
 	requireNoProperty(t, defs[task.ToolName], "wait_until_done")
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 

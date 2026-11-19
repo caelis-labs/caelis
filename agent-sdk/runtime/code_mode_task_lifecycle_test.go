@@ -139,7 +139,7 @@ func TestIndependentJSExecReadWhileRunningKeepsTerminalCAS(t *testing.T) {
 				return nil
 			}
 			handle = jsExecTaskHandle(req)
-			return []model.ToolCall{{ID: "read-running", Name: "Task", Args: `{"action":"read","handle":"` + handle + `"}`}}
+			return []model.ToolCall{{ID: "read-running", Name: "Task", Args: `{"action":"wait","yield_time_ms":0,"handle":"` + handle + `"}`}}
 		case 2:
 			once.Do(func() { close(release) })
 			return []model.ToolCall{{ID: "wait-terminal", Name: "Task", Args: `{"action":"wait","handle":"` + handle + `"}`}}

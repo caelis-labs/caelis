@@ -712,6 +712,13 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if len(handles) == 0 {
 		return tool.Result{}, fmt.Errorf("arg %q is required", "handle")
 	}
+	yield := time.Duration(0)
+	if strings.EqualFold(strings.TrimSpace(action), "wait") {
+		yield = time.Minute
+		if value := optionalIntArg(args, "yield_time_ms"); value != nil {
+			yield = time.Duration(*value) * time.Millisecond
+		}
+	}
 	if call.Parent != nil && call.Parent.Kind == codemode.ToolKind {
 		for _, handle := range handles {
 			identity, err := t.resolveJobHandle(ctx, handle)
@@ -721,7 +728,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			if strings.EqualFold(action, "write") && identity.kind == taskapi.KindCommand {
 				return tool.Result{}, codemode.NewPublicPermissionError("native command stdin is prohibited from JavaScript")
 			}
-			if identity.kind == taskapi.KindCodeMode && (strings.EqualFold(action, "wait") || strings.EqualFold(action, "cancel")) {
+			if identity.kind == taskapi.KindCodeMode && (yield > 0 || strings.EqualFold(action, "cancel")) {
 				entry, ok := t.tasks.storedTaskEntryByID(ctx, t.sessionRef, identity.taskID)
 				if ok && taskStringValue(entry.Metadata["parent_call"]) == call.Parent.ID {
 					return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "a script cannot wait on or cancel its own Task")
@@ -733,12 +740,15 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	appendNewline := optionalBoolArg(args, "append_newline")
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	switch normalizedAction {
-	case "wait", "read", "write", "cancel":
+	case "wait", "write", "cancel":
 	default:
 		return tool.Result{}, fmt.Errorf("invalid Task action %q", action)
 	}
-	if len(handles) > 1 && (normalizedAction == "read" || normalizedAction == "write") {
+	if len(handles) > 1 && normalizedAction == "write" {
 		return tool.Result{}, fmt.Errorf("task action %q accepts exactly one handle", normalizedAction)
+	}
+	if normalizedAction == "wait" && len(handles) > 1 {
+		return t.callBatchTaskWaitAny(ctx, call, handles, yield), nil
 	}
 	if len(handles) > 1 {
 		result := t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
@@ -749,14 +759,8 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, err
 	}
 
-	yield := time.Duration(0)
-	switch normalizedAction {
-	case "wait":
-		yield = taskWaitMaxYield
-	case "write":
-		if identity.kind == taskapi.KindCommand {
-			yield = taskWriteOutputWait
-		}
+	if normalizedAction == "write" && identity.kind == taskapi.KindCommand {
+		yield = taskWriteOutputWait
 	}
 	req := taskapi.ControlRequest{
 		TaskID:        identity.taskID,
@@ -778,7 +782,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	}
 
 	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, actualWaitMS)
-	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, actualWaitMS, snapshot)
+	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yield, actualWaitMS, snapshot)
 	return result, nil
 }
 
@@ -790,24 +794,8 @@ func durationMillis(value time.Duration) int {
 }
 
 func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, handles []string, input string) tool.Result {
-	if strings.EqualFold(action, "wait") {
-		return t.callBatchTaskWaitAny(ctx, call, handles)
-	}
 	items := make([]taskBatchControlItem, 0, len(handles))
-	started := time.Now()
 	for _, handle := range handles {
-		yield := time.Duration(0)
-		if strings.EqualFold(action, "wait") {
-			yield = taskWaitMaxYield
-		}
-		if strings.EqualFold(action, "wait") && yield > 0 {
-			elapsed := time.Since(started)
-			if elapsed >= yield {
-				yield = 0
-			} else {
-				yield -= elapsed
-			}
-		}
 		identity, resolveErr := t.resolveJobHandle(ctx, handle)
 		if resolveErr != nil {
 			items = append(items, taskBatchControlItem{Handle: handle, Err: resolveErr})
@@ -816,36 +804,26 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 
 		req := taskapi.ControlRequest{
 			TaskID:    identity.taskID,
-			Yield:     yield,
 			Input:     input,
 			Principal: session.ActorKindTool,
 			Source:    "agent_tool",
 		}
-		var snapshot taskapi.Snapshot
-		var err error
-		itemStarted := time.Now()
-		actualWaitMS := 0
-		snapshot, err = t.callTaskControl(ctx, action, req)
-		if strings.EqualFold(action, "wait") {
-			actualWaitMS = durationMillis(time.Since(itemStarted))
-		}
+		snapshot, err := t.callTaskControl(ctx, action, req)
+
 		if err != nil {
-			items = append(items, taskBatchControlItem{Handle: handle, Err: err, ActualWaitMS: actualWaitMS})
+			items = append(items, taskBatchControlItem{Handle: handle, Err: err})
 			continue
 		}
 
-		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true, ActualWaitMS: actualWaitMS})
+		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true})
 	}
-	actualWaitMS := 0
-	if strings.EqualFold(action, "wait") {
-		actualWaitMS = durationMillis(time.Since(started))
-	}
-	result := taskBatchControlToolResult(call, t.base.Definition(), items, action, actualWaitMS)
-	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, actualWaitMS, items)
+
+	result := taskBatchControlToolResult(call, t.base.Definition(), items, action, 0)
+	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, 0, 0, items)
 	return result
 }
 
-func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Call, handles []string) tool.Result {
+func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Call, handles []string, yield time.Duration) tool.Result {
 	type target struct {
 		handle   string
 		identity taskControlIdentity
@@ -873,8 +851,8 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 		for _, item := range targets {
 			go func(item target) {
 				itemStarted := time.Now()
-				snapshot, err := t.tasks.Wait(waitCtx, t.sessionRef, taskapi.ControlRequest{
-					TaskID: item.identity.taskID, Yield: taskWaitMaxYield,
+				snapshot, err := t.callTaskControl(waitCtx, "wait", taskapi.ControlRequest{
+					TaskID: item.identity.taskID, Yield: yield,
 					Principal: session.ActorKindTool, Source: "agent_tool",
 				})
 				results <- outcome{target: item, snapshot: snapshot, err: err, waitMS: durationMillis(time.Since(itemStarted))}
@@ -891,7 +869,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 			// observation taken while another lifecycle owner is committing,
 			// or a normal yield expiry. Keep the other waits alive until one
 			// target is terminal or every target has returned.
-			if result.err == nil && !result.snapshot.Running {
+			if yield > 0 && result.err == nil && !result.snapshot.Running {
 				winner = result
 				break
 			}
@@ -926,7 +904,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 	}
 	actualWaitMS := durationMillis(time.Since(started))
 	result := taskBatchControlToolResult(call, t.base.Definition(), items, "wait", actualWaitMS)
-	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, "wait", "", actualWaitMS, items)
+	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, "wait", "", yield, actualWaitMS, items)
 	return result
 }
 
@@ -934,9 +912,10 @@ func (t runtimeTaskTool) callTaskControl(ctx context.Context, action string, req
 	normalizedReq := normalizeTaskControlRequest(req)
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "wait":
+		if req.Yield == 0 {
+			return t.tasks.Read(ctx, t.sessionRef, normalizedReq)
+		}
 		return t.tasks.Wait(ctx, t.sessionRef, normalizedReq)
-	case "read":
-		return t.tasks.Read(ctx, t.sessionRef, normalizedReq)
 	case "write":
 		return t.tasks.Write(ctx, t.sessionRef, normalizedReq)
 	case "cancel":
@@ -961,7 +940,7 @@ func splitTaskControlHandles(handle string) []string {
 	return out
 }
 
-func taskToolResultEventMeta(existing map[string]any, action string, input string, actualWaitMS int, snapshot taskapi.Snapshot) map[string]any {
+func taskToolResultEventMeta(existing map[string]any, action string, input string, yield time.Duration, actualWaitMS int, snapshot taskapi.Snapshot) map[string]any {
 	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -972,7 +951,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
 	toolMeta["target_handle"] = taskPublicHandle(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		toolMeta["effective_yield_time_ms"] = int(taskWaitMaxYield / time.Millisecond)
+		toolMeta["effective_yield_time_ms"] = durationMillis(yield)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
@@ -981,7 +960,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	return out
 }
 
-func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, actualWaitMS int, items []taskBatchControlItem) map[string]any {
+func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yield time.Duration, actualWaitMS int, items []taskBatchControlItem) map[string]any {
 	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -998,7 +977,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		toolMeta["target_kind"] = strings.TrimSpace(string(kind))
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		toolMeta["effective_yield_time_ms"] = int(taskWaitMaxYield / time.Millisecond)
+		toolMeta["effective_yield_time_ms"] = durationMillis(yield)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
