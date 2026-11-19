@@ -41,6 +41,7 @@ type draftSession struct {
 	active             bool
 	prompt             *draftPromptCall
 	receiptWaiters     int
+	replayEnd          func() error
 	messageSequence    uint64
 	userMessages       map[string]uint64
 	changed            chan struct{}
@@ -290,11 +291,31 @@ func (d *draftClient) loadSession(ctx context.Context, sessionID, cwd string, me
 	if err != nil {
 		return LoadSessionResponse{}, err
 	}
-	response, err := acpsdk.SendRequestWithResponseHook[v2.ResumeSessionResponse](d.client.conn, ctx, v2.AgentMethodSessionResume, request, func(hookCtx context.Context, _ v2.ResumeSessionResponse) error {
-		if replayEnd != nil {
-			return replayEnd(hookCtx)
+	end := sync.OnceValue(func() error {
+		if replayEnd == nil {
+			return nil
 		}
-		return nil
+		return replayEnd(ctx)
+	})
+	d.mu.Lock()
+	session, err := d.ensureSessionLocked(sessionID)
+	if err != nil {
+		d.mu.Unlock()
+		return LoadSessionResponse{}, err
+	}
+	if session.replayEnd != nil {
+		d.mu.Unlock()
+		return LoadSessionResponse{}, errors.New("acp draft: Session replay is already in progress")
+	}
+	session.replayEnd = end
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		session.replayEnd = nil
+		d.mu.Unlock()
+	}()
+	response, err := acpsdk.SendRequestWithResponseHook[v2.ResumeSessionResponse](d.client.conn, ctx, v2.AgentMethodSessionResume, request, func(context.Context, v2.ResumeSessionResponse) error {
+		return end()
 	})
 	if err != nil {
 		return LoadSessionResponse{}, err

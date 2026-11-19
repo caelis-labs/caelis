@@ -340,8 +340,8 @@ func (s *controlCommandBackend) ownedACPPreparation(ctx context.Context, princip
 	if err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
-	if isRetiredAntigravityConnection(preparation.Connection.ID) || preparation.Request.AdapterID == "antigravity" {
-		return controlagents.ACPPreparation{}, errorcode.New(errorcode.FailedPrecondition, "The Antigravity ACP connection is retired.")
+	if isRetiredAntigravityConnection(preparation.Connection) {
+		return controlagents.ACPPreparation{}, errorcode.New(errorcode.FailedPrecondition, "The standalone Antigravity ACP launcher is retired. Reconnect Google Antigravity in /connect.")
 	}
 	return preparation, nil
 }

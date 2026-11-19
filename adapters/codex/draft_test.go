@@ -580,6 +580,9 @@ func TestDraftResumeReplaysNativeMessageIdentityBehindStableBarrier(t *testing.T
 		s, stop, activity := draftState(u)
 		return s == "idle" && stop == "end_turn" && activity == "turn-1"
 	})
+	recorder.wait(t, func(u v2.UpdateSessionNotification) bool {
+		return u.SessionId == "thread-1" && u.Update.ReplayComplete != nil
+	})
 	// The resumed channel accepts new work; replay never submits an old prompt.
 	acceptDraftPrompt(t, fake, client, ctx, "thread-1", "turn-2", "user-2", "new")
 }

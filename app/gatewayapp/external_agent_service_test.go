@@ -19,6 +19,7 @@ func TestResolveACPConnectionLauncherUsesInstalledNativeACPCommand(t *testing.T)
 		args    []string
 		env     map[string]string
 	}{
+		{adapter: "antigravity", command: "agy", args: []string{"acp"}},
 		{adapter: "grok", command: "grok", args: []string{"agent", "stdio"}},
 		{adapter: "kimi", command: "kimi", args: []string{"acp"}},
 		{adapter: "opencode", command: "opencode", args: []string{"acp"}},
@@ -95,7 +96,7 @@ func TestResolveACPConnectionLauncherRequiresNativeCommandOnPATH(t *testing.T) {
 
 func TestResolveACPConnectionLauncherRejectsRemovedRegistryLaunchers(t *testing.T) {
 	for _, req := range []controlagents.ConnectRequest{
-		{AdapterID: "antigravity", Launcher: controlagents.LauncherChoiceInstalled},
+		{AdapterID: "antigravity", Launcher: controlagents.LauncherChoiceManaged},
 		{AdapterID: "codex", Launcher: controlagents.LauncherChoiceManaged},
 		{AdapterID: "claude", Launcher: controlagents.LauncherChoiceGlobal},
 		{AdapterID: "factory-droid", Launcher: controlagents.LauncherChoiceNPX},

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"sort"
 	"strings"
 
@@ -28,7 +29,7 @@ type ACPControllerCommand = controller.ControllerCommand
 type ACPControllerConfigChoice = controller.ControllerConfigChoice
 type ACPControllerMode = controller.ControllerMode
 
-var errAntigravityConnectionRetired = errors.New("gatewayapp: the built-in Antigravity ACP connection is retired. Choose a different model in /model")
+var errAntigravityConnectionRetired = errors.New("gatewayapp: the standalone Antigravity ACP launcher is retired. Reconnect Google Antigravity in /connect")
 
 func withSelfACPAgent(assembly assembly.ResolvedAssembly, self assembly.AgentConfig) assembly.ResolvedAssembly {
 	return agentregistry.WithSelfAgent(assembly, self)
@@ -249,7 +250,11 @@ func (s *runtimeComposition) withExternalACPAgents(resolved assembly.ResolvedAss
 		}
 	}
 	for _, agent := range controlagents.ListAgents(doc.ExternalAgents) {
-		if isRetiredAntigravityConnection(agent.ConnectionID) {
+		resolvedAgent, connection, err := controlagents.ResolveAgent(doc.ExternalAgents, agent.ID)
+		if err != nil {
+			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve external Agent %q: %w", agent.ID, err)
+		}
+		if isRetiredAntigravityConnection(connection) {
 			continue
 		}
 		if forbiddenExternalAgentID(agent.ID) {
@@ -257,10 +262,6 @@ func (s *runtimeComposition) withExternalACPAgents(resolved assembly.ResolvedAss
 		}
 		if _, exists := seen[agent.ID]; exists {
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: external Agent %q conflicts with an existing Agent", agent.ID)
-		}
-		resolvedAgent, connection, err := controlagents.ResolveAgent(doc.ExternalAgents, agent.ID)
-		if err != nil {
-			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve external Agent %q: %w", agent.ID, err)
 		}
 		materialized, err := s.materializeExternalAgent(resolvedAgent, connection)
 		if err != nil {
@@ -276,7 +277,7 @@ func (s *runtimeComposition) materializeExternalAgent(agent controlagents.Agent,
 	if strings.TrimSpace(agent.ConnectionID) == "" || !strings.EqualFold(agent.ConnectionID, connection.ID) {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: external Agent %q has no matching ACP connection", agent.ID)
 	}
-	if isRetiredAntigravityConnection(connection.ID) {
+	if isRetiredAntigravityConnection(connection) {
 		return assembly.AgentConfig{}, errAntigravityConnectionRetired
 	}
 	return assembly.AgentConfig{
@@ -291,10 +292,14 @@ func (s *runtimeComposition) materializeExternalAgent(agent controlagents.Agent,
 	}, nil
 }
 
-// The old built-in connection ID stays readable for existing profiles and
-// Sessions. A separately configured custom command has its own identity.
-func isRetiredAntigravityConnection(id string) bool {
-	return strings.EqualFold(strings.TrimSpace(id), "antigravity")
+// Older stores can still reference the standalone runtime under the same
+// connection ID. Reconnecting updates the launcher through normal onboarding.
+func isRetiredAntigravityConnection(connection controlagents.Connection) bool {
+	if connection.ID != "antigravity" {
+		return false
+	}
+	command := path.Base(strings.ReplaceAll(strings.ToLower(connection.Launcher.Command), "\\", "/"))
+	return command == "agy_acp_server.par" || command == "agy_acp_server.exe"
 }
 
 func (s *runtimeComposition) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration) (assembly.ResolvedAssembly, error) {
