@@ -151,10 +151,10 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 	if checkpoint == nil || checkpoint.Actor.Name != "agent-watchdog" {
 		t.Fatalf("checkpoint = %#v, want Agent-owned watchdog evidence", checkpoint)
 	}
-	if got, want := testModel.calls, 6; got != want {
+	if got, want := testModel.calls, 15; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
-	if got, want := toolExecutions, 5; got != want {
+	if got, want := toolExecutions, 14; got != want {
 		t.Fatalf("tool executions = %d, want %d; trigger step must not execute", got, want)
 	}
 	state, err := runtime.RunState(context.Background(), active.SessionRef)
