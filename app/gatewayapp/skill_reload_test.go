@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -27,9 +28,14 @@ func TestSkillInstructionsRejectedAdmissionDoesNotPinNewSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
+	stamp := time.Unix(1_700_000_000, 0)
 	write := func(description string) {
 		t.Helper()
-		if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte("---\nname: admission-test\ndescription: "+description+"\n---\n"), 0o600); err != nil {
+		path := filepath.Join(root, "SKILL.md")
+		if err := os.WriteFile(path, []byte("---\nname: admission-test\ndescription: "+description+"\n---\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
 			t.Fatal(err)
 		}
 	}
