@@ -66,9 +66,8 @@ type aliasIndexEntry struct {
 	indexes []int
 }
 
-// Catalog is the immutable skill metadata snapshot assembled with the system
-// prompt. It owns skill-name alias resolution for tools, completion, and
-// submission projection.
+// Catalog is an immutable snapshot of discovered Skill metadata. It owns
+// skill-name alias resolution for tools, completion, and submission projection.
 type Catalog struct {
 	metas   []Meta
 	aliases map[string]aliasIndexEntry

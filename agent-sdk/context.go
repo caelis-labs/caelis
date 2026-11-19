@@ -315,6 +315,11 @@ type AgentSpec struct {
 	Request                   ModelRequestOptions
 	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
 	Metadata                  map[string]any     `json:"metadata,omitempty"`
+
+	// ResolveSessionInstructions supplies additional main-request instructions.
+	// After ModelPrepare, Chat calls it with the compaction summary ID in the
+	// assembled history, or an empty ID if that history has no summary.
+	ResolveSessionInstructions func(ctx context.Context, summaryID string) (string, error) `json:"-"`
 }
 
 // ModelRequestOptions controls model request behavior independent of

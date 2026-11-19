@@ -19,11 +19,15 @@ const ToolName = "Skill"
 type Config struct {
 	Loader  skill.Loader
 	Catalog skill.Catalog
+	// ResolveCatalog supplies the current authorized catalog at call time.
+	// If unset, the tool uses Catalog.
+	ResolveCatalog func(context.Context) (skill.Catalog, error)
 }
 
 type Tool struct {
-	loader  skill.Loader
-	catalog skill.Catalog
+	loader         skill.Loader
+	catalog        skill.Catalog
+	resolveCatalog func(context.Context) (skill.Catalog, error)
 }
 
 func New(cfg Config) *Tool {
@@ -32,15 +36,16 @@ func New(cfg Config) *Tool {
 		loader = skillfs.Loader{}
 	}
 	return &Tool{
-		loader:  loader,
-		catalog: cfg.Catalog,
+		loader:         loader,
+		catalog:        cfg.Catalog,
+		resolveCatalog: cfg.ResolveCatalog,
 	}
 }
 
 func (t *Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Load a specialized skill when the task matches one of the available skills in the system context. Use this tool to inject the skill's SKILL.md instructions and relative-resource base directory into the conversation. The skill name must match a listed skill name or an unambiguous local skill name.",
+		Description: "Load a specialized skill by name from the available skills, including newly registered skills. Returns the skill's SKILL.md instructions and relative-resource base directory. Use the full name or an unambiguous local skill name.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"required":             []string{"name"},
@@ -49,7 +54,7 @@ func (t *Tool) Definition() tool.Definition {
 				"name": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Name of the skill from the available skills list.",
+					"description": "Name of an available skill.",
 				},
 			},
 		},
@@ -76,11 +81,18 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 		return tool.Result{}, err
 	}
 	name = strings.TrimSpace(name)
-	meta, status := t.catalog.Resolve(name)
+	catalog := t.catalog
+	if t.resolveCatalog != nil {
+		catalog, err = t.resolveCatalog(ctx)
+		if err != nil {
+			return tool.Result{}, err
+		}
+	}
+	meta, status := catalog.Resolve(name)
 	switch status {
 	case skill.ResolveMatched:
 	case skill.ResolveAmbiguous:
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, ambiguousSkillNameMessage(t.catalog, name))
+		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, ambiguousSkillNameMessage(catalog, name))
 	default:
 		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "skill not found: "+name)
 	}

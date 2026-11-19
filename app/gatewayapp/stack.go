@@ -657,6 +657,7 @@ func newStackFenceOwnerID() (string, error) {
 
 type stackBaseMetadata struct {
 	Metadata     map[string]any
+	BasePrompt   string
 	SkillCatalog skill.Catalog
 }
 
@@ -678,6 +679,7 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, sandboxCfg
 	}
 	return stackBaseMetadata{
 		Metadata:     sandboxpolicy.WithPolicyMetadata(baseMetadata, sandboxCfg),
+		BasePrompt:   result.BasePrompt,
 		SkillCatalog: result.SkillCatalog,
 	}, nil
 }
@@ -883,12 +885,12 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	if exec != nil {
 		execErr = exec.Close()
 	}
+	if capabilityClose != nil {
+		capabilityClose()
+	}
 	var mcpErr error
 	if mcpMgr != nil {
 		mcpErr = mcpMgr.Close()
-	}
-	if capabilityClose != nil {
-		capabilityClose()
 	}
 	if execErr != nil || mcpErr != nil {
 		s.mu.Lock()

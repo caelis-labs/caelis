@@ -286,7 +286,9 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatalf("first app approvals=%d", n)
 	}
 	observed, err := client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != selected || observed.Plugins[0].Version != "0.5.1" || len(observed.Servers) != 1 || observed.Servers[0].PluginID != "desktop-world" || len(observed.Servers[0].Tools) != 2 || len(observed.Skills) != 1 || observed.Skills[0].Name != "desktop-world:desktop-world" {
+	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != selected || observed.Plugins[0].Version != "0.5.1" || len(observed.Servers) != 1 || observed.Servers[0].PluginID != "desktop-world" || len(observed.Servers[0].Tools) != 2 || !slices.ContainsFunc(observed.Skills, func(item sessionprofile.SkillStatus) bool {
+		return item.Name == "desktop-world:desktop-world" && item.Status == "ready"
+	}) {
 		t.Fatalf("unpaired/duplicate native capability: %+v %v", observed, err)
 	}
 	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-parent-reuse", "FIRST_APP"); n != 0 {
@@ -442,8 +444,8 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatalf("native clear failed: %+v %v", cleared, err)
 	}
 	passive, err = client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(passive.Servers) != 0 {
-		t.Fatalf("cleared source retained its old connection: %+v %v", passive, err)
+	if err != nil || len(passive.Servers) != 1 || passive.Servers[0].PluginID != "desktop-world" || passive.Servers[0].Name != "dtw" {
+		t.Fatalf("clearing the explicit selection did not immediately restore the default server: %+v %v", passive, err)
 	}
 	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-default-turn", "NATIVE_NO_CALL"); n != 0 {
 		t.Fatal("default-only observation requested approval")

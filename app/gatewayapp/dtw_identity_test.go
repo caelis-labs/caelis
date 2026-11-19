@@ -80,10 +80,6 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertPair(ordinary)
-			resource := &applicationMCPResource{plugins: profile.Plugins}
-			if !resource.matches(profile) {
-				t.Fatal("unchanged snapshot did not match its own connection")
-			}
 			otherName := "dtw"
 			if name == "dtw" {
 				otherName = "desktop-world"
@@ -93,13 +89,6 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 				if _, err := applicationRuntimePluginContributions(changed, paths); err == nil {
 					t.Fatalf("undeclared proxy %q matched service %q", proxyName, name)
 				}
-				if resource.matches(changed) {
-					t.Fatalf("proxy identity change %q reused snapshot connection", proxyName)
-				}
-			}
-			otherProfile := sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: dtwIdentityFixture(t, otherName)}}}
-			if resource.matches(otherProfile) {
-				t.Fatal("old/new package selection shared a snapshot connection")
 			}
 		})
 	}

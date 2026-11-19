@@ -274,6 +274,10 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	writeAtomicSkill(t, filepath.Join(home, ".agents", "skills", "global"), "fixture-global-skill", "GLOBAL_SKILL")
 	provider := newRevisionProvider()
 	host := startApplicationHTTPHostWithSavedModels(t, filepath.Join(root, "store"), root, provider)
 	defer func() { host.close(t) }()
@@ -299,15 +303,11 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 		if err != nil || presentation.Models == nil || presentation.Models.CurrentModelID != profile.Model || presentation.Modes == nil || len(presentation.Modes.AvailableModes) != 0 || len(presentation.Commands) != 1 || presentation.Commands[0].Name != "compact" {
 			t.Fatalf("explicit passive presentation: %+v, %v", presentation, err)
 		}
-		candidates, err := client.CompleteSkill(ctx, appserver.CompletionRequest{SessionID: sid})
-		selectedCandidates := candidates[:0]
-		for _, candidate := range candidates {
-			if candidate.Value != "desktop-world:dtw" && candidate.Value != "desktop-world:desktop-world" {
-				selectedCandidates = append(selectedCandidates, candidate)
+		for _, name := range []string{"selected-skill", "fixture-global-skill"} {
+			candidates, err := client.CompleteSkill(ctx, appserver.CompletionRequest{SessionID: sid, Query: name})
+			if err != nil || !slices.ContainsFunc(candidates, func(candidate appserver.CompletionCandidate) bool { return candidate.Value == name }) {
+				t.Fatalf("passive Skill completion for %s: %+v, %v", name, candidates, err)
 			}
-		}
-		if err != nil || len(selectedCandidates) != 1 || selectedCandidates[0].Value != "selected-skill" {
-			t.Fatalf("explicit skill projection: %+v, %v", candidates, err)
 		}
 		if agents, err := client.ListAgents(ctx, appserver.AgentRequest{SessionID: sid}); err != nil || len(agents) != 0 {
 			t.Fatalf("main profile borrowed Host Agent catalog: %+v, %v", agents, err)

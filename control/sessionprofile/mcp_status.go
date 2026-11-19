@@ -15,6 +15,7 @@ type MCPStatus struct {
 
 // MCPServerStatus keeps connection state separate from catalog refresh health.
 type MCPServerStatus struct {
+	Ready         bool                `json:"ready"` // the current tool catalog can be used
 	PluginID      string              `json:"plugin_id,omitempty"`
 	Refreshing    bool                `json:"refreshing"`
 	Stale         bool                `json:"stale"`

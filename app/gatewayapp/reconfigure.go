@@ -143,7 +143,7 @@ type gatewayRuntimeBundle struct {
 	CloseCapabilities           func()
 	CapabilityStatus            func(uint64) sessionprofile.MCPStatus
 	CapabilityRefresh           func(context.Context, string, string) error
-	CapabilityUpdated           func(sessionprofile.Configuration)
+	CapabilityUpdated           func(context.Context, sessionprofile.Configuration)
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int
 	ReleasePluginCache          func() error
@@ -178,13 +178,13 @@ func (b *gatewayRuntimeBundle) Close() {
 		_ = b.Exec.Close()
 		b.Exec = nil
 	}
-	if b.MCP != nil {
-		_ = b.MCP.Close()
-		b.MCP = nil
-	}
 	if b.CloseCapabilities != nil {
 		b.CloseCapabilities()
 		b.CloseCapabilities = nil
+	}
+	if b.MCP != nil {
+		_ = b.MCP.Close()
+		b.MCP = nil
 	}
 	if b.ReleasePluginCache != nil {
 		_ = b.ReleasePluginCache()
@@ -348,7 +348,10 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
 	bundle.MCP = mcpMgr
-	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr, mcpSpecs)
+	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr)
+	if s.activation != nil && s.retainRuntimeWork != nil && s.authorities.store != nil {
+		bundle.CloseCapabilities = s.watchNativeMCP(mcpMgr, plan.Plugins.MCPServerSpecs)
+	}
 	if err := ctx.Err(); err != nil {
 		bundle.Close()
 		return nil, err
@@ -371,19 +374,24 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	policyRegistry = toolpolicy.Registry{Base: policyRegistry, Authority: s.authorities.userID, Rules: s.policyRules}
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
+	resolveSkills := func(ctx context.Context) (skill.Catalog, error) {
+		if err := ctx.Err(); err != nil {
+			return skill.Catalog{}, err
+		}
+		metas, err := skillfs.DiscoverMetaRequest(skill.DiscoverRequest{
+			Dirs: plan.SkillDirs, WorkspaceDir: s.workspace.CWD, PluginBundles: runtimeCfg.PluginSkills,
+		})
+		return skill.NewCatalog(metas), err
+	}
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
-		Runtime:      sandboxRuntime,
-		SkillLoader:  skillfs.Loader{},
-		SkillCatalog: runtimeCfg.SkillCatalog,
+		Runtime:             sandboxRuntime,
+		ResolveSkillCatalog: resolveSkills,
 	})
 	if err != nil {
 		bundle.Close()
 		return nil, err
 	}
-	if len(mcpSpecs) > 0 {
-		ranker := newBoundToolSearchRanker(s)
-		tools = append(tools, toolsearch.NewSource(mcpMgr, ranker))
-	}
+	tools = append(tools, toolsearch.NewSource(mcpMgr, newBoundToolSearchRanker(s)))
 	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{
 		Sandbox: sandboxRuntime,
 	})
@@ -474,7 +482,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 			if _, frozen := req.State[codemode.MetadataCatalog].(string); !frozen && mcpMgr != nil {
 				metadata[codemode.MetadataSelectedTools] = selectedCodeModeTools(mcpMgr.Tools())
 			}
-			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
+			if systemPrompt := baseMetadata.BasePrompt; systemPrompt != "" {
 				if spawnedChild {
 					systemPrompt = systemPromptWithoutCollaborationGuidance(systemPrompt)
 					if handle, role, ok := s.spawnedCollaboratorIdentity(ctx, activeSession); ok {
@@ -486,9 +494,10 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				metadata["system_prompt"] = systemPrompt
 			}
 			return kernelimpl.ToolAugmentation{
-				Tools:         augmentedTools,
-				DeferredTools: mcpMgr,
-				Metadata:      metadata,
+				Tools:                      augmentedTools,
+				DeferredTools:              mcpMgr,
+				Metadata:                   metadata,
+				ResolveSessionInstructions: sessionSkillInstructions(s.sessions, req.SessionRef, resolveSkills),
 			}, nil
 		},
 	})
@@ -621,11 +630,11 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	if oldExec != nil {
 		_ = oldExec.Close()
 	}
-	if oldMcpMgr != nil {
-		_ = oldMcpMgr.Close()
-	}
 	if oldCapabilityClose != nil {
 		oldCapabilityClose()
+	}
+	if oldMcpMgr != nil {
+		_ = oldMcpMgr.Close()
 	}
 	if oldPluginCacheRelease != nil {
 		_ = oldPluginCacheRelease()

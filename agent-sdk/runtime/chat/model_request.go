@@ -33,6 +33,8 @@ func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	next.admitModelRequest = snapshot.Admit
 	next.releaseModelRequest = snapshot.Release
 	next.resolveModelRequest = a.resolveModelRequest
+	next.resolveSessionInstructions = a.resolveSessionInstructions
+	next.summaryID = a.summaryID
 	next.toolResultArtifacts = a.toolResultArtifacts
 	next.discoveries = a.discoveries
 	*a = *next

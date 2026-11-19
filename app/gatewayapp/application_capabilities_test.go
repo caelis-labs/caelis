@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -31,7 +32,7 @@ func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata := applicationSkillMetadata(catalog)
+	metadata := promptassembly.SkillMetadata(catalog)
 	if !strings.Contains(metadata, "selected") || strings.Contains(metadata, "SELECTED_BODY_MARKER") || strings.Contains(metadata, "ambient") {
 		t.Fatalf("root metadata includes unselected Skill or body: %s", metadata)
 	}

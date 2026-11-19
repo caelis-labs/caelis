@@ -277,6 +277,9 @@ func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
 	if len(infos) != 1 || !strings.Contains(infos[0].Warning, `tool "bad" quarantined`) {
 		t.Fatalf("server infos = %#v, want bad-tool quarantine warning", infos)
 	}
+	if all := mgr.GetServerInfos(""); len(all) != 1 || all[0].PluginID != "myplugin" || all[0].Warning != infos[0].Warning {
+		t.Fatalf("combined status lost the source or warning: %+v", all)
+	}
 	if !slices.Equal(infos[0].Tools, []string{"echo"}) || len(infos[0].ToolDetails) != 1 || infos[0].ToolDetails[0].Name != "echo" || infos[0].ToolDetails[0].Description != tools[0].Definition().Description {
 		t.Fatalf("status details include quarantined or non-callable definitions: %#v", infos[0])
 	}

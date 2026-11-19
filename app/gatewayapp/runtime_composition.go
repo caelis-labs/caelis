@@ -66,7 +66,7 @@ type runtimeComposition struct {
 	capabilityClose    func()
 	capabilityStatus   func(uint64) sessionprofile.MCPStatus
 	capabilityRefresh  func(context.Context, string, string) error
-	capabilityUpdated  func(sessionprofile.Configuration)
+	capabilityUpdated  func(context.Context, sessionprofile.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
 	retainIdleWork     func(session.SessionRef) (func(), bool)

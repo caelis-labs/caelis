@@ -1702,10 +1702,10 @@ export interface SessionFeedDelivery {
 }
 
 export interface SessionInheritance {
-  cwd_instructions: false;
-  mcp: false;
-  skills: false;
-  workspace_memory: false;
+  cwd_instructions?: false;
+  mcp?: boolean;
+  skills?: boolean;
+  workspace_memory?: false;
   [key: string]: JSONValue;
 }
 
@@ -1752,6 +1752,7 @@ export interface SessionMCPServer {
 export interface SessionMCPServerStatus {
   name: string;
   plugin_id?: string;
+  ready?: boolean;
   refresh_failed?: boolean;
   refreshing?: boolean;
   stale?: boolean;
@@ -1853,7 +1854,7 @@ export interface SessionPresentationModeRequest {
 export interface SessionProfile {
   execution: "tools-only" | "workspace-write";
   execution_config?: ExecutionConfig | null;
-  inherit: SessionInheritance;
+  inherit?: SessionInheritance;
   instructions: string;
   mcp_servers?: Array<SessionMCPServer>;
   model: string;

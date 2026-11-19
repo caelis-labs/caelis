@@ -164,8 +164,13 @@ resident; observation may retain it after activation, but never grants execution
 authority. Once work is idle and the last observation closes, Control releases
 the Runtime. The next activation samples current configuration.
 
-Ordinary default-model, skill, MCP, plugin and sandbox changes affect later
-activations. Team bind/reset changes affect the next role invocation; an ongoing
+Ordinary default-model, plugin registration and sandbox changes affect later
+activations. During an activation, the `Skill` tool discovers current Skills in
+the Session's selected directories and bundles on each call. The main-model
+instructions pin their list of Skill names and descriptions in durable Session
+state. The first main request assembled with a newly adopted compaction summary
+refreshes that list. Async compaction generation keeps the instructions of its
+source request. Team bind/reset changes affect the next role invocation; an ongoing
 model request or review retains its resolved model, effort and speed. The optional
 approval classifier and its deferred Guardian share one captured Team revision.
 This capture does not dispatch or retry the original tool action. Explicit provider or ACP-Agent removal is the narrow
@@ -332,8 +337,11 @@ writes use revision-aware atomic replacement; readers observe a complete documen
 
 Native MCP configuration is assembled from AppConfig plus supported user
 overlays. Project `.agents/mcp.json` or `.mcp.json` files are sampled only after
-the exact canonical workspace is trusted. Overlay changes never hot-reload an
-active Runtime. During automatic assembly, a malformed overlay file or server
+the exact canonical workspace is trusted. Resident Session Runtimes detect ordinary
+Host and overlay configuration changes and apply connection changes in place.
+Application Sessions use this same catalog and watcher, with their explicit
+Server definitions taking precedence by namespace.
+During assembly and reload, a malformed overlay file or server
 entry is omitted; an invalid persisted native server is omitted individually.
 An invalid higher-priority entry cannot shadow a healthy lower-priority entry;
 ambiguous names within one overlay file are all omitted. A valid explicit
@@ -349,11 +357,13 @@ The TUI's Session presence subscription displays these notices during active
 and idle periods; Turn and reconnect views omit duplicate presentation.
 Overlapping tool namespaces wait for higher-priority initialization to settle
 before publication, preserving configured collision precedence.
+Unchanged connections continue serving across reload. A removed or replaced
+Server stops accepting new calls and closes once dispatched calls finish.
 Runtime release cancels and drains pending initialization and closes its clients.
 
 Automatic Skill discovery omits malformed individual `SKILL.md` files from
-future Session prompts and catalogs without a startup notice. An explicit Skill
-read or load still returns its parse error. A missing YAML closing marker is
+live catalogs and refreshed prompt metadata without a startup notice. An explicit
+read of the Skill file still returns its parse error. A missing YAML closing marker is
 invalid frontmatter, not plain Skill content.
 
 Fixed product plugin contributions are assembled separately from optional user

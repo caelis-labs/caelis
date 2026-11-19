@@ -24,7 +24,30 @@ func (s *controlCommandBackend) updateSessionConfiguration(ctx context.Context, 
 	if err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
+	if configuration.Revision > req.ExpectedConfigurationRevision &&
+		(req.Patch.MCPServers != nil && len(configuration.Profile.MCPServers) != 0 ||
+			req.Patch.Plugins != nil && len(configuration.Profile.Plugins) != 0) {
+		s.prepareObservedMCP(ctx, req.SessionID)
+	}
 	return appserver.CommandResult{OperationID: req.OperationID, SessionID: req.SessionID, Outcome: appserver.OutcomeCommitted, Configuration: &configuration}, nil
+}
+
+// A subscribed Application can prepare MCP before its first prompt. The
+// configuration receipt has already committed and Runtime health is separate.
+func (s *controlCommandBackend) prepareObservedMCP(ctx context.Context, sessionID string) {
+	registry := s.runtimeRegistry()
+	if registry == nil {
+		return
+	}
+	registry.mu.RLock()
+	cold := registry.observers[sessionID] != 0 && registry.sessions[sessionID] == nil
+	registry.mu.RUnlock()
+	if cold {
+		_, _, release, _, err := registry.acquireActivatedControlRuntime(ctx, sessionID)
+		if err == nil {
+			_ = release(ctx)
+		}
+	}
 }
 
 func (s *controlCommandBackend) createSessionResource(ctx context.Context, p appserver.Principal, req appserver.SessionResourceRequest) (appserver.CommandResult, error) {

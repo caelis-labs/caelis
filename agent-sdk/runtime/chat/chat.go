@@ -52,6 +52,9 @@ type Agent struct {
 	releaseModelRequest func()
 	discoveries         map[string]tool.Binding
 	boundCalls          map[string]boundMCPCall
+
+	resolveSessionInstructions func(context.Context, string) (string, error)
+	summaryID                  string
 }
 
 // New returns one concrete chat agent.
@@ -106,7 +109,8 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 		if name == "" {
 			name = "chat"
 		}
-		return &Agent{name: name, models: spec.Models, resolveModelRequest: spec.ResolveModelRequest, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
+		return &Agent{name: name, models: spec.Models, resolveModelRequest: spec.ResolveModelRequest,
+			resolveSessionInstructions: spec.ResolveSessionInstructions, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
 	}
 	systemPrompt := ""
 	if raw, ok := spec.Metadata["system_prompt"].(string); ok {
@@ -126,6 +130,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	chatAgent.deferredTools = spec.DeferredTools
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})
+	chatAgent.resolveSessionInstructions = spec.ResolveSessionInstructions
 	return chatAgent, nil
 }
 
@@ -151,7 +156,12 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			return
 		}
 		a.discoveries = mcpdiscovery.FromContext(ctx)
-		for event := range ctx.Events().All() {
+		a.summaryID = ""
+		events := ctx.Events()
+		if a.resolveSessionInstructions != nil && events.Len() > 0 {
+			a.summaryID = promptSummaryID(events.At(0))
+		}
+		for event := range events.All() {
 			mcpdiscovery.Apply(a.discoveries, event)
 		}
 		watchdog := newDefaultGenerationWatchdog()
@@ -380,6 +390,15 @@ func (a *Agent) collectCanonicalModelStep(
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
 		}
 		request = prepared
+		if cached == nil && a.resolveSessionInstructions != nil {
+			instructions, err := a.resolveSessionInstructions(ctx, a.summaryID)
+			if err != nil {
+				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+			}
+			if instructions != "" {
+				request.Instructions = append(request.Instructions, model.NewTextPart(instructions))
+			}
+		}
 		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,

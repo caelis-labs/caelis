@@ -109,11 +109,18 @@ func TestCatalogHTTPRefreshRevokesPinnedSchemaAndRetainsInflightResult(t *testin
 		t.Fatal("remove/re-add revived pending old handle")
 	}
 	fresh = mgr.Tools()[0]
+	source := fresh.(*MCPTool).server
 	if err := mgr.RevokeServer("p", "local"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fresh.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); err == nil || len(mgr.Tools()) != 0 || calls.Load() != 1 {
 		t.Fatal("revocation did not gate pinned callable")
+	}
+	if err := mgr.Reconcile([]ServerSpec{source.spec}); err != nil {
+		t.Fatal(err)
+	}
+	if info := mgr.GetServerInfos(""); len(info) != 1 || mgr.servers[0] != source || info[0].Ready {
+		t.Fatalf("no-op reconciliation changed the revoked source: %+v", info)
 	}
 }
 

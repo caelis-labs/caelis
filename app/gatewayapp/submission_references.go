@@ -26,9 +26,8 @@ func (s *runtimeComposition) projectSubmissionReferences(ctx context.Context, re
 	}
 	var skillNames map[string]string
 	if submissionReferenceTokensContain(tokens, promptrefs.KindSkill) {
-		// Skill shorthand uses the runtime prompt snapshot. Skills added after
-		// runtime assembly become available after a runtime rebuild, not midway
-		// through the current runtime context.
+		// Shorthand resolves aliases from the activation's catalog. The Skill
+		// tool resolves known names against current files when called.
 		skillNames = s.skillCatalogSnapshot().NameLookup()
 	}
 	projected := promptrefs.ProjectSubmissionReferences(text, promptrefs.ProjectionOptions{

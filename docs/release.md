@@ -74,7 +74,7 @@ Hosts retain atomic admission fencing; the early-version transition uses a live
 activity read followed by shutdown. See [replacement](control-client-schema.md#managed-host-replacement). Installation alone does not
 prove that the selected Host has changed.
 
-CWD, inheritance, execution and permissions remain bound at Session creation.
+CWD, execution and permissions remain bound at Session creation.
 Model, reasoning effort, supported service tier, instructions and tools can
 change at the next unissued model request, including within a Turn. A provider's
 support for priority is not a promise that every model supports Fast. Synthetic

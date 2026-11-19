@@ -19,9 +19,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/experimental"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -33,9 +35,8 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-// assembleApplicationSnapshot binds execution authority once; each model request
-// resolves its desired profile separately. Choosing a directory never imports
-// workspace instructions, skills, MCP, plugins or the process prompt.
+// assembleProfileSnapshot binds execution authority once. Each main request
+// resolves its desired profile alongside Core's capability discovery.
 func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.Service) (*sessionRuntimeInstance, error) {
 	store := a.deps.authorities.sessionProfiles
 	if store == nil || !sessionvisibility.IsApplicationSession(active) {
@@ -57,7 +58,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	// Only the Session main model is independently selected. Team roles resolve
 	// against the current Runtime configuration at each call.
-	// No workspace configuration may alter the application prefix.
+	// Application instructions come from the profile.
 	modelDocument, lookup, err := a.loadRuntimeModelSnapshot(ctx, active)
 	if err != nil {
 		return nil, err
@@ -66,12 +67,13 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	if err := controlplacement.ValidateSnapshot(placement.placement); err != nil {
 		return nil, err
 	}
-	contextWindow := a.deps.processConfig.snapshot().runtime.ContextWindow
+	process := a.deps.processConfig.snapshot().runtime
+	contextWindow := process.ContextWindow
 	instance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		placementCache:    placement,
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
-		activeRuntime:     stackRuntimeConfig{Experimental: experimental.Complete(modelDocument.Experimental), ContextWindow: contextWindow, ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile)},
+		activeRuntime:     stackRuntimeConfig{Experimental: experimental.Complete(modelDocument.Experimental), ContextWindow: contextWindow, SkillDirs: process.SkillDirs, ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile)},
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
 		retainRuntimeWork: activity.retainWork, retainIdleWork: activity.retainIdleWork, idleQuiet: activity.idleQuiet, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
@@ -107,6 +109,10 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 			resolver.closeCapabilities()
 		}
 	}()
+	resolver.inheritedMCP, err = resolveConfiguredMCPServers(modelDocument.MCPServers, modelDocument.WorkspaceTrust, workspace.CWD)
+	if err != nil {
+		return nil, err
+	}
 	configuration, err := store.Configuration(ctx, binding.Scope, binding.SessionID)
 	if err != nil {
 		return nil, err
@@ -127,12 +133,11 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	compaction.Idle.Enabled = instance.activeRuntime.Experimental[experimental.IdleCompact]
 	// The complete tool set is independent of Turn source. An unavailable
 	// callback provenance is rejected during resolution, never silently widened.
-	estimateCapabilities, releaseEstimate, err := resolver.acquireCapabilities(ctx, configuration)
+	estimateCapabilities, err := resolver.capabilitiesFor(ctx, configuration)
 	if err != nil {
 		return nil, err
 	}
 	estimateTools, err := resolver.tools(ctx, configuration, sessionprofile.Source{Kind: "user", OperationID: "estimate"}, estimateCapabilities)
-	releaseEstimate()
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +175,11 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		return nil, err
 	}
 	bundle := &gatewayRuntimeBundle{ACPControlPlane: childPlane, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
-	bundle.CloseCapabilities = resolver.closeCapabilities
+	stop := instance.watchConfiguredMCP(modelDocument, resolver.updateInheritedMCP)
+	bundle.CloseCapabilities = func() {
+		stop()
+		resolver.closeCapabilities()
+	}
 	bundle.CapabilityStatus = resolver.capabilityStatus
 	bundle.CapabilityRefresh = resolver.refreshMCPTools
 	bundle.CapabilityUpdated = resolver.configurationCommitted
@@ -244,8 +253,10 @@ type applicationTurnResolver struct {
 	// detached when this Session's native executor was activated.
 	modelLookup        func(context.Context) (*modelLookup, error)
 	capabilitiesMu     sync.Mutex
-	capabilities       map[uint64]*applicationCapabilities
-	currentMCP         *applicationMCPResource
+	capabilities       *applicationCapabilities
+	mcpManager         *mcp.Manager
+	inheritedMCP       []mcp.ServerSpec
+	declaredMCP        []mcp.ServerSpec
 	desiredRevision    uint64
 	capabilitiesClosed bool
 }
@@ -282,12 +293,10 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessi
 	if !hasTask {
 		tools = append(tools, tasktool.New())
 	}
-	if len(capabilities.catalog.Metas()) > 0 {
-		tools = append(tools, applicationLeasedTool{Tool: capabilities.skillTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope})
-	}
-	if capabilities.source != nil {
-		tools = append(tools, applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope})
-	}
+	tools = append(tools,
+		applicationLeasedTool{Tool: skilltool.New(skilltool.Config{ResolveCatalog: r.liveSkillCatalog}), store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope},
+		applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope},
+	)
 	children, err := r.composition.applicationChildren.tools(ctx)
 	if err != nil {
 		return nil, err
@@ -338,6 +347,7 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 		DisplayInput: strings.TrimSpace(intent.DisplayInput), ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
 		Inputs: agent.CloneAgentCommunicationInputs(intent.Inputs), InputActor: session.CloneActorRef(intent.InputActor),
 		AgentSpec: agent.AgentSpec{Name: "application", Model: snapshot.Model, Tools: snapshot.Tools, Metadata: metadata,
+			ResolveSessionInstructions: sessionSkillInstructions(r.composition.sessions, intent.SessionRef, r.liveSkillCatalog),
 			ResolveModelRequest: func(ctx context.Context) (agent.ModelRequestSnapshot, error) {
 				return r.resolveModelRequest(ctx, source)
 			}},
@@ -346,7 +356,7 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 
 func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, source sessionprofile.Source) (agent.ModelRequestSnapshot, error) {
 	store := r.composition.authorities.sessionProfiles
-	configuration, err := store.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
+	configuration, capabilities, err := r.currentCapabilities(ctx)
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
@@ -354,16 +364,6 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
-	capabilities, release, err := r.acquireCapabilities(ctx, configuration)
-	if err != nil {
-		return agent.ModelRequestSnapshot{}, err
-	}
-	keep := false
-	defer func() {
-		if !keep {
-			release()
-		}
-	}()
 	tools, err := r.tools(ctx, configuration, source, capabilities)
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
@@ -372,15 +372,10 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 	if configuration.Profile.Instructions != "" {
 		instructions = []model.Part{model.NewTextPart(configuration.Profile.Instructions)}
 	}
-	if metadata := applicationSkillMetadata(capabilities.catalog); metadata != "" {
-		instructions = append(instructions, model.NewTextPart(metadata))
-	}
-	keep = true
 	return agent.ModelRequestSnapshot{
 		Revision: strconv.FormatUint(configuration.Revision, 10), Model: resolved.Model, Tools: tools, DeferredTools: capabilities.source,
 		Instructions: instructions, Reasoning: model.ReasoningConfig{Effort: resolved.ReasoningEffort},
 		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
-		Release: release,
 		Validate: func(ctx context.Context) (func(), error) {
 			unlock, err := store.GuardConfiguration(ctx, r.binding.Scope, r.binding.SessionID, configuration.Revision)
 			if errors.Is(err, sessionprofile.ErrConfigurationStale) {

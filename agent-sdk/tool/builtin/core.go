@@ -1,6 +1,8 @@
 package builtin
 
 import (
+	"context"
+
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -20,6 +22,8 @@ type CoreToolsConfig struct {
 	Read         filesystem.ReadConfig
 	SkillLoader  skill.Loader
 	SkillCatalog skill.Catalog
+	// ResolveSkillCatalog optionally supplies live Skills to the built-in tool.
+	ResolveSkillCatalog func(context.Context) (skill.Catalog, error)
 }
 
 // BuildCoreTools constructs the default coding tool group, including js_exec.
@@ -57,8 +61,9 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	taskTool := task.New()
 	planTool := plan.New()
 	skillTool := skilltool.New(skilltool.Config{
-		Loader:  cfg.SkillLoader,
-		Catalog: cfg.SkillCatalog,
+		Loader:         cfg.SkillLoader,
+		Catalog:        cfg.SkillCatalog,
+		ResolveCatalog: cfg.ResolveSkillCatalog,
 	})
 	webSearchTool := web.NewSearch()
 	webFetchTool, err := web.NewFetch(web.FetchConfig{})
