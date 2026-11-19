@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1062,4 +1063,63 @@ func sgrSetsForeground(params string) bool {
 		}
 	}
 	return false
+}
+
+func TestWrappedTableDividerColumns(t *testing.T) {
+	raw := "说明\n\n| 优先级 | 文件 | 说明 |\n|---|---|---|\n| P1 | `command.go` | " + strings.Repeat("需要调整 ", 16) + " |"
+	ctx := BlockRenderContext{Width: 54, Theme: tuikit.DefaultTheme()}
+	rows := renderParticipantTurnNarrativeRowsWithBuffer("table", raw, nil, tuikit.LineStyleAssistant, ctx.Width, ctx, false)
+	var columns []int
+	tableLines := 0
+	for _, row := range rows {
+		var got []int
+		for index, char := range row.Plain {
+			if char == '│' || char == '┼' {
+				got = append(got, graphemeWidth(row.Plain[:index]))
+			}
+		}
+		if len(got) == 0 {
+			continue
+		}
+		tableLines++
+		if columns == nil {
+			columns = got
+		}
+		if len(got) != 2 || got[0] != columns[0] || got[1] != columns[1] {
+			t.Fatalf("divider columns %v, want %v in %q", got, columns, row.Plain)
+		}
+	}
+	if tableLines < 4 {
+		t.Fatalf("expected wrapped table, got %d lines", tableLines)
+	}
+}
+
+func TestParticipantMarkdownLineBreaks(t *testing.T) {
+	ctx := BlockRenderContext{Width: 25, Theme: tuikit.DefaultTheme()}
+	render := func(raw string) []string {
+		return renderedPlainRows(renderParticipantTurnNarrativeRowsWithBuffer("breaks", raw, nil, tuikit.LineStyleAssistant, ctx.Width, ctx, false))
+	}
+	for _, hardBreak := range []string{"  \n", "\\\n"} {
+		got := render("第一\n第二" + hardBreak + "第三")
+		if !slices.Equal(got, []string{"· 第一 第二", "  第三"}) {
+			t.Fatalf("paragraph breaks: %q", got)
+		}
+	}
+	token := strings.Repeat("a", 43)
+	code := render("正文\n\n```text\n    " + token + "\n```\n\n结束")
+	want := []string{"· 正文", "", "      " + token[:19], "  " + token[19:42], "  a", "", "  结束"}
+	if !slices.Equal(code, want) {
+		t.Fatalf("wrapped code: %q, want %q", code, want)
+	}
+	quote := render("> 引用内容带链接 [路径](/tmp/long/path/to/stuff.go)\n> 第二行")
+	for i, line := range quote {
+		if i == 0 {
+			line = strings.TrimPrefix(line, "· ")
+		} else {
+			line = strings.TrimPrefix(line, "  ")
+		}
+		if !strings.HasPrefix(line, "│ ") || strings.TrimSpace(strings.TrimPrefix(line, "│ ")) == "" {
+			t.Fatalf("quote rail or content missing in %q", quote)
+		}
+	}
 }

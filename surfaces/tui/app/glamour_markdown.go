@@ -21,9 +21,13 @@ import (
 // Displayed hrefs use URI encoding; link labels and other source text are intact.
 type narrativeMarkdown struct {
 	markdown goldmark.Markdown
+	width    int
 }
 
 func newNarrativeMarkdown(options gansi.Options) *narrativeMarkdown {
+	// Goldmark distinguishes explicit Markdown line breaks from soft newlines.
+	// Keep explicit breaks through Glamour's paragraph layout.
+	options.PreserveNewLines = true
 	markdown := goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.DefinitionList),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
@@ -33,7 +37,7 @@ func newNarrativeMarkdown(options gansi.Options) *narrativeMarkdown {
 	markdown.SetRenderer(renderer.NewRenderer(
 		renderer.WithNodeRenderers(util.Prioritized(gansi.NewRenderer(options), 1000)),
 	))
-	return &narrativeMarkdown{markdown: markdown}
+	return &narrativeMarkdown{markdown: markdown, width: options.WordWrap}
 }
 
 func (r *narrativeMarkdown) Render(raw string) (string, error) {
@@ -45,6 +49,15 @@ func (r *narrativeMarkdown) Render(raw string) (string, error) {
 			return ast.WalkContinue, nil
 		}
 		switch node := node.(type) {
+		case *ast.Text:
+			if node.SoftLineBreak() && proseParagraph(node) {
+				value := node.Segment.Value(source)
+				start := len(source)
+				source = append(source, value...)
+				source = append(source, ' ')
+				node.Segment = text.NewSegment(start, len(source))
+				node.SetSoftLineBreak(false)
+			}
 		case *ast.Link:
 			node.Destination = []byte(tuikit.EscapeHyperlinkURI(string(node.Destination)))
 		case *ast.Image:
@@ -69,6 +82,57 @@ func (r *narrativeMarkdown) Render(raw string) (string, error) {
 		node.Parent().ReplaceChild(node.Parent(), node, link)
 	}
 	var out bytes.Buffer
-	err := r.markdown.Renderer().Render(&out, source, document)
+	// Glamour's document word wrap can move indentation onto a line by
+	// itself before a long code token. Render overflowing top-level code
+	// directly, then hard-wrap the highlighted output in display cells.
+	render := r.markdown.Renderer().Render
+	for node := document.FirstChild(); node != nil; node = node.NextSibling() {
+		if !r.overflowsCodeBlock(node, source) {
+			continue
+		}
+		before := ast.NewDocument()
+		for document.FirstChild() != node {
+			before.AppendChild(before, document.FirstChild())
+		}
+		if err := render(&out, source, before); err != nil {
+			return "", err
+		}
+		var code bytes.Buffer
+		if err := render(&code, source, node); err != nil {
+			return "", err
+		}
+		out.WriteString(hardWrapDisplayLine(code.String(), r.width))
+		// Keep the sibling boundary used for paragraph spacing.
+		boundary := ast.NewTextBlock()
+		document.ReplaceChild(document, node, boundary)
+		node = boundary
+	}
+	err := render(&out, source, document)
 	return out.String(), err
+}
+
+// Glamour flows paragraphs as prose, except inside list items.
+func proseParagraph(node ast.Node) bool {
+	for parent := node.Parent(); parent != nil; parent = parent.Parent() {
+		if parent.IsRaw() {
+			return false
+		}
+		if parent.Kind() == ast.KindParagraph {
+			return parent.Parent().Kind() != ast.KindListItem
+		}
+	}
+	return false
+}
+
+func (r *narrativeMarkdown) overflowsCodeBlock(node ast.Node, source []byte) bool {
+	if node.Kind() != ast.KindCodeBlock && node.Kind() != ast.KindFencedCodeBlock {
+		return false
+	}
+	for i := 0; i < node.Lines().Len(); i++ {
+		line := node.Lines().At(i)
+		if graphemeWidth(string(line.Value(source))) > r.width {
+			return true
+		}
+	}
+	return false
 }
