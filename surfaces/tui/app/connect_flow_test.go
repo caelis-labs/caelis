@@ -1390,7 +1390,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		t.Fatalf("selected models = %q", got)
 	}
 	plain = ansi.Strip(m.renderWizardOverlay())
-	if strings.Count(plain, "[x]") != 2 || !strings.Contains(plain, "space toggle") || !strings.Contains(plain, "Connect 2 models") {
+	if !strings.Contains(plain, "[x] deepseek/deepseek-v4-pro") || !strings.Contains(plain, "[x] deepseek/deepseek-flash") || !strings.Contains(plain, "space toggle") || !strings.Contains(plain, "Connect 2 models") {
 		t.Fatalf("model picker missing checked models or checkbox guidance:\n%s", plain)
 	}
 	handled, cmd := m.handleWizardEnter()
