@@ -218,15 +218,25 @@ type codeModeControlTarget struct {
 	task    *codeModeTask
 }
 
-func (t codeModeControlTarget) Read(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+func (t codeModeControlTarget) Read(_ context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return t.snapshot(req, false)
+}
+
+func (t codeModeControlTarget) snapshot(req taskapi.ControlRequest, statusOnly bool) (taskapi.Snapshot, error) {
 	t.task.mu.Lock()
 	defer t.task.mu.Unlock()
 	snapshot := codeModeSnapshot(t.task.entry)
-	if t.task.persistErr != nil {
+	modelObserver := req.Source == "agent_tool" && req.Principal == session.ActorKindTool
+	if statusOnly && modelObserver {
+		// The model cancel only reports status. Leave the selected result
+		// available for a wait that may establish a terminal Turn disposition.
+		delete(snapshot.Result, "tool_result_json")
+	}
+	if statusOnly || t.task.persistErr != nil {
 		return snapshot, t.task.persistErr
 	}
-	raw := taskStringValue(snapshot.Result["tool_result_json"])
-	if req.Source == "agent_tool" && req.Principal == session.ActorKindTool {
+	if modelObserver {
+		raw := taskStringValue(snapshot.Result["tool_result_json"])
 		if t.task.frontier.model >= int64(len(raw)) {
 			delete(snapshot.Result, "tool_result_json")
 		} else {
@@ -261,7 +271,7 @@ func (t codeModeControlTarget) Cancel(ctx context.Context, req taskapi.ControlRe
 	case <-ctx.Done():
 		return taskapi.Snapshot{}, ctx.Err()
 	}
-	return t.Read(ctx, req)
+	return t.snapshot(req, true)
 }
 
 func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRef, id string) (taskControlTarget, error) {

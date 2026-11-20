@@ -60,11 +60,7 @@ func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
 	if !ok || filepath.Ext(mixedPath) != ".json" {
 		t.Fatalf("write(mixed) = %q/%v, want JSON artifact", mixedPath, ok)
 	}
-	raw, err := json.Marshal(tool.ModelParts(mixed))
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertFileContent(t, mixedPath, raw)
+	assertFileContent(t, mixedPath, []byte(`{"content":[{"type":"text","text":"alpha"},{"type":"resource","uri":"https://example.com/a.png","name":"a","mime_type":"image/png"},{"type":"structured","value":{"beta":true}}]}`))
 }
 
 func TestToolResultArtifactStoreCleansOldestFiles(t *testing.T) {
@@ -274,7 +270,7 @@ func TestCanonicalTerminalToolResultAddsTextAndScalarJSONHints(t *testing.T) {
 			if filepath.Ext(path) != tt.extension {
 				t.Fatalf("artifact path = %q, want %s", path, tt.extension)
 			}
-			want, _, ok := rawToolResultArtifact(tool.ModelParts(tt.result.Content))
+			want, _, ok := rawToolResultArtifact(tt.result.Content)
 			if !ok {
 				t.Fatal("rawToolResultArtifact() = false")
 			}

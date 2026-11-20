@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -18,10 +19,18 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 	t.Parallel()
 	media := tool.Image{Data: []byte("complete-inline-image-data"), MIMEType: "image/png", Name: "evidence"}
 	large := strings.Repeat(`{"method":"find","path":"C:\\验收\\item","description":"<value>"}`+"\n", 1200)
+	link := tool.Resource{URI: "resource://fixture/item", Name: "item", Title: "Item", MIMEType: "text/plain", Description: "fixture resource", Size: new(int64(0))}
+	emptyDocument := link
+	emptyDocument.Text = new(string)
+	document := link
+	document.Text = &large
 	for name, parts := range map[string][]tool.ContentBlock{
 		"text-and-structured":   {tool.Text(large), tool.StructuredContent{Value: mustJSON(map[string]any{"schema": large})}},
 		"text-and-media":        {tool.Text(large), media},
 		"text-media-structured": {tool.Text(large), media, tool.StructuredContent{Value: mustJSON(map[string]any{"schema": large})}},
+		"link-and-embedded":     {tool.Text(large), link, emptyDocument},
+		"embedded-only":         {document},
+		"embedded-then-text":    {document, tool.Text("end of result")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -42,11 +51,14 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 			if path == "" {
 				t.Fatal("multipart truncation lost its complete raw artifact reference")
 			}
-			raw, err := json.Marshal(tool.ModelParts(before.Content))
+			raw, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertFileContent(t, path, raw)
+			var recovered tool.Result
+			if err := json.Unmarshal(raw, &recovered); err != nil || !reflect.DeepEqual(recovered.Content, before.Content) {
+				t.Fatalf("artifact lost typed blocks: recovered %d of %d, decode error: %v", len(recovered.Content), len(before.Content), err)
+			}
 			assertPrivateFileMode(t, path)
 			if !reflect.DeepEqual(before, result) {
 				t.Fatal("canonicalization changed the original result")

@@ -103,23 +103,16 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := tools[0].(callbackTool).invoke(t.Context(), tool.Call{ID: call.CallID, Name: call.Name, Input: call.Arguments}, tool.InvocationContext{SessionID: b.SessionID, TurnID: call.TurnID, ItemID: call.ItemID})
-	if err != nil || got.ID != call.CallID || len(got.Content) != 4 {
+	if err != nil || got.ID != call.CallID || len(got.Content) != 5 {
 		t.Fatalf("projection shape: %+v, %v", got, err)
 	}
 	image, ok := got.Content[1].(tool.Image)
 	if got.Content[0] != tool.Text(before) || !ok || image.MIMEType != "image/png" || base64.StdEncoding.EncodeToString(image.Data) != encoded || got.Content[2] != tool.Text(after) {
 		t.Fatal("typed order or image bytes changed")
 	}
-	structured, ok := got.Content[3].(tool.StructuredContent)
-	if !ok {
-		t.Fatalf("missing structured receipt: %+v", got.Content)
-	}
-	var receipt map[string]any
-	if err := json.Unmarshal(structured.Value, &receipt); err != nil {
-		t.Fatal(err)
-	}
-	if receipt["outcome"] != "succeeded" || receipt["receipt_id"] != call.ID || !reflect.DeepEqual(receipt["structuredContent"], result.StructuredContent) {
-		t.Fatalf("effect receipt changed: %v", receipt)
+	assertContentV1Receipt(t, got.Content[3], call.ID, "succeeded")
+	if raw, ok := got.Structured(); !ok || string(raw) != `{"recorded":true}` {
+		t.Fatalf("structured callback output = %s, want the business payload", raw)
 	}
 	provenance := got.Metadata["application_call"].(map[string]any)
 	if provenance["call_id"] != call.CallID || provenance["session_id"] != b.SessionID || provenance["principal_id"] != c.PrincipalID {
@@ -132,14 +125,24 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 			t.Fatal(err)
 		}
 		out, err := reopened.projectResult(t.Context(), next.CallContext, next.Name, ResultFormatContentV1, result)
-		raw, ok := out.Structured()
-		if !tool.HasFailedReply(err) || err.Error() != before || !ok || !bytes.Contains(raw, []byte(`"outcome":"`+outcome+`"`)) {
+		if !tool.HasFailedReply(err) || err.Error() != before || len(out.Content) != 4 {
 			t.Fatalf("lost %s receipt: %+v %v", outcome, out, err)
 		}
-		if !reflect.DeepEqual(out.Content[:len(out.Content)-1], got.Content[:len(got.Content)-1]) {
+		assertContentV1Receipt(t, out.Content[3], next.ID, outcome)
+		if _, ok := out.Structured(); ok || !reflect.DeepEqual(out.Content[:3], got.Content[:3]) {
 			t.Fatalf("%s receipt changed diagnostic blocks: %+v", outcome, out.Content)
 		}
 	}
+}
+
+func assertContentV1Receipt(t *testing.T, block tool.ContentBlock, id, outcome string) map[string]any {
+	t.Helper()
+	text, ok := block.(tool.Text)
+	var receipt map[string]any
+	if !ok || json.Unmarshal([]byte(text), &receipt) != nil || receipt["outcome"] != outcome || receipt["receipt_id"] != id {
+		t.Fatalf("missing %s callback receipt %s: %+v", outcome, id, block)
+	}
+	return receipt
 }
 
 func TestContentV1RejectsMalformedResultsWithoutCompleting(t *testing.T) {
@@ -218,9 +221,13 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
-	raw, ok := out.Structured()
-	if err != nil || len(out.Content) != 2 || !ok || !bytes.Contains(raw, []byte(r.ID)) {
+	if err != nil || len(out.Content) != 3 {
 		t.Fatalf("resource not resolved with provenance: %+v %v", out, err)
+	}
+	receipt := assertContentV1Receipt(t, out.Content[1], call.ID, "succeeded")
+	resources, _ := json.Marshal(receipt["resources"])
+	if !bytes.Contains(resources, []byte(r.ID)) {
+		t.Fatalf("resource provenance missing: %s", resources)
 	}
 	snapshot, ok := out.Content[0].(tool.Image)
 	if !ok || snapshot.MIMEType != r.MediaType || snapshot.Name != r.Name {
@@ -257,9 +264,15 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 	next := claimContent(t, s, b, "expired")
 	assertError(t, s.CompleteCall(t.Context(), c.Scope, b.SessionID, next.ID, result), ErrResourceExpired)
 	expired, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
-	raw, ok = expired.Structured()
-	if !tool.HasFailedReply(err) || err.Error() != ErrResourceExpired.Error() || len(expired.Content) != 1 || !ok || !bytes.Contains(raw, []byte(`"outcome":"succeeded"`)) || !bytes.Contains(raw, []byte(`"content_error"`)) {
-		t.Fatalf("expiry changed effect outcome or silently dropped content: %+v %v", expired, err)
+	if !tool.HasFailedReply(err) || err.Error() != ErrResourceExpired.Error() || len(expired.Content) != 2 {
+		t.Fatalf("expiry changed content failure: %+v %v", expired, err)
+	}
+	receipt = assertContentV1Receipt(t, expired.Content[0], call.ID, "succeeded")
+	if receipt["content_error"] == nil {
+		t.Fatalf("expiry silently dropped content: %+v", receipt)
+	}
+	if raw, ok := expired.Structured(); !ok || string(raw) != `{"recorded":true}` {
+		t.Fatalf("expiry lost independent structured evidence: %s", raw)
 	}
 	if !bytes.Equal(snapshot.Data, data) {
 		t.Fatal("historical snapshot changed on resource expiry")
@@ -359,10 +372,10 @@ func TestContentV1UnknownLifecycleCannotReissue(t *testing.T) {
 				}
 				if claimed {
 					out, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
-					raw, ok := out.Structured()
-					if !tool.HasFailedReply(err) || err.Error() != "Application callback outcome: unknown" || !ok || !bytes.Contains(raw, []byte(`"outcome":"unknown"`)) {
-						t.Fatal("unknown effect lost")
+					if !tool.HasFailedReply(err) || err.Error() != "Application callback outcome: unknown" || len(out.Content) != 1 {
+						t.Fatalf("unknown effect lost: %+v %v", out, err)
 					}
+					assertContentV1Receipt(t, out.Content[0], call.ID, "unknown")
 				}
 				if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, id, contentResult(t)); err == nil {
 					t.Fatal("late result revived uncertain effect")

@@ -14,38 +14,18 @@ const (
 )
 
 // toolResultWithArtifactHint prefers a structured payload for the trusted
-// reference, otherwise a text suffix. It preserves part order and media.
-// Runtime metadata does not reuse or extend a tool-owned system_hint field.
+// reference, otherwise a text notice. It preserves original block order and
+// never reuses or extends a tool-owned system_hint field.
 func toolResultWithArtifactHint(result tool.Result, path string, collision bool) (tool.Result, map[string]any, bool) {
 	path = strings.TrimSpace(path)
 	if path == "" || len(result.Content) == 0 {
 		return tool.Result{}, nil, false
 	}
-	index := -1
-findHintBlock:
-	for i, block := range result.Content {
-		switch block.(type) {
-		case tool.StructuredContent:
-			index = i
-			break findHintBlock
-		case tool.Text:
-			if index < 0 {
-				index = i
-			}
+	for index, content := range result.Content {
+		block, ok := content.(tool.StructuredContent)
+		if !ok {
+			continue
 		}
-	}
-	if index < 0 {
-		return tool.Result{}, nil, false
-	}
-	out, _ := tool.CloneResult(result, nil)
-	switch block := out.Content[index].(type) {
-	case tool.Text:
-		if block != "" {
-			block += "\n\n"
-		}
-		out.Content[index] = block + tool.Text(toolResultArtifactHintPrefix+path+"\nModel-visible tool content was truncated.")
-		return out, nil, true
-	case tool.StructuredContent:
 		if !json.Valid(block.Value) {
 			return tool.Result{}, nil, false
 		}
@@ -59,11 +39,20 @@ findHintBlock:
 		if err != nil {
 			return tool.Result{}, nil, false
 		}
+		out, _ := tool.CloneResult(result, nil)
 		out.Content[index] = tool.StructuredContent{Value: raw}
 		return out, map[string]any{toolResultRuntimeNamespaceKey: runtimeMetadata}, true
-	default:
-		return tool.Result{}, nil, false
 	}
+	hint := tool.Text(toolResultArtifactHintPrefix + path + "\nModel-visible tool content was truncated.")
+	if len(result.Content) == 1 {
+		if text, ok := result.Content[0].(tool.Text); ok {
+			result.Content = []tool.ContentBlock{text + "\n\n" + hint}
+			return result, nil, true
+		}
+	}
+	// A large resource can consume the whole budget before a later text block.
+	result.Content = append([]tool.ContentBlock{hint}, result.Content...)
+	return result, nil, true
 }
 
 func toolResultWithoutReservedNamespace(result tool.Result) (tool.Result, bool) {

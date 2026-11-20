@@ -71,19 +71,24 @@ Policy, approvals, display events and the canonical ToolCall/ToolResult use the 
 and arguments. Without Code Mode, the model-facing call/result retain the original `mcp_call`
 name and call ID; a typed original-call field preserves that pairing through
 Store round trips and unknown-result recovery. Recovery never replays an unknown MCP
-effect or invents a recoverer. A dispatched call uses the tool bound by
-Runtime. On borrow, the Manager checks that its client remains available.
+effect or invents a recoverer. At borrow, the Manager checks that the selected
+callable still matches the exact published entry and that its client and catalog
+are ready. A changed or removed entry makes old handles stale, even if the same
+definition is later re-added. Unchanged entries keep their handles across
+successful refreshes. The Manager releases its locks before MCP I/O.
 
 ## Directory refresh and revocation
 
 A tool-list notification marks that server's catalog uncertain and blocks
-fresh lookups and binding checks. One worker per server merges
-notifications in a bounded wake-up channel and fetches a complete paginated list.
+fresh lookups, binding checks and new calls, including calls using retained
+handles. One worker per server merges notifications in a bounded wake-up channel
+and fetches a complete paginated list.
 A notification generation change during pagination discards the read and retries
 at most three times within the independent listing timeout. Repeated cursors,
 duplicate names, listing failures and cancellation retain the last whole directory.
-A failed refresh exposes a status warning and keeps lookups and binding checks
-blocked until another notification or explicit `Manager.RefreshTools` succeeds. The authorized
+A failed refresh exposes a status warning and keeps admission blocked until a
+later refresh succeeds, whether triggered by another notification or explicit
+`Manager.RefreshTools`. The authorized
 [Control retry command](experimental-features.md#retry-an-mcp-catalog-read) uses
 that same activation-owned Manager. Unrelated compaction does not inspect or mutate the MCP directory.
 
@@ -99,8 +104,8 @@ the Session tool set because of a projected-name collision are not available to
 Code Mode; qualified paths cannot restore them. `RevokeServer` blocks all new
 calls immediately but leaves server/plugin shutdown to the embedding owner.
 Runtime checks schema bindings when it resolves a call. Code Mode also checks
-the selected target before dispatch. Calls already in flight retain their
-results after revocation and are never automatically retried.
+the selected target before dispatch. Calls already admitted can finish after
+catalog changes or revocation and are never automatically retried.
 
 Policy consumes typed Session approval/revocation facts and exact configuration
 rules. Runtime checks cancellation and current authorization before consuming

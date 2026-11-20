@@ -62,7 +62,15 @@ func catalogClean(m *Manager) bool {
 func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, &mcpsdk.ServerOptions{PageSize: 1})
 	var calls atomic.Int32
-	catalogTool(server, "read", "v1", &calls)
+	addRead := func(propertyType string) {
+		server.AddTool(&mcpsdk.Tool{Name: "read", InputSchema: map[string]any{
+			"type": "object", "properties": map[string]any{"value": map[string]any{"type": propertyType}},
+		}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			calls.Add(1)
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "read"}}}, nil
+		})
+	}
+	addRead("string")
 	entered, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(release) })
@@ -73,6 +81,7 @@ func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T)
 	})
 	mgr := catalogManager(t, server, true)
 	old := mgr.Tools()[0]
+	oldBinding := BindingForDefinition(old.Definition())
 	slow := mgr.Tools()[1]
 	type receipt struct {
 		result tool.Result
@@ -83,14 +92,24 @@ func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T)
 		result, err := slow.Call(t.Context(), tool.Call{ID: "original", Name: "local__slow", Input: []byte(`{}`)})
 		done <- receipt{result: result, err: err}
 	}()
-	<-entered
-	catalogTool(server, "read", "v2", &calls)
+	select {
+	case <-entered:
+	case received := <-done:
+		t.Fatalf("call finished before reaching the server: %v", received.err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("call never reached the server")
+	}
+	addRead("number")
 	server.RemoveTools("slow")
 	awaitCatalog(t, func() bool {
-		return len(mgr.Tools()) == 1 && mgr.Tools()[0].Definition().Description == "v2" && catalogClean(mgr)
+		ready := mgr.SearchTools()
+		return len(ready) == 1 && BindingForDefinition(ready[0].Definition()).Version != oldBinding.Version
 	})
-	if err := mgr.CheckToolBinding(t.Context(), BindingForDefinition(old.Definition())); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision {
+	if err := mgr.CheckToolBinding(t.Context(), oldBinding); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision {
 		t.Fatalf("old binding was not stale: %v", err)
+	}
+	if _, err := old.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision || calls.Load() != 0 {
+		t.Fatalf("old handle was not rejected before dispatch: calls=%d, error=%v", calls.Load(), err)
 	}
 	releaseOnce.Do(func() { close(release) })
 	received := <-done
@@ -99,17 +118,32 @@ func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T)
 		t.Fatalf("lost inflight receipt: %+v, %v", result, received.err)
 	}
 	fresh := mgr.Tools()[0]
-	if BindingForDefinition(old.Definition()).Identity != BindingForDefinition(fresh.Definition()).Identity || BindingForDefinition(old.Definition()).Version == BindingForDefinition(fresh.Definition()).Version {
+	if binding := BindingForDefinition(fresh.Definition()); binding.Identity != oldBinding.Identity || binding.Version == oldBinding.Version {
 		t.Fatal("identity/schema version binding incorrect")
 	}
 	if _, err := fresh.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
+	server.RemoveTools("read")
+	awaitCatalog(t, func() bool { return len(mgr.Tools()) == 0 && catalogClean(mgr) })
+	addRead("number")
+	awaitCatalog(t, func() bool { return len(mgr.SearchTools()) == 1 })
+	readded := mgr.Tools()[0]
+	if BindingForDefinition(readded.Definition()) != BindingForDefinition(fresh.Definition()) {
+		t.Fatal("re-added definition did not have the same durable binding")
+	}
+	if _, err := fresh.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision || calls.Load() != 1 {
+		t.Fatalf("re-add revived the removed handle: calls=%d, error=%v", calls.Load(), err)
+	}
+	if _, err := readded.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	fresh = readded
 	source := fresh.(*MCPTool).server
 	if err := mgr.RevokeServer("p", "local"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fresh.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); err == nil || len(mgr.Tools()) != 0 || calls.Load() != 1 {
+	if _, err := fresh.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); err == nil || len(mgr.Tools()) != 0 || calls.Load() != 2 {
 		t.Fatal("revocation did not gate pinned callable")
 	}
 	if err := mgr.Reconcile([]ServerSpec{source.spec}); err != nil {
@@ -124,7 +158,8 @@ func TestCatalogUnrelatedRefreshKeepsExactBinding(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, nil)
 	catalogTool(server, "look", "stable", nil)
 	mgr := catalogManager(t, server, true)
-	binding := BindingForDefinition(mgr.Tools()[0].Definition())
+	retained := mgr.Tools()[0]
+	binding := BindingForDefinition(retained.Definition())
 	if err := mgr.RefreshTools(t.Context(), "p", "local"); err != nil {
 		t.Fatal(err)
 	}
@@ -136,12 +171,17 @@ func TestCatalogUnrelatedRefreshKeepsExactBinding(t *testing.T) {
 	if err := mgr.CheckToolBinding(t.Context(), binding); err != nil {
 		t.Fatalf("unrelated catalog addition invalidated binding: %v", err)
 	}
+	result, err := retained.Call(t.Context(), tool.Call{Input: []byte(`{}`)})
+	if err != nil || len(result.Content) != 1 || result.Content[0] != tool.Text("stable") {
+		t.Fatalf("unrelated refresh invalidated retained handle: %+v, %v", result, err)
+	}
 }
 
 func TestCatalogPaginationFailureCancellationAndNotificationCoalescing(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, &mcpsdk.ServerOptions{PageSize: 1})
-	catalogTool(server, "a", "a", nil)
-	catalogTool(server, "b", "b", nil)
+	var calls atomic.Int32
+	catalogTool(server, "a", "a", &calls)
+	catalogTool(server, "b", "b", &calls)
 	var mode atomic.Int32
 	var lists atomic.Int32
 	blocked, release := make(chan struct{}, 1), make(chan struct{})
@@ -185,8 +225,8 @@ func TestCatalogPaginationFailureCancellationAndNotificationCoalescing(t *testin
 		if _, found, err := mgr.Lookup(t.Context(), before[0].Name); found || errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision {
 			t.Fatalf("uncertain catalog allowed lookup: found=%t, error=%v", found, err)
 		}
-		if result, err := after[0].Call(t.Context(), tool.Call{Input: []byte(`{}`)}); err != nil {
-			t.Fatalf("selected callable could not borrow a live client: %v %+v", err, result)
+		if _, err := after[0].Call(t.Context(), tool.Call{Input: []byte(`{}`)}); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision || calls.Load() != 0 {
+			t.Fatalf("uncertain catalog allowed dispatch: calls=%d, error=%v", calls.Load(), err)
 		}
 	}
 	mode.Store(3)
@@ -346,6 +386,9 @@ func TestCatalogPaginationRacePublishesNoMixedSnapshot(t *testing.T) {
 	awaitCatalog(t, func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.generation >= 2 })
 	if err := mgr.CheckToolBinding(t.Context(), BindingForDefinition(previous.Definition())); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision {
 		t.Fatalf("dirty directory accepted a binding: %v", err)
+	}
+	if _, err := previous.Call(t.Context(), tool.Call{Input: []byte(`{}`)}); errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision {
+		t.Fatalf("dirty directory accepted a retained handle: %v", err)
 	}
 	block.Store(false)
 	releaseOnce.Do(func() { close(release) })

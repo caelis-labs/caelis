@@ -15,11 +15,12 @@ import (
 )
 
 type MCPTool struct {
-	client   *Client
-	manager  *Manager
-	server   *managedServer
-	origName string
-	def      tool.Definition
+	client    *Client
+	manager   *Manager
+	server    *managedServer
+	origName  string
+	def       tool.Definition
+	bindingID uint64 // Manager-local admission identity; not a durable binding version.
 }
 
 func (t *MCPTool) Definition() tool.Definition {
@@ -40,7 +41,7 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	}
 
 	if t.manager != nil {
-		release, err := t.manager.borrowClient(ctx, t.server)
+		release, err := t.manager.borrowClient(ctx, t)
 		if err != nil {
 			return tool.Result{}, err
 		}

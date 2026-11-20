@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,9 +18,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
@@ -303,4 +309,164 @@ func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	if !read || !wait {
 		t.Fatalf("successful Task executions: native wait=%v nested read=%v", wait, read)
 	}
+}
+
+func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
+	for _, name := range []string{filesystem.WriteToolName, filesystem.PatchToolName} {
+		t.Run(name, func(t *testing.T) {
+			store, active, root := codeModeStore(t)
+			file := filepath.Join(root, "shared.txt")
+			if err := os.WriteFile(file, []byte("initial"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sandbox, err := host.New(host.Config{CWD: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var target tool.Tool
+			args := []string{`{"path":"shared.txt","content":"first"}`, `{"path":"shared.txt","content":"second"}`}
+			if name == filesystem.PatchToolName {
+				target, err = filesystem.NewPatch(sandbox)
+				args = []string{`{"path":"shared.txt","edits":[{"old":"initial","new":"first"}]}`, `{"path":"shared.txt","edits":[{"old":"first","new":"second"}]}`}
+			} else {
+				target, err = filesystem.NewWrite(sandbox)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondDone := make(chan struct{})
+			var overtook atomic.Bool
+			hook := agent.ToolInvokeHook{Name: "delay-first-mutation", Invoke: func(ctx context.Context, info agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+				if info.Tool.ID == "first" {
+					// Simulate the first call reaching the file lock late. In a
+					// serial batch the second cannot arrive until we proceed.
+					select {
+					case <-secondDone:
+						overtook.Store(true)
+					case <-time.After(300 * time.Millisecond):
+					case <-ctx.Done():
+						return tool.Result{}, ctx.Err()
+					}
+				} else {
+					defer close(secondDone)
+				}
+				return next(ctx)
+			}}
+			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+				if i == 0 {
+					return []model.ToolCall{{ID: "first", Name: name, Args: args[0]}, {ID: "second", Name: name, Args: args[1]}}
+				}
+				return nil
+			}}
+			events := runNativeOrdering(t, store, active, driver, []tool.Tool{target}, Config{Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{hook}}})
+			contents, err := os.ReadFile(file)
+			if err != nil || string(contents) != "second" || overtook.Load() {
+				t.Fatalf("model order lost: file=%q, second overtook first=%v, err=%v", contents, overtook.Load(), err)
+			}
+			var replies []string
+			for _, e := range events {
+				if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == name && e.Tool.Outcome == session.ToolOutcomeSucceeded {
+					replies = append(replies, e.Tool.ID)
+				}
+			}
+			if !slices.Equal(replies, []string{"first", "second"}) {
+				t.Fatalf("ordered successful results = %v", replies)
+			}
+		})
+	}
+}
+
+func TestNativeScriptTaskWaitAndCancelOrdering(t *testing.T) {
+	for _, separated := range []bool{false, true} {
+		name := "adjacent"
+		if separated {
+			name = "intervening_effect"
+		}
+		t.Run(name, func(t *testing.T) {
+			store, active, _ := codeModeStore(t)
+			drained := make(chan struct{})
+			script := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, _ codemode.Host) (json.RawMessage, error) {
+				<-ctx.Done()
+				close(drained)
+				return nil, ctx.Err()
+			})}
+			var effectRan atomic.Bool
+			effect := tool.NamedTool{Def: tool.Definition{Name: "Effect"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+				effectRan.Store(true)
+				select {
+				case <-drained:
+					if separated {
+						t.Error("cancel crossed an intervening effect")
+					}
+				default:
+					if !separated {
+						t.Error("effect ran before the paired controls drained the script")
+					}
+				}
+				return tool.Result{}, nil
+			}}
+			wantState := taskapi.StateCancelled
+			if separated {
+				wantState = taskapi.StateRunning
+			}
+			driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
+				switch i {
+				case 0:
+					return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: `{"code":"fixture","yield_time_ms":0}`}}
+				case 1:
+					handle := jsExecTaskHandle(req)
+					if handle == "" {
+						t.Error("missing yielded script handle")
+						return nil
+					}
+					wait := model.ToolCall{ID: "wait", Name: tasktool.ToolName, Args: fmt.Sprintf(`{"action":"wait","handle":%q,"yield_time_ms":700}`, handle)}
+					cancel := model.ToolCall{ID: "cancel", Name: tasktool.ToolName, Args: fmt.Sprintf(`{"action":"cancel","handle":%q}`, handle)}
+					ordinary := model.ToolCall{ID: "ordinary", Name: "Effect", Args: `{}`}
+					if separated {
+						return []model.ToolCall{wait, ordinary, cancel}
+					}
+					return []model.ToolCall{wait, cancel, ordinary}
+				}
+				return nil
+			}}
+			events := runNativeOrdering(t, store, active, driver, []tool.Tool{script, effect}, Config{})
+			var waitState string
+			for _, e := range events {
+				if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.ID == "wait" {
+					waitState = taskRuntimeMetaString(e.Meta, "task", "state")
+				}
+			}
+			if waitState != string(wantState) || !effectRan.Load() {
+				t.Fatalf("wait observed %q, want %q; ordinary effect ran=%v", waitState, wantState, effectRan.Load())
+			}
+		})
+	}
+}
+
+func runNativeOrdering(t *testing.T, store *sessionfile.Store, active session.Session, driver model.LLM, tools []tool.Tool, cfg Config) []*session.Event {
+	t.Helper()
+	cfg.Sessions, cfg.TaskStore = store, sessionfile.NewTaskStore(store)
+	cfg.AgentFactory, cfg.DefaultPolicyMode = chat.Factory{}, "mcp-test"
+	if cfg.PolicyRegistry == nil {
+		cfg.PolicyRegistry = mcpFixturePolicy()
+	}
+	rt, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "exercise native batch order", AgentSpec: agent.AgentSpec{Model: driver, Tools: tools}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events
 }

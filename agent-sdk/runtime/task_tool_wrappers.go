@@ -685,20 +685,51 @@ func (t runtimeTaskTool) Definition() tool.Definition {
 	return def
 }
 
-func (t runtimeTaskTool) RuntimeMayCompleteTurn(_ toolbinding.Token, ctx context.Context, call tool.Call) bool {
-	var args struct {
-		Handle string `json:"handle"`
+func (t runtimeTaskTool) RuntimeNativeSchedule(_ toolbinding.Token, ctx context.Context, call tool.Call) toolbinding.NativeSchedule {
+	ordered := toolbinding.NativeSchedule{Ordered: true}
+	args, err := decodeJSONMap(call.Input)
+	if err != nil || tasktool.ValidateArgs(args) != nil {
+		return ordered
 	}
-	if err := json.Unmarshal(call.Input, &args); err != nil {
-		return true
-	}
-	for _, handle := range splitTaskControlHandles(args.Handle) {
-		identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
-		if err != nil || identity.kind == taskapi.KindCodeMode {
-			return true
+	handle, _ := stringArg(args, "handle")
+	handles := splitTaskControlHandles(handle)
+	for _, handle := range handles {
+		identity, err := t.resolveJobHandle(ctx, handle)
+		if err != nil {
+			return ordered
+		}
+		if identity.kind == taskapi.KindCodeMode {
+			if len(handles) != 1 || !t.hasActiveScript(identity.taskID) {
+				return ordered
+			}
+			action, _ := stringArg(args, "action")
+			switch strings.ToLower(action) {
+			case "wait":
+				if yield := optionalIntArg(args, "yield_time_ms"); yield == nil || *yield > 0 {
+					ordered.ScriptWait = identity.taskID
+				}
+			case "cancel":
+				ordered.ScriptCancel = identity.taskID
+			}
+			return ordered
 		}
 	}
-	return false
+	return toolbinding.NativeSchedule{}
+}
+
+func (t runtimeTaskTool) hasActiveScript(id string) bool {
+	t.tasks.mu.RLock()
+	script := t.tasks.codeTasks[id]
+	t.tasks.mu.RUnlock()
+	if script == nil || script.sessionRef.SessionID != t.sessionRef.SessionID {
+		return false
+	}
+	select {
+	case <-script.done:
+		return false
+	default:
+		return true
+	}
 }
 
 func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {

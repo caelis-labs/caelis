@@ -4,13 +4,14 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // Project selected js_exec results and mixed canonical tool content from their
-// original parts, not the lossy rawOutput summary. Other text-only and single-JSON
-// results retain their tool-specific presentation.
-func projectedMultimodalToolResultContent(message *model.Message) []eventstream.ToolCallContent {
+// model-visible parts, not the lossy rawOutput summary.
+func projectedMultimodalToolResultContent(message *model.Message, result *tool.Result) []eventstream.ToolCallContent {
 	if message == nil {
 		return nil
 	}
@@ -29,7 +30,20 @@ func projectedMultimodalToolResultContent(message *model.Message) []eventstream.
 			hasJSON = true
 		}
 	}
-	if results[0].Name != "js_exec" && !hasImage && (len(results[0].Content) <= 1 || !hasJSON) {
+	showParts := results[0].Name == "js_exec" || hasImage || len(results[0].Content) > 1 && hasJSON
+	if result != nil {
+		provenance, _ := result.Metadata["application_call"].(map[string]any)
+		if provenance["result_format"] == sessionprofile.ResultFormatContentV1 {
+			// Only callback results with actual content were previously shown:
+			// the old single receipt block contained both bookkeeping and data.
+			receiptBlocks := 1
+			if _, hasData := result.Structured(); hasData {
+				receiptBlocks++
+			}
+			showParts = len(result.Content) > receiptBlocks && (hasImage || len(results[0].Content) > 1)
+		}
+	}
+	if !showParts {
 		return nil
 	}
 	out := make([]eventstream.ToolCallContent, 0, len(results[0].Content))

@@ -229,7 +229,12 @@ func (s *Store) validateCallResult(ctx context.Context, call Call, result CallRe
 	if err != nil {
 		return err
 	}
-	receipt, err := json.Marshal(resultReceipt(call.CallContext, result, references))
+	// Count both projected blocks with the original combined receipt budget.
+	envelope := resultReceipt(call.CallContext, result.Outcome, references)
+	if result.StructuredContent != nil {
+		envelope["structuredContent"] = result.StructuredContent
+	}
+	receipt, err := json.Marshal(envelope)
 	if err != nil {
 		return ErrInvalid
 	}

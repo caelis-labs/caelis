@@ -163,18 +163,24 @@ allowlist. A StartThread-created collaborator receives only `ListThreads` and `S
 from the collaboration tool set. Creation and work observation remain with the
 controller, keeping Agent collaboration one level deep.
 
-Harness Chat executes eligible calls in one model batch concurrently when the
-active model declares parallel tool calls. A batch runs in model order if a
-call is unavailable or can end the Turn. Application callbacks and Code Mode
-submissions declare `Definition.MayCompleteTurn`. Runtime Task checks its target
-handles because a script can carry a terminal result. Observations of command
-tasks can run concurrently. Concurrent batches also return tool results in
-model order. Independent Code Mode calls can overlap,
-including calls to the same target and calls from Chat while an earlier script
-is yielded. Tool implementations own synchronization for shared state. Built-in
-Patch and Write serialize the read, revision check and write for a shared file
-within the process. Runtime retains per-invocation approval, sandbox and durable
-effect admission. Task control retains its per-task mutation claims.
+Harness Chat executes eligible calls in one native model batch concurrently
+when the active model declares parallel tool calls. Batches containing an
+unavailable call, a call that can end the Turn, or a built-in Patch or Write
+run in model order. Application callbacks and Code Mode submissions declare
+`Definition.MayCompleteTurn`. Runtime Task checks its target handles because
+waiting on a live or stored script can return a terminal result. An adjacent
+blocking wait and single-target cancel of the same active script can overlap
+in a parallel-capable batch. Cancel does not consume the script result, and
+the pair drains before Chat can admit another effect. The exception never
+crosses intervening calls. Command Task observations can run concurrently.
+Concurrent calls still return tool results in model order.
+
+Independent Code Mode calls can overlap, including calls to the same target
+and calls from Chat while an earlier script is yielded. Tool implementations
+own synchronization for shared state. Built-in Patch and Write lock the read,
+revision check, and write for a shared file across invocations within the
+process. Runtime retains per-invocation approval, sandbox and durable effect
+admission. Task control retains its per-task mutation claims.
 
 Participant startup uses an internal Session-scoped execution identity. An optional handle must be unique.
 Optional context transfer is derived by the host's recipient-specific
@@ -503,12 +509,12 @@ activity identity is limited to the first activity.
 
 All tool sources use the same serialized result budget before model delivery and
 durable event validation. When truncation needs a recovery artifact, the bounded
-private artifact store retains the complete original result: single text/JSON
-keeps its existing format, and multipart content uses an ordered typed JSON array
-including media sources. The model receives bounded content with a runtime-owned
-artifact reference, whose budget is reserved even behind earlier text parts.
-Media remains unchanged. Artifact quota or write failure does not bypass the
-result budget or add a reference to an unavailable file.
+private artifact store retains the original content. A single text or structured
+JSON block is saved as-is; other results use the result codec's ordered `content`
+array, preserving media and resource blocks. The model receives bounded content
+with a runtime-owned artifact reference, whose budget is reserved even behind
+earlier text parts. Media remains unchanged. Artifact quota or write failure
+does not bypass the result budget or add a reference to an unavailable file.
 
 `tool.Definition.Name` is the sole executable identity. Names are exact and
 case-sensitive; assembly rejects empty, padded, or duplicate names. Durable

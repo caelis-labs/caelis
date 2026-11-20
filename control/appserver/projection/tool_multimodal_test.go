@@ -7,7 +7,9 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestTextAndStructuredReceiptProjectAsSeparateOrderedContent(t *testing.T) {
@@ -35,6 +37,44 @@ func TestTextAndStructuredReceiptProjectAsSeparateOrderedContent(t *testing.T) {
 	last, ok := projected.Content[1].Content.(eventstream.TextContent)
 	if !ok || last.Text != `{"outcome":"failed","structuredContent":{"reason":"not found"}}` {
 		t.Fatalf("receipt content = %#v", projected.Content[1])
+	}
+}
+
+func TestContentV1CallbackResultPreservesDisplayBoundary(t *testing.T) {
+	t.Parallel()
+	const receipt = tool.Text(`{"outcome":"succeeded","receipt_id":"client-call-1"}`)
+	for _, tc := range []struct {
+		name  string
+		parts []tool.ContentBlock
+		want  []string
+	}{
+		{"receipt with callback text", []tool.ContentBlock{tool.Text("Evidence"), receipt}, []string{"Evidence", string(receipt)}},
+		{"receipt with no callback content", []tool.ContentBlock{receipt, tool.StructuredContent{Value: json.RawMessage(`{"score":7}`)}}, []string{"completed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tool.Result{Content: tc.parts, Metadata: map[string]any{
+				"application_call": map[string]any{"result_format": sessionprofile.ResultFormatContentV1},
+			}}
+			message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{
+				ToolUseID: "call-1", Name: "ApplicationLookup", Content: tool.ModelParts(result.Content),
+			}})
+			updates, err := ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &message, Tool: &session.EventTool{
+				ID: "call-1", Name: "ApplicationLookup", Status: "completed", Result: &result,
+			}})
+			if err != nil || len(updates) != 1 {
+				t.Fatalf("updates = %#v, err = %v", updates, err)
+			}
+			update := updates[0].(eventstream.ToolCallUpdate)
+			if len(update.Content) != len(tc.want) {
+				t.Fatalf("displayed %d blocks, want %d: %+v", len(update.Content), len(tc.want), update.Content)
+			}
+			for i, want := range tc.want {
+				text, ok := update.Content[i].Content.(eventstream.TextContent)
+				if !ok || text.Text != want {
+					t.Fatalf("display block %d = %+v, want text %q", i, update.Content[i], want)
+				}
+			}
+		})
 	}
 }
 

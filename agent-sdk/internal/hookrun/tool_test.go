@@ -67,7 +67,7 @@ func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
 }
 
 func TestInvokeCannotSuppressProducerFailure(t *testing.T) {
-	for _, cause := range []error{context.Canceled, errors.New("authority revoked"), errors.New("store write failed")} {
+	for _, cause := range []error{context.Canceled, errors.New("authority revoked"), errors.New("store write failed"), tool.FailedReply("tool reported failure")} {
 		t.Run(cause.Error(), func(t *testing.T) {
 			hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "suppress", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
 				r, _ := next(ctx)

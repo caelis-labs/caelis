@@ -48,23 +48,29 @@ func (c *clientCatalog) invalidate() {
 }
 
 // checkCatalogReadyLocked checks a current directory entry under Manager.mu.
-// Catalog invalidation affects lookups and binding checks, not client borrowing.
 func (m *Manager) checkCatalogReadyLocked(ctx context.Context, server *managedServer) error {
-	c := server.client.catalog
-	if c != nil {
+	if c := server.client.catalog; c != nil {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 	}
+	return m.checkServerReadyLocked(ctx, server)
+}
+
+// Requires Manager.mu and the client's catalog lock, when present.
+func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedServer) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if m.closed {
 		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
 	}
-	if err := checkClientAvailableLocked(server); err != nil {
-		return err
+	if server.revoked {
+		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
 	}
-	if c != nil && c.dirty {
+	if server.client.closedError() != nil {
+		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
+	}
+	if c := server.client.catalog; c != nil && c.dirty {
 		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 	}
 	return nil
@@ -84,7 +90,7 @@ func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
 }
 
 // RefreshTools retries a failed catalog read explicitly. Failure retains the
-// last whole directory but makes it unavailable for new lookups until validation succeeds.
+// last whole directory but blocks new lookups and calls until validation succeeds.
 func (m *Manager) RefreshTools(ctx context.Context, pluginID, serverName string) error {
 	if err := ctx.Err(); err != nil {
 		return err

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -55,7 +54,7 @@ func (s *toolResultArtifactStore) write(result tool.Result) (string, bool) {
 	if s == nil {
 		return "", false
 	}
-	content, extension, ok := rawToolResultArtifact(tool.ModelParts(result.Content))
+	content, extension, ok := rawToolResultArtifact(result.Content)
 	if !ok || len(content) == 0 || (s.fileMax > 0 && int64(len(content)) > s.fileMax) {
 		return "", false
 	}
@@ -209,25 +208,22 @@ func (s *toolResultArtifactStore) cleanupLocked(requiredBytes int64) error {
 	return nil
 }
 
-func rawToolResultArtifact(parts []model.Part) ([]byte, string, bool) {
-	if len(parts) == 0 {
+func rawToolResultArtifact(blocks []tool.ContentBlock) ([]byte, string, bool) {
+	if len(blocks) == 0 {
 		return nil, "", false
 	}
-	if len(parts) > 1 {
-		// Preserve ordered typed content, including media sources. Flattening a
-		// multipart result would lose structured data or evidence on recovery.
-		raw, err := json.Marshal(parts)
-		return raw, ".json", err == nil
+	if len(blocks) == 1 {
+		switch block := blocks[0].(type) {
+		case tool.Text:
+			return []byte(block), ".txt", true
+		case tool.StructuredContent:
+			return block.Value, ".json", json.Valid(block.Value)
+		}
 	}
-	part := parts[0]
-	switch {
-	case part.Text != nil:
-		return []byte(part.Text.Text), ".txt", true
-	case part.JSON != nil:
-		return append([]byte(nil), part.JSON.Value...), ".json", true
-	default:
-		return nil, "", false
-	}
+	// Reuse the result codec for ordered blocks, without serializing invocation
+	// identity or metadata. The model projection loses resource information.
+	raw, err := json.Marshal(tool.Result{Content: blocks})
+	return raw, ".json", err == nil
 }
 
 func randomToolResultArtifactID() (string, error) {

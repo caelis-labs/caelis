@@ -29,6 +29,7 @@ import (
 // image from a tool is bridged into a user message after its tool_call_id; the
 // fixture terminates when it sees the tool message, not when the last role is tool.
 type multimodalHTTPModel struct {
+	script   string
 	mu       sync.Mutex
 	requests [][]byte
 }
@@ -56,9 +57,17 @@ func (m *multimodalHTTPModel) RoundTrip(req *http.Request) (*http.Response, erro
 	message := map[string]any{"role": "assistant", "content": "MULTIMODAL_FINAL_SENTINEL"}
 	finish := "stop"
 	if !seenTool {
+		name, args := "ApplicationLookup", `{"key":"image"}`
+		if m.script != "" {
+			raw, err := json.Marshal(map[string]string{"code": m.script})
+			if err != nil {
+				return nil, err
+			}
+			name, args = "js_exec", string(raw)
+		}
 		message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{
 			"id": "provider-image-call", "index": 0, "type": "function", "function": map[string]any{
-				"name": "ApplicationLookup", "arguments": `{"key":"image"}`,
+				"name": name, "arguments": args,
 			},
 		}}}
 		finish = "tool_calls"
@@ -131,7 +140,7 @@ func multimodalHTTPImageRequestWithCheck(t *testing.T, raw []byte, callID string
 		if message.Role != "tool" || message.ToolCallID != callID {
 			continue
 		}
-		if !bytes.Contains(message.Content, []byte("outcome")) || !bytes.Contains(message.Content, []byte("structuredContent")) ||
+		if !bytes.Contains(message.Content, []byte("outcome")) || !bytes.Contains(message.Content, []byte("receipt_id")) ||
 			!bytes.Contains(message.Content, []byte("score")) || !bytes.Contains(message.Content, []byte("9007199254740991")) {
 			t.Fatalf("tool_call_id %q lost structured receipt: %s", callID, message.Content)
 		}
@@ -158,7 +167,7 @@ func multimodalHTTPImageRequestWithCheck(t *testing.T, raw []byte, callID string
 				first = j
 			case part.Type == "text" && part.Text == "last text":
 				last = j
-			case part.Type == "text" && strings.Contains(part.Text, `"structuredContent"`) && strings.Contains(part.Text, `"outcome":"succeeded"`):
+			case part.Type == "text" && strings.Contains(part.Text, `"receipt_id"`) && strings.Contains(part.Text, `"outcome":"succeeded"`):
 				receiptAt = j
 			}
 		}
@@ -299,8 +308,9 @@ func TestApplicationMultimodalHTTP(t *testing.T) {
 			firstAt := bytes.Index(encoded, []byte("first text"))
 			imageAt := bytes.Index(encoded, []byte(base64.StdEncoding.EncodeToString(pngBytes)))
 			lastAt := bytes.Index(encoded, []byte("last text"))
-			receiptAt := bytes.Index(encoded, []byte("structuredContent"))
-			if len(toolContent) == 0 || firstAt < 0 || firstAt >= imageAt || imageAt >= lastAt || lastAt >= receiptAt {
+			receiptAt := bytes.Index(encoded, []byte("receipt_id"))
+			dataAt := bytes.Index(encoded, []byte("9007199254740991"))
+			if len(toolContent) == 0 || firstAt < 0 || firstAt >= imageAt || imageAt >= lastAt || lastAt >= receiptAt || receiptAt >= dataAt {
 				t.Fatalf("canonical history lost ordered text/image/text/structured receipt: %s", encoded)
 			}
 			// Replace the Host and Store, then recover both the callback receipt

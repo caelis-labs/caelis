@@ -14,7 +14,6 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -87,6 +86,7 @@ type Manager struct {
 	refreshWorkers sync.WaitGroup
 	workers        sync.WaitGroup
 	owners         map[string]string
+	nextBinding    uint64
 	onFailure      func(ServerFailure)
 }
 
@@ -199,21 +199,26 @@ func (m *Manager) reconcile(specs []ServerSpec, initial *sync.WaitGroup) error {
 	return nil
 }
 
-// borrowClient orders dispatch with server retirement and published client
-// closure. It does not recheck the catalog for the selected callable.
-func (m *Manager) borrowClient(ctx context.Context, server *managedServer) (func(), error) {
+// borrowClient admits the exact callable before counting it as in flight. The
+// locks order admission with catalog invalidation, retirement, and published
+// closure; none are held across MCP I/O.
+func (m *Manager) borrowClient(ctx context.Context, remote *MCPTool) (func(), error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	server.client.identityMu.Lock()
-	defer server.client.identityMu.Unlock()
-	if err := ctx.Err(); err != nil {
+	server := remote.server
+	if c := server.client.catalog; c != nil {
+		// Catalog invalidation and closure publication both take this lock.
+		c.mu.Lock()
+		defer c.mu.Unlock()
+	} else {
+		server.client.identityMu.Lock()
+		defer server.client.identityMu.Unlock()
+	}
+	if err := m.checkServerReadyLocked(ctx, server); err != nil {
 		return nil, err
 	}
-	if m.closed {
-		return nil, tool.NewError(errorcode.Unavailable, "MCP source is closed")
-	}
-	if err := checkClientAvailableLocked(server); err != nil {
-		return nil, err
+	if current := m.toolsByName[remote.def.Name]; current == nil || current.bindingID != remote.bindingID {
+		return nil, tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 	}
 	server.inFlight++
 	return func() {
@@ -225,17 +230,6 @@ func (m *Manager) borrowClient(ctx context.Context, server *managedServer) (func
 			server.drained = nil
 		}
 	}, nil
-}
-
-// Requires Manager.mu to check the server's retirement state.
-func checkClientAvailableLocked(server *managedServer) error {
-	if server.revoked {
-		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
-	}
-	if server.client.closedError() != nil {
-		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
-	}
-	return nil
 }
 
 // retireLocked stops admission before waiting for calls which already borrowed
@@ -436,6 +430,16 @@ func (mgr *Manager) rebuildToolsLocked() {
 				server:   server,
 				origName: info.Name,
 				def:      def,
+			}
+			// Carry the admission ID only across consecutive publications of
+			// this exact entry. Removal and later re-addition cannot revive it,
+			// even if the definition's durable fingerprint matches again.
+			if old := mgr.toolsByName[name]; old != nil && old.server == server && old.client == client && old.origName == info.Name &&
+				old.def.Metadata[MetadataSourceFingerprint] == def.Metadata[MetadataSourceFingerprint] {
+				t.bindingID = old.bindingID
+			} else {
+				mgr.nextBinding++
+				t.bindingID = mgr.nextBinding
 			}
 			toolsByProjectedName[name] = t
 			mgr.tools = append(mgr.tools, t)

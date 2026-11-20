@@ -156,8 +156,8 @@ func TestContentV1EmptyStructuredObjectSurvivesReceipt(t *testing.T) {
 			t.Fatal(err)
 		}
 		projected, err := reopened.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, *got.Result)
-		if raw, ok := projected.Structured(); err != nil || !ok || !strings.Contains(string(raw), `"structuredContent":{}`) {
-			t.Fatal("empty structured object absent from model receipt")
+		if raw, ok := projected.Structured(); err != nil || !ok || string(raw) != `{}` {
+			t.Fatal("empty structured object absent from projected result")
 		}
 	}
 }

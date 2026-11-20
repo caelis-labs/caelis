@@ -43,6 +43,7 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, name, format s
 		return out, nil
 	}
 
+	metadata["result_format"] = format
 	var references []ContentBlock
 	var message string
 	blocks, _ := decodeContent(result.Content)
@@ -54,7 +55,7 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, name, format s
 			message = *block.Text
 		}
 	}
-	receipt := resultReceipt(c, result, references)
+	receipt := resultReceipt(c, result.Outcome, references)
 	// Store-generated unknown outcomes have no application content. They must
 	// remain machine-readable unknown, not failed execution or permission to retry.
 	var contentErr error
@@ -75,7 +76,16 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, name, format s
 	if err != nil {
 		return tool.Result{}, err
 	}
-	out.Content = append(out.Content, tool.StructuredContent{Value: raw})
+	// Keep the receipt visible in model context and replay without making its
+	// bookkeeping fields part of the application's structured output.
+	out.Content = append(out.Content, tool.Text(raw))
+	if result.StructuredContent != nil {
+		data, err := json.Marshal(result.StructuredContent)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		out.Content = append(out.Content, tool.StructuredContent{Value: data})
+	}
 	if result.Outcome != "succeeded" {
 		return out, callbackFailure(result.Outcome, message)
 	}
@@ -110,11 +120,8 @@ func legacyCallbackMessage(content json.RawMessage) string {
 	return ""
 }
 
-func resultReceipt(c CallContext, result CallResult, references []ContentBlock) map[string]any {
-	receipt := map[string]any{"outcome": result.Outcome, "receipt_id": callID(c)}
-	if result.StructuredContent != nil {
-		receipt["structuredContent"] = result.StructuredContent
-	}
+func resultReceipt(c CallContext, outcome string, references []ContentBlock) map[string]any {
+	receipt := map[string]any{"outcome": outcome, "receipt_id": callID(c)}
 	if len(references) > 0 {
 		receipt["resources"] = references
 	}

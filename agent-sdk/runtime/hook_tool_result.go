@@ -17,8 +17,8 @@ type resultHookTool struct {
 func (t resultHookTool) RuntimeViewImage(toolbinding.Token) bool {
 	return toolbinding.IsViewImage(t.concrete)
 }
-func (t resultHookTool) RuntimeMayCompleteTurn(_ toolbinding.Token, ctx context.Context, call tool.Call) bool {
-	return toolbinding.MayCompleteTurn(ctx, t.concrete, call)
+func (t resultHookTool) RuntimeNativeSchedule(_ toolbinding.Token, ctx context.Context, call tool.Call) toolbinding.NativeSchedule {
+	return toolbinding.ScheduleNativeCall(ctx, t.concrete, call)
 }
 
 func (t resultHookTool) Definition() tool.Definition {

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestMCPPreparedEnvelopeSurvivesFileReopen(t *testing.T) {
@@ -108,6 +112,86 @@ func TestMCPPreparedEnvelopeSurvivesFileReopen(t *testing.T) {
 	want := append(model.CloneMessages(driver.requests[2].Messages), model.NewTextMessage(model.RoleAssistant, "done"), model.NewTextMessage(model.RoleUser, followup))
 	if !reflect.DeepEqual(probe.messages, want) {
 		t.Fatalf("replayed messages=%#v, want %#v", probe.messages, want)
+	}
+}
+
+func TestMCPFixedCallRejectsBindingChangedDuringApproval(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	store, active := newTestSessionService(t, "mcp-stale-approval")
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "docs", Version: "1"}, nil)
+	var effects atomic.Int32
+	publish := func(schema map[string]any) {
+		server.AddTool(&mcpsdk.Tool{Name: "read", InputSchema: schema}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			effects.Add(1)
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}, nil
+		})
+	}
+	publish(map[string]any{"type": "object"})
+	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+	defer endpoint.Close()
+	manager, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "fixture", Name: "docs", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	select {
+	case <-manager.Initialized():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	remote, found, err := manager.Lookup(ctx, "docs__read")
+	if err != nil || !found {
+		t.Fatalf("initial catalog: found=%t, err=%v", found, err)
+	}
+	discovery, err := json.Marshal(mcp.NewToolSearchResult([]tool.Definition{remote.Definition()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	search := tool.NamedTool{Def: tool.Definition{Name: mcp.SearchToolName}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: discovery}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, nil
+	}}
+	driver := &mcpScriptModel{steps: func(step int, _ *model.Request) []model.ToolCall {
+		switch step {
+		case 0:
+			return []model.ToolCall{{ID: "search", Name: mcp.SearchToolName, Args: `{"query":"docs"}`}}
+		case 1:
+			return []model.ToolCall{{ID: "routed", Name: mcp.CallToolName, Args: `{"tool_name":"docs__read","arguments":{}}`}}
+		default:
+			return nil
+		}
+	}}
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: mcpAskFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvals atomic.Int32
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "Read a document", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{search, mcp.NewCallTool()}, DeferredTools: manager}, ApprovalRequester: approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approvals.Add(1)
+		// Keep the model's arguments valid for both schemas so dispatching to the
+		// new definition would reach the handler, not merely fail its validation.
+		publish(map[string]any{"type": "object", "properties": map[string]any{"hint": map[string]any{"type": "string"}}})
+		if err := manager.RefreshTools(ctx, "fixture", "docs"); err != nil {
+			return agent.ApprovalResponse{}, err
+		}
+		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once"}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Handle.WaitCompletion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs, err := session.PairToolFacts(events)
+	if err != nil || len(pairs) != 2 || pairs[1].Result == nil {
+		t.Fatalf("missing routed result: pairs=%v err=%v", pairs, err)
+	}
+	if got := pairs[1].Result.Tool; got.ErrorCode != string(tool.ErrorCodeStaleRevision) || approvals.Load() != 1 || effects.Load() != 0 {
+		t.Fatalf("stale fixed call: error=%q approvals=%d effects=%d", got.ErrorCode, approvals.Load(), effects.Load())
 	}
 }
 
