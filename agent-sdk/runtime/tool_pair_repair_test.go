@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -312,7 +312,7 @@ func TestToolFactsLegacyHalfBatchAndLateRepairRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := tool.Result{ID: "A", Name: "Write", Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"full":9007199254740993123456789}`)}}}
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"full":9007199254740993123456789}`)}}}
 	original, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "original-A", Type: session.EventTypeToolResult, Scope: intent.Scope, Tool: &session.EventTool{ID: "A", Name: "Write", Result: &result}, Message: &model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "A", Name: "Write", Content: tool.ModelParts(result.Content)}}}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -433,7 +433,7 @@ func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 	late.Seq = 0
 	late.Type = session.EventTypeToolResult
 	late.Message = ptrMessage(model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("same", "Write", map[string]any{"covered": true}, false)))
-	full := tool.Result{ID: "same", Name: "Write", Content: []tool.ContentBlock{tool.StructuredContent{Value: late.Message.ToolResults()[0].Content[0].JSONValue()}}}
+	full := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: late.Message.ToolResults()[0].Content[0].JSONValue()}}}
 	late.Tool.Result = &full
 	late.Tool.Outcome = session.ToolOutcomeSucceeded
 	appendFact(late)
@@ -532,7 +532,7 @@ func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 		t.Fatalf("paired result lost: %v", err)
 	}
 	r := pairs[0].Result.Tool
-	if completionErr == nil || r.Outcome != session.ToolOutcomeSucceeded || r.ProcessingFailure == nil || r.ProcessingFailure.Phase != "tool_invoke" || r.ProcessingFailure.Name != "repeat" || r.Result.ID != "same" || r.Result.Name != "Write" {
+	if completionErr == nil || r.Outcome != session.ToolOutcomeSucceeded || r.ProcessingFailure == nil || r.ProcessingFailure.Phase != "tool_invoke" || r.ProcessingFailure.Name != "repeat" || r.ID != "same" || r.Name != "Write" {
 		t.Fatalf("actual identity/disposition lost: %+v completion=%v", r, completionErr)
 	}
 	raw, _ := json.Marshal(events)
@@ -581,7 +581,7 @@ func TestToolFactsRepairRecomputesAfterRevisionConflict(t *testing.T) {
 	}
 	events, _ := base.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
 	pairs, err := session.PairToolFacts(events)
-	if err != nil || len(pairs) != 1 || pairs[0].Result == nil || pairs[0].Result.Tool.Result.ID != call.ID || pairs[0].Result.Tool.Execution.ItemID != "original-occurrence" {
+	if err != nil || len(pairs) != 1 || pairs[0].Result == nil || pairs[0].Result.Tool.ID != call.ID || pairs[0].Result.Tool.Execution.ItemID != "original-occurrence" {
 		t.Fatalf("original pair lost: %+v %v", pairs, err)
 	}
 	if err := rt.repairToolPairs(ctx, active.SessionRef); err != nil {

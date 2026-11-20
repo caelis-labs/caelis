@@ -174,6 +174,7 @@ func TestModelSpecsProjectsSuppliedToolsRegardlessOfMetadata(t *testing.T) {
 func TestNamedToolClonesCallAndResult(t *testing.T) {
 	t.Parallel()
 
+	content := []ContentBlock{Text("ok")}
 	tool := NamedTool{
 		Def: Definition{Name: "echo"},
 		Invoke: func(_ context.Context, call Call) (Result, error) {
@@ -183,14 +184,7 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 			call.Metadata["mutated"] = true
 			call.Metadata["nested"].(map[string]any)["value"] = "invoke-mutated"
 			return Result{
-				Name: "echo",
-				Content: []ContentBlock{
-					Text("ok"),
-				},
-				Meta: map[string]any{
-					"source": "invoke",
-					"nested": map[string]any{"value": "result"},
-				},
+				Content: content,
 			}, nil
 		},
 	}
@@ -207,9 +201,7 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if got := result.Name; got != "echo" {
-		t.Fatalf("result.Name = %q, want %q", got, "echo")
-	}
+	content[0] = Text("mutated")
 	if got := result.Content[0]; got != Text("ok") {
 		t.Fatalf("result.Content[0] = %q, want %q", got, "ok")
 	}
@@ -219,10 +211,7 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	if got := call.Metadata["nested"].(map[string]any)["value"]; got != "caller" {
 		t.Fatalf("input call nested metadata leaked mutation: %v", got)
 	}
-	result.Meta["nested"].(map[string]any)["value"] = "caller-mutated"
-	if got := result.Meta["nested"].(map[string]any)["value"]; got != "caller-mutated" {
-		t.Fatalf("result nested metadata mutation = %v", got)
-	}
+
 }
 
 func toolSpecNames(specs []model.ToolSpec) []string {
@@ -245,4 +234,16 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestResultWireContainsOnlyContent(t *testing.T) {
+	const content = `[{"type":"text","text":"receipt"}]`
+	var result Result
+	if err := json.Unmarshal([]byte(`{"id":"old","name":"old","metadata":{"x":true},"meta":{"y":true},"turn_complete":true,"content":`+content+`}`), &result); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil || string(raw) != `{"content":`+content+`}` {
+		t.Fatalf("encoded result = %s, %v", raw, err)
+	}
 }

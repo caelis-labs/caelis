@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
@@ -57,16 +58,25 @@ func (t dispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call
 		return tool.Result{}, err
 	}
 
+	observation := toolbinding.Observed(ctx)
+	around := len(hookrun.FromContext(ctx).Hooks.ToolInvoke) != 0
+	var original tool.Result
 	result, err := hookrun.InvokeTool(ctx, def, call, func(callCtx context.Context) (tool.Result, error) {
 		if synthetic, err, ok := toolbinding.PreparedReply(ctx); ok {
 			return synthetic, err
 		}
 		result, err := toolbinding.Call(callCtx, t.base, tool.CloneCall(call), toolbinding.Dispatch{Model: attachment.Model})
+		if around && observation.BuiltinDisplay != nil {
+			original, _ = tool.CloneResult(result, nil)
+		}
 		if admission != nil && callCtx.Err() != nil && err != nil {
 			err = errorcode.Wrap(errorcode.UnknownOutcome, "tool result is unconfirmed after cancellation; do not replay", err)
 		}
 		return result, err
 	})
+	if around && observation.BuiltinDisplay != nil && !reflect.DeepEqual(original.Content, result.Content) {
+		observation.BuiltinDisplay = nil
+	}
 	return result, err
 }
 

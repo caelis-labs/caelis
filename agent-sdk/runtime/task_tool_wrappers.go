@@ -176,19 +176,12 @@ func (t runtimeSendMessageTool) Call(ctx context.Context, call tool.Call) (tool.
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return sendMessageToolResult(call, input.Target), nil
+	return sendMessageToolResult(ctx, input.Target), nil
 }
 
-func sendMessageToolResult(call tool.Call, target string) tool.Result {
-	meta := map[string]any{}
-	messageMeta := taskRuntimeMetaSection(meta, "message")
-	messageMeta["to"] = strings.TrimSpace(target)
-	return tool.Result{
-		ID:       strings.TrimSpace(call.ID),
-		Name:     sendmessage.ToolName,
-		Content:  []tool.ContentBlock{tool.Text("Message sent.")},
-		Metadata: meta,
-	}
+func sendMessageToolResult(ctx context.Context, target string) tool.Result {
+	toolbinding.Observed(ctx).MessageTo = strings.TrimSpace(target)
+	return tool.Result{Content: []tool.ContentBlock{tool.Text("Message sent.")}}
 }
 
 func sessionHasSubagentTarget(activeSession session.Session, target string) bool {
@@ -272,7 +265,7 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 					payload["system_hint"] = hint
 				}
 			}
-			result, _ := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
+			result, _ := taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
 			if approved && !isCommandToolError(err) {
 				// The approval continuation must see claim or persistence errors
 				// even when StartCommand could also return a Task snapshot.
@@ -283,12 +276,12 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 		if approved {
 			return tool.Result{}, err
 		}
-		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
+		if result, ok := commandStartDiagnosticToolResult(t.base.Definition().Name, command, err); ok {
 			return result, tool.FailedReply(err.Error())
 		}
 		return tool.Result{}, err
 	}
-	return taskSnapshotToolResult(call, t.base.Definition(), snapshot)
+	return taskSnapshotToolResult(ctx, snapshot)
 }
 
 func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, runtime sandbox.Runtime) (taskapi.CommandStartRequest, error) {
@@ -327,16 +320,12 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 		ParentCall:  strings.TrimSpace(call.ID),
 		ParentTool:  strings.TrimSpace(call.Name),
 		Constraints: constraintsFromMetadata(call.Metadata),
-		Observer: taskToolObserver{
-			ctx:  ctx,
-			call: call,
-			def:  t.base.Definition(),
-		},
+		Observer:    taskToolObserver{ctx: ctx},
 	}
 	return req, nil
 }
 
-func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, command string, err error) (tool.Result, bool) {
+func commandStartDiagnosticToolResult(name, command string, err error) (tool.Result, bool) {
 	if err == nil {
 		return tool.Result{}, false
 	}
@@ -352,15 +341,13 @@ func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, comma
 	payload := map[string]any{
 		"state":     "failed",
 		"error":     strings.TrimSpace(err.Error()),
-		"tool_name": strings.TrimSpace(def.Name),
+		"tool_name": strings.TrimSpace(name),
 	}
 	if hint := strings.TrimSpace(diag.Hint); hint != "" {
 		payload["system_hint"] = hint
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(def.Name),
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
 	}, true
 }
@@ -463,7 +450,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if spawnContextUnsupported(snapshot) {
 		payload["system_hint"] = spawnContextUnsupportedHint
 	}
-	result, _ := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
+	result, _ := taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
 	return result, nil
 }
 
@@ -679,10 +666,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 }
 
 func (t runtimeTaskTool) Definition() tool.Definition {
-	def := tool.CloneDefinition(t.base.Definition())
-	// A completed Code Mode task can carry its selected tool's disposition.
-	def.MayCompleteTurn = true
-	return def
+	return t.base.Definition()
 }
 
 func (t runtimeTaskTool) RuntimeNativeSchedule(_ toolbinding.Token, ctx context.Context, call tool.Call) toolbinding.NativeSchedule {
@@ -788,10 +772,10 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, fmt.Errorf("task action %q accepts exactly one handle", normalizedAction)
 	}
 	if normalizedAction == "wait" && len(handles) > 1 {
-		return t.callBatchTaskWaitAny(ctx, call, handles, yield)
+		return t.callBatchTaskWaitAny(ctx, handles, yield)
 	}
 	if len(handles) > 1 {
-		return t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
+		return t.callBatchTaskControl(ctx, normalizedAction, handles, input)
 	}
 	identity, err := t.resolveJobHandle(ctx, handles[0])
 	if err != nil {
@@ -820,8 +804,9 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, controlErr
 	}
 
-	result, resultErr := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, actualWaitMS)
-	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yield, actualWaitMS, snapshot)
+	result, resultErr := taskControlSnapshotToolResult(ctx, snapshot, normalizedAction, actualWaitMS)
+	observation := toolbinding.Observed(ctx)
+	observation.TaskEvent = taskToolResultEventMeta(observation.TaskEvent, normalizedAction, input, yield, actualWaitMS, snapshot)
 	return result, resultErr
 }
 
@@ -832,7 +817,7 @@ func durationMillis(value time.Duration) int {
 	return int(value / time.Millisecond)
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, handles []string, input string) (tool.Result, error) {
+func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, action string, handles []string, input string) (tool.Result, error) {
 	items := make([]taskBatchControlItem, 0, len(handles))
 	for _, handle := range handles {
 		identity, resolveErr := t.resolveJobHandle(ctx, handle)
@@ -857,12 +842,13 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true})
 	}
 
-	result, resultErr := taskBatchControlToolResult(call, t.base.Definition(), items, action, 0)
-	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, 0, 0, items)
+	result, resultErr := taskBatchControlToolResult(ctx, items, action, 0)
+	observation := toolbinding.Observed(ctx)
+	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, action, input, 0, 0, items)
 	return result, resultErr
 }
 
-func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Call, handles []string, yield time.Duration) (tool.Result, error) {
+func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []string, yield time.Duration) (tool.Result, error) {
 	type target struct {
 		handle   string
 		identity taskControlIdentity
@@ -942,8 +928,9 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 		items = append(items, itemsByHandle[handle])
 	}
 	actualWaitMS := durationMillis(time.Since(started))
-	result, resultErr := taskBatchControlToolResult(call, t.base.Definition(), items, "wait", actualWaitMS)
-	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, "wait", "", yield, actualWaitMS, items)
+	result, resultErr := taskBatchControlToolResult(ctx, items, "wait", actualWaitMS)
+	observation := toolbinding.Observed(ctx)
+	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "wait", "", yield, actualWaitMS, items)
 	return result, resultErr
 }
 
@@ -984,7 +971,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	if out == nil {
 		out = map[string]any{}
 	}
-	toolMeta := taskRuntimeMetaSection(out, "tool")
+	toolMeta := toolbinding.RuntimeSection(out, "tool")
 	toolMeta["name"] = tasktool.ToolName
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
@@ -1004,7 +991,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 	if out == nil {
 		out = map[string]any{}
 	}
-	toolMeta := taskRuntimeMetaSection(out, "tool")
+	toolMeta := toolbinding.RuntimeSection(out, "tool")
 	toolMeta["name"] = tasktool.ToolName
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_handles"] = taskBatchVisibleHandles(items)
@@ -1022,7 +1009,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
 		toolMeta["input"] = strings.TrimSpace(input)
 	}
-	taskMeta := taskRuntimeMetaSection(out, "task")
+	taskMeta := toolbinding.RuntimeSection(out, "task")
 	taskMeta["handles"] = taskBatchVisibleHandles(items)
 	taskMeta["count"] = len(items)
 	if failed := taskBatchErrorCount(items); failed > 0 {
@@ -1066,31 +1053,6 @@ func commonTaskBatchKind(items []taskBatchControlItem) (taskapi.Kind, bool) {
 		}
 	}
 	return kind, strings.TrimSpace(string(kind)) != ""
-}
-
-func taskRuntimeMetaSection(meta map[string]any, section string) map[string]any {
-	if meta == nil {
-		return nil
-	}
-	caelis, _ := meta["caelis"].(map[string]any)
-	if caelis == nil {
-		caelis = map[string]any{}
-		meta["caelis"] = caelis
-	}
-	if _, ok := caelis["version"]; !ok {
-		caelis["version"] = 1
-	}
-	runtime, _ := caelis["runtime"].(map[string]any)
-	if runtime == nil {
-		runtime = map[string]any{}
-		caelis["runtime"] = runtime
-	}
-	values, _ := runtime[section].(map[string]any)
-	if values == nil {
-		values = map[string]any{}
-		runtime[section] = values
-	}
-	return values
 }
 
 func (t runtimeTaskTool) resolveJobHandle(ctx context.Context, handle string) (taskControlIdentity, error) {

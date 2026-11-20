@@ -9,6 +9,7 @@ import (
 	"iter"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -387,8 +388,6 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 			var payload map[string]any
 			_ = json.Unmarshal(call.Input, &payload)
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
@@ -476,8 +475,6 @@ func TestChatAgentRetainsUnsupportedImageToolResultBeforeRejectingNextModelReque
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.Text("image result"),
 					tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "result.png"},
@@ -587,7 +584,7 @@ func TestChatAgentDispatchesModelStepPosition(t *testing.T) {
 					Tool: tool.NamedTool{
 						Def: tool.Definition{Name: name},
 						Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-							return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"ok":true}`)}}}, nil
+							return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"ok":true}`)}}}, nil
 						},
 					},
 					observe: observed,
@@ -694,8 +691,6 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 				t.Fatalf("tool input = %q, want valid JSON: %v", string(call.Input), err)
 			}
 			return tool.Result{
-				ID:      call.ID,
-				Name:    call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"value": payload["value"]})}},
 			}, nil
 		},
@@ -881,8 +876,6 @@ func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 				return tool.Result{}, ctx.Err()
 			}
 			return tool.Result{
-				ID:      call.ID,
-				Name:    call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"value": call.ID})}},
 			}, nil
 		},
@@ -1001,8 +994,6 @@ func TestChatAgentRespectsSerialToolCallModel(t *testing.T) {
 			return tool.Result{}, ctx.Err()
 		}
 		return tool.Result{
-			ID:      call.ID,
-			Name:    call.Name,
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"value": call.ID})}},
 		}, nil
 	}
@@ -1033,46 +1024,48 @@ func TestChatAgentRespectsSerialToolCallModel(t *testing.T) {
 	}
 }
 
-func TestChatAgentTerminalToolResultStopsSameBatchAndNextModelStep(t *testing.T) {
+func TestToolContentCannotStopBatchOrNextModelStep(t *testing.T) {
 	t.Parallel()
-	testModel := &contextStabilityModel{toolNames: []string{"bot_dream", "side_effect"}}
+	testModel := &contextStabilityModel{toolNames: []string{"record_handoff", "side_effect"}}
 	var sideEffects int
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
-		tool.NamedTool{Def: tool.Definition{Name: "bot_dream", MayCompleteTurn: true, InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			return tool.Result{ID: call.ID, Name: call.Name, TurnComplete: true, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"accepted":true}`)}}}, nil
+		tool.NamedTool{Def: tool.Definition{Name: "record_handoff", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"turn_complete":true,"accepted":true}`)}}}, nil
 		}},
 		tool.NamedTool{Def: tool.Definition{Name: "side_effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			sideEffects++
-			return tool.Result{ID: call.ID, Name: call.Name}, nil
+			return tool.Result{}, nil
 		}},
 	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := agent.NewContext(agent.ContextSpec{Context: context.Background(), Session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}}, Events: []*session.Event{{Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "rotate"))}}})
-	var terminal *session.Event
+	var receipt *session.Event
 	for event, runErr := range chatAgent.Run(ctx) {
 		if runErr != nil {
 			t.Fatal(runErr)
 		}
-		if event != nil && event.Type == session.EventTypeToolResult {
-			terminal = event
+		if event != nil && event.Type == session.EventTypeToolResult && event.Tool.ID == "call-alpha" {
+			receipt = event
 		}
 	}
-	if sideEffects != 0 || len(testModel.requests) != 1 {
-		t.Fatalf("side effects = %d, model requests = %d; want 0 and 1", sideEffects, len(testModel.requests))
+	if sideEffects != 1 || len(testModel.requests) != 2 {
+		t.Fatalf("side effects = %d, model requests = %d", sideEffects, len(testModel.requests))
 	}
-	if terminal == nil || terminal.Tool == nil || terminal.Tool.ID != "call-alpha" || !terminal.Tool.TurnComplete || terminal.Tool.Status != "completed" {
-		t.Fatalf("terminal result = %+v", terminal)
+	if receipt == nil || receipt.Tool.Status != "completed" || receipt.Tool.Output["turn_complete"] != true {
+		t.Fatalf("missing business result: %+v", receipt)
 	}
-	raw, err := json.Marshal(terminal)
-	if err != nil {
-		t.Fatal(err)
+	var ids []string
+	for _, message := range testModel.requests[1].Messages {
+		for _, result := range message.ToolResults() {
+			ids = append(ids, result.ToolUseID)
+		}
 	}
-	var restored session.Event
-	if err := json.Unmarshal(raw, &restored); err != nil || restored.Tool == nil || !restored.Tool.TurnComplete {
-		t.Fatalf("durable terminal result = %+v, %v", restored.Tool, err)
+	if !slices.Equal(ids, []string{"call-alpha", "call-beta"}) {
+		t.Fatalf("model received tool calls %v", ids)
 	}
+
 }
 
 func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
@@ -1087,8 +1080,6 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:      call.ID,
-				Name:    call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
@@ -1918,8 +1909,6 @@ func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 			var payload map[string]any
 			_ = json.Unmarshal(call.Input, &payload)
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 					"value": payload["value"],
 				})}},
@@ -2284,8 +2273,6 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp"
 	result := tool.Result{
-		ID:      "call-1",
-		Name:    "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`)}},
 	}
 	canonical, _ := canonicalToolResult(result, nil)
@@ -2357,8 +2344,6 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"echo hello"}`,
 	}, tool.Result{
-		ID:      "call-1",
-		Name:    "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"error":"terminal session failed"}`)}},
 	}, tool.FailedReply("tool failed"), nil, runtimeTaskResultSourceMeta(true))
 
@@ -2381,8 +2366,6 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"wait","task_id":"jack"}`,
 	}, tool.Result{
-		ID:   "task-wait-1",
-		Name: "Task",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"action":         "wait",
 			"running":        true,
@@ -2416,8 +2399,6 @@ func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"wait","task_id":"jeff"}`,
 	}, tool.Result{
-		ID:   "task-wait-1",
-		Name: "Task",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"task_id":       "jeff",
 			"state":         "completed",
@@ -2448,8 +2429,6 @@ func TestToolResultEventSuppressesTaskReadACPContent(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"read","handle":"command-3"}`,
 	}, tool.Result{
-		ID:   "task-read-1",
-		Name: "Task",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"action":        "read",
 			"handle":        "command-3",
@@ -2478,8 +2457,6 @@ func TestToolResultEventPreservesTaskWriteRawOutput(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"write","task_id":"jeff","input":"continue"}`,
 	}, tool.Result{
-		ID:   "task-write-1",
-		Name: "Task",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"task_id":       "jeff",
 			"state":         "running",
@@ -2509,9 +2486,6 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
-		ID:       "task-wait-1",
-		Name:     "Task",
-		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"action":      "wait",
 			"handle":      "command-2",
@@ -2521,7 +2495,7 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 			"error":       "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
 			"exit_code":   1,
 		})}},
-	}, nil, nil, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2546,8 +2520,6 @@ func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"cancel","task_id":"command-task"}`,
 	}, tool.Result{
-		ID:   "task-cancel-1",
-		Name: "Task",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state":     "cancelled",
 			"result":    "cancelled command output\n",
@@ -2575,8 +2547,6 @@ func TestToolResultEventMarksTaskInvocationErrorFailed(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
-		ID:   "task-wait-1",
-		Name: "Task",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state": "running",
 			"error": "task control transport failed",
@@ -2600,8 +2570,6 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 		Args: `{"action":"wait","handle":"command-task"}`,
 	}
 	result := tool.Result{
-		ID:   call.ID,
-		Name: call.Name,
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"handle":    "command-task",
 			"state":     "failed",
@@ -2631,8 +2599,6 @@ func TestImageToolResultModelContextRoundTrip(t *testing.T) {
 		Args: `{"path":"pixel.png"}`,
 	}
 	result := tool.Result{
-		ID:   call.ID,
-		Name: call.Name,
 		Content: []tool.ContentBlock{
 			tool.Text("Viewed image."),
 			tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "pixel.png"},
@@ -2710,8 +2676,6 @@ func TestToolResultEventCompletesSpawnInvocationWhileChildRuns(t *testing.T) {
 		Name: "StartThread",
 		Args: `{"agent":"self","prompt":"inspect"}`,
 	}, tool.Result{
-		ID:   "spawn-1",
-		Name: "StartThread",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"task_id": "task-1",
 			"state":   "running",
@@ -2732,7 +2696,6 @@ func TestToolResultEventCompletesSendMessageInvocationWhileTargetRuns(t *testing
 	event := toolResultEvent(model.ToolCall{
 		ID: "message-1", Name: "SendMessage", Args: `{"to":"bryn","message":"continue"}`,
 	}, tool.Result{
-		ID: "message-1", Name: "SendMessage",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"accepted": true, "state": "running", "to": "bryn",
 		})}},
@@ -2751,13 +2714,10 @@ func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"sleep 10"}`,
 	}, tool.Result{
-		ID:       "command-cancel-1",
-		Name:     "RunCommand",
-		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state": "cancelled",
 		})}},
-	}, nil, nil, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2778,8 +2738,6 @@ func TestToolResultEventPreservesCommandResultAsRawOutput(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"git status"}`,
 	}, tool.Result{
-		ID:   "command-status-1",
-		Name: "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
 			"exit_code": 0,
@@ -2807,8 +2765,6 @@ func TestToolResultEventPreservesRawCommandOutputWhitespace(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"python test.py"}`,
 	}, tool.Result{
-		ID:   "command-output-1",
-		Name: "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    raw,
 			"exit_code": 0,
@@ -2834,14 +2790,11 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 		Name: "RunCommand",
 		Args: `{"command":"go mod tidy"}`,
 	}, tool.Result{
-		ID:       "command-tidy-1",
-		Name:     "RunCommand",
-		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    "go: module internal registry: network unreachable\n",
 			"exit_code": 1,
 		})}},
-	}, nil, nil, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2866,13 +2819,10 @@ func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"false"}`,
 	}, tool.Result{
-		ID:       "command-silent-failure-1",
-		Name:     "RunCommand",
-		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"exit_code": 1,
 		})}},
-	}, nil, nil, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2896,8 +2846,6 @@ func TestToolResultEventOmitsContentForSuccessfulSilentCommand(t *testing.T) {
 		Name: "RunCommand",
 		Args: `{"command":"true"}`,
 	}, tool.Result{
-		ID:   "command-silent-success-1",
-		Name: "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state":     "completed",
 			"exit_code": 0,
@@ -2920,8 +2868,6 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	result := tool.Result{
-		ID:   "call-1",
-		Name: "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    large,
 			"exit_code": 1,
@@ -3008,8 +2954,6 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	result := tool.Result{
-		ID:   "call-1",
-		Name: "RunCommand",
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result": large,
 		})}},
@@ -3185,13 +3129,6 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 		},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			toolbinding.ReportProgress(ctx, tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
-				Meta: map[string]any{
-					"task_id": "task-1",
-					"state":   "running",
-					"running": true,
-				},
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 					"task_id": "task-1",
 					"state":   "running",
@@ -3201,13 +3138,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 			})
 			<-release
 			return tool.Result{
-				ID:      call.ID,
-				Name:    call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"done","state":"completed"}`)}},
-				Meta: map[string]any{
-					"result": "done",
-					"state":  "completed",
-				},
 			}, nil
 		},
 	}
@@ -3478,8 +3409,6 @@ func TestChatAgentStopsItsOwnRepeatedRawModelToolLoop(t *testing.T) {
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			toolCalls++
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
@@ -3550,7 +3479,6 @@ func TestChatAgentAllowsProgressingRawModelToolSteps(t *testing.T) {
 				},
 				Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 					return tool.Result{
-						ID: call.ID, Name: call.Name,
 						Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 					}, nil
 				},
@@ -3598,7 +3526,6 @@ func TestChatAgentGenerationWatchdogStateIsPerRun(t *testing.T) {
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			toolCalls++
 			return tool.Result{
-				ID: call.ID, Name: call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
@@ -3655,7 +3582,6 @@ func TestChatAgentGenerationWatchdogStateIsIsolatedAcrossConcurrentRuns(t *testi
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			toolCalls.Add(1)
 			return tool.Result{
-				ID: call.ID, Name: call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
@@ -4278,8 +4204,6 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			toolCallsCount++
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"retry-pong"}`)},
 				},

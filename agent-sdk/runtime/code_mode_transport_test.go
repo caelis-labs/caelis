@@ -172,7 +172,7 @@ func TestCodeModeKnownReceiptPreservesUnknownOutcomeWhenCaught(t *testing.T) {
 	}
 	for _, event := range events {
 		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == "script" {
-			if event.Tool.Outcome != session.ToolOutcomeUnknown || event.Tool.Result.Metadata[codemode.MetadataScriptCompletion] != "completed" {
+			if event.Tool.Outcome != session.ToolOutcomeUnknown || event.Meta[codemode.MetadataScriptCompletion] != "completed" {
 				t.Fatalf("script lost outcome or completion: %+v", event.Tool)
 			}
 			return

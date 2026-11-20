@@ -285,8 +285,8 @@ func TestGuardianBoundedResultReportsMissingContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := q.boundResult(tool.Result{ID: "inspection", Name: "RunCommand", Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}})
-	if result.ID != "inspection" || q.truncated != 1 || tool.ResultNeedsTruncation(result, tool.TruncationPolicy{MaxBytes: q.resultBytes}) {
+	result := q.boundResult(tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}})
+	if q.truncated != 1 || tool.ResultNeedsTruncation(result, tool.TruncationPolicy{MaxBytes: q.resultBytes}) {
 		t.Fatalf("bounded result lost identity or budget: %+v", result)
 	}
 	encoded, _ := json.Marshal(tool.ModelParts(result.Content))

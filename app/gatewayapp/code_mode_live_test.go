@@ -368,11 +368,8 @@ func TestCodeModeLive(t *testing.T) {
 				if filepath.Base(input.File) != "workflow.js" {
 					continue
 				}
-				var result tool.Result
-				if json.Unmarshal(toolResultJSON(record.Result), &result) != nil {
-					continue
-				}
-				source, _ := result.Metadata["code_mode_source"].(map[string]any)
+
+				source, _ := event.Meta["code_mode_source"].(map[string]any)
 				if source["sha256"] == expected {
 					fixedFile = true
 				}

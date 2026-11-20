@@ -1,7 +1,6 @@
 package filesystem
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -279,11 +279,13 @@ func TestPatchToolWhitespaceDiffUsesActualBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := `{"path":"feature.py","edits":[{"old":"   if ready:\n       return True\n","new":"   if ready:\n       return False\n"}]}`
-	result, err := newTestPatchTool(t, dir).Call(context.Background(), tool.Call{Input: json.RawMessage(input)})
+	var details map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { details = fields })
+	_, err := newTestPatchTool(t, dir).Call(ctx, tool.Call{Input: json.RawMessage(input)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hunks := mutationToolMetadata(result.Metadata)["diff_hunks"]
+	hunks := details["diff_hunks"]
 	encoded, err := json.Marshal(hunks)
 	if err != nil {
 		t.Fatal(err)

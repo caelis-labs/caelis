@@ -363,7 +363,7 @@ func TestAdditiveEmptyAndCallbackBodies(t *testing.T) {
 	}
 	for _, raw := range []string{
 		`{"outcome":true,"content":null,"future_optional":true}`,
-		`{"outcome":"succeeded","content":null,"turn_complete":"true","future_optional":true}`,
+		`{"outcome":"succeeded","content":null,"result_format":true,"future_optional":true}`,
 	} {
 		if err := DecodeRequest([]byte(raw), &sessionprofile.CallResult{}); err == nil {
 			t.Fatalf("accepted invalid callback field: %s", raw)

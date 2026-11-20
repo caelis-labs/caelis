@@ -442,11 +442,42 @@ func TestCodeModeFallbackPreservesOriginalResultBytes(t *testing.T) {
 	const raw = `{"is_error":true,"metadata":{"code_mode_script_completion":"completed"}}`
 	entry.Result = map[string]any{"tool_result_json": raw, "error": "cumulative error"}
 	frame := terminalCommandFallbackFrame(entry)
-	if frame.Text != raw || frame.State != "failed" || !frame.Closed {
+	if frame.Text != raw || frame.State != "failed" || !frame.Closed || frame.ScriptCompletion != "completed" {
 		t.Fatalf("original result/lifecycle lost: %+v", frame)
 	}
 	delete(entry.Result, "tool_result_json")
 	if got := terminalCommandFallbackFrame(entry).Text; got != "cumulative error" {
 		t.Fatalf("missing receipt erased existing diagnostic: %q", got)
 	}
+}
+
+func TestCodeModeFinalFrameUsesProducerSettlement(t *testing.T) {
+	// A reader may still hold its original running Task snapshot when the final
+	// producer frame arrives. VM settlement and cumulative Task state can differ.
+	entry := taskStreamTestEntry("session-1", "script", task.KindCodeMode)
+	entry.State = task.StateRunning
+	entry.Running = true
+	entry.Metadata["code_mode_source"] = map[string]any{"code": "return 42", "sha256": "original"}
+	spool := newTaskStreamTestSpool(t)
+	recorder := NewRecorder(spool, nil)
+	observer := recorder.BindTaskOutput(t.Context(), output.Binding{SessionID: entry.Session.SessionID, TaskID: entry.TaskID, Kind: output.TaskKindCodeMode, StartsAtTaskOrigin: true})
+	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "{}", State: "failed", Closed: true, ProducerClosed: true, ScriptCompletion: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), spool, recorder)
+	batch, err := service.Events(t.Context(), Principal{ID: "owner"}, ReadRequest{SessionID: entry.Session.SessionID, TaskID: entry.TaskID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, delivery := range batch.Deliveries {
+		for _, r := range delivery.Records {
+			if f := r.Frame; f != nil && f.Closed {
+				if f.State != "failed" || f.ScriptCompletion != "completed" || f.ScriptSource == nil || f.ScriptSource.Code != "return 42" {
+					t.Fatalf("final frame: %+v", f)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("missing final frame")
 }

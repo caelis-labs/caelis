@@ -39,6 +39,9 @@ type Event struct {
 	State      string    `json:"state,omitempty"`
 	Running    bool      `json:"running,omitempty"`
 	Closed     bool      `json:"closed,omitempty"`
+	// ScriptCompletion records VM settlement on a final Code Mode event. A script
+	// can finish normally after catching a failed tool invocation.
+	ScriptCompletion string `json:"script_completion,omitempty"`
 	// ProducerClosed proves that the stable Task identity cannot emit another
 	// output event. It is producer lifecycle, not a retained delivery record.
 	ProducerClosed bool           `json:"producer_closed,omitempty"`

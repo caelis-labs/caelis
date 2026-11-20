@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/aymanbagabas/go-udiff/lcs"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 )
 
 const (
@@ -12,14 +13,8 @@ const (
 	mutationDiffMaxLines     = 800
 )
 
-type MutationDiffHunk struct {
-	Header   string   `json:"header"`
-	OldStart int      `json:"old_start"`
-	OldLines int      `json:"old_lines"`
-	NewStart int      `json:"new_start"`
-	NewLines int      `json:"new_lines"`
-	Lines    []string `json:"lines"`
-}
+// MutationDiffHunk is a unified diff hunk produced by BuildMutationDiffHunks.
+type MutationDiffHunk = toolpresentation.DiffHunk
 
 type mutationDiffRow struct {
 	kind    byte
@@ -32,46 +27,12 @@ func mutationDiffResultMeta(before, after string) ([]MutationDiffHunk, bool) {
 	return BuildMutationDiffHunks(before, after, mutationDiffContextLines, mutationDiffMaxHunks, mutationDiffMaxLines)
 }
 
-func attachMutationDiffMeta(meta map[string]any, before, after, fallbackHunk string) {
-	if meta == nil {
-		return
-	}
-	toolMeta := mutationToolMetadata(meta)
-	hunks, truncated := mutationDiffResultMeta(before, after)
-	if len(hunks) == 0 {
-		return
-	}
-	toolMeta["diff_hunks"] = hunks
-	if truncated {
-		toolMeta["diff_truncated"] = true
-	}
-	if fallbackHunk == "" {
-		toolMeta["hunk"] = hunks[0].Header
-	}
+func mutationDisplay(plan fileMutationPlan, stats LineDiffStats) toolpresentation.FileChange {
+	hunks, truncated := mutationDiffResultMeta(plan.before, plan.after)
+	return toolpresentation.FileChange{Created: plan.created, PreviousEmpty: plan.before == "", AddedLines: stats.Added, RemovedLines: stats.Removed, Revision: textRevision(plan.after), Hunk: plan.hunk, Hunks: hunks, Truncated: truncated}
 }
 
-func mutationToolMetadata(meta map[string]any) map[string]any {
-	caelis, _ := meta["caelis"].(map[string]any)
-	if caelis == nil {
-		caelis = map[string]any{}
-		meta["caelis"] = caelis
-	}
-	if _, ok := caelis["version"]; !ok {
-		caelis["version"] = 1
-	}
-	runtime, _ := caelis["runtime"].(map[string]any)
-	if runtime == nil {
-		runtime = map[string]any{}
-		caelis["runtime"] = runtime
-	}
-	toolMeta, _ := runtime["tool"].(map[string]any)
-	if toolMeta == nil {
-		toolMeta = map[string]any{}
-		runtime["tool"] = toolMeta
-	}
-	return toolMeta
-}
-
+// BuildMutationDiffHunks computes a bounded unified diff for the two texts.
 func BuildMutationDiffHunks(before, after string, contextLines, maxHunks, maxLines int) ([]MutationDiffHunk, bool) {
 	oldLines := splitDiffLines(before)
 	newLines := splitDiffLines(after)

@@ -25,7 +25,7 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 				probe := tool.NamedTool{Def: tool.Definition{Name: "operate", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"app": map[string]any{"type": "string"}}, "required": []string{"app"}}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 					effects.Add(1)
 					actualInput = string(c.Input)
-					return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("full")}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.Text("full")}}, nil
 				}}
 				driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 					if i == 0 {

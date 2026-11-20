@@ -14,7 +14,7 @@ func taskResultMeta(meta map[string]any, trusted bool) map[string]any {
 	if out == nil {
 		out = map[string]any{}
 	}
-	section := taskRuntimeMetaSection(out, toolbinding.MetadataSection)
+	section := toolbinding.RuntimeSection(out, toolbinding.MetadataSection)
 	section[toolbinding.MetadataTaskResult] = trusted
 	return out
 }

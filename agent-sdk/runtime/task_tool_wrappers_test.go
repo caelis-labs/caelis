@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -218,7 +219,8 @@ func TestRuntimeSendMessageToolDelegatesWithoutLifecycleProtocol(t *testing.T) {
 		sessionRef: session.SessionRef{SessionID: "session-1"},
 	}
 	raw, _ := json.Marshal(map[string]any{"to": "parent", "message": " status update "})
-	result, err := target.Call(context.Background(), tool.Call{ID: "message-call-1", Name: "SendMessage", Input: raw})
+	ctx, observation := toolbinding.Observe(t.Context())
+	result, err := target.Call(ctx, tool.Call{ID: "message-call-1", Name: "SendMessage", Input: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +230,7 @@ func TestRuntimeSendMessageToolDelegatesWithoutLifecycleProtocol(t *testing.T) {
 	if got := testToolResultText(t, result); got != "Message sent." {
 		t.Fatalf("tool result = %q, want input dispatch acknowledgement", got)
 	}
-	messageMeta := testToolResultRuntimeMeta(t, result, "message")
+	messageMeta := testToolResultRuntimeMeta(t, observation, "message")
 	if len(messageMeta) != 1 || messageMeta["to"] != "parent" {
 		t.Fatalf("message metadata = %#v", messageMeta)
 	}
@@ -237,7 +239,7 @@ func TestRuntimeSendMessageToolDelegatesWithoutLifecycleProtocol(t *testing.T) {
 func TestSendMessageToolResultContainsNoTargetLifecycle(t *testing.T) {
 	t.Parallel()
 
-	result := sendMessageToolResult(tool.Call{ID: "call-1"}, "research")
+	result := sendMessageToolResult(t.Context(), "research")
 	if got := testToolResultText(t, result); got != "Message sent." {
 		t.Fatalf("result = %q, want ordinary input acknowledgement", got)
 	}
@@ -463,9 +465,9 @@ func TestRuntimeTaskWaitRejectsTimeoutMSAlias(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(handle) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 
 	raw := mustJSONRaw(map[string]any{

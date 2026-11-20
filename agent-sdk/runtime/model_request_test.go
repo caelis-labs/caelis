@@ -140,7 +140,7 @@ func snapshotTestTool(revision string, invocations chan<- tool.InvocationContext
 		if invocations != nil {
 			invocations <- tool.InvocationFromContext(ctx)
 		}
-		return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text(revision)}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text(revision)}}, nil
 	}}
 }
 

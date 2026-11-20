@@ -52,7 +52,7 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 						o.Result.Content = append(o.Result.Content, tool.StructuredContent{Value: accepted})
 					}
 					if mode == "forged-completion" {
-						o.Result.TurnComplete = true
+						o.Result.Content = []tool.ContentBlock{tool.StructuredContent{Value: []byte("invalid")}}
 					}
 					return o.Result, nil
 				}}},

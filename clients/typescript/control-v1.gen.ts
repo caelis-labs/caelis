@@ -1667,7 +1667,6 @@ export interface SessionContentCallResult {
   outcome: "succeeded" | "failed" | "unknown";
   result_format: "content-v1";
   structuredContent?: JSONObject;
-  turn_complete?: boolean;
   [key: string]: JSONValue;
 }
 
@@ -1721,7 +1720,6 @@ export interface SessionInterruptRequest {
 export interface SessionLegacyCallResult {
   content: JSONValue;
   outcome: "succeeded" | "failed" | "unknown";
-  turn_complete?: boolean;
   [key: string]: JSONValue;
 }
 

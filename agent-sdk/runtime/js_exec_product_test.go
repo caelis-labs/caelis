@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -359,48 +358,42 @@ func TestJSExecYieldReturnsControlAndContinuesOriginalTask(t *testing.T) {
 }
 
 func TestJSExecFinalBoundaryCancelsBeforeJoinAndPreservesUnknown(t *testing.T) {
-	for _, trustedComplete := range []bool{false, true} {
-		t.Run(fmt.Sprint(trustedComplete), func(t *testing.T) {
-			store, active, root := codeModeStore(t)
-			sandbox, err := host.New(host.Config{CWD: root})
-			if err != nil {
-				t.Fatal(err)
+	store, active, root := codeModeStore(t)
+	sandbox, err := host.New(host.Config{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sandbox.Close()
+	started := make(chan struct{})
+	var after atomic.Int32
+	hold := tool.NamedTool{Def: tool.Definition{Name: "Hold", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+		close(started)
+		<-ctx.Done()
+		return tool.Result{}, ctx.Err()
+	}}
+	later := tool.NamedTool{Def: tool.Definition{Name: "After", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { after.Add(1); return tool.Result{}, nil }}
+
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{{ID: "async-script", Name: codemode.ToolName, Args: `{"code":"await tools.call('Hold',{});await tools.call('After',{});return {};","yield_time_ms":0}`}}
+		}
+		if i == 1 {
+			select {
+			case <-started:
+			case <-time.After(3 * time.Second):
+				t.Error("Host call did not start")
 			}
-			defer sandbox.Close()
-			started := make(chan struct{})
-			var after atomic.Int32
-			hold := tool.NamedTool{Def: tool.Definition{Name: "Hold", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
-				close(started)
-				<-ctx.Done()
-				return tool.Result{}, ctx.Err()
-			}}
-			later := tool.NamedTool{Def: tool.Definition{Name: "After", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { after.Add(1); return tool.Result{}, nil }}
-			complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { return tool.Result{TurnComplete: true}, nil }}
-			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-				if i == 0 {
-					return []model.ToolCall{{ID: "async-script", Name: codemode.ToolName, Args: `{"code":"await tools.call('Hold',{});await tools.call('After',{});return {};","yield_time_ms":0}`}}
-				}
-				if i == 1 {
-					select {
-					case <-started:
-					case <-time.After(3 * time.Second):
-						t.Error("Host call did not start")
-					}
-					if trustedComplete {
-						return []model.ToolCall{{ID: "end", Name: "Complete", Args: `{}`}}
-					}
-				}
-				return nil
-			}}
-			_, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{hold, later, complete, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, nil, nil)
-			if after.Load() != 0 {
-				t.Fatal("new Host call dispatched after final boundary")
-			}
-			entries, _ := rt.tasks.store.ListSession(t.Context(), active.SessionRef)
-			if len(entries) != 1 || entries[0].Running || entries[0].State != taskapi.StateUnknownOutcome {
-				t.Fatalf("in-flight unknown lost: %+v", entries)
-			}
-		})
+
+		}
+		return nil
+	}}
+	_, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{hold, later, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, nil, nil)
+	if after.Load() != 0 {
+		t.Fatal("new Host call dispatched after final boundary")
+	}
+	entries, _ := rt.tasks.store.ListSession(t.Context(), active.SessionRef)
+	if len(entries) != 1 || entries[0].Running || entries[0].State != taskapi.StateUnknownOutcome {
+		t.Fatalf("in-flight unknown lost: %+v", entries)
 	}
 }
 

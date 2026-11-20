@@ -471,6 +471,20 @@ func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string, kind run
 	return runtime, releaseUse, nil
 }
 
+// acquireLoadedRuntimeAfterRelease waits for teardown and checks the registry
+// again before pinning the current owner. It never activates an idle Session.
+func (r *sessionRuntimeRegistry) acquireLoadedRuntimeAfterRelease(ctx context.Context, sessionID string, kind runtimeUseKind) (*sessionRuntime, func(), error) {
+	for {
+		rt, release, err := r.acquireLoadedRuntime(sessionID, kind)
+		if !isSessionRuntimeReleasingError(err) {
+			return rt, release, err
+		}
+		if err := r.waitSessionRelease(ctx, sessionID); err != nil {
+			return nil, nil, err
+		}
+	}
+}
+
 // acquireActivatedControlRuntime keeps activation and use-retention on one
 // retry loop so an idle release that starts after the Runtime is observed cannot
 // turn later Agent input or a command into a spurious unavailable error.
@@ -482,14 +496,8 @@ func (r *sessionRuntimeRegistry) acquireActivatedControlRuntime(
 		if err := ctx.Err(); err != nil {
 			return nil, session.Session{}, nil, false, err
 		}
-		if err := r.waitSessionRelease(ctx, sessionID); err != nil {
-			return nil, session.Session{}, nil, false, err
-		}
-		loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID, runtimeUseCommand)
+		loaded, releaseUse, err := r.acquireLoadedRuntimeAfterRelease(ctx, sessionID, runtimeUseCommand)
 		if err != nil {
-			if isSessionRuntimeReleasingError(err) {
-				continue
-			}
 			return nil, session.Session{}, nil, false, err
 		}
 		if loaded != nil {
@@ -547,15 +555,8 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 		return nil, session.Session{}, nil, err
 	}
 	defer unlock()
-	loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID, kind)
-	if isSessionRuntimeReleasingError(err) {
-		// The activation lock prevents a replacement Runtime from being bound
-		// while the releasing tombstone drains. Wait for that known lifecycle
-		// transition before assembling the disposable configuration snapshot.
-		if err := r.waitSessionRelease(buildCtx, sessionID); err != nil {
-			return nil, session.Session{}, nil, err
-		}
-	} else if err != nil {
+	loaded, releaseUse, err := r.acquireLoadedRuntimeAfterRelease(buildCtx, sessionID, kind)
+	if err != nil {
 		return nil, session.Session{}, nil, err
 	}
 	if loaded != nil {

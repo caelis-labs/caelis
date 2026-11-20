@@ -40,7 +40,7 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	calls := 0
 	screen := tool.NamedTool{Def: tool.Definition{Name: "ECHO"}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 		calls++
-		return tool.Result{ID: call.ID, Name: call.Name, Content: content}, nil
+		return tool.Result{Content: content}, nil
 	}}
 	allow := staticPolicyRegistry{mode: policy.NamedMode{ID: "allow", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 		return policy.Decision{Action: policy.ActionAllow}, nil

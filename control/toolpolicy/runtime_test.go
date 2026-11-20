@@ -106,7 +106,7 @@ func policyEffectTools(t *testing.T, count *atomic.Int32) []tool.Tool {
 		def.InputSchema = map[string]any{"type": "object", "required": []string{"app"}, "properties": map[string]any{"app": map[string]any{"type": "string"}}}
 		targets = append(targets, tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			count.Add(1)
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text("observed fixture")}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.Text("observed fixture")}}, nil
 		}})
 	}
 	return targets

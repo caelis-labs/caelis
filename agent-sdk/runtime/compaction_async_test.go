@@ -178,7 +178,7 @@ func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceR
 				return tool.Result{}, ctx.Err()
 			}
 		}
-		return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text("raw tool fact: outcome unknown; original receipt retained")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("raw tool fact: outcome unknown; original receipt retained")}}, nil
 	}}
 	h.source.set(agent.ModelRequestSnapshot{Revision: "epoch-1", Model: h.llm, Tools: []tool.Tool{h.tool}})
 	h.rt, err = New(Config{Sessions: store, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{

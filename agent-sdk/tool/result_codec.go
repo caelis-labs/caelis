@@ -15,8 +15,6 @@ type legacyResultBlock struct{ part model.Part }
 
 func (b legacyResultBlock) ContentType() ContentType { return ContentType(b.part.Kind) }
 
-type resultAlias Result
-
 // MarshalJSON serializes each block with its content type discriminator.
 func (r Result) MarshalJSON() ([]byte, error) {
 	if err := ValidateContent(r.Content); err != nil {
@@ -56,16 +54,14 @@ func (r Result) MarshalJSON() ([]byte, error) {
 		blocks = append(blocks, raw)
 	}
 	return json.Marshal(struct {
-		resultAlias
 		Content []json.RawMessage `json:"content,omitempty"`
-	}{resultAlias(r), blocks})
+	}{blocks})
 }
 
 // UnmarshalJSON accepts typed blocks and the historical model-part encoding
 // shared by Session receipts and Code Mode task snapshots.
 func (r *Result) UnmarshalJSON(data []byte) error {
 	var wire struct {
-		resultAlias
 		Content    []json.RawMessage `json:"content"`
 		Structured *struct {
 			Value        json.RawMessage `json:"value"`
@@ -83,8 +79,9 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("invalid historical structured content")
 		}
 	}
+	var decoded Result
 	if wire.Content != nil {
-		wire.resultAlias.Content = make([]ContentBlock, 0, len(wire.Content))
+		decoded.Content = make([]ContentBlock, 0, len(wire.Content))
 	}
 	for i, raw := range wire.Content {
 		if wire.Structured != nil && i == wire.Structured.ContentIndex {
@@ -95,19 +92,19 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 			if part.Kind != model.PartKindJSON || part.JSON == nil || !bytes.Equal(part.JSON.Value, wire.Structured.Value) {
 				return fmt.Errorf("historical structured content differs from its JSON part")
 			}
-			wire.resultAlias.Content = append(wire.resultAlias.Content, StructuredContent{Value: wire.Structured.Value})
+			decoded.Content = append(decoded.Content, StructuredContent{Value: wire.Structured.Value})
 			continue
 		}
 		block, err := decodeContentBlock(raw)
 		if err != nil {
 			return fmt.Errorf("result block %d: %w", i, err)
 		}
-		wire.resultAlias.Content = append(wire.resultAlias.Content, block)
+		decoded.Content = append(decoded.Content, block)
 	}
-	if err := ValidateContent(wire.resultAlias.Content); err != nil {
+	if err := ValidateContent(decoded.Content); err != nil {
 		return err
 	}
-	*r = Result(wire.resultAlias)
+	*r = decoded
 	return nil
 }
 

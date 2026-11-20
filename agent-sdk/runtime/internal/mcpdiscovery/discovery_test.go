@@ -36,7 +36,7 @@ func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
 func TestFullDiscoveryResultsRequireTheirOwningSource(t *testing.T) {
 	binding := tool.Binding{Name: "docs__read", Identity: "source", Version: "v1"}
 	raw, _ := json.Marshal(map[string]any{"tools": []any{map[string]any{"name": binding.Name, "binding": binding, "input_schema": map[string]any{"type": "object"}}}})
-	original := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Outcome: session.ToolOutcomeSucceeded, Result: &tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{MetadataKey: true}}}}
+	original := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Outcome: session.ToolOutcomeSucceeded, Result: &tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, Discovery: true}}
 	for _, nested := range []bool{false, true} {
 		event := session.CloneEvent(original)
 		if nested {

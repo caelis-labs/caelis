@@ -38,7 +38,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 				accepted := json.RawMessage(`{"value":"ACCEPTED"}`)
 				target := tool.NamedTool{Def: tool.Definition{Name: "ReadSecret"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 					effects.Add(1)
-					r := tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}, tool.Resource{URI: "https://example.invalid/RAW-SECRET", MIMEType: "image/png", Name: "fixture"}}}
+					r := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}, tool.Resource{URI: "https://example.invalid/RAW-SECRET", MIMEType: "image/png", Name: "fixture"}}}
 					if mode == "unknown" {
 						return r, errorcode.New(errorcode.UnknownOutcome, "effect unknown")
 					}

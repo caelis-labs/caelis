@@ -55,7 +55,7 @@ func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testin
 	target := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
 
@@ -152,7 +152,7 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			observed = append(observed, tool.InvocationFromContext(ctx))
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
 	core, err := New(Config{
@@ -310,7 +310,7 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			identities = append(identities, tool.InvocationFromContext(ctx))
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
 	firstWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-1", "turn-1", sequence)

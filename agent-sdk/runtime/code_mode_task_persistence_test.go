@@ -25,7 +25,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-func TestPersistedTerminalScriptTaskStopsLaterBatchEffects(t *testing.T) {
+func TestLegacyScriptReceiptAllowsNextEffectAndModelStep(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	_, err := sessionfile.NewTaskStore(store).Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{
 		TaskID: "finished", Handle: "script", Kind: taskapi.KindCodeMode, State: taskapi.StateCompleted,
@@ -49,7 +49,7 @@ func TestPersistedTerminalScriptTaskStopsLaterBatchEffects(t *testing.T) {
 		return nil
 	}}
 	events, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{tasktool.New(), sibling}}, nil, nil)
-	if len(driver.requests) != 1 || effects.Load() != 0 {
+	if len(driver.requests) != 2 || effects.Load() != 1 {
 		t.Fatalf("model requests = %d, sibling effects = %d", len(driver.requests), effects.Load())
 	}
 	control, err := rt.tasks.Cancel(t.Context(), active.SessionRef, taskapi.ControlRequest{
@@ -59,20 +59,20 @@ func TestPersistedTerminalScriptTaskStopsLaterBatchEffects(t *testing.T) {
 		t.Fatalf("controller cancel lost the previously visible result: %+v %v", control, err)
 	}
 	for _, e := range events {
-		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.ID == "collect" && e.Tool.TurnComplete {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.ID == "collect" && e.Tool.Status == "completed" {
 			return
 		}
 	}
 	t.Fatal("missing terminal Task receipt")
 }
 
-func TestLiveTerminalScriptTaskWaitWithCancelFencesLaterEffect(t *testing.T) {
+func TestLiveScriptTaskWaitWithCancelReturnsSelectedResult(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	finish, committed, cancelReturned := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	markCommitted := sync.OnceFunc(func() { close(committed) })
 	const receipt = "selected-terminal-script-receipt"
-	terminal := tool.NamedTool{Def: tool.Definition{Name: "Complete", MayCompleteTurn: true}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{TurnComplete: true, Content: []tool.ContentBlock{tool.Text(receipt)}}, nil
+	terminal := tool.NamedTool{Def: tool.Definition{Name: "Complete"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{Content: []tool.ContentBlock{tool.Text(receipt)}}, nil
 	}}
 	script := &codemode.Tool{Name: codemode.ToolName, Executor: codeOutputExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (codemode.Output, error) {
 		select {
@@ -145,8 +145,8 @@ func TestLiveTerminalScriptTaskWaitWithCancelFencesLaterEffect(t *testing.T) {
 		PolicyRegistry:      registry,
 		Hooks:               agent.Hooks{ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{hook}},
 	})
-	if len(driver.requests) != 2 || earlier.Load() != 1 || later.Load() != 0 {
-		t.Fatalf("terminal boundary lost: model requests=%d preceding effects=%d later effects=%d", len(driver.requests), earlier.Load(), later.Load())
+	if len(driver.requests) != 3 || earlier.Load() != 1 || later.Load() != 1 {
+		t.Fatalf("batch ordering: model requests=%d preceding effects=%d later effects=%d", len(driver.requests), earlier.Load(), later.Load())
 	}
 	var replies []string
 	for _, event := range events {
@@ -157,12 +157,12 @@ func TestLiveTerminalScriptTaskWaitWithCancelFencesLaterEffect(t *testing.T) {
 		switch event.Tool.ID {
 		case "wait":
 			raw, err := json.Marshal(event.Tool.Result)
-			if err != nil || !event.Tool.TurnComplete || !strings.Contains(string(raw), receipt) {
-				t.Fatalf("wait lost the selected terminal result: terminal=%v result=%s err=%v", event.Tool.TurnComplete, raw, err)
+			if err != nil || !strings.Contains(string(raw), receipt) {
+				t.Fatalf("wait lost the selected terminal result: result=%s err=%v", raw, err)
 			}
 		case "cancel":
 			raw, err := json.Marshal(event.Tool.Result)
-			if err != nil || event.Tool.TurnComplete || strings.Contains(string(raw), receipt) || strings.Contains(string(raw), "tool_result_json") {
+			if err != nil || strings.Contains(string(raw), receipt) || strings.Contains(string(raw), "tool_result_json") {
 				t.Fatalf("cancel exposed the script result: %s, err=%v", raw, err)
 			}
 		}
@@ -429,12 +429,12 @@ func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
 	image := tool.Image{Data: []byte("abc"), MIMEType: "image/png"}
 	first := encodeSnapshot("one", []tool.ContentBlock{tool.Text("before"), tool.StructuredContent{Value: json.RawMessage(identifier)}, image})
 	second := encodeSnapshot("two", []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`null`)}, tool.Text("after")})
-	call, def := tool.Call{ID: "observe"}, tool.Definition{Name: "Task"}
-	single, err := taskControlSnapshotToolResult(call, def, first, "wait", 0)
+	ctx := t.Context()
+	single, err := taskControlSnapshotToolResult(ctx, first, "wait", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := taskBatchControlToolResult(call, def, []taskBatchControlItem{{Snapshot: first}, {Snapshot: second}}, "wait", 0)
+	batch, err := taskBatchControlToolResult(ctx, []taskBatchControlItem{{Snapshot: first}, {Snapshot: second}}, "wait", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

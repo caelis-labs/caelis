@@ -188,8 +188,6 @@ func EchoTool(name string) tool.Tool {
 				}
 			}
 			return tool.Result{
-				ID:      call.ID,
-				Name:    call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: MustJSON(payload)}},
 			}, nil
 		},

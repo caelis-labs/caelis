@@ -124,7 +124,7 @@ func (r *Runtime) resetCodeMode(ref session.SessionRef, executor codemode.Execut
 		go func() { _ = old.engine.Close() }()
 	}
 	raw, _ := json.Marshal(codemode.ExecutionState{Generation: next.generation})
-	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{codemode.MetadataScriptCompletion: "completed"}}
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}
 }
 
 // ReleaseCodeModeEnvironments releases disposable language state after the host

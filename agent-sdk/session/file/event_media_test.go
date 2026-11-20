@@ -19,7 +19,7 @@ func newSharedMediaFixture(t testing.TB, count int) (*Store, session.Session, []
 	t.Helper()
 	store, active := newEventPageIndexFixture(t, 0)
 	image := tool.Image{Data: []byte(strings.Repeat("abc", 256<<10)), MIMEType: "image/png", Name: "screen"}
-	result := tool.Result{Name: "screen", Content: []tool.ContentBlock{image}}
+	result := tool.Result{Content: []tool.ContentBlock{image}}
 	events := make([]*session.Event, count)
 	for i := range count {
 		id := fmt.Sprintf("call-%d", i)

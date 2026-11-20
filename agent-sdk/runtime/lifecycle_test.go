@@ -27,7 +27,7 @@ func TestRuntimeEmitsTypedRunTurnModelAndToolLifecycle(t *testing.T) {
 		return textResponse("done", model.Usage{})
 	}}
 	probe := tool.NamedTool{Def: tool.Definition{Name: "probe"}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-		return tool.Result{ID: call.ID, Name: call.Name}, nil
+		return tool.Result{}, nil
 	}}
 	sessions, active := newTestSessionService(t, "lifecycle-runtime")
 	sink := &concurrentTraceSink{}

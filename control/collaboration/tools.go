@@ -125,5 +125,5 @@ func (t boundTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{ID: call.ID, Name: t.definition.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: result}}}, nil
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: result}}}, nil
 }

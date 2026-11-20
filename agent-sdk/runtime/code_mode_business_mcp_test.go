@@ -193,7 +193,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 					return tool.Result{}, fmt.Errorf("unexpected Consume argument: %s", call.Input)
 				}
 				consumed.Add(1)
-				return toolutil.JSONResult(call.Name, map[string]any{"summary": "checked:" + args.Name})
+				return toolutil.JSONResult(map[string]any{"summary": "checked:" + args.Name})
 			}}
 			spec := agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}, consume}, DeferredTools: manager}
 			runCodeMode(t, store, active, spec, nil, nil)

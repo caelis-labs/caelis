@@ -52,14 +52,12 @@ func TestContentV1CallbackResultPreservesDisplayBoundary(t *testing.T) {
 		{"receipt with no callback content", []tool.ContentBlock{receipt, tool.StructuredContent{Value: json.RawMessage(`{"score":7}`)}}, []string{"completed"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := tool.Result{Content: tc.parts, Metadata: map[string]any{
-				"application_call": map[string]any{"result_format": sessionprofile.ResultFormatContentV1},
-			}}
+			result := tool.Result{Content: tc.parts}
 			message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{
 				ToolUseID: "call-1", Name: "ApplicationLookup", Content: tool.ModelParts(result.Content),
 			}})
 			updates, err := ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &message, Tool: &session.EventTool{
-				ID: "call-1", Name: "ApplicationLookup", Status: "completed", Result: &result,
+				ID: "call-1", Name: "ApplicationLookup", Status: "completed", ResultFormat: sessionprofile.ResultFormatContentV1, Result: &result,
 			}})
 			if err != nil || len(updates) != 1 {
 				t.Fatalf("updates = %#v, err = %v", updates, err)

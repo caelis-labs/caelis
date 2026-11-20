@@ -12,22 +12,8 @@ import (
 // projectResult preserves the application's effect receipt independently of
 // media availability. Once resolved, media bytes are historical evidence in
 // canonical Session content; replay never fetches resources or repeats effects.
-func (s *Store) projectResult(ctx context.Context, c CallContext, name, format string, result CallResult) (tool.Result, error) {
-	out := tool.Result{ID: c.CallID, Name: name, TurnComplete: result.TurnComplete}
-	provenance, err := json.Marshal(c)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	var metadata map[string]any
-	if err = json.Unmarshal(provenance, &metadata); err != nil {
-		return tool.Result{}, err
-	}
-	metadata["receipt_id"] = callID(c)
-	metadata["outcome"] = result.Outcome
-	if result.TurnComplete {
-		metadata["turn_complete"] = true
-	}
-	out.Metadata = map[string]any{"application_call": metadata}
+func (s *Store) projectResult(ctx context.Context, c CallContext, format string, result CallResult) (tool.Result, error) {
+	var out tool.Result
 	if format == "" {
 		// The baseline callback format is opaque JSON text.
 		// Keep it until that public capability is retired; never infer images
@@ -43,7 +29,6 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, name, format s
 		return out, nil
 	}
 
-	metadata["result_format"] = format
 	var references []ContentBlock
 	var message string
 	blocks, _ := decodeContent(result.Content)

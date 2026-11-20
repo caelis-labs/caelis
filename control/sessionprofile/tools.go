@@ -56,12 +56,12 @@ func (s *Store) ToolsForConfiguration(ctx context.Context, binding Binding, conf
 	out := make([]tool.Tool, 0, len(pinned.Profile.Tools))
 	for _, def := range pinned.Profile.Tools {
 		definition := tool.Definition{
-			Name:            def.Name,
-			MayCompleteTurn: true,
-			Description:     def.Description,
-			InputSchema:     def.InputSchema,
+			Name:        def.Name,
+			Description: def.Description,
+			InputSchema: def.InputSchema,
 			Metadata: map[string]any{
 				callbackPolicyMetadataKey: callbackPolicyMetadata{approvalPolicy: def.ApprovalPolicy},
+				tool.MetadataResultFormat: def.ResultFormat,
 			},
 		}
 		out = append(out, callbackTool{store: s, binding: stored, configuration: pinned, source: source, resultFormat: def.ResultFormat, definition: definition})
@@ -92,5 +92,5 @@ func (t callbackTool) invoke(ctx context.Context, call tool.Call, identity tool.
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return t.store.projectResult(ctx, provenance, t.definition.Name, t.resultFormat, result)
+	return t.store.projectResult(ctx, provenance, t.resultFormat, result)
 }

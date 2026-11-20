@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -139,6 +140,13 @@ func renderScriptInvocationRows(blockID string, events []SubagentEvent, width in
 	ev := events[0]
 	prefix := truncateDisplayCells(explorationChildPrefix(first), maxInt(0, width-1))
 	budget := maxInt(1, width-displayColumns(prefix))
+	tag, styledTag := approvalReviewStatusTag(ctx, sanitizeRenderableText(ev.ApprovalStatus))
+	if tagWidth := displayColumns(tag) + 1; tag != "" && tagWidth < budget {
+		budget -= tagWidth
+		tag, styledTag = " "+tag, " "+styledTag
+	} else {
+		tag, styledTag = "", ""
+	}
 	header := scriptInvocationHeader(events, ctx, budget, fullArgs)
 	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
 	var styled string
@@ -149,8 +157,8 @@ func renderScriptInvocationRows(blockID string, events []SubagentEvent, width in
 	} else {
 		styled = styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)
 	}
-	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header))
-	line := prefix + header
+	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header)) + styledTag
+	line := prefix + header + tag
 	if ev.Err {
 		styled = ctx.Theme.ErrorStyle().Render(line)
 	} else if dim {
@@ -184,16 +192,18 @@ func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budg
 			header = strings.TrimSpace(label + " " + strings.Join(details, ", "))
 		} else {
 			ev.Args = firstNonEmpty(ev.StartArgs, ev.Args)
+			if ev.Done && !ev.Err && isMutationPanelToolEvent(ev) && ev.DiffSummary == "" {
+				summary := toolDisplayResultHeader(ev.Name, ev.Output)
+				if _, _, _, ok := tuikit.SplitDiffCountTokens(summary); ok {
+					ev.DiffSummary = summary
+				}
+			}
 			if ev.Name == surfaceToolRunCommand {
 				command := firstNonEmpty(ev.FullArgs, ev.Args)
 				ev.Args, _ = longCommandDisplayPreview(command, maxInt(1, budget-displayColumns(label)-1))
 			}
 			header = strings.TrimPrefix(standardToolLifecycleHeader(ev, false), "• ")
 		}
-	}
-	if ev.ApprovalStatus != "" {
-		tag, _ := approvalReviewStatusTag(ctx, ev.ApprovalStatus)
-		header += " " + tag
 	}
 	header = sanitizeRenderableText(header)
 	if ev.Name != surfaceToolRunCommand {
@@ -202,6 +212,10 @@ func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budg
 	if detail, ok := strings.CutPrefix(header, label+" "); ok && displayColumns(header) > budget && displayColumns(label) <= budget {
 		header = label
 		if remaining := budget - displayColumns(label) - 1; remaining > 0 {
+			if path, add, remove, ok := tuikit.SplitDiffCountTokens(detail); label == "Edit" && ok && remaining > displayColumns(add+" "+remove)+1 {
+				counts := add + " " + remove
+				detail = compactSingleLineHeader(path, remaining-displayColumns(counts)-1) + " " + counts
+			}
 			header += " " + compactSingleLineHeader(detail, remaining)
 		}
 	}

@@ -2152,18 +2152,17 @@ func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseUse()
-	transientTasks := &transientListTaskStore{
-		Store:        stack.composition.authorities.taskStore,
-		failingUntil: time.Now().Add(15 * time.Millisecond),
-	}
+	transientTasks := &transientListTaskStore{Store: stack.composition.authorities.taskStore}
 	stack.sessionRuntimes.tasks = transientTasks
+	releaseUse()
 	if err := observed.Subscription.Close(); err != nil {
 		t.Fatal(err)
 	}
-	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, sessionID)
-	if transientTasks.failureCount() == 0 {
-		t.Fatal("idle release did not exercise the injected transient Task reader")
+	if err := stack.sessionRuntimes.waitForIdleReleases(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, loaded := stack.sessionRuntimes.loaded(sessionID); loaded || stack.sessionRuntimes.isReleasing(sessionID) || transientTasks.calls.Load() < 2 {
+		t.Fatalf("Runtime release after transient Task read: loaded=%v, calls=%d", loaded, transientTasks.calls.Load())
 	}
 }
 
@@ -2529,26 +2528,60 @@ func (s *staleRunningTaskReader) ListSession(ctx context.Context, ref session.Se
 
 type transientListTaskStore struct {
 	taskapi.Store
-	mu           sync.Mutex
-	failingUntil time.Time
-	failures     int
+	calls atomic.Int32
 }
 
 func (s *transientListTaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
-	s.mu.Lock()
-	if time.Now().Before(s.failingUntil) {
-		s.failures++
-		s.mu.Unlock()
+	if s.calls.Add(1) == 1 {
 		return nil, errors.New("transient task index read")
 	}
-	s.mu.Unlock()
 	return s.Store.ListSession(ctx, ref)
 }
 
-func (s *transientListTaskStore) failureCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.failures
+func TestParticipantHandlesWaitForRuntimeRelease(t *testing.T) {
+	ctx := t.Context()
+	workspace := newWorkspaceRuntimeTestDir(t, "participants-release", "Workspace rule.")
+	stack, err := NewLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "participants-release", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := appserver.BindParticipantClient(stack.ControlParticipants(), appserver.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := createWorkspaceRuntimeTestSession(t, client, "create-participants-release", "participants-release", "participants-release", workspace)
+	registry := stack.sessionRuntimes
+	rt := activateSessionRuntime(t, stack, id)
+	unpin, err := registry.acquireRuntimeUse(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unpin()
+	done := make(chan error, 1)
+	go func() { done <- registry.release(ctx, id) }()
+	waitForSessionRuntimeReleasing(t, registry, id)
+	// The participant read may cancel while the old owner is pinned.
+	readCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	_, err = reader.Handles(readCtx, id)
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("participant read during release = %v, want caller deadline", err)
+	}
+	unpin()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.Handles(ctx, id); err != nil {
+		t.Fatalf("idle participant read: %v", err)
+	}
+	if _, loaded := registry.loaded(id); loaded {
+		t.Fatal("participant read reactivated the released Runtime")
+	}
 }
 
 func TestParticipantHandlesFollowRuntimeTeamRevision(t *testing.T) {

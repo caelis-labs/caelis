@@ -151,7 +151,7 @@ func (o *boundRecorder) ObserveTaskOutput(ctx context.Context, event output.Even
 	if o == nil || o.partition == nil {
 		return nil
 	}
-	if event.ProducerClosed {
+	if event.ProducerClosed && !event.Closed {
 		return o.recorder.enqueue(o.partition, outputWrite{seal: true})
 	}
 	if event.OccurredAt.IsZero() {
@@ -177,7 +177,7 @@ func (o *boundRecorder) ObserveTaskOutput(ctx context.Context, event output.Even
 	}
 	return o.recorder.enqueueLocked(o.partition, outputWrite{
 		records: []streamspool.Record{{Type: taskOutputRecordType, OccurredAt: event.OccurredAt, Payload: payload}}, bytes: len(payload),
-		seal: event.Closed && o.partitionTerminal,
+		seal: event.ProducerClosed || event.Closed && o.partitionTerminal,
 	})
 }
 

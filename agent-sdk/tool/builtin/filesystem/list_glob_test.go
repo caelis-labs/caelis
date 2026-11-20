@@ -11,6 +11,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -76,7 +77,10 @@ func TestGlobToolSupportsPathForRelativePattern(t *testing.T) {
 		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	result, err := globTool.Call(context.Background(), tool.Call{Input: input})
+	var meta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { meta = fields })
+
+	result, err := globTool.Call(ctx, tool.Call{Input: input})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -86,7 +90,6 @@ func TestGlobToolSupportsPathForRelativePattern(t *testing.T) {
 	if len(matches) != 1 || matches[0] != filepath.Join(demoDir, "main.py") {
 		t.Fatalf("matches = %#v, want only demo/main.py", matches)
 	}
-	meta := filesystemToolMeta(t, result)
 	if got, _ := meta["pattern"].(string); got != "*.py" {
 		t.Fatalf("metadata pattern = %q, want original pattern", got)
 	}
@@ -304,7 +307,9 @@ func TestSearchToolAlwaysTreatsPatternAsRegex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	result, err := searchTool.Call(context.Background(), tool.Call{Input: input})
+	var meta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { meta = fields })
+	result, err := searchTool.Call(ctx, tool.Call{Input: input})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -319,7 +324,6 @@ func TestSearchToolAlwaysTreatsPatternAsRegex(t *testing.T) {
 		t.Fatalf("hit path = %q, want data.md content match", got)
 	}
 	assertPayloadKeys(t, hit, "path", "line", "text")
-	meta := filesystemToolMeta(t, result)
 	if got, _ := meta["pattern"].(string); got != ".txt$" {
 		t.Fatalf("metadata pattern = %q, want .txt$", got)
 	}
@@ -505,7 +509,10 @@ func TestSearchToolSkipsBinaryFilesAndLocalCrushCache(t *testing.T) {
 		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	result, err := searchTool.Call(context.Background(), tool.Call{Input: input})
+	var meta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { meta = fields })
+
+	result, err := searchTool.Call(ctx, tool.Call{Input: input})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -519,7 +526,6 @@ func TestSearchToolSkipsBinaryFilesAndLocalCrushCache(t *testing.T) {
 	if got, _ := hit["path"].(string); filepath.Base(got) != "main.go" {
 		t.Fatalf("hit path = %q, want main.go", got)
 	}
-	meta := filesystemToolMeta(t, result)
 	if got := numericMetaValue(meta["binary_files_skipped"]); got != 1 {
 		t.Fatalf("binary_files_skipped = %v, want 1", meta["binary_files_skipped"])
 	}
@@ -552,7 +558,10 @@ func TestSearchToolStopsReadingAfterResultLimit(t *testing.T) {
 	}
 	input, _ := json.Marshal(map[string]any{"pattern": "needle"})
 
-	result, err := searchTool.Call(context.Background(), tool.Call{Input: input})
+	var meta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { meta = fields })
+
+	result, err := searchTool.Call(ctx, tool.Call{Input: input})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -568,7 +577,6 @@ func TestSearchToolStopsReadingAfterResultLimit(t *testing.T) {
 	if truncated, _ := payload["truncated"].(bool); !truncated {
 		t.Fatalf("truncated = false, want result-limit truncation")
 	}
-	meta := filesystemToolMeta(t, result)
 	if got := numericMetaValue(meta["files_selected"]); got != 1 {
 		t.Fatalf("files_selected = %v, want traversal to stop after capped file", meta["files_selected"])
 	}
@@ -616,7 +624,10 @@ func TestSearchToolDefaultsToCWDAndSupportsInlineCaseFlag(t *testing.T) {
 		"include": "*.go",
 	})
 
-	result, err := searchTool.Call(context.Background(), tool.Call{Input: input})
+	var meta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { meta = fields })
+
+	result, err := searchTool.Call(ctx, tool.Call{Input: input})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -624,7 +635,7 @@ func TestSearchToolDefaultsToCWDAndSupportsInlineCaseFlag(t *testing.T) {
 	if hits, _ := payload["hits"].([]any); len(hits) != 1 {
 		t.Fatalf("hits = %#v, want one cwd hit", payload["hits"])
 	}
-	if got, _ := filesystemToolMeta(t, result)["path"].(string); got != dir {
+	if got, _ := meta["path"].(string); got != dir {
 		t.Fatalf("metadata path = %q, want cwd %q", got, dir)
 	}
 }
@@ -720,17 +731,6 @@ func filesystemToolPayload(t *testing.T, result tool.Result) map[string]any {
 		t.Fatalf("Unmarshal(payload) error = %v", err)
 	}
 	return payload
-}
-
-func filesystemToolMeta(t *testing.T, result tool.Result) map[string]any {
-	t.Helper()
-	caelis, _ := result.Metadata["caelis"].(map[string]any)
-	runtime, _ := caelis["runtime"].(map[string]any)
-	meta, _ := runtime["tool"].(map[string]any)
-	if meta == nil {
-		t.Fatalf("missing tool metadata: %#v", result.Metadata)
-	}
-	return meta
 }
 
 func stringSlicePayloadValue(t *testing.T, value any) []string {

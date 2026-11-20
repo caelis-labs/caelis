@@ -35,9 +35,6 @@ func TestSkillToolLoadsSkillContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if result.ID != "call-1" || result.Name != ToolName {
-		t.Fatalf("result identity = %#v, want call-1/%s", result, ToolName)
-	}
 	if len(result.Content) != 1 {
 		t.Fatalf("content = %#v, want one text part", result.Content)
 	}

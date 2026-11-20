@@ -503,7 +503,6 @@ func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
 			tool.StructuredContent{Value: mustJSON(map[string]any{"outcome": "succeeded", "score": 1})},
 			tool.Resource{URI: "https://example.com/evidence.txt", MIMEType: "text/plain", Name: "evidence.txt"},
 		},
-		Metadata: map[string]any{"application": map[string]any{"call_id": "receipt-1"}},
 	}
 	canonical, eventMeta := canonicalToolResult(result, nil)
 	message := toolResultMessageFromCanonical(call, canonical, nil)

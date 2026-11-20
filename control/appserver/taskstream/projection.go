@@ -404,24 +404,16 @@ const (
 	toolStatusCancelled   = "cancelled"
 )
 
-// scriptCompletionFrameMeta reads only the Code Mode producer's serialized
-// tool.Result (or the same durable fallback). It does not infer completion from
-// output text or Task state, and never changes lifecycle.
+// scriptCompletionFrameMeta projects the original script producer's observations.
 func scriptCompletionFrameMeta(req taskFrameProjectionRequest, frame controltaskstream.Frame) map[string]any {
 	meta := streamFrameMeta("final")
-	if req.TaskKind != task.KindCodeMode {
-		return meta
-	}
-	var receipt tool.Result
-	if json.Unmarshal([]byte(frame.Text), &receipt) != nil {
-		return meta
-	}
-	if source, ok := receipt.Metadata["code_mode_source"]; ok {
-		meta["code_mode_source"] = source
-	}
-	completion, _ := receipt.Metadata[codemode.MetadataScriptCompletion].(string)
-	if completion == "completed" || completion == "failed" {
-		meta[codemode.MetadataScriptCompletion] = completion
+	if req.TaskKind == task.KindCodeMode {
+		if s := frame.ScriptSource; s != nil {
+			meta["code_mode_source"] = map[string]any{"code": s.Code, "sha256": s.SHA256, "path": s.Path}
+		}
+		if c := frame.ScriptCompletion; c == "completed" || c == "failed" {
+			meta[codemode.MetadataScriptCompletion] = c
+		}
 	}
 	return meta
 }

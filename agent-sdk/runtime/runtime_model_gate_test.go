@@ -25,7 +25,8 @@ func TestAutoCompactModelWrapperPreservesWebSearcher(t *testing.T) {
 		t.Fatalf("wrapped model = %T, want WebSearcher capability", wrapped)
 	}
 
-	result, err := toolbinding.Call(context.Background(), web.NewSearch(), tool.Call{
+	ctx, observation := toolbinding.Observe(t.Context())
+	result, err := toolbinding.Call(ctx, web.NewSearch(), tool.Call{
 		Input: json.RawMessage(`{"query":"latest release","max_results":1}`),
 	}, toolbinding.Dispatch{Model: wrapped})
 	if err != nil {
@@ -35,7 +36,7 @@ func TestAutoCompactModelWrapperPreservesWebSearcher(t *testing.T) {
 	if got := payload["status"]; got != "completed" {
 		t.Fatalf("status = %#v, want completed: %#v", got, payload)
 	}
-	if got := nestedMap(result.Metadata, "caelis", "runtime", "tool")["provider"]; got != "test-search" {
+	if got := observation.BuiltinDisplay["provider"]; got != "test-search" {
 		t.Fatalf("provider = %#v, want test-search", got)
 	}
 }

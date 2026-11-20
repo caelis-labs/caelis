@@ -71,7 +71,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		}
 		if existing, getErr := tm.store.Get(ctx, taskID); getErr == nil && existing != nil {
 			release()
-			return taskSnapshotToolResult(call, owner.Definition(), codeModeSnapshot(existing))
+			return taskSnapshotToolResult(ctx, codeModeSnapshot(existing))
 		}
 	}
 	handle, err := tm.reserveTaskHandle(ctx, owner.active, owner.ref, taskapi.KindCodeMode, "script")
@@ -83,7 +83,8 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": execution.TurnID, "code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	// This context is registered under the original Run producer owner. It must
 	// outlive the foreground observation, not the original Run's authority.
-	workCtx, cancel := context.WithCancel(ctx)
+	workCtx, _ := toolbinding.Observe(ctx)
+	workCtx, cancel := context.WithCancel(workCtx)
 	task := &codeModeTask{entry: entry, sessionRef: owner.ref, handle: handle, done: make(chan struct{}), cancel: cancel, observer: output.Nop()}
 	if err = tm.persistTaskEntry(ctx, entry); err != nil {
 		release()
@@ -117,19 +118,16 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		task.frontier.model = int64(len(taskStringValue(task.entry.Result["tool_result_json"])))
 		snapshot := codeModeSnapshot(task.entry)
 		snapshot.Metadata["model_output_cursor"] = task.frontier.model
-		if result.Metadata == nil {
-			result.Metadata = map[string]any{}
-		}
-		for key, value := range taskToolMeta(snapshot) {
-			result.Metadata[key] = value
-		}
+		o := toolbinding.Observed(ctx)
+		o.TaskEvent = taskToolMeta(snapshot)
+		observeScriptTask(ctx, snapshot, legacyScriptDisposition{})
 		task.mu.Unlock()
 		return result, err
 	case <-timer.C:
 		task.mu.Lock()
 		snapshot := codeModeSnapshot(task.entry)
 		task.mu.Unlock()
-		return taskSnapshotToolResult(call, owner.Definition(), snapshot)
+		return taskSnapshotToolResult(ctx, snapshot)
 	case <-ctx.Done():
 		cancel()
 		<-task.done
@@ -146,11 +144,9 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 	// Pre-execution failures have no VM settlement observation. Preserve that
 	// failed completion on the same original Task result, without changing its
 	// cumulative error or lifecycle outcome.
-	if executeErr != nil && result.Metadata[codemode.MetadataScriptCompletion] == nil {
-		if result.Metadata == nil {
-			result.Metadata = map[string]any{}
-		}
-		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
+	o := toolbinding.Observed(ctx)
+	if executeErr != nil && o.ScriptCompletion == "" {
+		o.ScriptCompletion = "failed"
 	}
 	raw, marshalErr := json.Marshal(result)
 	executeErr = errors.Join(executeErr, marshalErr)
@@ -168,12 +164,18 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 		next.UpdatedAt = tm.runtime.now()
 		next.State = taskapi.StateCompleted
 		switch {
-		case result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown:
+		case errorcode.Is(executeErr, errorcode.UnknownOutcome):
 			next.State = taskapi.StateUnknownOutcome
 		case ctx.Err() != nil:
 			next.State = taskapi.StateCancelled
 		case executeErr != nil:
 			next.State = taskapi.StateFailed
+		}
+		if next.Metadata == nil {
+			next.Metadata = map[string]any{}
+		}
+		if o.ScriptCompletion != "" {
+			next.Metadata[codemode.MetadataScriptCompletion] = o.ScriptCompletion
 		}
 		next.Result = map[string]any{"tool_result_json": string(raw)}
 		if executeErr != nil && !tool.HasFailedReply(executeErr) {
@@ -203,7 +205,7 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 	if release != nil {
 		release()
 	}
-	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true})
+	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true, ScriptCompletion: o.ScriptCompletion})
 	task.cancel()
 	execution.release()
 	close(task.done)
@@ -229,7 +231,7 @@ func (t codeModeControlTarget) snapshot(req taskapi.ControlRequest, statusOnly b
 	modelObserver := req.Source == "agent_tool" && req.Principal == session.ActorKindTool
 	if statusOnly && modelObserver {
 		// The model cancel only reports status. Leave the selected result
-		// available for a wait that may establish a terminal Turn disposition.
+		// available for a subsequent wait.
 		delete(snapshot.Result, "tool_result_json")
 	}
 	if statusOnly || t.task.persistErr != nil {
@@ -312,7 +314,7 @@ func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRe
 // original selected result or producer state with an observation envelope.
 func (tm *taskRuntime) syncCanonicalCodeModeCursor(ctx context.Context, ref session.SessionRef, event *session.Event) error {
 	id := taskRuntimeMetaString(event.Meta, "task", "task_id")
-	section := taskRuntimeMetaSection(event.Meta, "task")
+	section := toolbinding.RuntimeSection(event.Meta, "task")
 	cursor, ok := taskInt64Value(section["model_output_cursor"])
 	if !ok || cursor < 0 {
 		return nil

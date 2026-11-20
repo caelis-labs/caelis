@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -21,37 +20,13 @@ func DecodeArgs(call tool.Call) (map[string]any, error) {
 	return args, nil
 }
 
-func JSONResult(name string, payload map[string]any, metaExtra ...map[string]any) (tool.Result, error) {
+// JSONResult encodes one structured business value.
+func JSONResult(payload map[string]any) (tool.Result, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	name = strings.TrimSpace(name)
-	toolMeta := map[string]any{}
-	for _, extra := range metaExtra {
-		for key, value := range extra {
-			if strings.TrimSpace(key) == "" {
-				continue
-			}
-			toolMeta[key] = value
-		}
-	}
-	var metadata map[string]any
-	if len(toolMeta) > 0 {
-		metadata = map[string]any{
-			"caelis": map[string]any{
-				"version": 1,
-				"runtime": map[string]any{
-					"tool": toolMeta,
-				},
-			},
-		}
-	}
-	return tool.Result{
-		Name:     name,
-		Content:  []tool.ContentBlock{tool.StructuredContent{Value: raw}},
-		Metadata: metadata,
-	}, nil
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, nil
 }
 
 func WithContextCancel(ctx context.Context) error {

@@ -65,15 +65,9 @@ func TestDecodeArgs(t *testing.T) {
 func TestJSONResult(t *testing.T) {
 	t.Parallel()
 
-	result, err := JSONResult(" read_file ", map[string]any{"ok": true}, map[string]any{
-		"display": "Read README.md",
-		"":        "ignored",
-	})
+	result, err := JSONResult(map[string]any{"ok": true})
 	if err != nil {
 		t.Fatalf("JSONResult() error = %v, want nil", err)
-	}
-	if result.Name != "read_file" {
-		t.Fatalf("result.Name = %q, want %q", result.Name, "read_file")
 	}
 	if len(result.Content) != 1 {
 		t.Fatalf("len(result.Content) = %d, want 1", len(result.Content))
@@ -89,24 +83,7 @@ func TestJSONResult(t *testing.T) {
 	if payload["ok"] != true {
 		t.Fatalf("payload[ok] = %v, want true", payload["ok"])
 	}
-	caelis, ok := result.Metadata["caelis"].(map[string]any)
-	if !ok {
-		t.Fatalf("metadata.caelis type = %T, want map[string]any", result.Metadata["caelis"])
-	}
-	runtime, ok := caelis["runtime"].(map[string]any)
-	if !ok {
-		t.Fatalf("metadata.caelis.runtime type = %T, want map[string]any", caelis["runtime"])
-	}
-	toolMeta, ok := runtime["tool"].(map[string]any)
-	if !ok {
-		t.Fatalf("metadata.runtime.tool type = %T, want map[string]any", runtime["tool"])
-	}
-	if toolMeta["display"] != "Read README.md" {
-		t.Fatalf("toolMeta[display] = %v, want %q", toolMeta["display"], "Read README.md")
-	}
-	if _, exists := toolMeta[""]; exists {
-		t.Fatal("toolMeta contains empty key, want it skipped")
-	}
+
 }
 
 func TestWithContextCancel(t *testing.T) {

@@ -100,7 +100,6 @@ func (t *ViewImageTool) CallWithImageInput(ctx context.Context, call tool.Call, 
 	}
 
 	return tool.Result{
-		Name: ViewImageToolName,
 		Content: []tool.ContentBlock{
 			tool.Text(fmt.Sprintf("Viewed image %q (%s, %d bytes).", targetPath, mimeType, len(data))),
 			tool.Image{Data: data, MIMEType: mimeType, Name: filepath.Base(targetPath)},

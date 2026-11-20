@@ -114,7 +114,7 @@ func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T)
 	releaseOnce.Do(func() { close(release) })
 	received := <-done
 	result := received.result
-	if received.err != nil || result.ID != "original" || len(result.Content) != 1 || result.Content[0] != tool.Text("original receipt") {
+	if received.err != nil || len(result.Content) != 1 || result.Content[0] != tool.Text("original receipt") {
 		t.Fatalf("lost inflight receipt: %+v, %v", result, received.err)
 	}
 	fresh := mgr.Tools()[0]

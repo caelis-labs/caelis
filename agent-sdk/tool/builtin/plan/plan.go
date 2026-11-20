@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -68,7 +69,7 @@ func (Tool) Definition() tool.Definition {
 	}
 }
 
-func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+func (Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	args, err := decodeArgs(call.Input)
 	if err != nil {
 		return tool.Result{}, err
@@ -80,24 +81,10 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	payload := map[string]any{
 		"updated": true,
 	}
-	meta := map[string]any{
-		"caelis": map[string]any{
-			"version": 1,
-			"runtime": map[string]any{
-				"tool": map[string]any{
-					"updated":     true,
-					"entries":     entriesToAny(entries),
-					"explanation": strings.TrimSpace(args.Explanation),
-				},
-			},
-		},
-	}
+	toolpresentation.Plan(ctx, entriesToAny(entries), strings.TrimSpace(args.Explanation))
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:       strings.TrimSpace(call.ID),
-		Name:     ToolName,
-		Content:  []tool.ContentBlock{tool.StructuredContent{Value: raw}},
-		Metadata: meta,
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
 	}, nil
 }
 

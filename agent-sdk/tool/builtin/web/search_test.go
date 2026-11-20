@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -89,7 +90,9 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 			Source: "example.com",
 		}},
 	}}
-	result, err := NewSearch().CallWithBackend(context.Background(), tool.Call{
+	var meta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { meta = fields })
+	result, err := NewSearch().CallWithBackend(ctx, tool.Call{
 		Input: json.RawMessage(`{"query":"latest release","max_results":1}`),
 	}, SearchBackend{SearchWeb: backend.SearchWeb})
 	if err != nil {
@@ -108,7 +111,6 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 			t.Fatalf("successful result repeated metadata or empty field %q: %#v", field, payload)
 		}
 	}
-	meta := result.Metadata["caelis"].(map[string]any)["runtime"].(map[string]any)["tool"].(map[string]any)
 	if meta["query"] != "latest release" || meta["model"] != backend.resp.Model || meta["usage"].(map[string]any)["total_tokens"] != 15 {
 		t.Fatalf("tool metadata lost diagnostics: %#v", meta)
 	}

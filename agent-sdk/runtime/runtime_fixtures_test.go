@@ -18,10 +18,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
@@ -2215,14 +2216,20 @@ func mustRuntimeRunCommandTool(t *testing.T, runtime sandbox.Runtime) tool.Tool 
 	return targetTool
 }
 
-func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, args map[string]any, failed ...bool) tool.Result {
+type observedToolResult struct {
+	tool.Result
+	observation *toolbinding.Observation
+}
+
+func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, args map[string]any, failed ...bool) observedToolResult {
 	t.Helper()
 
 	raw, err := json.Marshal(args)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := runCommandTool.Call(context.Background(), tool.Call{
+	ctx, observation := toolbinding.Observe(t.Context())
+	result, err := runCommandTool.Call(ctx, tool.Call{
 		ID:    fmt.Sprintf("command-yield-test-%d", runtimeTestCommandCallSequence.Add(1)),
 		Name:  shell.RunCommandToolName,
 		Input: raw,
@@ -2230,7 +2237,7 @@ func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, 
 	if (len(failed) > 0 && failed[0] && !tool.HasFailedReply(err)) || (len(failed) == 0 && err != nil) {
 		t.Fatalf("runCommandTool.Call() error = %v", err)
 	}
-	return result
+	return observedToolResult{result, observation}
 }
 
 var runtimeTestCommandCallSequence atomic.Uint64
@@ -2248,21 +2255,22 @@ func startProbeCommandTask(t *testing.T, activeSession session.Session, runtime 
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	handle, _ := testToolResultRuntimeMeta(t, result, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, result.observation, "task")["handle"].(string)
 	if strings.TrimSpace(handle) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", result.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", result.observation)
 	}
 	return handle
 }
 
-func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string]any, failed ...bool) tool.Result {
+func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string]any, failed ...bool) observedToolResult {
 	t.Helper()
 
 	raw, err := json.Marshal(args)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := taskTool.Call(context.Background(), tool.Call{
+	ctx, observation := toolbinding.Observe(t.Context())
+	result, err := taskTool.Call(ctx, tool.Call{
 		ID:    "task-control-test",
 		Name:  tasktool.ToolName,
 		Input: raw,
@@ -2270,7 +2278,7 @@ func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string
 	if (len(failed) > 0 && failed[0] && !tool.HasFailedReply(err)) || (len(failed) == 0 && err != nil) {
 		t.Fatalf("taskTool.Call() error = %v", err)
 	}
-	return result
+	return observedToolResult{result, observation}
 }
 
 func stringSliceFromAny(raw any) []string {
@@ -2291,11 +2299,15 @@ func stringSliceFromAny(raw any) []string {
 	}
 }
 
-func testToolResultPayload(t *testing.T, result tool.Result) map[string]any {
+type structuredResult interface {
+	Structured() (json.RawMessage, bool)
+}
+
+func testToolResultPayload(t *testing.T, result structuredResult) map[string]any {
 	t.Helper()
 	raw, ok := result.Structured()
 	if !ok {
-		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
+		t.Fatalf("result.Content = %#v, want JSON payload", result)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {
@@ -2304,18 +2316,18 @@ func testToolResultPayload(t *testing.T, result tool.Result) map[string]any {
 	return payload
 }
 
-func testToolResultRuntimeMeta(t *testing.T, result tool.Result, section string) map[string]any {
+func testToolResultRuntimeMeta(t *testing.T, observation *toolbinding.Observation, section string) map[string]any {
 	t.Helper()
-	caelis, _ := result.Metadata["caelis"].(map[string]any)
+	caelis, _ := observation.EventMeta()["caelis"].(map[string]any)
 	runtimeMeta, _ := caelis["runtime"].(map[string]any)
 	values, _ := runtimeMeta[section].(map[string]any)
 	if values == nil {
-		t.Fatalf("result.Metadata caelis.runtime.%s = %#v", section, result.Metadata)
+		t.Fatalf("result.Metadata caelis.runtime.%s = %#v", section, observation)
 	}
 	return values
 }
 
-func assertRunningTaskSnapshot(t *testing.T, result tool.Result) {
+func assertRunningTaskSnapshot(t *testing.T, result structuredResult) {
 	t.Helper()
 
 	payload := testToolResultPayload(t, result)

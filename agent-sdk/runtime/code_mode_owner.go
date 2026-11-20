@@ -27,13 +27,16 @@ func ownCodeModeProducers(ctx context.Context, concrete, wrapped []tool.Tool) []
 	return wrapped
 }
 
-type codeModeProducerIdentityKey struct{}
 type codeModeProducerErrorKey struct{}
 
 type codeModeProducerTool struct {
 	base  tool.Tool
 	scope *taskContinuationScope
 	owner context.Context
+}
+
+func (codeModeProducerTool) RuntimeNativeSchedule(toolbinding.Token, context.Context, tool.Call) toolbinding.NativeSchedule {
+	return toolbinding.NativeSchedule{Ordered: true}
 }
 
 func (t codeModeProducerTool) Definition() tool.Definition { return t.base.Definition() }
@@ -78,7 +81,7 @@ func (t codeModeProducerTool) RuntimeCall(_ toolbinding.Token, ctx context.Conte
 		defer errorMu.Unlock()
 		return durabilityErr
 	}
-	ctx = context.WithValue(context.WithValue(ctx, codeModeProducerIdentityKey{}, id), codeModeProducerLifetimeKey{}, func(ch <-chan struct{}, completionError func() error) { done = ch; producerError = completionError })
+	ctx = context.WithValue(ctx, codeModeProducerLifetimeKey{}, func(ch <-chan struct{}, completionError func() error) { done = ch; producerError = completionError })
 	result, callErr := toolbinding.Call(ctx, t.base, call, dispatch)
 	if done == nil {
 		t.scope.complete(id, work, completionError())
@@ -103,26 +106,4 @@ func codeModeReadPathArgument(one tool.Tool) string {
 
 func (t codeModeProducerTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 	return toolbinding.IsTaskResultSource(t.base)
-}
-
-// A trusted completion closes this Run's script dispatch and revokes commands
-// handed off by scripts that have not yet claimed their effect.
-func (s *taskContinuationScope) completeCodeMode(ctx context.Context) {
-	if s == nil {
-		return
-	}
-	current, _ := ctx.Value(codeModeProducerIdentityKey{}).(string)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.codeModeClosed = true
-	for id, work := range s.active {
-		switch work.kind {
-		case taskContinuationCodeModeScript:
-			if id != current {
-				work.cancel(errCodeModeComplete)
-			}
-		case taskContinuationCodeModeCommand:
-			work.revoke(errCodeModeComplete)
-		}
-	}
 }

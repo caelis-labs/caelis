@@ -26,47 +26,6 @@ import (
 )
 
 // Code Mode retains the original Run authority through producer quiescence.
-func TestReviewCodeModeTurnCompleteFencesPendingApproval(t *testing.T) {
-	store, active, _ := codeModeStore(t)
-	asked, release := make(chan struct{}), make(chan struct{})
-	var effects atomic.Int32
-	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-		if input.Tool.Name == "Write" {
-			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow", Name: "Allow", Kind: "allow_once"}}}}, nil
-		}
-		return policy.Decision{Action: policy.ActionAllow}, nil
-	}}}
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		close(asked)
-		<-release
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow", Approved: true}, nil
-	})
-	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{TurnComplete: true}, nil
-	}}
-	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		effects.Add(1)
-		return tool.Result{}, nil
-	}}
-	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
-		done := make(chan error, 1)
-		go func() { _, err := host.Call(ctx, "Write", []byte(`{}`)); done <- err }()
-		<-asked
-		reply, err := host.Call(ctx, "Complete", []byte(`{}`))
-		if err != nil || !reply.TurnComplete {
-			close(release)
-			<-done
-			return nil, errors.New("completion fixture failed")
-		}
-		close(release) // Approval resolves strictly after trusted completion.
-		<-done
-		return []byte(`{}`), nil
-	})}
-	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, complete, write}}, registry, requester)
-	if got := effects.Load(); got != 0 {
-		t.Fatalf("effect executed after trusted TurnComplete: effects=%d", got)
-	}
-}
 
 type reviewGenerationStore struct {
 	session.Service

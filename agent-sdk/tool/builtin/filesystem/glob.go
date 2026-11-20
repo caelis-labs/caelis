@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
@@ -100,7 +101,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 			return tool.Result{}, err
 		}
 		sort.Strings(matches)
-		return globResult(pattern, searchRoot, resolvedPattern, matches)
+		return globResult(ctx, pattern, searchRoot, resolvedPattern, matches)
 	}
 
 	root, relPattern := splitAbsoluteGlobPattern(resolvedPattern)
@@ -110,7 +111,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	excludeRules := workspaceExcludeRules(fsys, root)
 	if _, err := fsys.Stat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return globResult(pattern, searchRoot, resolvedPattern, matches)
+			return globResult(ctx, pattern, searchRoot, resolvedPattern, matches)
 		}
 		return tool.Result{}, err
 	}
@@ -146,7 +147,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		return tool.Result{}, err
 	}
 	sort.Strings(matches)
-	return globResult(pattern, searchRoot, resolvedPattern, matches)
+	return globResult(ctx, pattern, searchRoot, resolvedPattern, matches)
 }
 
 func globSearchRoot(fsys sandbox.FileSystem, pathArg string) (string, error) {
@@ -177,7 +178,7 @@ func validateGlobPatternUnderSearchRoot(searchRoot string, resolvedPattern strin
 	return nil
 }
 
-func globResult(pattern string, searchRoot string, resolvedPattern string, matches []string) (tool.Result, error) {
+func globResult(ctx context.Context, pattern string, searchRoot string, resolvedPattern string, matches []string) (tool.Result, error) {
 	truncated := len(matches) > globResultLimit
 	visible := make([]string, len(matches))
 	copy(visible, matches)
@@ -191,17 +192,9 @@ func globResult(pattern string, searchRoot string, resolvedPattern string, match
 	if len(visible) == 0 {
 		payload["message"] = fmt.Sprintf("No files matched glob %q.", pattern)
 	}
-	meta := map[string]any{
-		"pattern":          pattern,
-		"resolved_pattern": resolvedPattern,
-		"count":            len(visible),
-		"truncated":        truncated,
-		"path":             searchRoot,
-	}
-	if message, ok := payload["message"]; ok {
-		meta["message"] = message
-	}
-	return toolutil.JSONResult(GlobToolName, payload, meta)
+	message, _ := payload["message"].(string)
+	toolpresentation.Glob(ctx, pattern, searchRoot, resolvedPattern, len(visible), truncated, message)
+	return toolutil.JSONResult(payload)
 }
 
 var _ tool.Tool = (*GlobTool)(nil)

@@ -49,7 +49,7 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	}
 	h.codeModeResults.mu.Lock()
 	defer h.codeModeResults.mu.Unlock()
-	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: outcome != codemode.OutcomeSucceeded, TurnComplete: result.TurnComplete && outcome == codemode.OutcomeSucceeded}
+	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: outcome != codemode.OutcomeSucceeded}
 	succeeded := outcome == codemode.OutcomeSucceeded
 	retained, projected := 0, len(id)*6+128
 	textEntries := 0

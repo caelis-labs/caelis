@@ -48,9 +48,9 @@ func TestFullResultRejectsDuplicateBusinessBlocksWithoutLosingEffect(t *testing.
 }
 
 func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
-	hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "forged-flag", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "invalid-content", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
 		r, e := next(ctx)
-		r.TurnComplete = true
+		r.Content = []tool.ContentBlock{tool.StructuredContent{Value: []byte("invalid")}}
 		return r, e
 	}}}}
 	calls := 0
@@ -61,7 +61,7 @@ func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
 	var phase *agent.HookError
 	var processing *ProcessingError
 	actual, actualErr := EffectResult(r, err)
-	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "forged-flag" || !errors.As(err, &processing) || actualErr != nil || actual.TurnComplete || calls != 1 || len(actual.Content) != 1 || strings.Contains(string(actual.Content[0].(tool.Text)), "known committed business value") {
+	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "invalid-content" || !errors.As(err, &processing) || actualErr != nil || calls != 1 || len(actual.Content) != 1 || strings.Contains(string(actual.Content[0].(tool.Text)), "known committed business value") {
 		t.Fatalf("known effect lost: calls=%d result=%+v err=%v", calls, r, err)
 	}
 }

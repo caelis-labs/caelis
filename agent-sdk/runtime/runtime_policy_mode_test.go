@@ -64,7 +64,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 						t.Fatalf("requests=%d executions=%d", requests, len(observed.calls))
 					}
 					if !approved {
-						if !tool.HasFailedReply(err) || result.ID != call.ID || result.Name != call.Name {
+						if !tool.HasFailedReply(err) {
 							t.Fatalf("denial did not report a caller-bound error: %+v", result)
 						}
 						return

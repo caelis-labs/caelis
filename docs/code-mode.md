@@ -248,7 +248,7 @@ restrictions do not constitute a secure OS sandbox against engine exploits.
 
 Scripts yield within the original Run. The Run owner remains
 until the producer is quiescent; it does not extend generation or permission
-authority. Stop, cancellation and TurnComplete close further Host admission.
+authority. Stopping or cancelling the Run closes further Host admission.
 Final safe points cancel script producers before joining them, including an
 approval waiter. Cross-Turn background execution is not promised.
 

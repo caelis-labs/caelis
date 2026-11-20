@@ -165,15 +165,16 @@ controller, keeping Agent collaboration one level deep.
 
 Harness Chat executes eligible calls in one native model batch concurrently
 when the active model declares parallel tool calls. Batches containing an
-unavailable call, a call that can end the Turn, or a built-in Patch or Write
-run in model order. Application callbacks and Code Mode submissions declare
-`Definition.MayCompleteTurn`. Runtime Task checks its target handles because
-waiting on a live or stored script can return a terminal result. An adjacent
+unavailable call, a Code Mode submission, or a built-in Patch or Write run in
+model order. Runtime Task checks its target handles for script observations.
+An adjacent
 blocking wait and single-target cancel of the same active script can overlap
 in a parallel-capable batch. Cancel does not consume the script result, and
 the pair drains before Chat can admit another effect. The exception never
 crosses intervening calls. Command Task observations can run concurrently.
-Concurrent calls still return tool results in model order.
+Concurrent calls still return tool results in model order. A tool returns ordered content
+and reports failure through its error return. Runtime owns invocation identity,
+Session tool facts and Run completion.
 
 Independent Code Mode calls can overlap, including calls to the same target
 and calls from Chat while an earlier script is yielded. Tool implementations

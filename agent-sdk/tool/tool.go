@@ -23,17 +23,9 @@ type Call struct {
 	Metadata map[string]any  `json:"metadata,omitempty"`
 }
 
-// Result is one provider-neutral tool execution result.
+// Result contains the ordered content produced by one tool invocation.
 type Result struct {
-	ID      string         `json:"id,omitempty"`
-	Name    string         `json:"name,omitempty"`
 	Content []ContentBlock `json:"content,omitempty"`
-	// TurnComplete is a trusted host tool disposition. A completed result stops
-	// this Run before another serial tool effect or model request. Tools that
-	// return it must declare MayCompleteTurn in their Definition.
-	TurnComplete bool           `json:"turn_complete,omitempty"`
-	Meta         map[string]any `json:"meta,omitempty"`
-	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // CloneCall returns one copy of one tool call.
@@ -48,9 +40,6 @@ func CloneCall(in Call) Call {
 // CloneResult returns one copy of one tool result.
 func CloneResult(in Result, err error) (Result, error) {
 	out := in
-	out.Name = strings.TrimSpace(in.Name)
 	out.Content = cloneContent(in.Content)
-	out.Meta = jsonvalue.CloneMap(in.Meta)
-	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	return out, err
 }

@@ -87,43 +87,6 @@ func TestCodeModeRepeatedProviderIDsKeepDistinctChildReceipts(t *testing.T) {
 	}
 }
 
-func TestCodeModeTurnCompleteCannotBeSuppressedByExecutor(t *testing.T) {
-	store, active, _ := codeModeStore(t)
-	var effects atomic.Int32
-	stop := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{TurnComplete: true, Content: []tool.ContentBlock{tool.Text("complete")}}, nil
-	}}
-	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}
-	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
-		reply, err := host.Call(ctx, "Complete", []byte(`{}`))
-		if err != nil || !reply.TurnComplete {
-			return nil, errors.New("trusted completion lost")
-		}
-		if _, err := host.Call(ctx, "Write", []byte(`{}`)); err == nil {
-			return nil, errors.New("effect ran after completion")
-		}
-		return nil, errors.New("executor ignored completion")
-	})}
-	llm := codeModeModel(false)
-	runCodeMode(t, store, active, agent.AgentSpec{Model: llm, Tools: []tool.Tool{declaration, stop, write}}, nil, nil)
-	if effects.Load() != 0 || len(llm.requests) != 1 {
-		t.Fatalf("effects=%d model calls=%d", effects.Load(), len(llm.requests))
-	}
-	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, event := range events {
-		if event.Tool != nil && event.Tool.Name == "js_repl" && event.Tool.TurnComplete {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("trusted completion lost during durable event cloning")
-	}
-}
-
 func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	started, release := make(chan struct{}, 2), make(chan struct{})

@@ -483,7 +483,7 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 	if event.Tool != nil {
 		update := toolCallUpdateFromEventToolPayload(event.Tool, event.Meta)
 		if len(event.Tool.Content) == 0 {
-			if content := projectedMultimodalToolResultContent(event.Message, event.Tool.Result); len(content) > 0 {
+			if content := projectedMultimodalToolResultContent(event.Message, event.Tool); len(content) > 0 {
 				update.Content = content
 			}
 		}

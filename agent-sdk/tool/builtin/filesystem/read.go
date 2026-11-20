@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
@@ -211,16 +212,14 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		revision = statRevision(info)
 	}
 
-	return toolutil.JSONResult(ReadToolName, map[string]any{
+	toolpresentation.Read(ctx, targetPath, exhausted)
+	return toolutil.JSONResult(map[string]any{
 		"start_line":  startLine,
 		"end_line":    endLine,
 		"next_offset": nextOffset,
 		"has_more":    hasMore,
 		"revision":    revision,
 		"content":     content.String(),
-	}, map[string]any{
-		"path":      targetPath,
-		"exhausted": exhausted,
 	})
 }
 

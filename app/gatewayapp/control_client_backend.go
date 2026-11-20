@@ -235,18 +235,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 	case action == appserver.ActionSessionClose:
 		// An idle Runtime may already be draining. Wait before dispatch, then
 		// resolve the current owner again; the close command itself runs once.
-		var runtime *sessionRuntime
-		var releaseUse func()
-		var err error
-		for {
-			if err = runtimes.waitSessionRelease(ctx, sessionID); err != nil {
-				break
-			}
-			runtime, releaseUse, err = runtimes.acquireLoadedRuntime(sessionID, runtimeUseCommand)
-			if !isSessionRuntimeReleasingError(err) {
-				break
-			}
-		}
+		runtime, releaseUse, err := runtimes.acquireLoadedRuntimeAfterRelease(ctx, sessionID, runtimeUseCommand)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}

@@ -15,7 +15,7 @@ import (
 func sharedMediaEvent(t testing.TB, size int) Event {
 	image := tool.Image{Data: []byte(strings.Repeat("abc", size/4)), MIMEType: "image/png", Name: "screen"}
 	message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "call", Name: "screen", Content: tool.ModelParts([]tool.ContentBlock{image})}}}}
-	return Event{Schema: EventSchemaVersion, Type: EventTypeToolResult, Message: &message, Tool: &EventTool{ID: "call", Name: "screen", Result: &tool.Result{ID: "call", Name: "screen", Content: []tool.ContentBlock{image}}}}
+	return Event{Schema: EventSchemaVersion, Type: EventTypeToolResult, Message: &message, Tool: &EventTool{ID: "call", Name: "screen", Result: &tool.Result{Content: []tool.ContentBlock{image}}}}
 }
 func TestEventMediaSharesPayloadAndCompleteResult(t *testing.T) {
 	original := sharedMediaEvent(t, 64<<10)
@@ -98,5 +98,20 @@ func TestRetiredJournalMediaIsConsumedBeforeIgnoringExecution(t *testing.T) {
 	raw, _ = json.Marshal(object)
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLegacyToolReceiptRestoresEventFields(t *testing.T) {
+	var event EventTool
+	const old = `{"id":"original","name":"lookup","result":{"id":"other","turn_complete":true,"is_error":true,"metadata":{"caelis.mcp.discovery.v1":true,"application_call":{"result_format":"content-v1"}},"content":[{"type":"text","text":"old"}]}}`
+	if err := json.Unmarshal([]byte(old), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.ID != "original" || event.Outcome != ToolOutcomeFailed || !event.Discovery || event.ResultFormat != "content-v1" || event.Result.Content[0] != tool.Text("old") {
+		t.Fatalf("restored event = %+v", event)
+	}
+	raw, err := json.Marshal(event.Result)
+	if err != nil || string(raw) != `{"content":[{"type":"text","text":"old"}]}` {
+		t.Fatalf("restored result = %s, %v", raw, err)
 	}
 }

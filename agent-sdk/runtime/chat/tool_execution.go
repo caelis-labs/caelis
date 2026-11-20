@@ -16,16 +16,16 @@ import (
 )
 
 type toolObserver struct {
-	results chan<- tool.Result
+	results chan<- toolbinding.Progress
 }
 
-func (r toolObserver) ObserveToolResult(result tool.Result) {
+func (r toolObserver) ObserveToolResult(progress toolbinding.Progress) {
 	if r.results == nil {
 		return
 	}
-	cloned, _ := tool.CloneResult(result, nil)
+	progress.Result, _ = tool.CloneResult(progress.Result, nil)
 	select {
-	case r.results <- cloned:
+	case r.results <- progress:
 	default:
 	}
 }
@@ -43,7 +43,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 	yieldProgress func(*session.Event) bool,
 	visibility *toolVisibility,
 ) (model.Message, *session.Event, error) {
-	progressCh := make(chan tool.Result, 16)
+	progressCh := make(chan toolbinding.Progress, 16)
 	doneCh := make(chan toolExecutionResult, 1)
 	progressTaskResultMeta := runtimeTaskResultSourceMeta(false)
 	if selectedTool, ok := a.lookupRunTool(call.Name, visibility); ok && toolbinding.IsTaskResultSource(selectedTool) {
@@ -66,8 +66,8 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				if yieldProgress == nil {
 					continue
 				}
-				canonical, truncationMeta := canonicalToolResult(progress, nil)
-				event := session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta))
+				canonical, truncationMeta := canonicalToolResult(progress.Result, nil)
+				event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
 				a.applyPreparedFact(event)
 				_ = yieldProgress(event)
 			default:
@@ -81,8 +81,8 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 			if yieldProgress == nil {
 				continue
 			}
-			canonical, truncationMeta := canonicalToolResult(progress, nil)
-			event := session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta))
+			canonical, truncationMeta := canonicalToolResult(progress.Result, nil)
+			event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
 			a.applyPreparedFact(event)
 			if !yieldProgress(event) {
 				cancel()
@@ -103,7 +103,7 @@ func (a *Agent) executeToolCallAdmitted(
 	ctx context.Context,
 	call model.ToolCall,
 	step *agent.ModelStepRef,
-	report func(tool.Result),
+	report func(toolbinding.Progress),
 	visibility *toolVisibility,
 ) (model.Message, *session.Event, error) {
 	defer step.MarkAdmissionComplete()
@@ -118,8 +118,6 @@ func (a *Agent) executeToolCallAdmitted(
 	if bindingErr != nil {
 		rawOutput := tool.ErrorPayload(bindingErr)
 		result := tool.Result{
-			ID:      call.ID,
-			Name:    call.Name,
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(rawOutput)}},
 		}
 		canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
@@ -133,6 +131,7 @@ func (a *Agent) executeToolCallAdmitted(
 	ctx = toolbinding.WithOccurrence(ctx, prepared.execution, nil, prepared.binding)
 	callCtx, cancel := context.WithCancel(toolbinding.WithProgress(toolbinding.WithPrepared(ctx, invocation, prepared.result, prepared.resultErr), report))
 	defer cancel()
+	callCtx, observation := toolbinding.Observe(callCtx)
 	result, err := toolbinding.Call(callCtx, selectedTool, invocation, toolbinding.Dispatch{Model: a.model, Step: step})
 	cancel()
 	complete, _ := tool.CloneResult(result, nil)
@@ -141,7 +140,12 @@ func (a *Agent) executeToolCallAdmitted(
 		var normalized *codemode.ExecutionError
 		var processing *hookrun.ProcessingError
 		if !tool.HasFailedReply(err) && !errors.As(err, &processing) && (!codemode.IsDefinition(selectedTool.Definition()) || !errors.As(err, &normalized)) {
-			result = modelVisibleToolErrorResult(call, result, err)
+			result = modelVisibleToolErrorResult(err)
+			completion := observation.ScriptCompletion
+			if call.Name == codemode.ToolName && completion == "" {
+				completion = "failed"
+			}
+			observation = &toolbinding.Observation{ScriptCompletion: completion}
 		}
 	}
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
@@ -152,12 +156,14 @@ func (a *Agent) executeToolCallAdmitted(
 	if viewErr != nil {
 		message = hookrun.FailedView(originalView)
 		err = &hookrun.ProcessingError{Cause: viewErr, EffectError: effectErr}
+		observation.BuiltinDisplay = nil
 	}
-	eventMeta := truncationMeta
+	eventMeta := mergeEventMeta(observation.EventMeta(), truncationMeta)
 	if toolbinding.IsTaskResultSource(selectedTool) {
 		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))
 	}
 	event := toolResultEvent(call, result, err, &message, eventMeta)
+	observation.Apply(event.Tool, selectedTool.Definition(), effectErr == nil)
 	if err != nil && len(complete.Content) > 0 {
 		event.Tool.Result = &complete
 	}
@@ -189,20 +195,8 @@ func runtimeTaskResultSourceMeta(trusted bool) map[string]any {
 	}
 }
 
-func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err error) tool.Result {
-	scriptCompletion := result.Metadata[codemode.MetadataScriptCompletion]
-	result = tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(call.Name),
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(tool.ErrorPayload(err))}},
-	}
-	result.Metadata = map[string]any{}
-	if scriptCompletion != "" && scriptCompletion != nil {
-		result.Metadata[codemode.MetadataScriptCompletion] = scriptCompletion
-	} else if call.Name == "js_exec" {
-		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
-	}
-	return result
+func modelVisibleToolErrorResult(err error) tool.Result {
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(tool.ErrorPayload(err))}}}
 }
 
 func (a *Agent) lookupTool(name string) (tool.Tool, bool) {

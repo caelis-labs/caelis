@@ -21,7 +21,7 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 	live := []*session.Event{
 		{Type: session.EventTypeUser, Message: &user},
 		modelToolCallEvents(model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, ""), nil, "", nil)[0],
-		toolResultEvent(call, tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"value":"ok"}`)}}}, nil, nil),
+		toolResultEvent(call, tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"value":"ok"}`)}}}, nil, nil),
 		modelResponseEvent(model.NewTextMessage(model.RoleAssistant, "done"), nil, "", nil),
 	}
 	want := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: ctx, Events: live}))

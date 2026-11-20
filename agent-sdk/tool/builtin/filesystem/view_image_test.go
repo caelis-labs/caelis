@@ -43,7 +43,7 @@ func TestViewImageReturnsInlineImageStandalone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ViewImage.Call() error = %v", err)
 	}
-	if result.Name != ViewImageToolName || len(result.Content) != 2 {
+	if len(result.Content) != 2 {
 		t.Fatalf("ViewImage result = %#v, want text and media", result)
 	}
 	if text, ok := result.Content[0].(tool.Text); !ok || text == "" {

@@ -15,17 +15,16 @@ type trustedTaskResultTool struct {
 
 func (trustedTaskResultTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
 
+func (t trustedTaskResultTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	toolbinding.Observed(ctx).TaskEvent = map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"task_id": "task-7", "kind": "command"}}}}
+	return t.NamedTool.Call(ctx, call)
+}
 func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
 	t.Parallel()
 
 	result := func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"handle":"command-7","state":"running"}`)}},
-			Metadata: mergeEventMeta(runtimeTaskResultSourceMeta(true), map[string]any{
-				"caelis": map[string]any{"runtime": map[string]any{
-					"task": map[string]any{"task_id": "task-7", "kind": "command"},
-				}},
-			}),
 		}, nil
 	}
 	for _, test := range []struct {
@@ -36,7 +35,7 @@ func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
 		wantRuntimeKind string
 	}{
 		{
-			name:       "external metadata is stripped",
+			name:       "external content cannot declare task state",
 			tool:       tool.NamedTool{Def: tool.Definition{Name: "RunCommand"}, Invoke: result},
 			wantStatus: "completed",
 		},

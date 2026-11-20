@@ -17,10 +17,9 @@ const approvalResolutionRecoveryTimeout = 5 * time.Second
 // approvalWaiter retains the existing producer's context so a cancelled owner
 // cannot settle permission merely because its callback has not returned yet.
 type approvalWaiter struct {
-	responses chan agent.ApprovalResponse
-	owner     context.Context
-	runID     string
-	blocksRun bool
+	responses     chan agent.ApprovalResponse
+	owner         context.Context
+	blockingRunID string
 }
 
 type activeRun struct {
@@ -110,12 +109,13 @@ func (r *Runtime) requestDurableApproval(
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 		Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req)),
 	})
-	waiter := make(chan agent.ApprovalResponse, 1)
+	waiter := approvalWaiter{responses: make(chan agent.ApprovalResponse, 1), owner: ctx}
 	if err := session.ValidateApprovalRecordTransition(session.ApprovalRecord{}, token); err != nil {
 		return agent.ApprovalResponse{}, err
 	}
 	r.mu.Lock()
-	r.approvalWaiters[token.RequestID] = approvalWaiter{responses: waiter, owner: ctx, runID: req.RunID, blocksRun: req.OperationTaskID == ""}
+	// Register delivery before the append so a reader of the committed record can resolve it immediately.
+	r.approvalWaiters[token.RequestID] = waiter
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -124,6 +124,13 @@ func (r *Runtime) requestDurableApproval(
 	}()
 	if err := r.appendApprovalRecord(ctx, req.SessionRef, token); err != nil {
 		return agent.ApprovalResponse{}, err
+	}
+	// Only a durable foreground approval may appear as actionable in RunState.
+	if req.OperationTaskID == "" {
+		waiter.blockingRunID = req.RunID
+		r.mu.Lock()
+		r.approvalWaiters[token.RequestID] = waiter
+		r.mu.Unlock()
 	}
 	abandon := func(err error) error {
 		return r.joinApprovalCleanup(err, r.cancelPendingApprovalRecord(context.WithoutCancel(ctx), req.SessionRef, token, err.Error()))
@@ -152,7 +159,7 @@ func (r *Runtime) requestDurableApproval(
 		}
 	}
 	select {
-	case decision := <-waiter:
+	case decision := <-waiter.responses:
 		return decision, nil
 	case <-ctx.Done():
 		// Cancellation is not a continue-after-tool-error path. Only cancel the
