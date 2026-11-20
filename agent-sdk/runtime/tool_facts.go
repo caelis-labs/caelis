@@ -71,11 +71,12 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		message, processingErr = hookrun.ModelView(ctx, def, call, message)
 		if processingErr != nil {
 			message = hookrun.FailedView(original)
-			event.Tool.Error = processingErr.Error()
 		}
 		event.Message = &message
 		if ownsNestedCommandPresentation(ctx, call, source) {
 			chat.ApplyRuntimeToolResultPresentation(event, full, source, callErr, observation.EventMeta())
+		} else if callErr == nil && processingErr == nil && isCodeModeChild(ctx) && len(observation.BuiltinDisplay) > 0 {
+			chat.ApplyRuntimeToolResultPresentation(event, full, nil, nil, observation.EventMeta())
 		}
 		event.Tool.ErrorCode = string(errorcode.CodeOf(callErr))
 		event.Tool.ProcessingFailure = hookrun.ProcessingFailure(errors.Join(callErr, processingErr))

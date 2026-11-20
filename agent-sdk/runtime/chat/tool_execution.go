@@ -156,6 +156,7 @@ func (a *Agent) executeToolCallAdmitted(
 	if viewErr != nil {
 		message = hookrun.FailedView(originalView)
 		err = &hookrun.ProcessingError{Cause: viewErr, EffectError: effectErr}
+		observation.BuiltinDisplay = nil
 	}
 	eventMeta := mergeEventMeta(observation.EventMeta(), truncationMeta)
 	if toolbinding.IsTaskResultSource(selectedTool) {

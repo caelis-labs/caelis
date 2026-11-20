@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -184,6 +185,12 @@ func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budg
 			header = strings.TrimSpace(label + " " + strings.Join(details, ", "))
 		} else {
 			ev.Args = firstNonEmpty(ev.StartArgs, ev.Args)
+			if ev.Done && !ev.Err && isMutationPanelToolEvent(ev) && ev.DiffSummary == "" {
+				summary := toolDisplayResultHeader(ev.Name, ev.Output)
+				if _, _, _, ok := tuikit.SplitDiffCountTokens(summary); ok {
+					ev.DiffSummary = summary
+				}
+			}
 			if ev.Name == surfaceToolRunCommand {
 				command := firstNonEmpty(ev.FullArgs, ev.Args)
 				ev.Args, _ = longCommandDisplayPreview(command, maxInt(1, budget-displayColumns(label)-1))
@@ -202,6 +209,10 @@ func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budg
 	if detail, ok := strings.CutPrefix(header, label+" "); ok && displayColumns(header) > budget && displayColumns(label) <= budget {
 		header = label
 		if remaining := budget - displayColumns(label) - 1; remaining > 0 {
+			if path, add, remove, ok := tuikit.SplitDiffCountTokens(detail); label == "Edit" && ok && remaining > displayColumns(add+" "+remove)+1 {
+				counts := add + " " + remove
+				detail = compactSingleLineHeader(path, remaining-displayColumns(counts)-1) + " " + counts
+			}
 			header += " " + compactSingleLineHeader(detail, remaining)
 		}
 	}

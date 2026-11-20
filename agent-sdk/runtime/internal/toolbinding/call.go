@@ -8,9 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 )
 
@@ -30,11 +27,10 @@ func Call(ctx context.Context, candidate tool.Tool, call tool.Call, dispatch Dis
 	if rt, ok := candidate.(runtimeCaller); ok {
 		return rt.RuntimeCall(Token{}, ctx, call, dispatch)
 	}
-	switch candidate.(type) {
-	case *filesystem.PatchTool, *filesystem.WriteTool, *filesystem.ReadTool, *filesystem.SearchTool, *filesystem.GlobTool, *web.SearchTool, *web.FetchTool, plan.Tool, *skilltool.Tool, *shell.RunCommandTool:
-		o := Observed(ctx)
-		ctx = toolpresentation.With(ctx, func(details map[string]any) { o.BuiltinDisplay = details })
-	}
+	// Only SDK-internal publishers can populate this observation. It carries
+	// display fields independently of the bound tool's concrete type.
+	o := Observed(ctx)
+	ctx = toolpresentation.With(ctx, func(details map[string]any) { o.BuiltinDisplay = details })
 	if dispatch.Model != nil {
 		switch native := candidate.(type) {
 		case *web.SearchTool:
