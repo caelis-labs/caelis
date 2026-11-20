@@ -184,7 +184,7 @@ func (t policyWrappedTool) applyPolicyDecision(ctx context.Context, call tool.Ca
 		return t.requestApproval(ctx, call, decision, dispatch)
 	case policy.ActionDeny:
 		dispatch.Step.MarkAdmissionComplete()
-		return policyDecisionResult(call, t.tool.Definition(), decision)
+		return policyDecisionResult(t.tool.Definition(), decision)
 	default:
 		return tool.Result{}, &policy.DecisionError{Mode: t.mode, Detail: "unhandled normalized decision"}
 	}
@@ -197,7 +197,7 @@ func (t policyWrappedTool) requestApproval(
 	dispatch toolbinding.Dispatch,
 ) (tool.Result, error) {
 	if decision.Approval == nil || (t.approval.requester == nil && t.approval.runtime == nil) {
-		return policyDecisionResult(call, t.tool.Definition(), decision)
+		return policyDecisionResult(t.tool.Definition(), decision)
 	}
 	request := t.approvalRequest(ctx, call, decision, dispatch)
 	approvedCall := tool.CloneCall(call)
@@ -218,7 +218,7 @@ func (t policyWrappedTool) requestApproval(
 		ctx = context.WithValue(ctx, policyDispatchKey{}, &policyDispatchPermit{runtime: t.approval.runtime, session: t.session, decision: decision, optionID: response.OptionID})
 		return toolbinding.Call(ctx, t.tool, approvedCall, dispatch)
 	}
-	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, response)
+	return policyDecisionResultWithOutcome(t.tool.Definition(), decision, response)
 }
 
 func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, decision policy.Decision, dispatch toolbinding.Dispatch) agent.ApprovalRequest {
@@ -291,12 +291,11 @@ func mergeCallMetadata(meta map[string]any, decision policy.Decision) map[string
 	return out
 }
 
-func policyDecisionResult(call tool.Call, def tool.Definition, decision policy.Decision) (tool.Result, error) {
-	return policyDecisionResultWithOutcome(call, def, decision, agent.ApprovalResponse{})
+func policyDecisionResult(def tool.Definition, decision policy.Decision) (tool.Result, error) {
+	return policyDecisionResultWithOutcome(def, decision, agent.ApprovalResponse{})
 }
 
 func policyDecisionResultWithOutcome(
-	call tool.Call,
 	def tool.Definition,
 	decision policy.Decision,
 	outcome agent.ApprovalResponse,
@@ -311,8 +310,6 @@ func policyDecisionResultWithOutcome(
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(def.Name),
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
 	}, tool.FailedReply(errorText)
 }

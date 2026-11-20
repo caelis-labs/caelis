@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -20,16 +21,15 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 			{"content": "Implement fix", "status": "in_progress"},
 		},
 	})
-	result, err := planTool.Call(context.Background(), tool.Call{
+	var toolMeta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { toolMeta = fields })
+	result, err := planTool.Call(ctx, tool.Call{
 		ID:    "call-1",
 		Name:  ToolName,
 		Input: raw,
 	})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
-	}
-	if got := result.Name; got != ToolName {
-		t.Fatalf("result.Name = %q, want %q", got, ToolName)
 	}
 	structured, ok := result.Structured()
 	if len(result.Content) != 1 || !ok {
@@ -42,9 +42,6 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	if got := payload["updated"]; got != true {
 		t.Fatalf("updated = %#v, want true", got)
 	}
-	caelis, _ := result.Metadata["caelis"].(map[string]any)
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
 	entries, _ := toolMeta["entries"].([]map[string]any)
 	if got, want := len(entries), 2; got != want {
 		t.Fatalf("len(metadata entries) = %d, want %d", got, want)

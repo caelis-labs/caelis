@@ -44,7 +44,7 @@ func (s *controlCommandBackend) interruptSessionTree(ctx context.Context, ref se
 	if registry := s.runtimeRegistry(); registry != nil {
 		// A dormant Session must not activate concurrently with reconciliation of
 		// its orphaned Tasks. Loaded execution owners are retained independently.
-		_, unlock, err := registry.lockActivation(ctx)
+		buildCtx, unlock, err := registry.lockActivation(ctx)
 		if err != nil {
 			return session.Session{}, classifyControlPreDispatchError(err)
 		}
@@ -54,12 +54,8 @@ func (s *controlCommandBackend) interruptSessionTree(ctx context.Context, ref se
 				unlockActivation()
 			}
 		}()
-		loaded, release, err := registry.acquireLoadedRuntime(ref.SessionID, runtimeUseCommand)
-		if isSessionRuntimeReleasingError(err) {
-			if err = registry.waitSessionRelease(ctx, ref.SessionID); err != nil {
-				return session.Session{}, classifyControlPreDispatchError(err)
-			}
-		} else if err != nil {
+		loaded, release, err := registry.acquireLoadedRuntimeAfterRelease(buildCtx, ref.SessionID, runtimeUseCommand)
+		if err != nil {
 			return session.Session{}, classifyControlPreDispatchError(err)
 		}
 		if loaded != nil {

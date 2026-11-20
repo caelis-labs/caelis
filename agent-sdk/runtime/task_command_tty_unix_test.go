@@ -37,7 +37,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 		t.Fatalf("RunCommand payload = %#v, want running input-capable task", running)
 	}
 	handle, _ := running["handle"].(string)
-	taskID, _ := testToolResultRuntimeMeta(t, runResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runResult.observation, "task")["task_id"].(string)
 	entry, err := store.Get(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("store.Get() error = %v", err)
@@ -155,7 +155,7 @@ func TestRuntimeCommandTTYTaskWritePreservesUTF8Input(t *testing.T) {
 	if !utf8.ValidString(got) || !strings.Contains(got, "你好, 小明! (输入来自 stdin/TTY)") {
 		t.Fatalf("Task write result = %q valid=%v, want intact UTF-8 input echo", got, utf8.ValidString(got))
 	}
-	delta, _ := testToolResultRuntimeMeta(t, writeResult, "task")["output_delta"].(string)
+	delta, _ := testToolResultRuntimeMeta(t, writeResult.observation, "task")["output_delta"].(string)
 	if !utf8.ValidString(delta) || !strings.Contains(delta, "你好, 小明! (输入来自 stdin/TTY)") {
 		t.Fatalf("Task write output_delta = %q valid=%v, want intact UTF-8 input echo", delta, utf8.ValidString(delta))
 	}

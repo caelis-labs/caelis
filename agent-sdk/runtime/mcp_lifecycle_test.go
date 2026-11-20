@@ -14,7 +14,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -35,15 +35,16 @@ func TestMCPPreparedEnvelopeSurvivesFileReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	search := tool.NamedTool{Def: tool.Definition{Name: mcp.SearchToolName}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-		return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: discovery}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, nil
+	search := tool.NamedTool{Def: tool.Definition{Name: mcp.SearchToolName}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+		toolbinding.Observed(ctx).Discovery = true
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: discovery}}}, nil
 	}}
 	proposal := model.ToolCall{ID: "routed", Name: mcp.CallToolName, Args: `{"tool_name":"docs__read","arguments":{"number":1}}`}
 	const effectiveInput = `{"number":9007199254740993}`
 	var dispatched string
 	remote := tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 		dispatched = string(call.Input)
-		return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text("read")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("read")}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(step int, _ *model.Request) []model.ToolCall {
 		switch step {
@@ -148,8 +149,9 @@ func TestMCPFixedCallRejectsBindingChangedDuringApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	search := tool.NamedTool{Def: tool.Definition{Name: mcp.SearchToolName}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: discovery}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, nil
+	search := tool.NamedTool{Def: tool.Definition{Name: mcp.SearchToolName}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+		toolbinding.Observed(ctx).Discovery = true
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: discovery}}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(step int, _ *model.Request) []model.ToolCall {
 		switch step {

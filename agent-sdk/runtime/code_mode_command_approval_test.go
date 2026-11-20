@@ -153,7 +153,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 		{name: "start-failure", wantStarts: 1, wantState: taskapi.StateFailed, startErr: startErr},
 		{name: "stale", wantState: taskapi.StateFailed, wantError: "stale_revision"},
 		{name: "cancel", wantState: taskapi.StateCancelled},
-		{name: "turn-complete", wantState: taskapi.StateCancelled},
+
 		{name: "settlement-failure", wantStarts: 1, startErr: startErr},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,9 +215,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 						close(approve)
 						return nil
 					}
-					if tc.name == "turn-complete" {
-						return []model.ToolCall{{ID: "complete", Name: "Complete", Args: "{}"}}
-					}
+
 					args := `{"code":"return retainedCommandState;"}`
 					if tc.name == "reset" {
 						args = `{"reset":true}`
@@ -256,10 +254,9 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 				}
 				return nil
 			}}
-			complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}},
-				Invoke: func(context.Context, tool.Call) (tool.Result, error) { return tool.Result{TurnComplete: true}, nil }}
+
 			spec := agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
-				return agent.ModelRequestSnapshot{Model: driver, Tools: []tool.Tool{command, tasktool.New(), complete,
+				return agent.ModelRequestSnapshot{Model: driver, Tools: []tool.Tool{command, tasktool.New(),
 					&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: native}},
 					Validate: func(context.Context) (func(), error) {
 						if stale.Load() {

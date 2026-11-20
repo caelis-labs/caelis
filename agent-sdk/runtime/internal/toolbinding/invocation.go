@@ -75,6 +75,7 @@ func WithPrepared(ctx context.Context, call tool.Call, result *tool.Result, err 
 // The caller must validate the prepared call before transferring ownership.
 func RebasePrepared(dst, src context.Context) context.Context {
 	p := src.Value(preparedKey{}).(*preparedInvocation)
+	dst = context.WithValue(dst, observationKey{}, Observed(src))
 	return context.WithValue(WithOccurrence(dst, p.execution, p.parent, p.target), preparedKey{}, p)
 }
 

@@ -103,7 +103,7 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := tools[0].(callbackTool).invoke(t.Context(), tool.Call{ID: call.CallID, Name: call.Name, Input: call.Arguments}, tool.InvocationContext{SessionID: b.SessionID, TurnID: call.TurnID, ItemID: call.ItemID})
-	if err != nil || got.ID != call.CallID || len(got.Content) != 5 {
+	if err != nil || len(got.Content) != 5 {
 		t.Fatalf("projection shape: %+v, %v", got, err)
 	}
 	image, ok := got.Content[1].(tool.Image)
@@ -114,17 +114,13 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 	if raw, ok := got.Structured(); !ok || string(raw) != `{"recorded":true}` {
 		t.Fatalf("structured callback output = %s, want the business payload", raw)
 	}
-	provenance := got.Metadata["application_call"].(map[string]any)
-	if provenance["call_id"] != call.CallID || provenance["session_id"] != b.SessionID || provenance["principal_id"] != c.PrincipalID {
-		t.Fatalf("native provenance changed: %v", provenance)
-	}
 	for _, outcome := range []string{"failed", "unknown"} {
 		next := claimContent(t, reopened, b, outcome)
 		result.Outcome, result.StructuredContent = outcome, nil
 		if err := reopened.CompleteCall(t.Context(), b.Scope, b.SessionID, next.ID, result); err != nil {
 			t.Fatal(err)
 		}
-		out, err := reopened.projectResult(t.Context(), next.CallContext, next.Name, ResultFormatContentV1, result)
+		out, err := reopened.projectResult(t.Context(), next.CallContext, ResultFormatContentV1, result)
 		if !tool.HasFailedReply(err) || err.Error() != before || len(out.Content) != 4 {
 			t.Fatalf("lost %s receipt: %+v %v", outcome, out, err)
 		}
@@ -220,7 +216,7 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
+	out, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
 	if err != nil || len(out.Content) != 3 {
 		t.Fatalf("resource not resolved with provenance: %+v %v", out, err)
 	}
@@ -263,7 +259,7 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 	}
 	next := claimContent(t, s, b, "expired")
 	assertError(t, s.CompleteCall(t.Context(), c.Scope, b.SessionID, next.ID, result), ErrResourceExpired)
-	expired, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
+	expired, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
 	if !tool.HasFailedReply(err) || err.Error() != ErrResourceExpired.Error() || len(expired.Content) != 2 {
 		t.Fatalf("expiry changed content failure: %+v %v", expired, err)
 	}
@@ -299,7 +295,7 @@ func TestContentV1CatalogAndLegacyCompatibility(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, "", result)
+	out, err := s.projectResult(t.Context(), call.CallContext, "", result)
 	if err != nil || len(out.Content) != 1 {
 		t.Fatalf("legacy receipt shape: %+v, %v", out, err)
 	}
@@ -321,7 +317,7 @@ func TestLegacyCallbackFailurePreservesOpaqueReceipt(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, "", result)
+	out, err := s.projectResult(t.Context(), call.CallContext, "", result)
 	if !tool.HasFailedReply(err) || err.Error() != "fixture refused the request" || len(out.Content) != 1 ||
 		out.Content[0] != tool.Text(`{"outcome":"failed","content":{"message":"fixture refused the request","details":["unchanged",9223372036854775807]}}`) {
 		t.Fatalf("failed callback changed: %+v, %v", out, err)
@@ -371,7 +367,7 @@ func TestContentV1UnknownLifecycleCannotReissue(t *testing.T) {
 					t.Fatalf("terminal %s %v", call.State, err)
 				}
 				if claimed {
-					out, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
+					out, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
 					if !tool.HasFailedReply(err) || err.Error() != "Application callback outcome: unknown" || len(out.Content) != 1 {
 						t.Fatalf("unknown effect lost: %+v %v", out, err)
 					}

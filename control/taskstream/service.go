@@ -7,10 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/singleflight"
 	"io"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -443,6 +444,7 @@ func (s *service) projectSpoolRecord(entry *task.Entry, raw streamspool.Record, 
 		Running: event.Running, Closed: event.Closed, ExitCode: event.ExitCode,
 		Event: session.CloneEvent(event.Event), UpdatedAt: event.OccurredAt,
 	}
+	frame.setScriptObservation(entry, event.ScriptCompletion)
 	return Record{
 		Cursor: cursor, Generation: hex.EncodeToString(point.Key.Epoch[:]), Sequence: point.Sequence,
 		Task: descriptor, Frame: &frame,
@@ -517,8 +519,7 @@ func terminalCommandFallbackFrame(entry *task.Entry) Frame {
 		text = strings.TrimSpace(mapString(entry.Result, "error"))
 	}
 	// Code Mode already persists the original typed result. Use those same
-	// bytes on fallback, as on the producer stream, including its read-only
-	// completion observation. Task state remains the lifecycle authority.
+	// bytes on fallback as on the producer stream.
 	if entry.Kind == task.KindCodeMode {
 		if raw := mapString(entry.Result, "tool_result_json"); raw != "" {
 			text = raw
@@ -528,10 +529,12 @@ func terminalCommandFallbackFrame(entry *task.Entry) Frame {
 	if code, ok := integerValue(entry.Result["exit_code"]); ok {
 		exitCode = &code
 	}
-	return Frame{
+	frame := Frame{
 		TerminalID: descriptor.CurrentTurnID,
 		Text:       text, State: string(entry.State), Closed: true, ExitCode: exitCode, UpdatedAt: entry.UpdatedAt,
 	}
+	frame.setScriptObservation(entry, "")
+	return frame
 }
 
 func integerValue(value any) (int, bool) {

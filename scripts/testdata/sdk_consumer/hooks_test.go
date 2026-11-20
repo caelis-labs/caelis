@@ -40,7 +40,7 @@ func TestSDKHooksToolArgumentsFullResultAndModelView(t *testing.T) {
 		if string(c.Input) != "{\"app\":\"B\"}" {
 			t.Error("dispatch did not consume final arguments")
 		}
-		return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("original business")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("original business")}}, nil
 	}}
 	hooks := agent.Hooks{
 		ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "cache-tool-proposal", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {

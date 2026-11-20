@@ -17,7 +17,7 @@ import (
 	localruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -42,7 +42,7 @@ func TestStartupHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutco
 		Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 			close(started)
 			<-finish // Deliberately ignore cancellation and fence loss.
-			return tool.Result{ID: "call-fenced", Name: "SIDE_EFFECT", Content: []tool.ContentBlock{tool.Text("stale success")}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.Text("stale success")}}, nil
 		},
 	}
 	runtimeA, err := localruntime.New(localruntime.Config{Sessions: service, AgentFactory: chat.Factory{}, Clock: clock.Now, PolicyRegistry: registry, DefaultPolicyMode: "allow"})

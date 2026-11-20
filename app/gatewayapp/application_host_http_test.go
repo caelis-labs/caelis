@@ -32,9 +32,9 @@ import (
 // Runtime, and public HTTP client. It returns a callback for each user turn and
 // a terminal answer only after the native tool result enters the model context.
 type applicationHTTPModel struct {
-	mu            sync.Mutex
-	requests      [][]byte
-	terminalBatch bool
+	mu       sync.Mutex
+	requests [][]byte
+	batch    bool
 }
 
 func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -44,7 +44,7 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	m.mu.Lock()
 	m.requests = append(m.requests, append([]byte(nil), raw...))
-	terminalBatch := m.terminalBatch
+	batch := m.batch
 	m.mu.Unlock()
 	var decoded struct {
 		Messages []struct {
@@ -66,10 +66,10 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 				"name": "ApplicationLookup", "arguments": `{"key":"one","execution":{"session_id":"forged-session","turn_id":"forged-turn","item_id":"forged-item"}}`,
 			},
 		}}}
-		if terminalBatch {
+		if batch {
 			message["tool_calls"] = append(message["tool_calls"].([]any), map[string]any{
 				"id": "provider-later-id", "index": 1, "type": "function", "function": map[string]any{
-					"name": "ApplicationLookup", "arguments": `{"key":"must-not-run"}`,
+					"name": "ApplicationLookup", "arguments": `{"key":"two"}`,
 				},
 			})
 		}
@@ -644,7 +644,7 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	}
 }
 
-func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T) {
+func TestApplicationHTTPCallbackBatchCompletesThroughModel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -652,7 +652,7 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	provider := &applicationHTTPModel{terminalBatch: true}
+	provider := &applicationHTTPModel{batch: true}
 	store := filepath.Join(root, "store")
 	host := startApplicationHTTPHost(t, store, workspace, provider)
 	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
@@ -660,7 +660,7 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 		t.Fatal(err)
 	}
 	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "connect-terminal-model", ExpectedRevision: &status.Configuration.Revision},
+		WriteBase: appserver.WriteBase{OperationID: "connect-batch-model", ExpectedRevision: &status.Configuration.Revision},
 		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_KEY"},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -668,38 +668,52 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	}
 	credentialPath := filepath.Join(root, "application.credential")
 	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", credentialPath)
-	sessionID := createApplicationHTTPSession(t, ctx, client, "terminal")
+	sessionID := createApplicationHTTPSession(t, ctx, client, "batch")
 	prompt, err := client.Prompt(ctx, appserver.PromptRequest{
-		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "prompt-terminal"}, Input: "Finish after the first callback.", SourceKind: "user"})
+		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "prompt-batch"}, Input: "Look up both keys.", SourceKind: "user"})
 	if err != nil || (prompt.Outcome != appserver.OutcomeCommitted && prompt.Outcome != appserver.OutcomeAccepted) {
 		t.Fatalf("PromptApplication = %+v, %v", prompt, err)
 	}
-	calls, err := client.WaitSessionToolCalls(ctx, sessionID)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("initial calls = %+v, %v", calls, err)
+	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`)}
+	completed := map[string]sessionprofile.Call{}
+	for len(completed) < 2 {
+		calls, err := client.WaitSessionToolCalls(ctx, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range calls {
+			if _, ok := completed[call.CallID]; ok {
+				t.Fatalf("duplicate callback: %s", call.CallID)
+			}
+			if _, err := client.ClaimSessionToolCall(ctx, sessionID, call.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.CompleteSessionToolCall(ctx, sessionID, call.ID, result); err != nil {
+				t.Fatal(err)
+			}
+			completed[call.CallID] = call
+		}
 	}
-	call := calls[0]
-	if call.CallID != "provider-reused-id" {
-		t.Fatalf("original call = %+v", call)
-	}
-	if _, err := client.ClaimSessionToolCall(ctx, sessionID, call.ID); err != nil {
-		t.Fatal(err)
-	}
-	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`), TurnComplete: true}
-	if err := client.CompleteSessionToolCall(ctx, sessionID, call.ID, result); err != nil {
-		t.Fatal(err)
+	call := completed["provider-reused-id"]
+	if call.ID == "" || completed["provider-later-id"].TurnID != call.TurnID {
+		t.Fatalf("callback identities: %+v", completed)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, sessionID)
 	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
 	if err != nil || state.Run.Active || state.Run.Status != "" {
 		t.Fatalf("completed Turn retained live state = %+v, %v", state.Run, err)
 	}
-	calls, err = client.SessionToolCalls(ctx, sessionID)
-	if err != nil || len(calls) != 1 || calls[0].ID != call.ID || calls[0].State != "completed" || calls[0].Result == nil || !calls[0].Result.TurnComplete {
+	calls, err := client.SessionToolCalls(ctx, sessionID)
+	if err != nil || len(calls) != 2 {
 		t.Fatalf("callback receipts = %+v, %v", calls, err)
 	}
-	if provider.requestCount() != 1 {
-		t.Fatalf("model requests = %d, want 1", provider.requestCount())
+	for _, c := range calls {
+		if c.State != "completed" || c.Result == nil || string(c.Result.Content) != string(result.Content) {
+			t.Fatalf("callback receipt: %+v", c)
+		}
+	}
+	if provider.requestCount() != 2 {
+		t.Fatalf("model requests = %d, want 2", provider.requestCount())
 	}
 	var turnCompleted bool
 	for _, event := range applicationHTTPHistory(t, ctx, client, sessionID) {
@@ -719,7 +733,7 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	}
 	client = host.app(string(secret))
 	restored, err := client.SessionToolCall(ctx, sessionID, call.ID)
-	if err != nil || restored.State != "completed" || restored.Result == nil || !restored.Result.TurnComplete {
+	if err != nil || restored.State != "completed" || restored.Result == nil || string(restored.Result.Content) != string(result.Content) {
 		t.Fatalf("restarted original receipt = %+v, %v", restored, err)
 	}
 }

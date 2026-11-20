@@ -20,17 +20,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
@@ -115,7 +115,6 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			toolExecutions++
 			return tool.Result{
-				ID: call.ID, Name: call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
@@ -2426,8 +2425,6 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
@@ -3187,11 +3184,24 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	}
 }
 
+// Inspect the live RunState at the storage boundary, before the approval is durable.
+type pendingApprovalProbe struct {
+	*sessionfile.Store
+	beforeAppend func()
+}
+
+func (s *pendingApprovalProbe) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if token := approvalRecordFromEvent(req.Event); token != nil && token.Status == session.ApprovalRecordPending {
+		s.beforeAppend()
+	}
+	return s.Store.AppendEvent(ctx, req)
+}
+
 func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }})
+	sessions := &pendingApprovalProbe{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }})}
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -3214,12 +3224,18 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	sessions.beforeAppend = func() {
+		state, err := runtime.RunState(t.Context(), activeSession.SessionRef)
+		if err != nil || state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || state.ApprovalRequestID != "" {
+			t.Errorf("before pending approval is committed, RunState = %+v, %v", state, err)
+		}
+	}
 	var calls int
 	targetTool := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			calls++
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}}}, nil
 		},
 	}
 	run, err := runtime.Run(context.Background(), agent.RunRequest{
@@ -3530,9 +3546,9 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 		"workdir":       ".",
 		"yield_time_ms": 1000,
 	})
-	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(handle) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 
 	taskTool := runtimeTaskTool{
@@ -3601,9 +3617,9 @@ func TestRuntimeTaskZeroWaitIsImmediateAndPositiveWaitIgnoresNewOutputUntilTermi
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
-	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(handle) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 
 	start := time.Now()
@@ -3625,7 +3641,7 @@ func TestRuntimeTaskZeroWaitIsImmediateAndPositiveWaitIgnoresNewOutputUntilTermi
 	if latest, _ := payload["latest_output"].(string); strings.Contains(latest, "wait-ready") {
 		t.Fatalf("task read latest_output = %q, want no future output", latest)
 	}
-	taskMeta := testToolResultRuntimeMeta(t, taskResult, "task")
+	taskMeta := testToolResultRuntimeMeta(t, taskResult.observation, "task")
 	startCursor, startKnown := taskInt64Value(taskMeta["output_start_cursor"])
 	endCursor, endKnown := taskInt64Value(taskMeta["output_cursor"])
 	if !startKnown || !endKnown || startCursor < 0 || startCursor > endCursor {
@@ -3665,7 +3681,7 @@ func TestRuntimeTaskWaitIgnoresUnreadOutputUntilTerminal(t *testing.T) {
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
-	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	identity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, handle)
 	if err != nil {
 		t.Fatal(err)
@@ -3727,7 +3743,7 @@ func TestRuntimeCommandTaskWaitReturnsRunningOnlyAfterYieldExpires(t *testing.T)
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
-	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	identity, err := runtime.tasks.resolveTaskHandle(context.Background(), activeSession.SessionRef, handle)
 	if err != nil {
 		t.Fatal(err)
@@ -4222,9 +4238,9 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	handle, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(handle) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 
 	waitErr := errors.New("transient wait failure")
@@ -4279,9 +4295,9 @@ func TestRuntimeTaskWaitDefaultsToOneMinute(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
@@ -4295,7 +4311,7 @@ func TestRuntimeTaskWaitDefaultsToOneMinute(t *testing.T) {
 	if got := fake.session.lastWait; got != taskWaitMaxYield {
 		t.Fatalf("TASK wait completion budget = %v, want %v", got, taskWaitMaxYield)
 	}
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	toolMeta := testToolResultRuntimeMeta(t, taskResult.observation, "tool")
 	if got := toolMeta["effective_yield_time_ms"]; got != float64(60000) && got != 60000 {
 		t.Fatalf("effective_yield_time_ms = %#v, want 60000", got)
 	}
@@ -4410,7 +4426,7 @@ func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 			t.Fatalf("batch item missing actual_wait_time_ms: %#v", item)
 		}
 	}
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	toolMeta := testToolResultRuntimeMeta(t, taskResult.observation, "tool")
 	if got := stringSliceFromAny(toolMeta["target_handles"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
 		t.Fatalf("target_handles = %#v, want [%s %s]", toolMeta["target_handles"], taskOne, taskTwo)
 	}
@@ -4525,7 +4541,7 @@ func TestRuntimeTaskCancelAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 	if len(tasks) != 2 {
 		t.Fatalf("payload[tasks] = %#v, want 2 tasks", payload["tasks"])
 	}
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	toolMeta := testToolResultRuntimeMeta(t, taskResult.observation, "tool")
 	if got := stringSliceFromAny(toolMeta["target_handles"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
 		t.Fatalf("target_handles = %#v, want [%s %s]", toolMeta["target_handles"], taskOne, taskTwo)
 	}
@@ -4565,7 +4581,7 @@ func TestRuntimeTaskBatchCancelReturnsPartialFailurePayload(t *testing.T) {
 	if errText, _ := second["error"].(string); !strings.Contains(errText, "not found") {
 		t.Fatalf("second error = %q, want not found", errText)
 	}
-	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	toolMeta := testToolResultRuntimeMeta(t, taskResult.observation, "tool")
 	if got := stringSliceFromAny(toolMeta["target_handles"]); !reflect.DeepEqual(got, []string{taskOne, "stale-id"}) {
 		t.Fatalf("target_handles = %#v, want [%s stale-id]", toolMeta["target_handles"], taskOne)
 	}
@@ -4618,9 +4634,9 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 
 	fakeSession.stdout = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
@@ -4681,9 +4697,9 @@ func TestRuntimeTaskWaitAddsWindowsMSYSSSHSignalPipeHintWhenCompleted(t *testing
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult.observation, "task")["handle"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want handle", runCommandResult.observation)
 	}
 
 	completed := false
@@ -4734,8 +4750,7 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	t.Parallel()
 
 	result, _ := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
-		tool.Definition{Name: shell.RunCommandToolName},
+		t.Context(),
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			State:   taskapi.StateCompleted,
@@ -4762,20 +4777,13 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	if got, _ := payload["result"].(string); got != "done\n" {
 		t.Fatalf("payload[result] = %q, want full terminal text", got)
 	}
-	if _, exists := result.Meta["text"]; exists {
-		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)
-	}
-	if _, exists := result.Meta["exit_code"]; exists {
-		t.Fatalf("result.Meta duplicated exit_code output: %#v", result.Meta)
-	}
 }
 
 func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	t.Parallel()
 
 	result, _ := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
-		tool.Definition{Name: shell.RunCommandToolName},
+		t.Context(),
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			State:   taskapi.StateFailed,
@@ -4801,20 +4809,13 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
 	}
-	if _, exists := result.Meta["error"]; exists {
-		t.Fatalf("result.Meta duplicated error output: %#v", result.Meta)
-	}
 }
 
 func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 	t.Parallel()
 
 	result, _ := taskControlSnapshotToolResult(
-		tool.Call{ID: "task-cancel-1", Name: tasktool.ToolName, Input: mustJSONRaw(map[string]any{
-			"action": "cancel",
-			"handle": "task-1",
-		})},
-		tool.Definition{Name: tasktool.ToolName},
+		t.Context(),
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			Kind:    taskapi.KindCommand,
@@ -4849,8 +4850,7 @@ func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 
 	hugeStderr := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	result, _ := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
-		tool.Definition{Name: shell.RunCommandToolName},
+		t.Context(),
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			State:   taskapi.StateFailed,
@@ -4874,9 +4874,6 @@ func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 	if gotText != hugeStderr {
 		t.Fatalf("payload result len = %d, want untruncated tool output len %d", len(gotText), len(hugeStderr))
 	}
-	if _, exists := result.Meta["text"]; exists {
-		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)
-	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata", payload)
 	}
@@ -4885,9 +4882,9 @@ func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T) {
 	t.Parallel()
 
+	ctx, observation := toolbinding.Observe(t.Context())
 	result, _ := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
-		tool.Definition{Name: shell.RunCommandToolName},
+		ctx,
 		taskapi.Snapshot{
 			Ref: taskapi.Ref{
 				SessionID:  "session-1",
@@ -4913,7 +4910,7 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 		},
 	)
 
-	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	taskMeta := testToolResultRuntimeMeta(t, observation, "task")
 	if got := taskMeta["terminal_id"]; got != "terminal-1" {
 		t.Fatalf("metadata terminal_id = %#v, want terminal-1", got)
 	}
@@ -4957,9 +4954,9 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	t.Parallel()
 
+	ctx, observation := toolbinding.Observe(t.Context())
 	result, _ := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: spawn.ToolName},
-		tool.Definition{Name: spawn.ToolName},
+		ctx,
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "child-session"},
 			Kind:    taskapi.KindSubagent,
@@ -4990,7 +4987,7 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	if got := payload["final_message"]; got != "done" {
 		t.Fatalf("payload[final_message] = %#v, want done", got)
 	}
-	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	taskMeta := testToolResultRuntimeMeta(t, observation, "task")
 	if got := taskMeta["task_id"]; got != "task-1" {
 		t.Fatalf("metadata task_id = %#v, want internal task-1", got)
 	}
@@ -5021,9 +5018,9 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) {
 	t.Parallel()
 
+	ctx, observation := toolbinding.Observe(t.Context())
 	result, _ := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: spawn.ToolName},
-		tool.Definition{Name: spawn.ToolName},
+		ctx,
 		taskapi.Snapshot{
 			Ref: taskapi.Ref{
 				TaskID:     "task-1",
@@ -5040,7 +5037,7 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 			},
 		},
 	)
-	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	taskMeta := testToolResultRuntimeMeta(t, observation, "task")
 	if got := taskMeta["terminal_id"]; got != "subagent-task-1" {
 		t.Fatalf("metadata terminal_id = %#v, want subagent-task-1", got)
 	}

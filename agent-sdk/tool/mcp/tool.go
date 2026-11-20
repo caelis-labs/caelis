@@ -53,8 +53,6 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	})
 	if err != nil {
 		result := tool.Result{
-			ID:   call.ID,
-			Name: call.Name,
 			Content: []tool.ContentBlock{
 				tool.Text(fmt.Sprintf("MCP execution error: %s", err.Error())),
 			},
@@ -63,7 +61,7 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	}
 
 	if resp == nil {
-		result := tool.Result{ID: call.ID, Name: call.Name,
+		result := tool.Result{
 			Content: []tool.ContentBlock{tool.Text("MCP server returned no tool result")}}
 		return result, tool.NewError(errorcode.UnknownOutcome, "MCP server returned no tool execution receipt")
 	}
@@ -88,7 +86,7 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 			}
 		}
 	}
-	result := tool.Result{ID: call.ID, Name: call.Name, Content: blocks}
+	result := tool.Result{Content: blocks}
 	if _, ok := result.Structured(); t.def.OutputSchema != nil && !ok && !resp.IsError {
 		contentErr = errors.Join(contentErr, errors.New("outputSchema requires structuredContent"))
 	}

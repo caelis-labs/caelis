@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -96,18 +95,10 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 	call.Input = append(json.RawMessage(nil), p.Input...)
 	if p.Kind == agent.ToolPrepareBlock {
 		const message = "Tool preparation blocked this call"
-		r := tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text(message)}}
+		r := tool.Result{Content: []tool.ContentBlock{tool.Text(message)}}
 		return call, &r, tool.FailedReply(message)
 	}
 	if p.Result != nil {
-		if p.Result.ID != "" && p.Result.ID != call.ID || p.Result.Name != "" && p.Result.Name != call.Name {
-			return failure(fmt.Errorf("synthetic result changed call identity"))
-		}
-		p.Result.ID = call.ID
-		p.Result.Name = call.Name
-		if p.Result.TurnComplete {
-			return failure(fmt.Errorf("synthetic tool result cannot complete the Turn"))
-		}
 		if err := validateResult(def, *p.Result, nil); err != nil {
 			return failure(err)
 		}
@@ -180,18 +171,15 @@ func validateModelViewParts(parts []model.Part) error {
 func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result tool.Result, cause error) (tool.Result, error) {
 	var processing *ProcessingError
 	if errors.As(cause, &processing) {
-		return failedProcessingResult(call, result), cause
+		return failedProcessingResult(), cause
 	}
 	if err := tool.ValidateContent(result.Content); err != nil {
-		return failedProcessingResult(call, result), &ProcessingError{Cause: err, EffectError: cause}
+		return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: cause}
 	}
 	e := toolEvidence(ctx, def, call)
 	for _, h := range FromContext(ctx).Hooks.ToolResult {
 		input := agent.ToolOutcome{Result: result, Error: cause}
 		next, err := Call(ctx, "tool_result", h, e, input, func(o agent.ToolOutcome) agent.ToolOutcome { o.Result, _ = tool.CloneResult(o.Result, nil); return o }, func(r tool.Result) tool.Result { r, _ = tool.CloneResult(r, nil); return r })
-		if err == nil && (next.ID != result.ID || next.Name != result.Name || next.TurnComplete != result.TurnComplete || !reflect.DeepEqual(next.Metadata, result.Metadata) || !reflect.DeepEqual(next.Meta, result.Meta)) {
-			err = fmt.Errorf("result identity and system fields cannot change")
-		}
 		if err == nil {
 			_, hadStructured := result.Structured()
 			_, hasStructured := next.Structured()
@@ -205,17 +193,16 @@ func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result
 		if err != nil {
 			// Never fall back to raw content after a failed redaction. The error
 			// preserves that an effect may have succeeded; callers never replay.
-			return failedProcessingResult(call, result), &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause}
+			return failedProcessingResult(), &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause}
 		}
 		result = next
 	}
 	return result, cause
 }
 
-// failedProcessingResult retains system disposition without retaining business
-// content, structured values, media or open metadata after failed processing.
-func failedProcessingResult(call tool.Call, result tool.Result) tool.Result {
-	return tool.Result{ID: call.ID, Name: call.Name, TurnComplete: result.TurnComplete, Content: []tool.ContentBlock{tool.Text("Tool completed; result processing failed. Do not repeat the operation.")}}
+// A failed transformation must not expose the original business content.
+func failedProcessingResult() tool.Result {
+	return tool.Result{Content: []tool.ContentBlock{tool.Text("Tool completed; result processing failed. Do not repeat the operation.")}}
 }
 
 func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base func(context.Context) (tool.Result, error)) (tool.Result, error) {
@@ -241,19 +228,14 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 	}
 	r, err := chain(ctx)
 	if err != nil && actual != nil && (!errors.Is(err, actualErr) || !errors.Is(actualErr, err)) {
-		return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr}
+		return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: actualErr}
 	}
 	if err == nil && len(entries) > 0 {
-		if r.ID != "" && r.ID != call.ID || r.Name != "" && r.Name != call.Name || actual == nil && r.TurnComplete || actual != nil && (r.TurnComplete != actual.TurnComplete || !reflect.DeepEqual(r.Meta, actual.Meta) || !reflect.DeepEqual(r.Metadata, actual.Metadata)) {
-			err = fmt.Errorf("middleware changed tool identity or completion")
-		}
-		if err == nil {
-			err = validateResult(def, r, err)
-		}
+		err = validateResult(def, r, nil)
 		if err != nil {
 			err = &agent.HookError{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
 			if actual != nil {
-				return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr}
+				return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: actualErr}
 			}
 			return tool.Result{}, err
 		}

@@ -264,14 +264,14 @@ func CloneEventScope(in EventScope) EventScope {
 func CloneEventTool(in EventTool) EventTool {
 	out := EventTool{
 		Execution: in.Execution, BatchID: in.BatchID, Outcome: in.Outcome, ErrorCode: in.ErrorCode, Error: in.Error,
-		TurnComplete: in.TurnComplete,
-		ID:           in.ID,
-		Name:         strings.TrimSpace(in.Name),
-		Kind:         strings.TrimSpace(in.Kind),
-		Title:        strings.TrimSpace(in.Title),
-		Status:       strings.TrimSpace(in.Status),
-		Input:        jsonvalue.CloneMap(in.Input),
-		Output:       jsonvalue.CloneMap(in.Output),
+		Discovery: in.Discovery, ResultFormat: in.ResultFormat,
+		ID:     in.ID,
+		Name:   strings.TrimSpace(in.Name),
+		Kind:   strings.TrimSpace(in.Kind),
+		Title:  strings.TrimSpace(in.Title),
+		Status: strings.TrimSpace(in.Status),
+		Input:  jsonvalue.CloneMap(in.Input),
+		Output: jsonvalue.CloneMap(in.Output),
 	}
 	if in.Result != nil {
 		result, _ := tool.CloneResult(*in.Result, nil)

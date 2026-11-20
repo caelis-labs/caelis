@@ -389,9 +389,6 @@ func TestRunCommandCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
 	}
-	if _, exists := result.Meta["error"]; exists {
-		t.Fatalf("result.Meta duplicated error output: %#v", result.Meta)
-	}
 }
 
 func TestRunCommandCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
@@ -429,9 +426,6 @@ func TestRunCommandCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testin
 	}
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
-	}
-	if _, exists := result.Meta["error"]; exists {
-		t.Fatalf("result.Meta duplicated error output: %#v", result.Meta)
 	}
 }
 

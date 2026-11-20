@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
@@ -120,11 +121,8 @@ func (t *FetchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		return tool.Result{}, err
 	}
 	payload := t.renderResponse(resp, body, format)
-	return toolutil.JSONResult(FetchToolName, payload, map[string]any{
-		"url":       u.String(),
-		"final_url": resp.finalURL,
-		"format":    format,
-	})
+	toolpresentation.WebFetch(ctx, u.String(), resp.finalURL, format)
+	return toolutil.JSONResult(payload)
 }
 
 var _ tool.Tool = (*FetchTool)(nil)

@@ -357,10 +357,8 @@ Validate size, format, image dimensions, MIME type and resource hash before mode
 admission. Media capability comes from the selected/frozen model; unknown image
 support is not permission to inject an image. See OpenAPI for exact block limits.
 
-`turn_complete: true` is valid only for succeeded results. It records the original
-callback result then finishes that Turn before another serial tool effect or model
-request. Unexecuted siblings gain no claim. It never moves queued input or grants
-a new Session. Failed/unknown results cannot complete a Turn as success.
+After the application submits its receipt, the model receives the result and can finish the
+Turn or request more tools. The application owns any subsequent Session handoff.
 
 ## Resources
 

@@ -73,9 +73,12 @@ type EventTool struct {
 	// ModelCall retains the effective protocol envelope when execution targets another tool.
 	ModelCall *model.ToolCall `json:"model_call,omitempty"`
 	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
-	ProposedCall *model.ToolCall     `json:"proposed_call,omitempty"`
-	ID           string              `json:"id,omitempty"`
-	TurnComplete bool                `json:"turn_complete,omitempty"`
+	ProposedCall *model.ToolCall `json:"proposed_call,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	// Discovery marks a successful Runtime directory lookup for restoring MCP bindings.
+	Discovery bool `json:"discovery,omitempty"`
+	// ResultFormat is the presentation format declared by the bound tool.
+	ResultFormat string              `json:"result_format,omitempty"`
 	Name         string              `json:"name,omitempty"`
 	Kind         string              `json:"kind,omitempty"`
 	Title        string              `json:"title,omitempty"`
@@ -114,17 +117,31 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 		if err := decoder.Decode(&decoded.Result); err != nil {
 			return err
 		}
-		// Older receipts could carry failure only on the returned value.
-		if decoded.Outcome == "" {
-			var legacy struct {
-				IsError bool `json:"is_error"`
+		// Until pre-content-only Sessions leave the supported upgrade window, lift
+		// their nested receipt fields into the owning event on read.
+		var previous struct {
+			IsError  bool            `json:"is_error"`
+			Metadata json.RawMessage `json:"metadata"`
+		}
+		if err := json.Unmarshal(fields.Result, &previous); err != nil {
+			return err
+		}
+		if len(previous.Metadata) > 0 {
+			// Old tool metadata was arbitrary JSON. Only recognized values contribute.
+			var meta struct {
+				Discovery bool `json:"caelis.mcp.discovery.v1"`
+				Callback  struct {
+					Format string `json:"result_format"`
+				} `json:"application_call"`
 			}
-			if err := json.Unmarshal(fields.Result, &legacy); err != nil {
-				return err
+			_ = json.Unmarshal(previous.Metadata, &meta)
+			decoded.Discovery = decoded.Discovery || meta.Discovery
+			if decoded.ResultFormat == "" {
+				decoded.ResultFormat = meta.Callback.Format
 			}
-			if legacy.IsError {
-				decoded.Outcome = ToolOutcomeFailed
-			}
+		}
+		if decoded.Outcome == "" && previous.IsError {
+			decoded.Outcome = ToolOutcomeFailed
 		}
 	}
 	*t = EventTool(decoded)

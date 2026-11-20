@@ -2069,8 +2069,6 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
@@ -2201,8 +2199,6 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"tool result that must survive step-level compact"}`)},
 				},
@@ -2331,8 +2327,6 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:      call.ID,
-				Name:    call.Name,
 				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
@@ -2427,8 +2421,6 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"tool result before failed compact"}`)},
 				},
@@ -2536,8 +2528,6 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"retry exhausted high-water tool result"}`)},
 				},

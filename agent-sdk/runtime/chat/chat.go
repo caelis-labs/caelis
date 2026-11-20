@@ -286,24 +286,15 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			if !ok {
 				return
 			}
-			terminalTool := false
 			for _, toolEvent := range toolEvents {
 				if !a.yieldedResults[toolEvent] && !yield(toolEvent, nil) {
 					return
 				}
 				// yield returns only after Runtime confirms the canonical append.
 				mcpdiscovery.Apply(a.discoveries, toolEvent)
-				if toolEvent != nil && toolEvent.Tool != nil && toolEvent.Tool.TurnComplete {
-					// The terminal callback receipt is durable before this Run exits.
-					// Do not consume queued input or issue another model request.
-					terminalTool = true
-				}
 			}
 			if err != nil {
 				yield(nil, err)
-				return
-			}
-			if terminalTool {
 				return
 			}
 			messages = append(messages, toolMessages...)

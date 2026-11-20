@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -47,7 +48,8 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.R
 		return tool.Result{}, tool.NewError(errorcode.ResourceExhausted, "complete schema exceeds budget")
 	}
 	raw, err := json.Marshal(selected)
-	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, err
+	toolbinding.Observed(ctx).Discovery = err == nil
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, err
 }
 
 type codeModeSearchEntry struct {

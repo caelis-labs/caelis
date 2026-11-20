@@ -39,7 +39,7 @@ func FromEvents(events []*session.Event) map[string]tool.Binding {
 func Apply(out map[string]tool.Binding, event *session.Event) {
 	if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == mcp.SearchToolName && event.Tool.Result != nil && event.Tool.Outcome == session.ToolOutcomeSucceeded && (session.IsMainInvocationVisibleEvent(event) || event.Tool.Parent != nil && event.Tool.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool") {
 		result := event.Tool.Result
-		if result.Metadata[MetadataKey] == true {
+		if event.Tool.Discovery {
 			if value, ok := result.Structured(); ok {
 				var raw map[string]any
 				if json.Unmarshal(value, &raw) == nil {

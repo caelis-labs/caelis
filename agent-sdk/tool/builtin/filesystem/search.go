@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
@@ -174,14 +175,14 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		}
 	} else {
 		if shouldExcludePath(root, target, false, excludeRules) || !shouldIncludeFilePath(root, target, includeRules) {
-			return newSearchResult(target, pattern, include, hits, stats)
+			return newSearchResult(ctx, target, pattern, include, hits, stats)
 		}
 		if _, err := searchSelectedFile(ctx, fsys, target, compiled, &hits, &stats, appendMatch); err != nil {
 			return tool.Result{}, err
 		}
 	}
 
-	return newSearchResult(target, pattern, include, hits, stats)
+	return newSearchResult(ctx, target, pattern, include, hits, stats)
 }
 
 func (s *searchStats) observe(result searchFileResult) {
@@ -225,7 +226,7 @@ func isSkippableSearchError(err error) bool {
 	}
 }
 
-func newSearchResult(path string, pattern string, include string, hits []map[string]any, stats searchStats) (tool.Result, error) {
+func newSearchResult(ctx context.Context, path string, pattern string, include string, hits []map[string]any, stats searchStats) (tool.Result, error) {
 	truncated := len(hits) > searchResultLimit
 	visible := make([]map[string]any, len(hits))
 	copy(visible, hits)
@@ -246,23 +247,9 @@ func newSearchResult(path string, pattern string, include string, hits []map[str
 	if message := emptySearchMessage(len(visible), include, stats); message != "" {
 		payload["message"] = message
 	}
-	meta := map[string]any{
-		"path":                 path,
-		"pattern":              pattern,
-		"count":                len(visible),
-		"file_count":           len(filesWithHits),
-		"truncated":            truncated,
-		"files_selected":       stats.filesSelected,
-		"files_scanned":        stats.filesScanned,
-		"binary_files_skipped": stats.binaryFilesSkipped,
-	}
-	if include != "" {
-		meta["include"] = include
-	}
-	if message, ok := payload["message"]; ok {
-		meta["message"] = message
-	}
-	return toolutil.JSONResult(SearchToolName, payload, meta)
+	message, _ := payload["message"].(string)
+	toolpresentation.Grep(ctx, path, pattern, include, message, toolpresentation.SearchStats{Count: len(visible), FileCount: len(filesWithHits), FilesSelected: stats.filesSelected, FilesScanned: stats.filesScanned, BinaryFilesSkipped: stats.binaryFilesSkipped, Truncated: truncated})
+	return toolutil.JSONResult(payload)
 }
 
 func emptySearchMessage(hitCount int, include string, stats searchStats) string {

@@ -1,7 +1,6 @@
 package filesystem
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -122,13 +122,12 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	result, err := patchTool.Call(context.Background(), tool.Call{Input: input})
+	var toolMeta map[string]any
+	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { toolMeta = fields })
+	result, err := patchTool.Call(ctx, tool.Call{Input: input})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	caelis, _ := result.Metadata["caelis"].(map[string]any)
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
 	rawHunks, ok := toolMeta["diff_hunks"].([]MutationDiffHunk)
 	if !ok {
 		t.Fatalf("result.Metadata diff_hunks = %T, want []MutationDiffHunk", toolMeta["diff_hunks"])

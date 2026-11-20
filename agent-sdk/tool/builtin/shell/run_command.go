@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
@@ -201,45 +202,8 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		})
 	}
 	payload := runCommandPayloadForCommand(command, result, err)
-	out, resultErr := toolutil.JSONResult(RunCommandToolName, payload)
-	if result.Route != "" {
-		if out.Metadata == nil {
-			out.Metadata = map[string]any{}
-		}
-		runCommandToolMetadata(out.Metadata)["route"] = result.Route
-	}
-	if result.Backend != "" {
-		if out.Metadata == nil {
-			out.Metadata = map[string]any{}
-		}
-		runCommandToolMetadata(out.Metadata)["backend"] = result.Backend
-	}
-	return out, resultErr
-}
-
-func runCommandToolMetadata(meta map[string]any) map[string]any {
-	if meta == nil {
-		return nil
-	}
-	caelis, _ := meta["caelis"].(map[string]any)
-	if caelis == nil {
-		caelis = map[string]any{}
-		meta["caelis"] = caelis
-	}
-	if _, ok := caelis["version"]; !ok {
-		caelis["version"] = 1
-	}
-	runtime, _ := caelis["runtime"].(map[string]any)
-	if runtime == nil {
-		runtime = map[string]any{}
-		caelis["runtime"] = runtime
-	}
-	toolMeta, _ := runtime["tool"].(map[string]any)
-	if toolMeta == nil {
-		toolMeta = map[string]any{}
-		runtime["tool"] = toolMeta
-	}
-	return toolMeta
+	toolpresentation.Command(ctx, string(result.Route), string(result.Backend))
+	return toolutil.JSONResult(payload)
 }
 
 func (t *RunCommandTool) SandboxRuntime() sandbox.Runtime {

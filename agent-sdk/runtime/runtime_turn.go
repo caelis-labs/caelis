@@ -27,7 +27,7 @@ func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.R
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for id, waiter := range r.approvalWaiters {
-		if waiter.runID == state.ActiveRunID && waiter.blocksRun && waiter.owner.Err() == nil {
+		if waiter.blockingRunID != "" && waiter.blockingRunID == state.ActiveRunID && waiter.owner.Err() == nil {
 			state.WaitingApproval = true
 			state.ApprovalRequestID = id
 			state.Status = agent.RunLifecycleStatusWaitingApproval
@@ -299,9 +299,6 @@ func (r *Runtime) runAttempt(
 				if session.IsCanonicalHistoryEvent(normalized) {
 					_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
 				}
-			}
-			if normalized.Type == session.EventTypeToolResult && normalized.Tool != nil && normalized.Tool.TurnComplete {
-				taskScopeFromContext(ctx).completeCodeMode(ctx)
 			}
 			source.Append(normalized)
 			batch = append(batch, session.CloneEvent(normalized))

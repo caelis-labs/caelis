@@ -59,7 +59,7 @@ func testResult() CallResult {
 	return CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"recorded":true}`)}
 }
 
-func TestApplicationTerminalResultPersistsOnOriginalCall(t *testing.T) {
+func TestApplicationReceiptPersistsOnOriginalCall(t *testing.T) {
 	s, path := testStore(t)
 	connection := testOwner(t, s, 9123)
 	binding := testBinding(t, s, connection, "terminal-session")
@@ -68,9 +68,9 @@ func TestApplicationTerminalResultPersistsOnOriginalCall(t *testing.T) {
 	if _, err := s.ClaimCall(t.Context(), connection.Scope, binding.SessionID, id); err != nil {
 		t.Fatal(err)
 	}
-	invalid := CallResult{Outcome: "unknown", Content: json.RawMessage(`null`), TurnComplete: true}
+	invalid := CallResult{Outcome: "invalid", Content: json.RawMessage(`null`)}
 	assertError(t, s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, invalid), ErrInvalid)
-	result := CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`), TurnComplete: true}
+	result := CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`)}
 	if err := s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, result); err != nil {
 		t.Fatal(err)
 	}
@@ -86,12 +86,12 @@ func TestApplicationTerminalResultPersistsOnOriginalCall(t *testing.T) {
 	}
 	defer reopened.Close()
 	call, err := reopened.GetCall(t.Context(), connection.Scope, binding.SessionID, id)
-	if err != nil || call.State != "completed" || call.Result == nil || !call.Result.TurnComplete || call.ID != id {
+	if err != nil || call.State != "completed" || call.Result == nil || string(call.Result.Content) != string(result.Content) || call.ID != id {
 		t.Fatalf("recovered original call = %+v, %v", call, err)
 	}
-	projected, err := reopened.projectResult(t.Context(), provenance, "WriteNote", "", *call.Result)
-	if err != nil || !projected.TurnComplete || projected.ID != provenance.CallID {
-		t.Fatalf("projected terminal result = %+v, %v", projected, err)
+	projected, err := reopened.projectResult(t.Context(), provenance, "", *call.Result)
+	if err != nil || len(projected.Content) != 1 {
+		t.Fatalf("projected callback content = %+v, %v", projected, err)
 	}
 }
 func assertError(t *testing.T, err, want error) {
@@ -141,9 +141,6 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !tools[0].Definition().MayCompleteTurn {
-		t.Fatal("application callbacks must be able to stop later calls in their batch")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	type returned struct {
@@ -175,7 +172,7 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 	}
 	select {
 	case outcome := <-done:
-		if outcome.err != nil || outcome.result.ID != native.ID {
+		if outcome.err != nil || len(outcome.result.Content) != 1 {
 			t.Fatalf("native result %+v %v", outcome.result, outcome.err)
 		}
 	case <-ctx.Done():

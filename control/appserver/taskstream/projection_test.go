@@ -1,14 +1,12 @@
 package taskstream
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
@@ -906,8 +904,8 @@ func TestChildTaskFramePreservesDirectScriptParent(t *testing.T) {
 func TestCodeModeTaskStreamProjectsIndependentScriptCompletion(t *testing.T) {
 	for _, kind := range []task.Kind{task.KindCodeMode, task.KindCommand} {
 		for _, completion := range []string{"completed", "failed"} {
-			raw, _ := json.Marshal(tool.Result{Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}})
-			events := commandTaskStreamFrameEvents(taskFrameProjectionRequest{TaskKind: kind, CallID: "script", ToolName: "js_exec"}, controltaskstream.Frame{Closed: true, State: "failed", Text: string(raw)})
+
+			events := commandTaskStreamFrameEvents(taskFrameProjectionRequest{TaskKind: kind, CallID: "script", ToolName: "js_exec"}, controltaskstream.Frame{Closed: true, State: "failed", ScriptCompletion: completion})
 			update := events[0].Update.(eventstream.ToolCallUpdate)
 			value := update.Meta[codemode.MetadataScriptCompletion]
 			if kind == task.KindCodeMode && value != completion {

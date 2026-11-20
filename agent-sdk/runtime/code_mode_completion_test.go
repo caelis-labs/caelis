@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -62,10 +63,11 @@ func TestCodeModeScriptCompletionSurvivesCanonicalErrors(t *testing.T) {
 
 func TestCodeModeTaskResultPreservesScriptCompletion(t *testing.T) {
 	for _, completion := range []string{"completed", "failed"} {
-		raw, _ := json.Marshal(tool.Result{Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}, Content: []tool.ContentBlock{tool.Text("original result")}})
+		raw, _ := json.Marshal(map[string]any{"metadata": map[string]any{codemode.MetadataScriptCompletion: completion}})
 		snapshot := task.Snapshot{Kind: task.KindCodeMode, State: task.StateFailed}
-		result, err := taskSnapshotToolResultWithPayload(tool.Call{ID: "observe"}, tool.Definition{Name: "Task"}, snapshot, map[string]any{"tool_result_json": string(raw)})
-		if !tool.HasFailedReply(err) || result.Metadata[codemode.MetadataScriptCompletion] != completion {
+		ctx, observed := toolbinding.Observe(t.Context())
+		result, err := taskSnapshotToolResultWithPayload(ctx, snapshot, map[string]any{"tool_result_json": string(raw)})
+		if !tool.HasFailedReply(err) || observed.ScriptCompletion != completion {
 			t.Fatalf("lost independent Task observation: %+v", result)
 		}
 	}

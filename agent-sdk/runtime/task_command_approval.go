@@ -61,7 +61,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 	if err != nil {
 		release()
 		if task != nil {
-			result, _ := taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now()))
+			result, _ := taskSnapshotToolResult(ctx, task.snapshotWithoutSession(time.Now()))
 			return result, err
 		}
 		return tool.Result{}, err
@@ -77,7 +77,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		switch {
 		case errorcode.Is(err, errorcode.ResourceExhausted):
 			code = "task_capacity"
-		case errors.Is(err, errTaskAuthorizationChanged), errors.Is(err, errCodeModeComplete),
+		case errors.Is(err, errTaskAuthorizationChanged),
 			errors.Is(err, errCodeModeHostClosed), ctx.Err() != nil, approval.owner.Err() != nil:
 			state, code = taskapi.StateCancelled, "approval_cancelled"
 		}
@@ -85,7 +85,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		defer cancel()
 		persistErr := t.tasks.finishUnstartedCommandClaimed(cleanup, task, state, code, err.Error())
 		release()
-		result, resultErr := taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now()))
+		result, resultErr := taskSnapshotToolResult(ctx, task.snapshotWithoutSession(time.Now()))
 		return result, errors.Join(persistErr, resultErr)
 	}
 	task.mu.Lock()
@@ -127,7 +127,7 @@ func (a *taskApproval) registerCommand(ctx context.Context, scope *taskContinuat
 		return nil, err
 	}
 	defer release()
-	work, err := scope.register(a.owner, taskID, a.generation, taskContinuationCodeModeCommand)
+	work, err := scope.register(a.owner, taskID, a.generation, taskContinuationOrdinary)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +172,7 @@ func validateApprovedCommandTarget(ctx context.Context, validate func(context.Co
 
 func (t runtimeCommandTool) observeSubmittedCommand(ctx context.Context, call tool.Call, task *commandTask, deadline time.Time) (tool.Result, error) {
 	snapshot, err := t.tasks.waitCommandTask(ctx, t.sessionRef, task, taskapi.ControlRequest{Yield: max(time.Until(deadline), 0)})
-	result, resultErr := taskSnapshotToolResult(call, t.Definition(), snapshot)
+	result, resultErr := taskSnapshotToolResult(ctx, snapshot)
 	return result, errors.Join(err, resultErr)
 }
 
@@ -220,7 +220,8 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 			defer cancel()
 		}
 		// The continuation reports through Task output, not invocation progress.
-		_, executeErr := execute(toolbinding.WithProgress(permitCtx, nil), call)
+		continuationCtx, _ := toolbinding.Observe(permitCtx)
+		_, executeErr := execute(toolbinding.WithProgress(continuationCtx, nil), call)
 		if executeErr == nil {
 			return nil
 		}

@@ -111,7 +111,7 @@ func TestExperimentalAsyncAllowsHealthyRepeatedRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			work := tool.NamedTool{Def: tool.Definition{Name: "work", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
-				return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text(strings.Repeat("new independent evidence ", 500))}}, nil
+				return tool.Result{Content: []tool.ContentBlock{tool.Text(strings.Repeat("new independent evidence ", 500))}}, nil
 			}}
 			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "perform eight independent steps", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{work}}})
 			if err != nil {

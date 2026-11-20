@@ -18,13 +18,13 @@ var errTaskAuthorizationChanged = errors.New("task authorization was invalidated
 type taskScopeKey struct{}
 
 type taskContinuationScope struct {
-	mu             sync.Mutex
-	active         map[string]*taskContinuation
-	changed        chan struct{}
-	closed         bool
-	codeModeClosed bool
-	generation     uint64
-	err            error
+	mu      sync.Mutex
+	active  map[string]*taskContinuation
+	changed chan struct{}
+	closed  bool
+
+	generation uint64
+	err        error
 }
 
 type taskContinuation struct {
@@ -43,7 +43,6 @@ type taskContinuationKind uint8
 const (
 	taskContinuationOrdinary taskContinuationKind = iota
 	taskContinuationCodeModeScript
-	taskContinuationCodeModeCommand
 )
 
 func newTaskContinuationScope() *taskContinuationScope {
@@ -72,9 +71,6 @@ func (s *taskContinuationScope) register(ctx context.Context, id string, generat
 	}
 	if generation != s.generation {
 		return nil, errTaskAuthorizationChanged
-	}
-	if kind != taskContinuationOrdinary && s.codeModeClosed {
-		return nil, errCodeModeComplete
 	}
 	if s.active[id] != nil {
 		return nil, errorcode.New(errorcode.Conflict, "task continuation already exists")

@@ -38,8 +38,8 @@ func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
 	for name, parts := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			result := tool.Result{ID: "budget", Name: "fixture", Content: parts}
-			call := model.ToolCall{ID: result.ID, Name: result.Name, Args: `{}`}
+			result := tool.Result{Content: parts}
+			call := model.ToolCall{ID: "budget", Name: "fixture", Args: `{}`}
 			canonical, meta := canonicalToolResult(result, nil)
 			if tool.ResultNeedsTruncation(canonical, tool.DefaultTruncationPolicy()) {
 				t.Fatal("canonical result still exceeds the shared content budget")

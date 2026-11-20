@@ -62,9 +62,8 @@ type Reply struct {
 	BodyText string `json:"body_text"`
 	// Value is explicitly structured, successful JSON, validated against an
 	// output schema when declared. Search supplies its typed result directly.
-	Value        json.RawMessage `json:"value,omitempty"`
-	IsError      bool            `json:"is_error,omitempty"`
-	TurnComplete bool            `json:"turn_complete,omitempty"`
+	Value   json.RawMessage `json:"value,omitempty"`
+	IsError bool            `json:"is_error,omitempty"`
 }
 
 // Text joins text and JSON parts in order for failure diagnostics, retaining JSON tokens.
@@ -241,7 +240,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline source, file source and reset operations.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, MayCompleteTurn: true, Metadata: map[string]any{metadataKind: ToolKind}, Description: description, InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{metadataKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
 			"code":          map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body."},

@@ -166,8 +166,6 @@ func repeatedCompactionEchoTool() tool.Tool {
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
 				Content: []tool.ContentBlock{
 					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"repeated compaction tool result"}`)},
 				},

@@ -162,7 +162,6 @@ func (a *Agent) executeStepToolCallsOrdered(
 			index++
 		}
 
-		terminal := false
 		for i, event := range groupEvents {
 			if event == nil {
 				continue
@@ -179,9 +178,8 @@ func (a *Agent) executeStepToolCallsOrdered(
 				a.yieldedResults[event] = true
 				mcpdiscovery.Apply(a.discoveries, event)
 			}
-			terminal = terminal || (event.Tool != nil && event.Tool.TurnComplete)
 		}
-		if terminal || err != nil {
+		if err != nil {
 			return messages, events, true, err
 		}
 	}

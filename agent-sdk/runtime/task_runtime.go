@@ -30,14 +30,13 @@ func randomTaskID() (string, error) {
 }
 
 type taskToolObserver struct {
-	ctx  context.Context
-	call tool.Call
-	def  tool.Definition
+	ctx context.Context
 }
 
 func (o taskToolObserver) ObserveTaskSnapshot(snapshot taskapi.Snapshot) {
-	result, _ := taskSnapshotToolResult(o.call, o.def, snapshot)
-	toolbinding.ReportProgress(o.ctx, result)
+	ctx, _ := toolbinding.Observe(o.ctx)
+	result, _ := taskSnapshotToolResult(ctx, snapshot)
+	toolbinding.ReportProgress(ctx, result)
 }
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
@@ -79,19 +78,19 @@ func (tm *taskRuntime) Cancel(ctx context.Context, ref session.SessionRef, req t
 	})
 }
 
-func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot) (tool.Result, error) {
-	return taskSnapshotToolResultWithPayload(call, def, snapshot, taskToolPayload(snapshot))
+func taskSnapshotToolResult(ctx context.Context, snapshot taskapi.Snapshot) (tool.Result, error) {
+	return taskSnapshotToolResultWithPayload(ctx, snapshot, taskToolPayload(snapshot))
 }
 
-func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string, actualWaitMS int) (tool.Result, error) {
+func taskControlSnapshotToolResult(ctx context.Context, snapshot taskapi.Snapshot, action string, actualWaitMS int) (tool.Result, error) {
 	if strings.EqualFold(strings.TrimSpace(action), "cancel") {
-		return taskSnapshotToolResultWithPayload(call, def, snapshot, taskCancelToolPayload(snapshot))
+		return taskSnapshotToolResultWithPayload(ctx, snapshot, taskCancelToolPayload(snapshot))
 	}
 	payload := taskToolPayload(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		payload["actual_wait_time_ms"] = actualWaitMS
 	}
-	return taskSnapshotToolResultWithPayload(call, def, snapshot, payload)
+	return taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
 }
 
 type taskBatchControlItem struct {
@@ -102,9 +101,9 @@ type taskBatchControlItem struct {
 	ActualWaitMS int
 }
 
-func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, actualWaitMS int) (tool.Result, error) {
+func taskBatchControlToolResult(ctx context.Context, items []taskBatchControlItem, action string, actualWaitMS int) (tool.Result, error) {
 	payload := taskBatchControlPayload(items, action, actualWaitMS)
-	result := tool.Result{ID: strings.TrimSpace(call.ID), Name: strings.TrimSpace(def.Name)}
+	result := tool.Result{}
 	failed := taskBatchHasError(items)
 	if action != "cancel" {
 		for i, item := range items {
@@ -112,29 +111,28 @@ func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []tas
 				continue
 			}
 			itemPayload := payload["tasks"].([]map[string]any)[i]
-			if selected, legacyFailed, ok := takeCodeModeTaskResult(itemPayload); ok {
-				failed = failed || legacyFailed
-				addCodeModeTaskResult(&result, itemPayload, selected, legacyFailed || codeModeTaskFailed(item.Snapshot))
+			if selected, legacy, ok := takeCodeModeTaskResult(itemPayload); ok {
+				failed = failed || legacy.Failed
+				addCodeModeTaskResult(&result, itemPayload, selected)
 			}
 		}
 	}
 	return withTaskPayload(result, payload, failed)
 }
 
-func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, payload map[string]any) (tool.Result, error) {
+func taskSnapshotToolResultWithPayload(ctx context.Context, snapshot taskapi.Snapshot, payload map[string]any) (tool.Result, error) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	meta := taskToolMeta(snapshot)
-	result := tool.Result{ID: call.ID, Name: def.Name, Metadata: meta}
+	observation := toolbinding.Observed(ctx)
+	observation.TaskEvent = taskToolMeta(snapshot)
+	var result tool.Result
 	failed := codeModeTaskFailed(snapshot)
 	if snapshot.Kind == taskapi.KindCodeMode {
-		if selected, legacyFailed, ok := takeCodeModeTaskResult(payload); ok {
-			failed = failed || legacyFailed
-			addCodeModeTaskResult(&result, payload, selected, failed)
-			if completion, ok := selected.Metadata[codemode.MetadataScriptCompletion]; ok {
-				meta[codemode.MetadataScriptCompletion] = completion
-			}
+		if selected, legacy, ok := takeCodeModeTaskResult(payload); ok {
+			failed = failed || legacy.Failed
+			observeScriptTask(ctx, snapshot, legacy)
+			addCodeModeTaskResult(&result, payload, selected)
 		}
 	}
 	return withTaskPayload(result, payload, failed)
@@ -144,23 +142,41 @@ func codeModeTaskFailed(snapshot taskapi.Snapshot) bool {
 	return snapshot.Kind == taskapi.KindCodeMode && (snapshot.State == taskapi.StateUnknownOutcome || snapshot.State == taskapi.StateFailed || snapshot.State == taskapi.StateInterrupted || snapshot.State == taskapi.StateCancelled)
 }
 
-func takeCodeModeTaskResult(payload map[string]any) (tool.Result, bool, bool) {
+// Read pre-content-only script dispositions until their Task snapshots expire.
+type legacyScriptDisposition struct {
+	Failed bool `json:"is_error"`
+
+	Metadata struct {
+		Completion string `json:"code_mode_script_completion"`
+	} `json:"metadata"`
+}
+
+func observeScriptTask(ctx context.Context, snapshot taskapi.Snapshot, old legacyScriptDisposition) {
+	o := toolbinding.Observed(ctx)
+
+	completion, _ := snapshot.Metadata[codemode.MetadataScriptCompletion].(string)
+	if completion == "" {
+		completion = old.Metadata.Completion
+	}
+	if completion != "" {
+		o.ScriptCompletion = completion
+	}
+}
+func takeCodeModeTaskResult(payload map[string]any) (tool.Result, legacyScriptDisposition, bool) {
 	var result tool.Result
 	raw := taskStringValue(payload["tool_result_json"])
 	delete(payload, "tool_result_json")
 	if raw == "" || json.Unmarshal([]byte(raw), &result) != nil {
-		return tool.Result{}, false, false
+		return tool.Result{}, legacyScriptDisposition{}, false
 	}
 	// Current snapshots record failure in Task state. Read the historical
 	// field for older snapshots, which could carry their own failed reply.
-	var legacy struct {
-		Failed bool `json:"is_error"`
-	}
+	var legacy legacyScriptDisposition
 	_ = json.Unmarshal([]byte(raw), &legacy)
-	return result, legacy.Failed, true
+	return result, legacy, true
 }
 
-func addCodeModeTaskResult(result *tool.Result, payload map[string]any, selected tool.Result, failed bool) {
+func addCodeModeTaskResult(result *tool.Result, payload map[string]any, selected tool.Result) {
 	var historical []json.RawMessage
 	for _, block := range selected.Content {
 		if structured, ok := block.(tool.StructuredContent); ok {
@@ -184,7 +200,6 @@ func addCodeModeTaskResult(result *tool.Result, payload map[string]any, selected
 	} else if len(historical) > 0 {
 		payload["result_parts"] = historical
 	}
-	result.TurnComplete = result.TurnComplete || (selected.TurnComplete && !failed)
 }
 
 func withTaskPayload(result tool.Result, payload map[string]any, failed bool) (tool.Result, error) {
@@ -262,7 +277,7 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 			meta["code_mode_source"] = source
 		}
 	}
-	taskMeta := taskRuntimeMetaSection(meta, "task")
+	taskMeta := toolbinding.RuntimeSection(meta, "task")
 	taskMeta["kind"] = strings.TrimSpace(string(snapshot.Kind))
 	taskMeta["state"] = strings.TrimSpace(string(snapshot.State))
 	taskMeta["running"] = snapshot.Running

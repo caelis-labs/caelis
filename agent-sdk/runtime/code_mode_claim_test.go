@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -61,66 +60,6 @@ func TestCodeModeIntentDoesNotHoldConfigurationGuardDuringApprovalOrIO(t *testin
 	runCodeMode(t, store, active, spec, registry, requester)
 	if !approved.Load() || !executed.Load() || !store.updated.Load() {
 		t.Fatalf("approval=%v execution=%v replacement_during_claim=%v", approved.Load(), executed.Load(), store.updated.Load())
-	}
-}
-
-func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
-	store, active, _ := codeModeStore(t)
-	asked, release := make(chan struct{}), make(chan struct{})
-	var effects atomic.Int32
-	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-		if input.Tool.Name == "Write" {
-			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{}}, nil
-		}
-		return policy.Decision{Action: policy.ActionAllow}, nil
-	}}}
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		close(asked)
-		<-release
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
-	})
-	encoded := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-	data, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	image := tool.Image{Data: data, MIMEType: "image/png", Name: "fixture.png"}
-	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{TurnComplete: true, Content: []tool.ContentBlock{image}}, nil
-	}}
-	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		effects.Add(1)
-		return tool.Result{}, nil
-	}}
-	declaration := &codemode.Tool{Name: "js_repl", Executor: codeOutputExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (codemode.Output, error) {
-		done := make(chan error, 1)
-		go func() { _, err := host.Call(ctx, "Write", []byte(`{}`)); done <- err }()
-		<-asked
-		reply, err := host.Call(ctx, "Complete", []byte(`{}`))
-		close(release)
-		blocked := <-done
-		if err != nil || !reply.TurnComplete || len(reply.Parts) != 1 || !errors.Is(blocked, errCodeModeComplete) {
-			return codemode.Output{}, errors.New("completion did not fence the pending approval")
-		}
-		return codemode.Output{Reply: true, Parts: reply.Parts}, nil
-	})}
-	llm := codeModeModel(false)
-	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{declaration, complete, write}}, registry, requester)
-	emitted := false
-	for _, event := range live {
-		if session.IsCanonicalHistoryEvent(event) && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "js_repl" {
-			if !event.Tool.TurnComplete || event.Message == nil || event.Message.Parts[0].ToolResult.IsError {
-				t.Fatalf("completion disposition lost: %+v", event.Tool)
-			}
-			for _, part := range event.Message.Parts[0].ToolResult.Content {
-				if part.Media != nil && part.Media.Source.Data == encoded {
-					emitted = true
-				}
-			}
-		}
-	}
-	if effects.Load() != 0 || !emitted || len(llm.requests) != 1 {
-		t.Fatalf("effects=%d emitted=%v model_requests=%d", effects.Load(), emitted, len(llm.requests))
 	}
 }
 

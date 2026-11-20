@@ -35,7 +35,7 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 	calls := 0
 	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read", Description: "Read one numbered document", InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []any{"number"}, "properties": map[string]any{"number": map[string]any{"type": "integer"}}}, Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataServer: "docs", mcp.MetadataTool: "read", mcp.MetadataSourceFingerprint: "version-1"}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		calls++
-		return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("read")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("read")}}, nil
 	}}
 	source := &readyMCPSource{tools: []tool.Tool{remote}}
 	llm := &mcpRoutingModel{next: func(i int) []model.ToolCall {

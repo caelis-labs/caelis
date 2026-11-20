@@ -4,9 +4,13 @@ import (
 	"context"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 )
 
@@ -25,6 +29,11 @@ type runtimeCaller interface {
 func Call(ctx context.Context, candidate tool.Tool, call tool.Call, dispatch Dispatch) (tool.Result, error) {
 	if rt, ok := candidate.(runtimeCaller); ok {
 		return rt.RuntimeCall(Token{}, ctx, call, dispatch)
+	}
+	switch candidate.(type) {
+	case *filesystem.PatchTool, *filesystem.WriteTool, *filesystem.ReadTool, *filesystem.SearchTool, *filesystem.GlobTool, *web.SearchTool, *web.FetchTool, plan.Tool, *skilltool.Tool, *shell.RunCommandTool:
+		o := Observed(ctx)
+		ctx = toolpresentation.With(ctx, func(details map[string]any) { o.BuiltinDisplay = details })
 	}
 	if dispatch.Model != nil {
 		switch native := candidate.(type) {

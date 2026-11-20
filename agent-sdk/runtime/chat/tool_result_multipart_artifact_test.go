@@ -35,7 +35,7 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			store := testToolResultArtifactStore(t, 8, 4*1024*1024)
-			result := tool.Result{ID: "multipart", Name: "fixture", Content: parts}
+			result := tool.Result{Content: parts}
 			before, _ := tool.CloneResult(result, nil)
 			canonical, meta := canonicalToolResult(result, store)
 			var path string
@@ -75,7 +75,7 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 			if again, info := tool.TruncateResultWithInfo(canonical, tool.DefaultTruncationPolicy()); info.Truncated || !reflect.DeepEqual(again, canonical) {
 				t.Fatal("canonical multipart result still needs truncation")
 			}
-			call := model.ToolCall{ID: result.ID, Name: result.Name, Args: `{}`}
+			call := model.ToolCall{ID: "multipart", Name: "fixture", Args: `{}`}
 			message := toolResultMessageFromCanonical(call, canonical, nil)
 			event := session.CanonicalizeEvent(toolResultEvent(call, canonical, nil, &message, meta))
 			if err := session.ValidateDurableCoreEvent(event); err != nil {

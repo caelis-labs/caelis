@@ -14,10 +14,6 @@ func TestScriptFinalFrameProjectsSelectedContent(t *testing.T) {
 	const selected = `{"answer":9007199254740993}`
 	receipt := tool.Result{
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(selected)}},
-		Metadata: map[string]any{
-			"code_mode_script_completion": "completed",
-			"code_mode_source":            map[string]any{"code": "return {answer:9007199254740993};"},
-		},
 	}
 	raw, err := json.Marshal(receipt)
 	if err != nil {

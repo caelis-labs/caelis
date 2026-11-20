@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
@@ -70,21 +71,8 @@ func (t *WriteTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		"summary":  mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
 		"revision": textRevision(plan.after),
 	}
-	meta := map[string]any{
-		"created":        plan.created,
-		"previous_empty": plan.before == "",
-		"bytes_written":  len([]byte(plan.after)),
-		"line_count":     lineCount(plan.after),
-		"added_lines":    diffStats.Added,
-		"removed_lines":  diffStats.Removed,
-		"revision":       textRevision(plan.after),
-	}
-	result, err := toolutil.JSONResult(WriteToolName, payload, meta)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	attachMutationDiffMeta(result.Metadata, plan.before, plan.after, plan.hunk)
-	return result, nil
+	toolpresentation.Write(ctx, mutationDisplay(plan, diffStats), len(plan.after), lineCount(plan.after))
+	return toolutil.JSONResult(payload)
 }
 
 type mkdirAllFileSystem interface {

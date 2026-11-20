@@ -25,7 +25,7 @@ import (
 // Replaces comparison-only command-in-script approval tests with real JS and
 // an allowed filesystem effect, keeping the original Runtime approval/Journal.
 func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
-	for _, mode := range []string{"allow", "generation", "complete", "cancel"} {
+	for _, mode := range []string{"allow", "generation", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
 			sandbox, err := host.New(host.Config{CWD: root})
@@ -51,7 +51,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 				return write.Call(ctx, c)
 			}}
 			later := tool.NamedTool{Def: tool.Definition{Name: "After", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { after.Add(1); return tool.Result{}, nil }}
-			complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { return tool.Result{TurnComplete: true}, nil }}
+
 			registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
 				if in.Tool.Name == "Write" {
 					return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{}}, nil
@@ -94,9 +94,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 						t.Error("missing original yielded Task")
 						return nil
 					}
-					if mode == "complete" {
-						return []model.ToolCall{{ID: "complete", Name: "Complete", Args: `{}`}}
-					}
+
 					action := "wait"
 					if mode == "cancel" {
 						action = "cancel"
@@ -113,7 +111,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 				}
 				return nil
 			}}
-			tools := []tool.Tool{counted, later, complete, tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}
+			tools := []tool.Tool{counted, later, tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}
 			spec := agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
 				return agent.ModelRequestSnapshot{Model: driver, Tools: tools, Validate: func(context.Context) (func(), error) {
 					revision.RLock()

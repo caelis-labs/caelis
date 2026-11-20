@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
@@ -79,14 +80,14 @@ func (t *SearchTool) CallWithBackend(ctx context.Context, call tool.Call, backen
 	req := model.NormalizeWebSearchRequest(model.WebSearchRequest{Query: query, MaxResults: maxResults})
 	provider := strings.TrimSpace(backend.Provider)
 	if reason := strings.TrimSpace(backend.UnavailableReason); reason != "" {
-		return webSearchUnavailableResult(req, provider, reason)
+		return webSearchUnavailableResult(ctx, req, provider, reason)
 	}
 	if backend.SearchWeb == nil {
-		return webSearchUnavailableResult(req, provider, "Web search is unavailable for this provider. Use WebFetch with a known URL, or configure a search backend.")
+		return webSearchUnavailableResult(ctx, req, provider, "Web search is unavailable for this provider. Use WebFetch with a known URL, or configure a search backend.")
 	}
 	resp, err := backend.SearchWeb(ctx, req)
 	if err != nil {
-		return webSearchFailedResult(req, provider, err)
+		return webSearchFailedResult(ctx, req, provider, err)
 	}
 	if resp.Provider == "" {
 		resp.Provider = provider
@@ -102,10 +103,8 @@ func (t *SearchTool) CallWithBackend(ctx context.Context, call tool.Call, backen
 	if len(citations) != 0 {
 		payload["citations"] = citations
 	}
-	return toolutil.JSONResult(SearchToolName, payload, map[string]any{
-		"query": resp.Query, "provider": resp.Provider, "model": resp.Model,
-		"usage": usagePayload(resp.Usage),
-	})
+	toolpresentation.WebSearch(ctx, resp.Query, resp.Provider, resp.Model, usagePayload(resp.Usage))
+	return toolutil.JSONResult(payload)
 }
 
 // Keep the result order used by legacy positional references. Citations reuse
@@ -153,17 +152,15 @@ type webSearchCitation struct {
 	Sources       []model.CitationSource `json:"sources,omitempty"`
 }
 
-func webSearchFailedResult(req model.WebSearchRequest, provider string, err error) (tool.Result, error) {
+func webSearchFailedResult(ctx context.Context, req model.WebSearchRequest, provider string, err error) (tool.Result, error) {
 	message := strings.TrimSpace("Web search failed. " + webSearchErrorMessage(err))
-	result, resultErr := toolutil.JSONResult(SearchToolName, map[string]any{
+	toolpresentation.WebSearch(ctx, req.Query, provider, "", nil)
+	result, resultErr := toolutil.JSONResult(map[string]any{
 		"status":   "failed",
 		"query":    req.Query,
 		"provider": provider,
 		"message":  message,
 		"results":  []any{},
-	}, map[string]any{
-		"query":    req.Query,
-		"provider": provider,
 	})
 	if resultErr != nil {
 		return tool.Result{}, resultErr
@@ -171,16 +168,14 @@ func webSearchFailedResult(req model.WebSearchRequest, provider string, err erro
 	return result, tool.FailedReply(message)
 }
 
-func webSearchUnavailableResult(req model.WebSearchRequest, provider string, message string) (tool.Result, error) {
-	return toolutil.JSONResult(SearchToolName, map[string]any{
+func webSearchUnavailableResult(ctx context.Context, req model.WebSearchRequest, provider string, message string) (tool.Result, error) {
+	toolpresentation.WebSearch(ctx, req.Query, provider, "", nil)
+	return toolutil.JSONResult(map[string]any{
 		"status":   "unavailable",
 		"query":    req.Query,
 		"provider": provider,
 		"message":  strings.TrimSpace(message),
 		"results":  []any{},
-	}, map[string]any{
-		"query":    req.Query,
-		"provider": provider,
 	})
 }
 

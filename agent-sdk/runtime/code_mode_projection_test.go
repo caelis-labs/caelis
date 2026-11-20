@@ -158,11 +158,8 @@ func TestJSExecFixedFileBytesInContinuousVM(t *testing.T) {
 	var hashes []string
 	for _, e := range events {
 		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == codemode.ToolName && e.Tool.Outcome == "succeeded" {
-			var result tool.Result
-			if json.Unmarshal(toolResultJSON(e.Tool.Result), &result) != nil {
-				t.Fatal("invalid original result")
-			}
-			m, _ := result.Metadata["code_mode_source"].(map[string]any)
+
+			m, _ := e.Meta["code_mode_source"].(map[string]any)
 			if h, _ := m["sha256"].(string); h != "" {
 				hashes = append(hashes, h)
 			}

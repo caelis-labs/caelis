@@ -11,19 +11,17 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // changingBindingSource replaces one method while retaining its original name.
@@ -244,7 +242,9 @@ func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"tools": []any{map[string]any{"name": current.Name, "binding": current, "input_schema": map[string]any{"type": "object"}}}})
 	search := tool.Call{ID: "search", Name: mcp.SearchToolName, Input: []byte(`{}`)}
 	searchCtx := toolbinding.WithOccurrence(ctx, tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "search"}, parent, nil)
-	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}
+	searchCtx, observed := toolbinding.Observe(searchCtx)
+	observed.Discovery = true
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}
 	if err := rt.appendToolFact(searchCtx, active.SessionRef, "turn", search, &result, nil); err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,6 @@ type codeModeAdmissionKey struct{}
 type codeModeValidationKey struct{}
 type nestedToolEventSinkKey struct{}
 
-var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 var errCodeModeHostClosed = errors.New("code mode host admission is closed")
 
 type runtimeCodeModeTool struct {
@@ -44,6 +43,10 @@ type runtimeCodeModeTool struct {
 }
 
 func (t runtimeCodeModeTool) Definition() tool.Definition { return t.declaration.Definition() }
+
+func (runtimeCodeModeTool) RuntimeNativeSchedule(toolbinding.Token, context.Context, tool.Call) toolbinding.NativeSchedule {
+	return toolbinding.NativeSchedule{Ordered: true}
+}
 
 func (t runtimeCodeModeTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
 	t.producingModel = dispatch.Model
@@ -73,6 +76,7 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 		if t.runtime == nil {
 			return tool.Result{}, fmt.Errorf("js_exec reset requires Runtime Session binding")
 		}
+		toolbinding.Observed(ctx).ScriptCompletion = "completed"
 		return t.runtime.resetCodeMode(t.ref, t.declaration.Executor), nil
 	}
 	source, err := t.declaration.ReadSource(call, limits.SourceBytes)
@@ -135,42 +139,34 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	<-host.drained
 	host.mu.Lock()
 	defer host.mu.Unlock()
-	if host.turnComplete && host.fatal == nil {
-		// A trusted host disposition cannot be suppressed by executor control
-		// flow or an invalid final value. No further effect or model call follows.
-		completed.err = nil
-		if !validCodeModeOutput(completed.output, limits.OutputBytes) {
-			completed.output = codemode.Output{Value: []byte(`null`)}
-		}
-	}
 	if completed.err == nil && !validCodeModeOutput(completed.output, limits.OutputBytes) {
 		completed.err = errors.Join(completed.err, fmt.Errorf("code mode output must be bounded JSON"))
 	}
-	result := tool.Result{ID: call.ID, Name: call.Name, TurnComplete: host.turnComplete,
-		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
+	var result tool.Result
+	observation := toolbinding.Observed(ctx)
+	observation.Source = &source
+
 	if completed.err == nil {
 		result.Content, completed.err = host.returnedParts(completed.output)
 	}
 	var payload map[string]any
+	var unknown bool
 	if len(host.failures) > 0 {
-		result.Metadata["code_mode_outcome"] = codemode.OutcomeFailed
 		for _, failure := range host.failures {
 			if failure.Outcome == codemode.OutcomeUnknown {
-				result.Metadata["code_mode_outcome"] = codemode.OutcomeUnknown
+				unknown = true
+				break
 			}
 		}
 		payload = host.failurePayload(completed.err != nil)
 	}
-	result.Metadata[codemode.MetadataScriptCompletion] = "completed"
+	observation.ScriptCompletion = "completed"
 	if completed.err != nil || host.fatal != nil {
-		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
-	}
-
-	if completed.err != nil || host.fatal != nil {
+		observation.ScriptCompletion = "failed"
 		// Normalize once before foreground delivery or Task persistence. Keep
 		// private Host causes out of the public diagnostic and error string.
 		publicErr := completed.err
-		if result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown {
+		if unknown {
 			publicErr = codemode.PublicHostError(call.Name, tool.NewError(errorcode.UnknownOutcome, "tool outcome is unknown"))
 		} else if host.fatal != nil {
 			publicErr = codemode.PublicHostError(call.Name, host.fatal)
@@ -188,8 +184,8 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	if payload != nil {
 		appendCodeModePayload(&result, payload)
 	}
-	if host.isError && !host.turnComplete {
-		if result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown {
+	if host.isError {
+		if unknown {
 			const message = "tool outcome is unknown; do not replay"
 			return result, tool.WrapError(errorcode.UnknownOutcome, tool.FailedReply(message), message)
 		}
@@ -241,8 +237,8 @@ type codeModeHost struct {
 	pending        int
 	calls          int
 	isError        bool
-	turnComplete   bool
-	fatal          error
+
+	fatal error
 	*codeModeResults
 }
 
@@ -274,19 +270,9 @@ func (h *codeModeHost) admit(ctx context.Context, validateTarget func(context.Co
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if scope := taskScopeFromContext(h.ctx); scope != nil {
-		scope.mu.Lock()
-		closed := scope.codeModeClosed
-		scope.mu.Unlock()
-		if closed {
-			return nil, errCodeModeComplete
-		}
-	}
 	release, validationErr := validateTarget(ctx)
 	h.mu.Lock()
 	switch {
-	case h.turnComplete:
-		validationErr = errCodeModeComplete
 	case h.closed:
 		validationErr = errCodeModeHostClosed
 	case h.ctx.Err() != nil:
@@ -407,7 +393,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.fail(err)
 		return codemode.Reply{}, err
 	}
-	var report func(tool.Result)
+	ctx, _ = toolbinding.Observe(ctx)
+	var report func(toolbinding.Progress)
 	if publish, ok := ctx.Value(nestedToolEventSinkKey{}).(func(*session.Event)); ok && ownsNestedCommandPresentation(ctx, call, target.tool) {
 		report = (nestedCommandObserver{publish: publish, fact: runtimeToolFact(ctx, call, "", nil), target: target.tool}).ObserveToolResult
 	}
@@ -424,22 +411,10 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.isError = h.isError || callErr != nil
-	if result.TurnComplete && callErr == nil {
-		h.turnComplete = true
-		h.closed = true
-		if scope := taskScopeFromContext(h.ctx); scope != nil {
-			scope.completeCodeMode(h.ctx)
-		}
-	}
 	if outcome == codemode.OutcomeUnknown && callErr == nil {
 		callErr = errorcode.New(errorcode.UnknownOutcome, "tool outcome is unknown; do not replay")
 	}
 	if callErr != nil {
-		if errors.Is(callErr, errCodeModeComplete) {
-			// A pending approval lost admission before claiming an effect. This
-			// expected rejection must not cancel the completing call's media Emit.
-			return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
-		}
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
 		if h.ctx.Err() == nil && persistErr == nil && (settledCodeModeToolError(callErr) || discovery && errorcode.Is(callErr, errorcode.ResourceExhausted)) {

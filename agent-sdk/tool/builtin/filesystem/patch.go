@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
@@ -78,20 +79,8 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		"summary":      mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
 		"revision":     textRevision(plan.after),
 	}
-	meta := map[string]any{
-		"created":        plan.created,
-		"previous_empty": plan.before == "",
-		"added_lines":    diffStats.Added,
-		"removed_lines":  diffStats.Removed,
-		"hunk":           plan.hunk,
-		"revision":       textRevision(plan.after),
-	}
-	result, err := toolutil.JSONResult(PatchToolName, payload, meta)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	attachMutationDiffMeta(result.Metadata, plan.before, plan.after, plan.hunk)
-	return result, nil
+	toolpresentation.Patch(ctx, mutationDisplay(plan, diffStats))
+	return toolutil.JSONResult(payload)
 }
 
 var _ tool.Tool = (*PatchTool)(nil)

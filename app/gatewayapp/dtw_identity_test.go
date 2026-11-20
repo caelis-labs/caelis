@@ -191,13 +191,13 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 		t.Fatal("revoked old handle admitted another dispatch")
 	}
 	freshResult, err := fresh.Call(ctx, tool.Call{ID: "new-activation", Name: fresh.Definition().Name, Input: call.Input})
-	if err != nil || freshResult.Name != "dtw__look" {
+	if err != nil || len(freshResult.Content) != 1 || freshResult.Content[0] != tool.Text("dtw original receipt") {
 		t.Fatalf("new activation positive control = %+v, %v", freshResult, err)
 	}
 	releaseOld()
 	select {
 	case got := <-done:
-		if got.err != nil || got.result.ID != call.ID || got.result.Name != call.Name || len(got.result.Content) != 1 || got.result.Content[0] != tool.Text("desktop-world original receipt") {
+		if got.err != nil || len(got.result.Content) != 1 || got.result.Content[0] != tool.Text("desktop-world original receipt") {
 			t.Fatalf("old accepted result lost its original identity: %+v, %v", got.result, got.err)
 		}
 	case <-ctx.Done():

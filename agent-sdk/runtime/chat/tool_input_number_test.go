@@ -50,7 +50,7 @@ func TestToolObservationInputNumbersSurviveSessionFileReplay(t *testing.T) {
 
 	live := []*session.Event{
 		modelToolCallEvents(model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, ""), nil, "", nil)[0],
-		toolResultEvent(call, tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"result":"ok"}`)}}}, nil, nil),
+		toolResultEvent(call, tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"result":"ok"}`)}}}, nil, nil),
 	}
 	assertInputs(t, live)
 	ctx := context.Background()

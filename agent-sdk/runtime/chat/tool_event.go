@@ -26,9 +26,6 @@ func toolEvent(call model.ToolCall, result tool.Result, err error, message *mode
 		Tool: toolEventPayload(call, "", mustObject(call.Args), nil, nil),
 	}
 	applyToolResultPresentation(event, call, result, err, message, statusOverride, extraMeta...)
-	if statusOverride == "" && err == nil {
-		event.Tool.TurnComplete = result.TurnComplete
-	}
 	full, _ := tool.CloneResult(result, nil)
 	event.Tool.Result = &full
 	event.Tool.Outcome = processingOutcome(err)
@@ -41,9 +38,9 @@ func toolEvent(call model.ToolCall, result tool.Result, err error, message *mode
 
 // ApplyRuntimeToolResultPresentation applies the chat tool display fields to a
 // Runtime-authored tool event. Task authority comes from the bound target.
-func ApplyRuntimeToolResultPresentation(event *session.Event, result tool.Result, target tool.Tool, err error) {
+func ApplyRuntimeToolResultPresentation(event *session.Event, result tool.Result, target tool.Tool, err error, meta map[string]any) {
 	call := model.ToolCall{ID: event.Tool.ID, Name: event.Tool.Name}
-	applyToolResultPresentation(event, call, result, err, event.Message, "", runtimeTaskResultSourceMeta(toolbinding.IsTaskResultSource(target)))
+	applyToolResultPresentation(event, call, result, err, event.Message, "", meta, runtimeTaskResultSourceMeta(toolbinding.IsTaskResultSource(target)))
 }
 
 func applyToolResultPresentation(event *session.Event, call model.ToolCall, result tool.Result, err error, message *model.Message, statusOverride string, extraMeta ...map[string]any) {
@@ -56,14 +53,13 @@ func applyToolResultPresentation(event *session.Event, call model.ToolCall, resu
 	}
 	rawOutput := toolResultRawOutput(parts, err != nil)
 	trustedTaskResult := runtimeTaskResultSourceDeclared(extraMeta)
-	resultMetadata := session.CloneState(result.Metadata)
+	resultMetadata := session.CloneState(mergeEventMeta(extraMeta...))
 	resultMetadata = withoutUntrustedRuntimeTaskAuthority(resultMetadata, trustedTaskResult)
 	metaParts := []map[string]any{resultMetadata}
-	metaParts = append(metaParts, extraMeta...)
 	metaParts = append(metaParts, toolMeta(call.Name), runtimeTaskResultSourceMeta(trustedTaskResult))
 	status := strings.TrimSpace(statusOverride)
 	if status == "" {
-		status = toolCallStatus(call, result, err, rawOutput, trustedTaskResult)
+		status = toolCallStatus(call, resultMetadata, err, rawOutput, trustedTaskResult)
 	}
 	event.Tool.Status = status
 	event.Tool.Output = session.CloneState(rawOutput)
@@ -126,7 +122,7 @@ func toolResultRawOutput(parts []model.Part, isError bool) map[string]any {
 	return map[string]any{}
 }
 
-func toolCallStatus(call model.ToolCall, result tool.Result, err error, rawOutput map[string]any, trustedTaskResult bool) string {
+func toolCallStatus(call model.ToolCall, meta map[string]any, err error, rawOutput map[string]any, trustedTaskResult bool) string {
 	if err != nil {
 		return "failed"
 	}
@@ -135,12 +131,12 @@ func toolCallStatus(call model.ToolCall, result tool.Result, err error, rawOutpu
 	// Spawn, Task, and SendMessage, do not transfer their invocation lifecycle
 	// to the target they address or observe.
 	if trustedTaskResult &&
-		((strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) && runtimeTaskKind(result.Metadata) == "command") || (call.Name == "js_exec" && runtimeTaskKind(result.Metadata) == "code_mode")) {
+		((strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) && runtimeTaskKind(meta) == "command") || (call.Name == "js_exec" && runtimeTaskKind(meta) == "code_mode")) {
 		state, _ := rawOutput["state"].(string)
 		if call.Name == "js_exec" {
 			// Returned business data may itself contain a running inner Task.
 			// Only the original outer Task producer owns this invocation state.
-			state, _ = runtimeTaskMetadata(result.Metadata)["state"].(string)
+			state, _ = runtimeTaskMetadata(meta)["state"].(string)
 		}
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {

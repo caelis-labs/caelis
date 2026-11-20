@@ -119,7 +119,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			if tc.caught {
 				wantCompletion = "completed"
 			}
-			if persisted.TurnComplete || persisted.Metadata[codemode.MetadataScriptCompletion] != wantCompletion || persisted.Metadata["code_mode_outcome"] != codemode.OutcomeFailed {
+			if entry.Metadata[codemode.MetadataScriptCompletion] != wantCompletion {
 				t.Fatalf("script completion differs from its trusted receipt: %+v", persisted)
 			}
 			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
@@ -160,7 +160,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 						}
 						return
 					}
-					if failure.Reply == nil || failure.Reply.CallID != callID || !failure.Reply.IsError || failure.Reply.TurnComplete || failure.Reply.Outcome != codemode.OutcomeFailed {
+					if failure.Reply == nil || failure.Reply.CallID != callID || !failure.Reply.IsError || failure.Reply.Outcome != codemode.OutcomeFailed {
 						t.Fatalf("original failed reply was lost or mutated: %+v", failure.Reply)
 					}
 					foundDomain := false

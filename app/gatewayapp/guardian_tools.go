@@ -261,7 +261,7 @@ func (t guardianQueryTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 			if runErr != nil {
 				return q.errorResult(t.name, "execution_failed", runErr, payload)
 			}
-			result, err = toolutil.JSONResult(t.name, payload, nil)
+			result, err = toolutil.JSONResult(payload)
 		}
 	default:
 		err = fmt.Errorf("unsupported Guardian tool %q", t.name)
@@ -291,7 +291,7 @@ func (q *guardianQueries) errorResult(name, kind string, err error, partial map[
 	}
 	partial["error_kind"], partial["error"] = kind, guardianFold(err.Error(), 512)
 	partial["guidance"] = "This is an evidence limitation, not a risk verdict. Decide using the remaining facts."
-	result, _ := toolutil.JSONResult(name, partial, nil)
+	result, _ := toolutil.JSONResult(partial)
 	return q.boundResult(result), tool.FailedReply(err.Error())
 }
 

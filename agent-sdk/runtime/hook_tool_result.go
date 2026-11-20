@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
@@ -42,7 +43,13 @@ func (t resultHookTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, c 
 		r, err = toolbinding.Call(ctx, t.base, c, dispatch)
 		return err
 	})
-	return hookrun.FullResult(ctx, t.Definition(), c, r, err)
+	r, err = hookrun.FullResult(ctx, t.Definition(), c, r, err)
+	var processing *hookrun.ProcessingError
+	if errors.As(err, &processing) {
+		// A failed transform may have been redacting the display as well as the reply.
+		*toolbinding.Observed(ctx) = toolbinding.Observation{}
+	}
+	return r, err
 }
 
 func wrapToolResults(concrete, tools []tool.Tool) []tool.Tool {

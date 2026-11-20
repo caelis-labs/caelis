@@ -23,7 +23,7 @@ func TestCrossVersionReplayCorpusMatchesRuntimeProducedModelContext(t *testing.T
 		{Schema: session.EventSchemaVersion, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &liveUser},
 		modelToolCallEvents(liveAssistantCall, nil, "", nil)[0],
 		toolResultEvent(model.ToolCall{ID: "call-1", Name: "probe", Args: `{"path":"README.md"}`}, tool.Result{
-			ID: "call-1", Name: "probe", Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"value":"ok"}`)}},
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"value":"ok"}`)}},
 		}, nil, nil),
 		modelResponseEvent(model.NewTextMessage(model.RoleAssistant, "done"), nil, "", nil),
 	}

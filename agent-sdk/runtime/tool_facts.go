@@ -55,6 +55,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		event.Tool.Result = &full
 		effect, effectErr := hookrun.EffectResult(full, callErr)
 		event.Tool.Outcome = session.ToolOutcome(codeModeOutcome(effect, effectErr))
+		observation := toolbinding.Observed(ctx)
 		if event.Tool.Outcome == session.ToolOutcomeSucceeded {
 			event.Tool.Status = "completed"
 		}
@@ -66,6 +67,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			def = tool.CloneDefinition(targets[0].definition)
 			source = targets[0].source
 		}
+		observation.Apply(event.Tool, def, effectErr == nil)
 		message, processingErr = hookrun.ModelView(ctx, def, call, message)
 		if processingErr != nil {
 			message = hookrun.FailedView(original)
@@ -73,7 +75,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		}
 		event.Message = &message
 		if ownsNestedCommandPresentation(ctx, call, source) {
-			chat.ApplyRuntimeToolResultPresentation(event, full, source, callErr)
+			chat.ApplyRuntimeToolResultPresentation(event, full, source, callErr, observation.EventMeta())
 		}
 		event.Tool.ErrorCode = string(errorcode.CodeOf(callErr))
 		event.Tool.ProcessingFailure = hookrun.ProcessingFailure(errors.Join(callErr, processingErr))
@@ -135,7 +137,7 @@ type nestedCommandObserver struct {
 	target  tool.Tool
 }
 
-func (o nestedCommandObserver) ObserveToolResult(result tool.Result) {
+func (o nestedCommandObserver) ObserveToolResult(progress toolbinding.Progress) {
 	fact := *o.fact
 	event := &session.Event{
 		Type: session.EventTypeToolResult, Visibility: session.VisibilityUIOnly,
@@ -143,6 +145,6 @@ func (o nestedCommandObserver) ObserveToolResult(result tool.Result) {
 		Actor: session.ActorRef{Kind: session.ActorKindTool, ID: fact.ID, Name: fact.Name},
 		Tool:  &fact,
 	}
-	chat.ApplyRuntimeToolResultPresentation(event, result, o.target, nil)
+	chat.ApplyRuntimeToolResultPresentation(event, progress.Result, o.target, nil, progress.EventMeta)
 	o.publish(event)
 }
