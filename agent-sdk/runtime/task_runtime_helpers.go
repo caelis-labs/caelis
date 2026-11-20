@@ -189,28 +189,6 @@ func commandTimeoutFromTool(tool tool.Tool) time.Duration {
 	return timeout
 }
 
-func constraintsFromMetadata(meta map[string]any) sandbox.Constraints {
-	if meta == nil {
-		return sandbox.Constraints{}
-	}
-	raw, ok := meta["sandbox_constraints"]
-	if !ok || raw == nil {
-		return sandbox.Constraints{}
-	}
-	if typed, ok := raw.(sandbox.Constraints); ok {
-		return sandbox.NormalizeConstraints(typed)
-	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return sandbox.Constraints{}
-	}
-	var out sandbox.Constraints
-	if err := json.Unmarshal(bytes, &out); err != nil {
-		return sandbox.Constraints{}
-	}
-	return sandbox.NormalizeConstraints(out)
-}
-
 func decodeJSONMap(raw []byte) (map[string]any, error) {
 	var out map[string]any
 	if len(strings.TrimSpace(string(raw))) == 0 {

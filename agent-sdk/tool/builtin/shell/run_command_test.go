@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -269,40 +270,47 @@ func TestRunCommandCallUsesConfiguredHardTimeoutOnly(t *testing.T) {
 	}
 }
 
-func TestRunCommandCallDefaultsNetworkToRuntimeDefault(t *testing.T) {
+func TestRunCommandCallUsesRuntimeDefaultsOnlyWithoutDecodedConstraints(t *testing.T) {
 	t.Parallel()
 
+	defaults := sandbox.Constraints{
+		Route:      sandbox.RouteSandbox,
+		Backend:    sandbox.BackendWindows,
+		Permission: sandbox.PermissionWorkspaceWrite,
+		Isolation:  sandbox.IsolationProcess,
+		Network:    sandbox.NetworkEnabled,
+	}
 	var last sandbox.CommandRequest
 	rt := sandboxPermissionRuntime{
 		result: sandbox.CommandResult{Stdout: "ok", ExitCode: 0},
 		last:   &last,
 		descriptor: sandbox.Descriptor{
-			Backend: sandbox.BackendWindows,
-			DefaultConstraints: sandbox.Constraints{
-				Route:      sandbox.RouteSandbox,
-				Backend:    sandbox.BackendWindows,
-				Permission: sandbox.PermissionWorkspaceWrite,
-				Isolation:  sandbox.IsolationProcess,
-				Network:    sandbox.NetworkEnabled,
-			},
+			Backend:            sandbox.BackendWindows,
+			DefaultConstraints: defaults,
 		},
 	}
 	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
 		t.Fatalf("NewRunCommand() error = %v", err)
 	}
-	raw, err := json.Marshal(map[string]any{"command": "printf 'ok'"})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if _, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw}); err != nil {
-		t.Fatalf("Call() error = %v", err)
-	}
-	if got := last.Constraints.Network; got != sandbox.NetworkEnabled {
-		t.Fatalf("default network = %q, want enabled", got)
-	}
-	if got := last.Constraints.Backend; got != sandbox.BackendWindows {
-		t.Fatalf("constraints backend = %q, want windows default", got)
+	for _, tc := range []struct {
+		name     string
+		metadata map[string]any
+		want     sandbox.Constraints
+	}{
+		{name: "missing", want: defaults},
+		{name: "invalid", metadata: map[string]any{"sandbox_constraints": map[string]any{"route": "host", "path_rules": true}}, want: defaults},
+		{name: "explicitly empty", metadata: map[string]any{"sandbox_constraints": map[string]any{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := tool.Call{Name: RunCommandToolName, Input: json.RawMessage(`{"command":"printf 'ok'"}`), Metadata: tc.metadata}
+			if _, err := runCommandTool.Call(t.Context(), call); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(last.Constraints, tc.want) {
+				t.Fatalf("constraints = %+v, want %+v", last.Constraints, tc.want)
+			}
+		})
 	}
 }
 
