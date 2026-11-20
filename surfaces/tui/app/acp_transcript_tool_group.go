@@ -140,6 +140,13 @@ func renderScriptInvocationRows(blockID string, events []SubagentEvent, width in
 	ev := events[0]
 	prefix := truncateDisplayCells(explorationChildPrefix(first), maxInt(0, width-1))
 	budget := maxInt(1, width-displayColumns(prefix))
+	tag, styledTag := approvalReviewStatusTag(ctx, sanitizeRenderableText(ev.ApprovalStatus))
+	if tagWidth := displayColumns(tag) + 1; tag != "" && tagWidth < budget {
+		budget -= tagWidth
+		tag, styledTag = " "+tag, " "+styledTag
+	} else {
+		tag, styledTag = "", ""
+	}
 	header := scriptInvocationHeader(events, ctx, budget, fullArgs)
 	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
 	var styled string
@@ -150,8 +157,8 @@ func renderScriptInvocationRows(blockID string, events []SubagentEvent, width in
 	} else {
 		styled = styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)
 	}
-	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header))
-	line := prefix + header
+	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header)) + styledTag
+	line := prefix + header + tag
 	if ev.Err {
 		styled = ctx.Theme.ErrorStyle().Render(line)
 	} else if dim {
@@ -197,10 +204,6 @@ func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budg
 			}
 			header = strings.TrimPrefix(standardToolLifecycleHeader(ev, false), "• ")
 		}
-	}
-	if ev.ApprovalStatus != "" {
-		tag, _ := approvalReviewStatusTag(ctx, ev.ApprovalStatus)
-		header += " " + tag
 	}
 	header = sanitizeRenderableText(header)
 	if ev.Name != surfaceToolRunCommand {

@@ -57,6 +57,23 @@ func TestScriptMutationRowsUseFinalDiffCounts(t *testing.T) {
 					}
 				}
 			}
+			block.(*MainACPTurnBlock).AddApprovalReviewEvent("Patch", "Patch", "patch-with-a-long-file-name.txt", "approved", "")
+			ctx := m.blockRenderContext(60)
+			ctx.Theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+			found := false
+			for _, row := range block.Render(ctx) {
+				if strings.Contains(row.Plain, "Edit patch-") {
+					found = true
+					if !strings.Contains(row.Plain, "+2 -1 [approved]") ||
+						!strings.Contains(ansiTextForForeground(t, row.Styled, ctx.Theme.DiffAddFg), "+2") ||
+						ansiTextForForeground(t, row.Styled, ctx.Theme.DiffRemoveFg) != "-1" {
+						t.Fatalf("approval displaced the diff colors: %q", row.Styled)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("approved Patch row missing")
+			}
 		})
 	}
 }
