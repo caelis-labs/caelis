@@ -685,6 +685,22 @@ func (t runtimeTaskTool) Definition() tool.Definition {
 	return def
 }
 
+func (t runtimeTaskTool) RuntimeMayCompleteTurn(_ toolbinding.Token, ctx context.Context, call tool.Call) bool {
+	var args struct {
+		Handle string `json:"handle"`
+	}
+	if err := json.Unmarshal(call.Input, &args); err != nil {
+		return true
+	}
+	for _, handle := range splitTaskControlHandles(args.Handle) {
+		identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
+		if err != nil || identity.kind == taskapi.KindCodeMode {
+			return true
+		}
+	}
+	return false
+}
+
 func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	args, err := decodeJSONMap(call.Input)
 	if err != nil {

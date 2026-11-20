@@ -164,11 +164,12 @@ from the collaboration tool set. Creation and work observation remain with the
 controller, keeping Agent collaboration one level deep.
 
 Harness Chat executes eligible calls in one model batch concurrently when the
-active model declares parallel tool calls. Batches containing an unavailable
-call or a tool declaring `Definition.MayCompleteTurn` execute in model order.
-Application callbacks, Code Mode submissions and Runtime Task tools can return
-that disposition, so later effects in their batch wait for the result. Concurrent
-batches also return tool results in model order. Independent Code Mode calls can overlap,
+active model declares parallel tool calls. A batch runs in model order if a
+call is unavailable or can end the Turn. Application callbacks and Code Mode
+submissions declare `Definition.MayCompleteTurn`. Runtime Task checks its target
+handles because a script can carry a terminal result. Observations of command
+tasks can run concurrently. Concurrent batches also return tool results in
+model order. Independent Code Mode calls can overlap,
 including calls to the same target and calls from Chat while an earlier script
 is yielded. Tool implementations own synchronization for shared state. Built-in
 Patch and Write serialize the read, revision check and write for a shared file

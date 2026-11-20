@@ -20,6 +20,17 @@ type runtimeCaller interface {
 	RuntimeCall(Token, context.Context, tool.Call, Dispatch) (tool.Result, error)
 }
 
+// MayCompleteTurn checks the effective call when its Runtime owner can narrow
+// the tool's declared disposition (for example, a Task observing a command).
+func MayCompleteTurn(ctx context.Context, candidate tool.Tool, call tool.Call) bool {
+	if owner, ok := candidate.(interface {
+		RuntimeMayCompleteTurn(Token, context.Context, tool.Call) bool
+	}); ok {
+		return owner.RuntimeMayCompleteTurn(Token{}, ctx, call)
+	}
+	return candidate.Definition().MayCompleteTurn
+}
+
 // Call forwards dispatch inputs only through Runtime-owned wrappers. It never
 // puts them in a tool call or context.
 func Call(ctx context.Context, candidate tool.Tool, call tool.Call, dispatch Dispatch) (tool.Result, error) {

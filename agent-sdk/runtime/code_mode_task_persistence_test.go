@@ -17,9 +17,45 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
+
+func TestPersistedTerminalScriptTaskStopsLaterBatchEffects(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	_, err := sessionfile.NewTaskStore(store).Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{
+		TaskID: "finished", Handle: "script", Kind: taskapi.KindCodeMode, State: taskapi.StateCompleted,
+		Session: active.SessionRef, Result: map[string]any{"tool_result_json": `{"turn_complete":true}`},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effects atomic.Int32
+	sibling := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		effects.Add(1)
+		return tool.Result{}, nil
+	}}
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{
+				{ID: "collect", Name: tasktool.ToolName, Args: `{"action":"wait","handle":"script"}`},
+				{ID: "later", Name: "Effect", Args: `{}`},
+			}
+		}
+		return nil
+	}}
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{tasktool.New(), sibling}}, nil, nil)
+	if len(driver.requests) != 1 || effects.Load() != 0 {
+		t.Fatalf("model requests = %d, sibling effects = %d", len(driver.requests), effects.Load())
+	}
+	for _, e := range events {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.ID == "collect" && e.Tool.TurnComplete {
+			return
+		}
+	}
+	t.Fatal("missing terminal Task receipt")
+}
 
 // Repeated real observations must not manufacture durable revisions, including
 // after a nonzero model-output cursor has already committed.

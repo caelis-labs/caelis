@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -485,7 +486,7 @@ func (a *Agent) executeStepToolCalls(
 		}
 		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, err
 	}
-	if !a.canExecuteStepToolCallsConcurrently(calls, visibility) {
+	if !a.canExecuteStepToolCallsConcurrently(ctx, calls, visibility) {
 		return a.executeStepToolCallsSerial(ctx, stepID, calls, yieldProgress, visibility)
 	}
 	stepRefs := agent.NewConcurrentModelStepRefs(stepID, len(calls))
@@ -617,13 +618,13 @@ func modelStepRef(stepID string, index int, callCount int) *agent.ModelStepRef {
 	return &agent.ModelStepRef{ID: stepID, Index: index, CallCount: callCount}
 }
 
-func (a *Agent) canExecuteStepToolCallsConcurrently(calls []model.ToolCall, visibility *toolVisibility) bool {
+func (a *Agent) canExecuteStepToolCallsConcurrently(ctx context.Context, calls []model.ToolCall, visibility *toolVisibility) bool {
 	if caps, _ := model.CapabilitiesOf(a.model); !caps.ParallelToolCalls {
 		return false
 	}
 	for _, call := range calls {
 		item, ok := a.lookupRunTool(call.Name, visibility)
-		if !ok || item.Definition().MayCompleteTurn {
+		if !ok || toolbinding.MayCompleteTurn(ctx, item, a.preparedCalls[call.ID].call) {
 			return false
 		}
 	}

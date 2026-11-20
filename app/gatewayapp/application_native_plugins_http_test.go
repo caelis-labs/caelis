@@ -297,7 +297,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if n := settleNativeProfileHTTP(t, ctx, client, sibling, "native-sibling-first", "FIRST_APP"); n != 1 {
 		t.Fatalf("another Session inherited app grant: %d", n)
 	}
-	// The same app and remote schema cannot reuse a grant across package sources.
+	// A package upgrade keeps the configured plugin and server that own this Session grant.
 	replacement := nativeProfilePackageHTTP(t, "0.5.2")
 	selection := []sessionprofile.Plugin{{Root: replacement, MCPServers: []sessionprofile.MCPServer{{Name: "desktop-world", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestNativeProfilePluginMCPHelper$", "--", "native-profile-plugin-helper", audit}, WorkDir: replacement}}}}
 	current, err := client.SessionConfiguration(ctx, parent)
@@ -307,8 +307,8 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(parent, sessionprofile.UpdateConfigurationRequest{OperationID: "native-change-source", ExpectedConfigurationRevision: current.Revision, Patch: sessionprofile.ConfigurationPatch{Plugins: &selection}}))); err != nil {
 		t.Fatal(err)
 	}
-	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-new-source", "FIRST_APP"); n != 1 {
-		t.Fatalf("new source inherited the previous app grant: %d", n)
+	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-new-source", "FIRST_APP"); n != 0 {
+		t.Fatalf("upgraded package requested approval again for the same app: %d", n)
 	}
 	selected = replacement
 	child, task := applicationProfileChild(t, ctx, client, parent)
@@ -351,7 +351,12 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	}
 	wantInput, _ := json.Marshal(originalInput)
 	gotInput, _ := json.Marshal(childApproval.Permission.ToolCall.RawInput)
-	if string(wantInput) != string(gotInput) || childApproval.Subject == nil || !childApproval.Subject.Reported || childApproval.Subject.OpaqueInput || childApproval.Subject.Targets[0].Text != "desktop-world/desktop-world/look" || childApproval.Permission.Options[0].ID != "allow_session" || childApproval.Permission.Options[0].Kind != "allow_once" || childApproval.Permission.Options[1].ID != "cancel" || childApproval.Permission.Options[1].Kind != "reject_once" {
+	subject := childApproval.Subject
+	if subject == nil || !subject.Reported || subject.OpaqueInput || len(subject.Targets) != 3 ||
+		subject.Targets[0].Text != "desktop-world/desktop-world/look" || subject.Targets[2].Text != originalInput["app"] {
+		t.Fatalf("child approval lost its host-owned tool or app target: %+v", subject)
+	}
+	if string(wantInput) != string(gotInput) || childApproval.Permission.Options[0].ID != "allow_session" || childApproval.Permission.Options[0].Kind != "allow_once" || childApproval.Permission.Options[1].ID != "cancel" || childApproval.Permission.Options[1].Kind != "reject_once" {
 		t.Fatalf("native child forwarding changed arguments or host-owned scope: want=%s got=%s subject=%+v options=%+v", wantInput, gotInput, childApproval.Subject, childApproval.Permission.Options)
 	}
 	reconnected, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: parent})
@@ -425,7 +430,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if data, err := os.ReadFile(audit); err != nil || len(strings.Fields(string(data))) != 12 {
 		t.Fatalf("synthetic remote executions do not match canonical results: %v", err)
 	}
-	t.Log("native HTTP: paired explicit package, source and Session app grants, canonical child forwarding and model envelope; synthetic MCP effects=12, OS effects=0")
+	t.Log("native HTTP: paired explicit package, app and Session grant isolation, canonical child forwarding and model envelope; synthetic MCP effects=12, OS effects=0")
 	registered, err := client.ListPlugins(ctx, appserver.PluginRequest{})
 	if err != nil || len(registered) != 1 || registered[0].Root != installed || registered[0].Version != "0.1.3" {
 		t.Fatalf("profile overwrote standalone registration: %+v %v", registered, err)

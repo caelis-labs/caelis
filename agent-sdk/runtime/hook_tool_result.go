@@ -10,11 +10,16 @@ import (
 )
 
 type resultHookTool struct {
-	base      tool.Tool
-	viewImage bool
+	base     tool.Tool
+	concrete tool.Tool
 }
 
-func (t resultHookTool) RuntimeViewImage(toolbinding.Token) bool { return t.viewImage }
+func (t resultHookTool) RuntimeViewImage(toolbinding.Token) bool {
+	return toolbinding.IsViewImage(t.concrete)
+}
+func (t resultHookTool) RuntimeMayCompleteTurn(_ toolbinding.Token, ctx context.Context, call tool.Call) bool {
+	return toolbinding.MayCompleteTurn(ctx, t.concrete, call)
+}
 
 func (t resultHookTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.base.Definition())
@@ -45,7 +50,7 @@ func wrapToolResults(concrete, tools []tool.Tool) []tool.Tool {
 	// The wrapper chain preserves concrete registration order and drops nils.
 	for _, one := range concrete {
 		if one != nil {
-			out = append(out, resultHookTool{base: tools[len(out)], viewImage: toolbinding.IsViewImage(one)})
+			out = append(out, resultHookTool{base: tools[len(out)], concrete: one})
 		}
 	}
 	return out
