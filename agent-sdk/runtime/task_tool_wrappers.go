@@ -11,6 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -311,6 +312,7 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
+	constraints, _ := sandboxmeta.Constraints(call.Metadata)
 	req := taskapi.CommandStartRequest{OperationID: toolTaskOperationID(ctx, call),
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),
@@ -319,7 +321,7 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 		Yield:       time.Duration(yieldMS) * time.Millisecond,
 		ParentCall:  strings.TrimSpace(call.ID),
 		ParentTool:  strings.TrimSpace(call.Name),
-		Constraints: constraintsFromMetadata(call.Metadata),
+		Constraints: constraints,
 		Observer:    taskToolObserver{ctx: ctx},
 	}
 	return req, nil

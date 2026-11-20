@@ -8,6 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -283,7 +284,7 @@ func mergeCallMetadata(meta map[string]any, decision policy.Decision) map[string
 		out[k] = v
 	}
 	if !constraintsIsZero(decision.Constraints) {
-		out["sandbox_constraints"] = decision.Constraints
+		out[sandboxmeta.ConstraintsKey] = decision.Constraints
 	}
 	if decision.Metadata != nil {
 		out["policy_metadata"] = decision.Metadata

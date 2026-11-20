@@ -1,7 +1,6 @@
 package filesystem
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -28,35 +28,13 @@ func fileSystemFromRuntime(runtime sandbox.Runtime, meta map[string]any) sandbox
 	if runtime == nil {
 		return nil
 	}
-	constraints := constraintsFromMetadata(meta)
+	constraints, _ := sandboxmeta.Constraints(meta)
 	if provider, ok := runtime.(constraintAwareFileSystemRuntime); ok {
 		if fsys := provider.FileSystemFor(constraints); fsys != nil {
 			return fsys
 		}
 	}
 	return runtime.FileSystem()
-}
-
-func constraintsFromMetadata(meta map[string]any) sandbox.Constraints {
-	if meta == nil {
-		return sandbox.Constraints{}
-	}
-	raw, ok := meta["sandbox_constraints"]
-	if !ok || raw == nil {
-		return sandbox.Constraints{}
-	}
-	if typed, ok := raw.(sandbox.Constraints); ok {
-		return sandbox.NormalizeConstraints(typed)
-	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return sandbox.Constraints{}
-	}
-	var out sandbox.Constraints
-	if err := json.Unmarshal(bytes, &out); err != nil {
-		return sandbox.Constraints{}
-	}
-	return sandbox.NormalizeConstraints(out)
 }
 
 func normalizePathWithFS(fsys sandbox.FileSystem, value string) (string, error) {

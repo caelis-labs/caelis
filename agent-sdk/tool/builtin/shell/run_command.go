@@ -2,12 +2,12 @@ package shell
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -182,7 +182,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	var (
 		result sandbox.CommandResult
 	)
-	if constraints, ok := constraintsFromMetadata(call.Metadata); ok {
+	if constraints, ok := sandboxmeta.Constraints(call.Metadata); ok {
 		req := sandbox.CommandRequest{
 			Command:     command,
 			Dir:         workingDir,
@@ -383,25 +383,3 @@ func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {
 }
 
 var _ tool.Tool = (*RunCommandTool)(nil)
-
-func constraintsFromMetadata(meta map[string]any) (sandbox.Constraints, bool) {
-	if meta == nil {
-		return sandbox.Constraints{}, false
-	}
-	raw, ok := meta["sandbox_constraints"]
-	if !ok || raw == nil {
-		return sandbox.Constraints{}, false
-	}
-	if typed, ok := raw.(sandbox.Constraints); ok {
-		return sandbox.NormalizeConstraints(typed), true
-	}
-	bytes, err := json.Marshal(raw)
-	if err != nil {
-		return sandbox.Constraints{}, false
-	}
-	var out sandbox.Constraints
-	if err := json.Unmarshal(bytes, &out); err != nil {
-		return sandbox.Constraints{}, false
-	}
-	return sandbox.NormalizeConstraints(out), true
-}
