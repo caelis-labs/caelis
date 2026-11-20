@@ -235,12 +235,12 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 // Runtime appends partial catalog hints separately.
 const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
-const description = `Set one of code, file or reset:true. Top-level await works. Use return to select output (omitted: null). Reuse declared tool schemas: return (await Read(args)).data.content. Use tools.call(name,args) if the direct syntax is unavailable.
+const description = `Set code, file or reset:true. Top-level await works. Use return to select output (omitted: null). Reuse declared tool schemas. For example, return (await Read(args)).data.content. Use tools.call(name,args) as a fallback.
 Use block-local let/const for temporaries. Top-level bindings usually persist but may clear. Use let for reassignment. Redeclare only var/functions.
 
 Success returns a Body. result.data is explicit structured output, checked against any output schema. Missing data is undefined. JSON null stays null. result.text joins only text blocks with newlines. Return the original Body to preserve raw JSON, or select fields and original result.media references. Copies cannot attach media. Numbers may round. Omit undefined and stringify BigInt.
 
-await tools.search({query?,after?}) returns a plain page {tools,next:string|null} of summaries. Use tools.search() to browse or query with service and method keywords. Pass next as after with the same query. await tools.search({name}) returns the exact entry and binds it: {name,description,input_schema,output_format:"body",output_schema?,call_path,server?,tool?,plugin?}. output_schema describes .data. tools.search({names}) looks up 1–16 exact names and returns {tools:[{name,entry} or {name,error_code}]} in input order.
+await tools.search({query?,after?}) returns a plain page {tools,next:string|null}. Browse with tools.search() or query by service and method. Pass next as after with the same query. await tools.search({name}) returns the exact entry and binds it. Read input_schema, call_path and output_format:"body". Optional output_schema describes .data. tools.search({names}) returns {tools:[{name,entry} or {name,error_code}]} in input order (1–16 names).
 
 Inspect error.message, error.code and error.result when present (reply alias). error.result.text() joins text and raw JSON. error.result.json() parses that string. Return error.result whole or select its media references. On stale_revision, search again and rebuild args. Check child outcomes before retrying. Never replay unknown outcomes. runtime.state() reports generation/execution.`
 
