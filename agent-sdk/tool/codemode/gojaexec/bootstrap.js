@@ -17,7 +17,7 @@
   const del=Function.prototype.call.bind(Set.prototype.delete);
   const origins=new WeakMapType(), replies=new WeakMapType(), toolGlobals=new SetType();
   let limits, state;
-  function ownReply(reply) {
+  function ownReply(reply, diagnostic = false) {
     const media=[];
     for(let i=0;i<(reply.parts||[]).length;i++) {
       const p=reply.parts[i];
@@ -27,10 +27,17 @@
       }
     }
     const body={media:freeze(media)};
-    let read=false, json;
     const text=reply.body_text;
-    define(body,"text",{value:()=>text});
-    define(body,"json",{value:()=>{if(!read){json=own(reply,"value")?reply.value:parse(text);read=true;}return json;}});
+    if(diagnostic) {
+      // Failed replies keep the legacy readers for diagnostic scripts.
+      let read=false, json;
+      define(body,"text",{value:()=>text});
+      define(body,"json",{value:()=>{if(!read){json=parse(text);read=true;}return json;}});
+    } else {
+      define(body,"text",{value:text,enumerable:true});
+      const hasData = own(reply,"value");
+      define(body,"data",{value:hasData ? reply.value : undefined,enumerable:hasData});
+    }
     weakSet(replies,body,reply);
     return freeze(body);
   }
@@ -79,7 +86,7 @@
       if (has(seen,v)) throw invalid("cyclic JSON");
       add(seen,v);
       const body=inspect&&weakGet(replies,v);
-      if(body) {
+      if(body && typeof v.text === "function") {
         del(seen,v);
         return visit({text:body.body_text,media:v.media},depth,inspect,path);
       }
@@ -123,9 +130,9 @@
     }
     return out;
   }
-  function decode(raw) {
+  function decode(raw, search = false) {
     const envelope=parse(raw), reply=parse(envelope.raw);
-    if (envelope.error || reply.is_error || reply.outcome==="unknown_outcome") {
+    if (envelope.error || reply.is_error || reply.outcome==="failed" || reply.outcome==="unknown_outcome") {
       let message=envelope.error || "Tool call failed";
       if(reply.outcome==="unknown_outcome") message="Unknown outcome; do not replay";
       else if(!envelope.error) {
@@ -135,9 +142,13 @@
           if(typeof detail==="string") {message="Tool call failed: "+slice(detail,0,1024);break;}
         }
       }
-      const e=new ErrorType(message);e.reply=ownReply(reply);e.result=e.reply;
+      const e=new ErrorType(message);e.reply=ownReply(reply,true);e.result=e.reply;
       e.code=envelope.code||(reply.outcome==="unknown_outcome"?"unknown_outcome":"tool_failed");
       throw e;
+    }
+    if(search) {
+      if(!own(reply,"value")) throw new ErrorType("search result is missing its value");
+      return reply.value;
     }
     return ownReply(reply);
   }
@@ -157,7 +168,7 @@
         request[key]=value;
       }
       if(own(request,"name")&&names.length!==1)throw new ErrorType("name requires exact lookup");
-      return then(rpc("search","",encode(request)),decode);
+      return then(rpc("search","",encode(request)),raw=>decode(raw,true));
     }
   });
   // All entry points delegate to the same validation, RPC, decode and identity

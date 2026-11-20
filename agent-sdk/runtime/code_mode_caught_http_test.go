@@ -38,7 +38,7 @@ func TestCodeModeCaughtReadsReachNextHTTPRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths, _ := json.Marshal([]string{root, "missing.txt", "good.txt"})
-	code := `const errors=[], values=[]; for(const path of ` + string(paths) + `) {try {const r=await tools.call("Read",{path,limit:1});values.push(r.json().content);}catch(e){errors.push(e.message);}} return {errors,values,done:true};`
+	code := `const errors=[], values=[]; for(const path of ` + string(paths) + `) {try {const r=await tools.call("Read",{path,limit:1});values.push(r.data.content);}catch(e){errors.push(e.message);}} return {errors,values,done:true};`
 	args, _ := json.Marshal(map[string]any{"code": code})
 	var mu sync.Mutex
 	var requests [][]byte

@@ -70,7 +70,7 @@ func testJSExecConcurrentTargets(t *testing.T, sameTarget bool) {
 				other.Def = tool.CloneDefinition(def)
 				other.Def.Name += "Other"
 			}
-			code := fmt.Sprintf(`(await tools.search({name:%q})).json(); (await tools.search({name:%q})).json(); const replies = await Promise.all([tools.call(%q, {}), tools.call(%q, {})]); return {count: replies.length};`, def.Name, other.Def.Name, def.Name, other.Def.Name)
+			code := fmt.Sprintf(`await tools.search({name:%q}); await tools.search({name:%q}); const replies = await Promise.all([tools.call(%q, {}), tools.call(%q, {})]); return {count: replies.length};`, def.Name, other.Def.Name, def.Name, other.Def.Name)
 			targets := []tool.Tool{target}
 			if !sameTarget {
 				targets = append(targets, other)

@@ -91,7 +91,7 @@ func scriptPTYStages() [][]*session.Event {
 			entry.Input = map[string]any{"path": path, "pattern": "contract"}
 		}
 		if name == "js_exec" {
-			entry.Input = map[string]any{"code": "const first = await Read({path:'notes/first.txt'});\nconst second = await Read({path:'notes/second.txt'});\nreturn {first:first.json().content,second:second.json().content};"}
+			entry.Input = map[string]any{"code": "const first = await Read({path:'notes/first.txt'});\nconst second = await Read({path:'notes/second.txt'});\nreturn {first:first.data.content,second:second.data.content};"}
 			if id == "s3" {
 				entry.Input = map[string]any{"file": "probe.js"}
 			}

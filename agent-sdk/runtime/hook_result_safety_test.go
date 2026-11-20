@@ -84,7 +84,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 						call := model.ToolCall{ID: "one", Name: "ReadSecret", Args: `{}`}
 						if nested {
 							call.Name = codemode.ToolName
-							call.Args = `{"code":"try{const r=await tools.call('ReadSecret',{});if(r.text().includes('RAW-'+'SECRET'))throw Error('unsafe Body');return r.json();}catch(e){if(JSON.stringify(e.result||{}).includes('RAW-'+'SECRET'))throw Error('unsafe error.result');throw e;}"}`
+							call.Args = `{"code":"try{const r=await tools.call('ReadSecret',{});if(r.text.includes('RAW-'+'SECRET'))throw Error('unsafe Body');return r.data;}catch(e){if(JSON.stringify(e.result||{}).includes('RAW-'+'SECRET'))throw Error('unsafe error.result');throw e;}"}`
 						}
 						return []model.ToolCall{call}
 					}

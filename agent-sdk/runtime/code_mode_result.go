@@ -52,6 +52,7 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	h.codeModeResults.mu.Lock()
 	defer h.codeModeResults.mu.Unlock()
 	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: result.IsError, TurnComplete: result.TurnComplete && !result.IsError}
+	succeeded := outcome == codemode.OutcomeSucceeded && !result.IsError
 	retained, projected := 0, len(id)*6+128
 	textEntries := 0
 	if projected > h.limits.ReplyBytes {
@@ -65,8 +66,12 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 			textEntries++
 		case part.Kind == model.PartKindJSON && part.JSON != nil:
 			retained += len(part.JSON.Value)
-			projected += len(part.JSON.Value)*12 + 64
-			textEntries++
+			projected += len(part.JSON.Value)*6 + 64
+			if !succeeded {
+				// Failed replies also expose JSON in the diagnostic text.
+				projected += len(part.JSON.Value) * 6
+				textEntries++
+			}
 		case (part.Kind == model.PartKindMedia && part.Media != nil) || (part.Kind == model.PartKindFileRef && part.FileRef != nil):
 			retained += opaquePartBytes(part)
 			projected += 256
@@ -91,13 +96,14 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 		if source.ContentIndex < 0 || source.ContentIndex >= len(result.Content) || !json.Valid(source.Value) || result.Content[source.ContentIndex].Kind != model.PartKindJSON || result.Content[source.ContentIndex].JSON == nil || string(result.Content[source.ContentIndex].JSON.Value) != string(source.Value) {
 			return reply, fmt.Errorf("invalid structured result provenance")
 		}
-		if !result.IsError && outcome == codemode.OutcomeSucceeded && def.OutputSchema != nil {
-			if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: def.OutputSchema}, source.Value); err != nil {
-				return reply, fmt.Errorf("structured result does not match output schema: %w", err)
-			}
-			// Failed MCP content remains diagnostic, even with an output schema.
-			if len(source.Value)*6 > h.limits.ReplyBytes-projected {
+		if succeeded {
+			if len(source.Value) > (h.limits.ReplyBytes-projected)/6 {
 				return reply, fmt.Errorf("structured result exceeds projection budget")
+			}
+			if def.OutputSchema != nil {
+				if err := tool.ValidateOutput(def.OutputSchema, source.Value); err != nil {
+					return reply, fmt.Errorf("structured result does not match output schema: %w", err)
+				}
 			}
 			reply.Value = append(json.RawMessage(nil), source.Value...)
 		}
@@ -123,7 +129,11 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 		}
 		reply.Parts = append(reply.Parts, value)
 	}
-	reply.BodyText = reply.Text()
+	if succeeded {
+		reply.BodyText = reply.PlainText()
+	} else {
+		reply.BodyText = reply.Text()
+	}
 	if h.replies == nil {
 		h.replies = map[string]codemode.Reply{}
 	}

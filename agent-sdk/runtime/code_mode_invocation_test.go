@@ -34,7 +34,7 @@ func TestCodeModeGojaUsesFrozenOccurrence(t *testing.T) {
 			}}
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: `{"code":"const b=await tools.call('ReadFact',{});if(b.json().body.length!==45000)throw Error('truncated full Body');return {length:b.json().body.length};"}`}}
+					return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: `{"code":"const b=await tools.call('ReadFact',{});if(b.data.body.length!==45000)throw Error('truncated full Body');return {length:b.data.body.length};"}`}}
 				}
 				return nil
 			}}

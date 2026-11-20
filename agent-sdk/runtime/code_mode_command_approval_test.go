@@ -198,7 +198,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 			if tc.exitCode != 0 {
 				commandText = "exit 7"
 			}
-			script := "let retainedCommandState = 41; return (await RunCommand({command:" + stringJSONForCommandTest(commandText) + ",yield_time_ms:0})).json();"
+			script := "let retainedCommandState = 41; return (await RunCommand({command:" + stringJSONForCommandTest(commandText) + ",yield_time_ms:0})).data;"
 			driver := &mcpScriptModel{steps: func(step int, req *model.Request) []model.ToolCall {
 				switch step {
 				case 0:

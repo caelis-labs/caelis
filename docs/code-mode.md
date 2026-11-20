@@ -29,7 +29,7 @@ known. Calls may use function or method syntax, for example:
 ```javascript
 {
   const response = await Read(args);
-  return response.json().content;
+  return response.data.content;
 }
 ```
 
@@ -40,46 +40,46 @@ await dtw.apps(args);
 await context7['query-docs'](args);
 ```
 
-Use `(await tools.search()).json()` for a directory page. Each page contains
+`await tools.search()` returns a plain directory page. Each page contains
 `{tools:[{name,description}],next:string|null}`. Pass `{query}` to match any
 whitespace-separated keyword in a name or description (case-insensitive).
 Pass `{query,after:next}` to continue the same filter in name order. Pages show
 ready deferred tools, not tools already exposed directly. An empty page does
 not establish that a connecting service has no tools.
 
-Use `(await tools.search({name})).json()` for one exact entry with its complete
-input schema, optional output schema, original service metadata and call path.
-Unknown names fail without falling back to a keyword query.
+`await tools.search({name})` returns one plain object with the complete input
+schema, optional `output_schema`, original service metadata and `call_path`.
+Exact lookup records the current tool binding. The entry's `output_format: "body"`
+describes calls to that tool, not the search result. When declared,
+`output_schema` describes the tool call's `.data`. Unknown names fail without
+falling back to a keyword query.
 
-Every tool call returns the same Body object, through direct functions and
-`tools.call` alike:
+Successful tool calls return a Body, through direct functions and `tools.call`
+alike:
 
-```javascript
-const response = await Read({path: "input.json"});
-const file = response.json();
-return {content: file.content};
-```
+- `result.data` contains only explicitly structured output, validated against the
+  tool's declared output schema, if any. Missing structured output is `undefined`;
+  explicit JSON `null` stays `null`. Text and JSON content blocks are not promoted
+  into `.data`. For Read file text, use `result.data.content`.
+- `result.text` is a string property that joins only text blocks in content order
+  with newlines. It is empty when there are no text blocks.
+- `result.media` contains the original media and file references in content order.
+  Copying their handle fields grants no media authority.
 
-`result.text()` joins the tool reply's textual and JSON content in original order
-with a newline between entries. JSON entries retain their original tokens. For
-Read file text, use `result.json().content`; `text()` contains the reply envelope.
-`result.json()` uses the successful, schema-validated structured content when
-available; otherwise it parses the complete `text()` as one JSON document.
-Empty text and multiple independent JSON documents produce a parsing error.
-Both reads are synchronous and repeatable. `result.media` contains every original
-media/file reference in content order. Copying its handle fields grants no media
-authority. Returning a Body directly delivers its complete original reply;
-returning other values delivers their actual fields and selected original media
-references. Deleting fields from parsed JSON cannot restore removed attachments.
+Return the Body itself to deliver all original blocks and preserve raw JSON
+tokens. To return a subset, select data or text and any original media references
+you want to deliver. JavaScript numbers may round. Encode BigInt as a string and
+omit undefined fields or use null. An omitted return is null.
 
-Declared output schemas remain validated at the tool boundary. Inspect
-`error.message`, `error.code` and `error.result` when present; `error.reply` aliases
-`result`. A failed Host call exposes a diagnostic Body whose structured content
-is unverified; its `json()` only parses text. Script and local validation errors
-may omit these properties. Use `text()` and `media` for failure diagnostics.
-JavaScript Number computations follow Number precision; `text()` and a complete
-Body return retain original JSON tokens. Encode BigInt as a string, omit undefined
-fields or use null. An omitted return is null.
+Inspect `error.message`, `error.code` and `error.result` when present;
+`error.reply` aliases `error.result`. Script and local validation errors may
+omit these properties. Only a failed tool's diagnostic Body retains the legacy
+readers: `error.result.text()` joins text and raw JSON blocks in content order
+with newlines, and `error.result.json()` parses that entire string as a single
+JSON document. Empty text or multiple independent documents produce a parsing
+error. Unverified structured output is not exposed by those readers. Returning
+`error.result` directly still delivers its original reply; to select a diagnostic
+attachment, return the original reference from `error.result.media`.
 
 ## Continuous environment
 
@@ -96,7 +96,7 @@ uninitialized until the environment is reset.
 ```javascript
 // First js_exec
 let response = await Read({path: "input.json"});
-let file = response.json();
+let file = response.data;
 return file.content;
 
 // Later js_exec in the same active Session

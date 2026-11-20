@@ -18,7 +18,7 @@ func TestReviewStaticMCPDiscoveryAcrossVMs(t *testing.T) {
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`return (await tools.search({name:"a__target"})).json();`)
+			return h1Script(`return await tools.search({name:"a__target"});`)
 		case 1:
 			return h1Script(`return await tools.call("a__target",{value:1});`)
 		}

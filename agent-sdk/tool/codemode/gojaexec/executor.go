@@ -388,11 +388,19 @@ func (e *environment) Execute(ctx context.Context, source codemode.Source, limit
 					if workCtx.Err() != nil {
 						return
 					}
+					failed := callErr != nil || reply.IsError || reply.Outcome == codemode.OutcomeFailed || reply.Outcome == codemode.OutcomeUnknown
+					if failed {
+						reply.Value = nil
+					}
 					if !boundedReply(reply, l.ReplyBytes) {
 						cancel()
 						return
 					}
-					reply.BodyText = reply.Text()
+					if failed {
+						reply.BodyText = reply.Text()
+					} else {
+						reply.BodyText = reply.PlainText()
+					}
 					if !boundedReply(reply, l.ReplyBytes) {
 						cancel()
 						return
@@ -458,7 +466,7 @@ func boundedReply(r codemode.Reply, budget int) bool {
 		remaining -= n * 6
 		return remaining >= 0
 	}
-	if remaining < 0 || !consume(len(r.CallID)) || !consume(len(r.Outcome)) || !consume(len(r.BodyText)) {
+	if remaining < 0 || !consume(len(r.CallID)) || !consume(len(r.Outcome)) || !consume(len(r.BodyText)) || !consume(len(r.Value)) {
 		return false
 	}
 	for _, p := range r.Parts {

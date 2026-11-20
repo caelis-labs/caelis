@@ -44,17 +44,26 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 		}
 	}
 	for _, contract := range []string{
-		"Top-level await", "Use return for the final output", "omitted return is null",
-		"Use block-local let/const", "Top-level bindings usually persist across script calls, but may be cleared",
-		"Assign to let, not const", "Redeclare only if both declarations are var/function",
-		"{ const body = await Read(args); return body.json().content; }", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)",
-		"tools.search({name})", "{query?,after?}", "input_schema", "output_schema", "call_path",
-		"Return the original Body for the whole reply", "result.text()", "result.json()", "original result.media references", "omit undefined",
+		"Top-level await", "Use return to select output (omitted: null)",
+		"Use block-local let/const", "Top-level bindings usually persist but may clear",
+		"Use let for reassignment", "Redeclare only var/functions",
+		"(await Read(args)).data.content", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)",
+		"await tools.search({query?,after?}) returns a plain page", "next:string|null", "Pass next as after",
+		"await tools.search({name}) returns the exact entry and binds it", "input_schema", `output_format:"body"`, "output_schema describes .data", "call_path",
+		"result.data is explicit structured output", "checked against any output schema", "Missing data is undefined", "JSON null stays null",
+		"result.text joins only text blocks", "Return the original Body to preserve raw JSON", "original result.media references", "Omit undefined",
+		"error.result.text() joins text and raw JSON", "error.result.json() parses that string", "Return error.result whole or select its media references",
 		"runtime.state()", "reset:true", "error.message, error.code and error.result",
-		"stale_revision, refresh the exact schema and rebuild args", "Check child outcomes before retrying", "never replay unknown outcomes",
+		"stale_revision, search again and rebuild args", "Check child outcomes before retrying", "Never replay unknown outcomes",
 	} {
 		if !strings.Contains(description, contract) {
 			t.Fatalf("missing js_exec contract %q", contract)
+		}
+	}
+	successAPI := strings.SplitN(description, "Inspect error.message", 2)[0]
+	for _, reader := range []string{".json()", ".text()"} {
+		if strings.Contains(successAPI, reader) {
+			t.Fatalf("diagnostic reader advertised as part of the success API: %s", reader)
 		}
 	}
 	for _, legacy := range []string{"tools.unpack", "{parts:", "tools.describe", "output.text", "output.image"} {

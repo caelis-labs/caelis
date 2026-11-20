@@ -88,7 +88,10 @@ func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
 		if call.Name == canonical && (call.TargetBinding == nil || *call.TargetBinding != tool.BindingForDefinition(def)) {
 			t.Errorf("call path lost exact binding: %+v", call)
 		}
-		return tool.Result{Content: []model.Part{model.NewJSONPart(call.Input)}}, nil
+		return tool.Result{
+			Content:           []model.Part{model.NewJSONPart(call.Input)},
+			StructuredContent: &tool.StructuredContent{Value: call.Input, ContentIndex: 0},
+		}, nil
 	}
 	source := &runtimeDeferredSource{}
 	source.publish(tool.NamedTool{Def: def, Invoke: invoke})
@@ -96,21 +99,21 @@ func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
 	metadata, _ := json.Marshal(map[string]string{"name": canonical, "server": server, "tool": remote, "plugin": plugin})
 	code := fmt.Sprintf(`
 const expected=%s;
-const page=(await tools.search()).json();
+const page=await tools.search();
 if(page.tools.length!==1||page.tools[0].name!==expected.name||page.next!==null)throw Error("direct tool leaked into directory");
 if(typeof Date.now!=='function')throw Error('Date global overwritten');
-const date=((await tools.search({name:'Date'})).json());
+const date=await tools.search({name:'Date'});
 if(date.name!=='Date'||'server' in date||'tool' in date||'plugin' in date)throw Error('Date metadata');
 let args={value:1};
 const first=await eval(date.call_path);
-if(first.json().value!==1)throw Error('Date template result');
-const entry=(await tools.search({name:expected.name})).json();
+if(first.data.value!==1)throw Error('Date template result');
+const entry=await tools.search({name:expected.name});
 for(const key of Object.keys(expected))if(entry[key]!==expected[key])throw Error('metadata fidelity '+key);
 if(entry.input_schema.required[0]!=='value')throw Error('incomplete schema');
 if(typeof tools.plugins[expected.plugin][expected.server][expected.tool]!=='function')throw Error('original object names lost');
 args={value:2};
 const second=await eval(entry.call_path);
-if(second.json().value!==2)throw Error('quoted template result');
+if(second.data.value!==2)throw Error('quoted template result');
 if(typeof Date.now!=='function')throw Error('Date global changed');
 return {contract:true};`, metadata)
 	runSearchContract(t, source, []tool.Tool{date}, code)
@@ -130,7 +133,11 @@ func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
 		if call.Name != def.Name || call.TargetBinding == nil || *call.TargetBinding != tool.BindingForDefinition(def) {
 			t.Errorf("newly ready call lost identity: %+v", call)
 		}
-		return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ready":true}`))}}, nil
+		raw := json.RawMessage(`{"ready":true}`)
+		return tool.Result{
+			Content:           []model.Part{model.NewJSONPart(raw)},
+			StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0},
+		}, nil
 	}}
 	publications := 0
 	publish := tool.NamedTool{Def: tool.Definition{Name: "PublishReadyTool", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -141,13 +148,13 @@ func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
 	runSearchContract(t, source, []tool.Tool{publish}, `
 if('late-server' in tools.mcp)throw Error('tool was ready before VM snapshot');
 await PublishReadyTool({});
-const page=(await tools.search({query:'LATE irrelevant'})).json();
+const page=await tools.search({query:'LATE irrelevant'});
 if(page.tools.length!==1||page.next!==null||Object.keys(page.tools[0]).sort().join(',')!=='description,name')throw Error('unexpected directory');
-const found=(await tools.search({name:page.tools[0].name})).json();
+const found=await tools.search({name:page.tools[0].name});
 if('late-server' in tools.mcp)throw Error('search mutated frozen namespace');
 const args={};
 const reply=await eval(found.call_path);
-if(reply.json().ready!==true)throw Error('new tool template failed');
+if(reply.data.ready!==true)throw Error('new tool template failed');
 if('late-server' in tools.mcp)throw Error('call mutated frozen namespace');
 return {contract:true};`)
 	if publications != 1 || effects != 1 {
@@ -163,11 +170,11 @@ func TestCodeModeSearchContractPagination(t *testing.T) {
 		source.ready = append(source.ready, tool.NamedTool{Def: def})
 	}
 	runSearchContract(t, source, nil, `
- const page=(await tools.search()).json();
+ const page=await tools.search();
  if(page.tools.length!==16||page.next!==page.tools[15].name)throw Error("bad first page");
- const tail=(await tools.search({after:page.next})).json();
+ const tail=await tools.search({after:page.next});
  if(tail.tools.length!==4||tail.next!==null||tail.tools[0].name!== "docs__16")throw Error("bad tail");
- const empty=(await tools.search({query:"no_such_keyword"})).json();
+ const empty=await tools.search({query:"no_such_keyword"});
  return {contract:empty.tools.length===0&&empty.next===null};`)
 }
 

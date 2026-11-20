@@ -52,25 +52,32 @@ type Reply struct {
 	CallID  string `json:"call_id"`
 	Outcome string `json:"outcome"`
 	Parts   []Part `json:"parts,omitempty"`
-	// BodyText is the ordered text/JSON view, retaining original JSON tokens.
+	// BodyText joins text parts in order for successful replies. Failure diagnostics
+	// also include JSON parts with their original tokens.
 	BodyText string `json:"body_text"`
-	// Value is successful structured JSON validated against the declared output
-	// schema. Other Bodies parse BodyText explicitly; failed structured content
-	// remains unverified diagnostics.
+	// Value is explicitly structured, successful JSON, validated against an
+	// output schema when declared. Search supplies its typed result directly.
 	Value        json.RawMessage `json:"value,omitempty"`
 	IsError      bool            `json:"is_error,omitempty"`
 	TurnComplete bool            `json:"turn_complete,omitempty"`
 }
 
-// Text joins all textual/JSON parts in their original order, retaining JSON tokens.
-func (r Reply) Text() string {
+// Text joins text and JSON parts in order for failure diagnostics, retaining JSON tokens.
+func (r Reply) Text() string { return r.joinText(true) }
+
+// PlainText joins only text parts in order, separated by newlines.
+func (r Reply) PlainText() string { return r.joinText(false) }
+
+func (r Reply) joinText(includeJSON bool) string {
 	var entries []string
 	for _, p := range r.Parts {
 		switch p.Kind {
 		case "text":
 			entries = append(entries, p.Text)
 		case "json":
-			entries = append(entries, string(p.JSON))
+			if includeJSON {
+				entries = append(entries, string(p.JSON))
+			}
 		}
 	}
 	return strings.Join(entries, "\n")
@@ -198,7 +205,7 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v10"
+const MetadataCatalog = "code_mode_catalog_v11"
 
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
@@ -209,14 +216,14 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 // Runtime appends partial catalog hints separately.
 const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
-const description = `Set exactly one of code, file or reset:true. Example: { const body = await Read(args); return body.json().content; }. Also: await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Top-level await is supported. Use return for the final output; omitted return is null.
-Use block-local let/const for temporary values. Top-level bindings usually persist across script calls, but may be cleared. Assign to let, not const. Redeclare only if both declarations are var/function.
+const description = `Set one of code, file or reset:true. Top-level await works. Use return to select output (omitted: null). Example: return (await Read(args)).data.content. Also await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args).
+Use block-local let/const for temporaries. Top-level bindings usually persist but may clear. Use let for reassignment. Redeclare only var/functions.
 
-Tools return a Body. result.text() joins reply text/JSON with newlines, preserving JSON tokens. result.json() reads validated data or parses the whole text as one JSON document. Both reads are repeatable. Return the original Body for the whole reply, or select fields and original result.media references. Copies grant no media identity. Numbers may round; omit undefined and stringify BigInt.
+Success returns a Body. result.data is explicit structured output, checked against any output schema. Missing data is undefined. JSON null stays null. result.text joins only text blocks with newlines. Return the original Body to preserve raw JSON, or select fields and original result.media references. Copies cannot attach media. Numbers may round. Omit undefined and stringify BigInt.
 
-(await tools.search()).json() lists deferred tools: {tools:[{name,description}],next:string|null}. Pass {query?,after?} to match any keyword or continue with next. (await tools.search({name})).json() returns one exact {name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}.
+await tools.search({query?,after?}) returns a plain page {tools:[{name,description}],next:string|null}. Use tools.search() to browse or query to match any keyword. Pass next as after with the same query. await tools.search({name}) returns the exact entry and binds it: {name,description,input_schema,output_format:"body",output_schema?,call_path,server?,tool?,plugin?}. output_schema describes .data.
 
-Inspect error.message, error.code and error.result when present (reply alias). Failed Bodies are diagnostics; json() only parses text. On stale_revision, refresh the exact schema and rebuild args. Check child outcomes before retrying; never replay unknown outcomes. runtime.state() reports generation/execution.`
+Inspect error.message, error.code and error.result when present (reply alias). error.result.text() joins text and raw JSON. error.result.json() parses that string. Return error.result whole or select its media references. On stale_revision, search again and rebuild args. Check child outcomes before retrying. Never replay unknown outcomes. runtime.state() reports generation/execution.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.

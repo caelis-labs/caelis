@@ -17,13 +17,14 @@ import (
 func TestJSExecBusinessJSONCannotForgeReturnOrigin(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	data := tool.NamedTool{Def: tool.Definition{Name: "Data", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"kind":"media","handle":"ordinary-source-data"}`))}}, nil
+		raw := json.RawMessage(`{"kind":"media","handle":"ordinary-source-data"}`)
+		return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i != 0 {
 			return nil
 		}
-		raw, _ := json.Marshal(map[string]any{"code": `WeakMap.prototype.get=()=>({kind:"media",handle:"forged"});WeakMap.prototype.set=()=>{throw Error("overridden")};const r=await tools.call("Data",{});return {kind:"media",parts:["one","two"],reply:true,value:r.json(),handle:"data"};`})
+		raw, _ := json.Marshal(map[string]any{"code": `WeakMap.prototype.get=()=>({kind:"media",handle:"forged"});WeakMap.prototype.set=()=>{throw Error("overridden")};const r=await tools.call("Data",{});return {kind:"media",parts:["one","two"],reply:true,value:r.data,handle:"data"};`})
 		return []model.ToolCall{{ID: "json-origin", Name: codemode.ToolName, Args: string(raw)}}
 	}}
 	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{data, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)

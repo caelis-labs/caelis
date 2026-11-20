@@ -258,7 +258,7 @@ func TestCodeModeRealRetentionAcrossScriptsAndFailedProjections(t *testing.T) {
 		calls++
 		return tool.Result{Content: []model.Part{model.NewTextPart(strings.Repeat("x", args.Size))}}, nil
 	}}
-	sources := []string{`let firstBody=await Bytes({size:4});return firstBody.text();`, `return await Bytes({size:2});`, `let rejected=0;for(let i=0;i<5;i++){try{await Bytes({size:1})}catch(e){rejected++;}}return rejected;`, `return firstBody;`, "", `return await Bytes({size:6});`}
+	sources := []string{`let firstBody=await Bytes({size:4});return firstBody.text;`, `return await Bytes({size:2});`, `let rejected=0;for(let i=0;i<5;i++){try{await Bytes({size:1})}catch(e){rejected++;}}return rejected;`, `return firstBody;`, "", `return await Bytes({size:6});`}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i >= len(sources) {
 			return nil

@@ -31,11 +31,11 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 		name, selection, returned string
 		want                      int
 	}{
-		{"wrapped", `image.media[0]`, `return {selected:json.json()};`, 1},
-		{"payload", `image.media[0]`, `return json.json();`, 1},
-		{"body", `image.media[0]`, `return json;`, 0},
-		{"copied", `({...image.media[0]})`, `return json.json();`, 0},
-		{"ordinary", `{kind:"media",handle:"ordinary-business-data"}`, `return {selected:json.json()};`, 0},
+		{"wrapped", `image.media[0]`, `return {selected:body.data};`, 1},
+		{"payload", `image.media[0]`, `return body.data;`, 1},
+		{"body", `image.media[0]`, `return body;`, 0},
+		{"copied", `({...image.media[0]})`, `return body.data;`, 0},
+		{"ordinary", `{kind:"media",handle:"ordinary-business-data"}`, `return {selected:body.data};`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -71,7 +71,7 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 			if err = os.WriteFile(filepath.Join(root, "input.txt"), []byte(`{"case":"native-read"}`), 0600); err != nil {
 				t.Fatal(err)
 			}
-			code := `const image=await tools.call("ViewImage",{path:"fixture.png"});const json=await tools.call("Read",{path:"input.txt"});json.json().selected=` + tc.selection + `;` + tc.returned
+			code := `const image=await tools.call("ViewImage",{path:"fixture.png"});const body=await tools.call("Read",{path:"input.txt"});body.data.selected=` + tc.selection + `;` + tc.returned
 			args, _ := json.Marshal(map[string]any{"code": code})
 			var mu sync.Mutex
 			var requests [][]byte
