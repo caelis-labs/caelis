@@ -48,7 +48,7 @@ func TestApplicationNativePluginIdentityPolicyAndPairing(t *testing.T) {
 		t.Fatal("package was not selected once")
 	}
 	spec := contribution.MCPServerSpecs[0]
-	if spec.PluginID != "desktop-world" || spec.PackageRoot != root || spec.PackageVersion != "0.2.0" || spec.Command != "verified-bot-proxy" || spec.WorkDir != root || !spec.CleanEnvironment || spec.IntegrationID != "" {
+	if spec.PluginID != "desktop-world" || spec.PackageRoot != root || spec.PackageVersion != "0.2.0" || spec.Command != "verified-bot-proxy" || spec.WorkDir != root || !spec.CleanEnvironment {
 		t.Fatalf("lost native identity or policy: %+v", spec)
 	}
 	catalog, _, err := assembleApplicationSkills(profile, true, contribution.SkillBundles...)
@@ -61,8 +61,8 @@ func TestApplicationNativePluginIdentityPolicyAndPairing(t *testing.T) {
 	}
 	legacy := selectedPluginFixture(t, "desktop-world", "0.1.3")
 	old, err := applicationPluginContributions(sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: legacy}}}, paths)
-	if err != nil || old.MCPServerSpecs[0].IntegrationID != "" {
-		t.Fatalf("legacy policy widened: %+v %v", old, err)
+	if err != nil || len(old.MCPServerSpecs) != 1 {
+		t.Fatalf("legacy package selection: %+v %v", old, err)
 	}
 	ordinary := selectedPluginFixture(t, "ordinary-plugin", "0.2.0")
 	if err := os.WriteFile(filepath.Join(ordinary, ".mcp.json"), []byte(`{"mcpServers":{"desktop-world":{"command":"synthetic-native"}}}`), 0o600); err != nil {

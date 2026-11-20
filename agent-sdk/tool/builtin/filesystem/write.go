@@ -44,8 +44,6 @@ func (t *WriteTool) Definition() tool.Definition {
 			"required":             []string{"path", "content"},
 			"additionalProperties": false,
 		},
-		Metadata:              toolutil.AnnotationMetadata(false, true, true, false),
-		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 
@@ -61,16 +59,8 @@ func (t *WriteTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		return tool.Result{}, err
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
-	plan, err := planWriteMutation(fsys, args)
+	plan, err := applyFileMutation(ctx, fsys, args, planWriteMutation)
 	if err != nil {
-		return tool.Result{}, err
-	}
-	if plan.created {
-		if err := createWorkspaceParentDirs(fsys, plan.path); err != nil {
-			return tool.Result{}, err
-		}
-	}
-	if err := fsys.WriteFile(plan.path, []byte(plan.after), plan.mode); err != nil {
 		return tool.Result{}, err
 	}
 	diffStats := CountLineDiff(plan.before, plan.after)

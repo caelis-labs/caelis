@@ -6,9 +6,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
+	"github.com/caelis-labs/caelis/control/toolpolicy"
 )
 
-func codeModeHintsForSession(ctx context.Context, sessions session.Service, ref session.SessionRef, source tool.Source) ([]string, error) {
+func codeModeHintsForSession(ctx context.Context, sessions session.Service, ref session.SessionRef, source toolset.Source) ([]string, error) {
 	state, err := sessions.SnapshotState(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -33,12 +36,12 @@ func selectedCodeModeTools(candidates []tool.Tool) []string {
 			continue
 		}
 		def := one.Definition()
-		if !tool.IsMCPDefinition(def) {
+		if !mcp.IsDefinition(def) {
 			continue
 		}
-		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := def.Metadata[mcp.MetadataTool].(string)
 		docs := remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs"
-		desktop := def.Source != nil && def.Source.IntegrationID == "desktop-world/atomic-v1" && (remote == "apps" || remote == "look" || remote == "click" || remote == "setValue" || remote == "typeText")
+		desktop := toolpolicy.IsDesktopWorld(def) && (remote == "apps" || remote == "look" || remote == "click" || remote == "setValue" || remote == "typeText")
 		if docs || desktop {
 			names = append(names, def.Name)
 		}

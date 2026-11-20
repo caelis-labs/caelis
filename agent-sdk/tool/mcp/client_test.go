@@ -3,7 +3,6 @@ package mcp
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -112,7 +111,10 @@ func TestMCPServerHelperProcess(t *testing.T) {
 		server.AddTool(&mcpsdk.Tool{Name: "receipt", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 			const exact = `{"receipt_id":9223372036854775807}`
 			return &mcpsdk.CallToolResult{
-				Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: exact}},
+				Content: []mcpsdk.Content{
+					&mcpsdk.TextContent{Text: exact},
+					&mcpsdk.TextContent{Text: " " + exact},
+				},
 				StructuredContent: map[string]any{"receipt_id": int64(9223372036854775807)},
 			}, nil
 		})
@@ -181,9 +183,9 @@ func TestMCPStructuredReceiptRetainsExactIntegerAcrossStdio(t *testing.T) {
 	}
 	result, err := receiptTool.Call(ctx, tool.Call{ID: "original-receipt-call", Name: receiptTool.Definition().Name, Input: []byte(`{}`)})
 	const exact = `{"receipt_id":9223372036854775807}`
-	if err != nil || result.IsError || result.ID != "original-receipt-call" || len(result.Content) != 2 ||
-		result.Content[0].Text == nil || result.Content[0].Text.Text != exact ||
-		result.Content[1].JSON == nil || string(result.Content[1].JSON.Value) != exact {
+	raw, ok := result.Structured()
+	if err != nil || result.ID != "original-receipt-call" || len(result.Content) != 2 ||
+		result.Content[0] != tool.Text(" "+exact) || !ok || string(raw) != exact {
 		t.Fatalf("lossy MCP receipt = %+v, %v", result, err)
 	}
 	history, err := json.Marshal(result)
@@ -217,24 +219,21 @@ func TestMCPPersistentProcessKeepsImageStructuredReceiptAndOriginalCallID(t *tes
 	}
 	for number := 1; number <= 2; number++ {
 		result, err := execTool.Call(ctx, tool.Call{ID: fmt.Sprintf("call-%d", number), Name: execTool.Definition().Name, Input: []byte(`{}`)})
-		if err != nil || result.IsError || result.ID != fmt.Sprintf("call-%d", number) || len(result.Content) != 3 {
+		if err != nil || result.ID != fmt.Sprintf("call-%d", number) || len(result.Content) != 3 {
 			t.Fatalf("exec %d = %+v, %v", number, result, err)
 		}
-		if result.Content[0].Text == nil || result.Content[0].Text.Text != fmt.Sprintf("execution:%d", number) {
+		if result.Content[0] != tool.Text(fmt.Sprintf("execution:%d", number)) {
 			t.Fatalf("text = %+v", result.Content)
 		}
-		if result.Content[1].Media == nil || result.Content[1].Media.MimeType != "image/png" {
+		image, ok := result.Content[1].(tool.Image)
+		if !ok || image.MIMEType != "image/png" || !bytes.HasPrefix(image.Data, []byte("\x89PNG\r\n\x1a\n")) {
 			t.Fatalf("image = %+v", result.Content[1])
 		}
-		decoded, err := base64.StdEncoding.DecodeString(result.Content[1].Media.Source.Data)
-		if err != nil || !bytes.HasPrefix(decoded, []byte("\x89PNG\r\n\x1a\n")) {
-			t.Fatalf("PNG decode = %v", err)
-		}
-		if result.Content[2].JSON == nil || !bytes.Contains(result.Content[2].JSON.Value, []byte(`"request_id":"original-1"`)) {
+		if structured, ok := result.Content[2].(tool.StructuredContent); !ok || !bytes.Contains(structured.Value, []byte(`"request_id":"original-1"`)) {
 			t.Fatalf("native receipt = %+v", result.Content[2])
 		}
 		status, err := statusTool.Call(ctx, tool.Call{ID: "status", Name: statusTool.Definition().Name, Input: []byte(`{}`)})
-		if err != nil || status.IsError || status.Content[0].Text == nil || status.Content[0].Text.Text != fmt.Sprintf("state:%d secret:", number) {
+		if err != nil || len(status.Content) != 1 || status.Content[0] != tool.Text(fmt.Sprintf("state:%d secret:", number)) {
 			t.Fatalf("status = %+v, %v", status, err)
 		}
 	}
@@ -284,6 +283,50 @@ func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
 	}
 }
 
+func TestMCPToolCallFailedReplyRetainsDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		isError bool
+		content mcpsdk.Content
+		message string
+		want    []tool.ContentBlock
+	}{
+		{
+			name:    "server failure",
+			isError: true,
+			content: &mcpsdk.TextContent{Text: "fixture denied the request"},
+			message: "fixture denied the request",
+			want:    []tool.ContentBlock{tool.Text("fixture denied the request"), tool.Text("unchanged diagnostic detail")},
+		},
+		{
+			name:    "content projection failure",
+			content: &mcpsdk.AudioContent{MIMEType: "audio/wav", Data: []byte{1}},
+			message: "MCP content not delivered: audio content is not supported",
+			want: []tool.ContentBlock{tool.Text("[MCP audio omitted: unsupported]"), tool.Text("unchanged diagnostic detail"),
+				tool.Text("MCP content not delivered: audio content is not supported")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fixture", Version: "1"}, nil)
+			server.AddTool(&mcpsdk.Tool{Name: "fixture", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+				return &mcpsdk.CallToolResult{IsError: tc.isError, Content: []mcpsdk.Content{
+					tc.content, &mcpsdk.TextContent{Text: "unchanged diagnostic detail"},
+				}}, nil
+			})
+			mgr := catalogManager(t, server, false)
+			tools := mgr.Tools()
+			if len(tools) != 1 {
+				t.Fatalf("got %d tools, want one", len(tools))
+			}
+			name := tools[0].Definition().Name
+			result, err := tools[0].Call(t.Context(), tool.Call{ID: "original-call", Name: name})
+			if !tool.HasFailedReply(err) || err.Error() != tc.message || result.Name != name || result.ID != "original-call" || !slices.Equal(result.Content, tc.want) {
+				t.Fatalf("failed reply changed: %+v, %v", result, err)
+			}
+		})
+	}
+}
+
 func TestMCPToolCallServerExitRetainsUnknownOutcome(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -310,7 +353,7 @@ func TestMCPToolCallServerExitRetainsUnknownOutcome(t *testing.T) {
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
 	}
-	if source, _ := tools[0].Definition().Metadata[tool.MetadataMCPSourceFingerprint].(string); len(source) != 64 {
+	if source, _ := tools[0].Definition().Metadata[MetadataSourceFingerprint].(string); len(source) != 64 {
 		t.Fatalf("ready MCP tool has no source fingerprint: %q", source)
 	}
 	res, err := tools[0].Call(ctx, tool.Call{
@@ -321,10 +364,13 @@ func TestMCPToolCallServerExitRetainsUnknownOutcome(t *testing.T) {
 	if !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("tool call returned %v, want typed unknown outcome after server exit", err)
 	}
-	if !res.IsError || res.ID != "original-call" {
-		t.Fatalf("tool call IsError = false, want true")
+	if tool.HasFailedReply(err) || res.ID != "original-call" {
+		t.Fatalf("transport failure lost receipt identity or looked like a server failure response: %+v %v", res, err)
 	}
-	if len(res.Content) == 0 || res.Content[0].Text == nil {
+	if len(res.Content) == 0 {
+		t.Fatal("tool call returned no content")
+	}
+	if _, ok := res.Content[0].(tool.Text); !ok {
 		t.Fatalf("tool call content = %#v, want text error", res.Content)
 	}
 	for len(mgr.Tools()) != 0 && ctx.Err() == nil {
@@ -366,12 +412,8 @@ func TestMCPManagerAndTool(t *testing.T) {
 	if def.Name != "myserver__echo" {
 		t.Errorf("unexpected tool name: %s", def.Name)
 	}
-	if !strings.HasPrefix(def.Description, tool.ExternalCapabilityDescriptionPrefix) || !strings.Contains(def.Description, "Echoes input") {
+	if def.Description != "Echoes input" {
 		t.Errorf("unexpected tool description: %s", def.Description)
-	}
-	if def.Metadata[tool.MetadataExternalCapability] != true ||
-		def.Metadata[tool.MetadataDescriptionAuthority] != tool.MetadataAuthorityNonAuthorizing {
-		t.Errorf("unexpected external capability metadata: %#v", def.Metadata)
 	}
 
 	res, err := oneTool.Call(ctx, tool.Call{
@@ -382,11 +424,7 @@ func TestMCPManagerAndTool(t *testing.T) {
 		t.Fatalf("tool call failed: %v", err)
 	}
 
-	if res.IsError {
-		t.Errorf("expected tool call to succeed, but got error result")
-	}
-
-	if len(res.Content) != 1 || res.Content[0].Text == nil || res.Content[0].Text.Text != "echo:hello" {
+	if len(res.Content) != 1 || res.Content[0] != tool.Text("echo:hello") {
 		t.Errorf("unexpected content: %+v", res.Content)
 	}
 
@@ -461,7 +499,7 @@ func TestMCPManagerStreamableHTTP20260728(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool call failed: %v", err)
 	}
-	if res.IsError || len(res.Content) != 1 || res.Content[0].Text == nil || res.Content[0].Text.Text != "pong" {
+	if len(res.Content) != 1 || res.Content[0] != tool.Text("pong") {
 		t.Fatalf("unexpected HTTP MCP tool result: %+v", res)
 	}
 	if !sawHeader.Load() {
@@ -511,7 +549,7 @@ func TestMCPManagerStreamableHTTPFallsBackToLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool call failed: %v", err)
 	}
-	if res.IsError || len(res.Content) != 1 || res.Content[0].Text == nil || res.Content[0].Text.Text != "legacy-pong" {
+	if len(res.Content) != 1 || res.Content[0] != tool.Text("legacy-pong") {
 		t.Fatalf("unexpected legacy HTTP MCP tool result: %+v", res)
 	}
 }
@@ -563,7 +601,7 @@ func TestMCPManagerSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tool call failed: %v", err)
 	}
-	if res.IsError || len(res.Content) != 1 || res.Content[0].Text == nil || res.Content[0].Text.Text != "sse-pong" {
+	if len(res.Content) != 1 || res.Content[0] != tool.Text("sse-pong") {
 		t.Fatalf("unexpected SSE MCP tool result: %+v", res)
 	}
 	if !sawHeader.Load() {
@@ -757,7 +795,6 @@ func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *te
 	}
 	catalogSpec := baseSpec
 	catalogSpec.PluginID = "caelis.mcp.project"
-	catalogSpec.ReplaySourceIDs = []string{"caelis.mcp.user", "caelis.mcp.project"}
 	pluginSpec := baseSpec
 	pluginSpec.PluginID = "context7-plugin"
 	pluginSpec.Env = map[string]string{
@@ -783,22 +820,13 @@ func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *te
 		definitions[item.Definition().Name] = item.Definition()
 	}
 	echo := definitions["context7__echo"]
-	if echo.Name == "" || echo.Metadata[tool.MetadataPluginID] != catalogSpec.PluginID {
+	if echo.Name == "" || echo.Metadata[MetadataPluginID] != catalogSpec.PluginID {
 		t.Fatalf("compact echo definition = %#v, want catalog first-win", echo)
 	}
-	aliases, _ := echo.Metadata[tool.MetadataReplayAliases].([]string)
-	if got, want := aliases, []string{
-		"mcp__caelis_mcp_project__context7__echo",
-		"mcp__caelis_mcp_user__context7__echo",
-		"mcp__context7_plugin__context7__echo",
-	}; !slices.Equal(got, want) {
-		t.Fatalf("echo replay aliases = %#v, want %#v", got, want)
-	}
 	extra := definitions["context7__extra"]
-	if extra.Name == "" || extra.Metadata[tool.MetadataPluginID] != pluginSpec.PluginID {
+	if extra.Name == "" || extra.Metadata[MetadataPluginID] != pluginSpec.PluginID {
 		t.Fatalf("compact extra definition = %#v, want later unique plugin tool", extra)
 	}
-
 }
 
 func newInitializedTestManager(ctx context.Context, specs []ServerSpec) (*Manager, error) {

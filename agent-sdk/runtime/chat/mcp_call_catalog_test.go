@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type bindingCatalogSource struct {
@@ -25,19 +26,14 @@ func (t bindingCountedTool) Definition() tool.Definition {
 }
 
 func TestBindMCPCallsBuildsCatalogOnlyForResolvedDeclaration(t *testing.T) {
-	for _, kind := range []string{"ordinary", "impostor", "alias", "canonical", "malformed", "unsupported"} {
+	for _, kind := range []string{"ordinary", "impostor", "alias", "canonical", "malformed"} {
 		t.Run(kind, func(t *testing.T) {
 			definitions := 0
 			base := mcpToolForTest("docs__read")
-			if kind == "unsupported" {
-				def := base.Definition()
-				def.RequiredModelCapabilities = model.Capabilities{ImageInput: true}
-				base = tool.NamedTool{Def: def}
-			}
 			target := bindingCountedTool{base, &definitions}
 			source := &bindingCatalogSource{tools: []tool.Tool{target}}
 			name := "mcp_call"
-			declaration := tool.NewMCPCallTool()
+			declaration := mcp.NewCallTool()
 			switch kind {
 			case "ordinary":
 				name = "Read"
@@ -47,7 +43,7 @@ func TestBindMCPCallsBuildsCatalogOnlyForResolvedDeclaration(t *testing.T) {
 			case "alias":
 				name = "registered_alias"
 			}
-			a := &Agent{toolsByName: map[string]tool.Tool{name: declaration}, deferredTools: source, discoveries: map[string]tool.Binding{"docs__read": tool.BindingForDefinition(target.Tool.Definition())}}
+			a := &Agent{toolsByName: map[string]tool.Tool{name: declaration}, deferredTools: source, discoveries: map[string]tool.Binding{"docs__read": mcp.BindingForDefinition(target.Tool.Definition())}}
 			args := `{"tool_name":"docs__read","arguments":{}}`
 			if kind == "malformed" {
 				args = `{"tool_name":"docs__read","arguments":[]}`
@@ -64,18 +60,18 @@ func TestBindMCPCallsBuildsCatalogOnlyForResolvedDeclaration(t *testing.T) {
 			}
 			for _, id := range []string{"one", "two"} {
 				bound, ok := a.boundCalls[id]
-				if !ok || bound.original.Name != name {
-					t.Fatalf("lost resolved identity/original: %+v", bound)
+				if !ok {
+					t.Fatalf("no binding attempt for %q", id)
 				}
-				if kind == "malformed" || kind == "unsupported" {
+				if kind == "malformed" {
 					if bound.err == nil || bound.target != nil {
 						t.Fatalf("malformed envelope bound: %+v", bound)
 					}
-				} else if bound.err != nil || bound.target == nil {
+				} else if bound.err != nil || bound.target == nil || bound.call.ID != id || bound.call.Name != "docs__read" {
 					t.Fatalf("resolved MCP declaration failed: %+v", bound)
 				}
 			}
-			if kind != "malformed" && kind != "unsupported" && definitions != 3 {
+			if kind != "malformed" && definitions != 3 {
 				t.Fatalf("same validation reread Definition: %d", definitions)
 			}
 		})

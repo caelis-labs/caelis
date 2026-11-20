@@ -74,8 +74,8 @@ func TestApplicationArtifactFIFOReplacementDoesNotBlockDrain(t *testing.T) {
 	}
 
 	store := &resourceBridgeStore{}
-	_, publish := testResourceBridge(t, workspace, store)
-	_, err = publish.Call(ctx, testResourceCall(t, "PublishArtifact", map[string]string{"path": "output.txt", "name": "report", "media_type": "text/plain"}))
+	bridge := testResourceBridge(workspace, store)
+	_, err = bridge.publish(ctx, testResourceInput(t, map[string]string{"path": "output.txt", "name": "report", "media_type": "text/plain"}), testResourceInvocation())
 	if !errors.Is(err, sessionprofile.ErrInvalid) || store.calls != 0 {
 		t.Fatalf("canceled FIFO artifact reached resource Store: %v, calls=%d", err, store.calls)
 	}

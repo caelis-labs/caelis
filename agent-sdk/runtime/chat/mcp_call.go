@@ -8,20 +8,21 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 type boundMCPCall struct {
-	original model.ToolCall
-	call     model.ToolCall
-	target   tool.Tool
-	binding  tool.Binding
-	err      error
+	call    model.ToolCall
+	target  tool.Tool
+	binding tool.Binding
+	err     error
 }
 
 func (a *Agent) mcpTools(ctx context.Context, names []string) map[string]tool.Tool {
 	out := map[string]tool.Tool{}
 	candidates := append([]tool.Tool(nil), a.tools...)
-	if named, ok := a.deferredTools.(tool.NamedSource); ok {
+	if named, ok := a.deferredTools.(toolset.NamedSource); ok {
 		seen := map[string]bool{}
 		for _, name := range names {
 			if seen[name] {
@@ -41,7 +42,7 @@ func (a *Agent) mcpTools(ctx context.Context, names []string) map[string]tool.To
 			continue
 		}
 		def := one.Definition()
-		if tool.IsMCPDefinition(def) && def.AvailableForModel(a.model) {
+		if mcp.IsDefinition(def) {
 			out[def.Name] = one
 		}
 	}
@@ -50,16 +51,16 @@ func (a *Agent) mcpTools(ctx context.Context, names []string) map[string]tool.To
 
 // Bind once per complete model response, before approval or any sibling tool
 // executes. A later discovery or refresh cannot redirect a pending invocation.
-func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibility *tool.ToolVisibility) {
+func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibility *toolVisibility) {
 	a.boundCalls = map[string]boundMCPCall{}
 	var names []string
 	for _, call := range calls {
 		declaration, ok := a.lookupRunTool(call.Name, visibility)
-		if !ok || !tool.IsMCPCallDefinition(declaration.Definition()) {
+		if !ok || !mcp.IsCallDefinition(declaration.Definition()) {
 			continue
 		}
 
-		bound := boundMCPCall{original: call}
+		var bound boundMCPCall
 		actual, err := tool.ParseMCPCall(call)
 		bound.call = actual
 		bound.err = err
@@ -91,7 +92,7 @@ func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibi
 			switch {
 			case !known:
 				bound.err = tool.NewError(tool.ErrorCodeNotFound, "MCP tool has not been discovered in this Session")
-			case one == nil || binding != tool.BindingForDefinition(definition):
+			case one == nil || binding != mcp.BindingForDefinition(definition):
 				bound.err = tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding changed or is unavailable")
 			default:
 				bound.target = one
@@ -105,7 +106,7 @@ func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibi
 	}
 }
 
-func (a *Agent) boundTool(call model.ToolCall, visibility *tool.ToolVisibility) (tool.Tool, model.ToolCall, *tool.Binding, error) {
+func (a *Agent) boundTool(call model.ToolCall, visibility *toolVisibility) (tool.Tool, model.ToolCall, *tool.Binding, error) {
 	if bound, ok := a.boundCalls[call.ID]; ok {
 		if bound.err != nil {
 			return nil, bound.call, nil, bound.err
@@ -116,7 +117,7 @@ func (a *Agent) boundTool(call model.ToolCall, visibility *tool.ToolVisibility) 
 	if !ok {
 		return nil, call, nil, tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", call.Name))
 	}
-	if tool.IsMCPCallDefinition(one.Definition()) {
+	if mcp.IsCallDefinition(one.Definition()) {
 		return nil, call, nil, tool.NewError(tool.ErrorCodeInvalidInput, "MCP call is not bound to a model response")
 	}
 	return one, call, nil, nil

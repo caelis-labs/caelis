@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // CodeModeFixtureCall migrates deterministic provider fixtures to the product's
@@ -16,9 +17,9 @@ func CodeModeFixtureCall(enabled bool, name, args string) (string, string) {
 	}
 	var source string
 	switch name {
-	case tool.ToolSearchToolName:
+	case mcp.SearchToolName:
 		source = "return await tools.search(" + args + ");"
-	case tool.MCPCallToolName:
+	case mcp.CallToolName:
 		var input struct {
 			Name string          `json:"tool_name"`
 			Args json.RawMessage `json:"arguments"`
@@ -47,12 +48,12 @@ func CodeModeFixturePhase(name, args string) string {
 	}
 	_ = json.Unmarshal([]byte(args), &input)
 	if strings.Contains(input.Code, "tools.call(") {
-		return tool.MCPCallToolName
+		return mcp.CallToolName
 	}
 	if strings.Contains(input.Code, "tools.search(") {
-		return tool.ToolSearchToolName
+		return mcp.SearchToolName
 	}
-	return tool.MCPCallToolName
+	return mcp.CallToolName
 }
 
 // CodeModeFixtureSelectedTools keeps the opt-in external-package model harness

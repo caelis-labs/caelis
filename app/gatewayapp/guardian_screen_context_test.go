@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestGuardianScreenContextExcludesAllToolHistory(t *testing.T) {
@@ -119,7 +120,7 @@ func TestGuardianMCPActionIncludesSourceAndFourScopes(t *testing.T) {
 	req.Approval.ToolName = "docs__read"
 	req.Approval.RawInput = map[string]any{"key": "fixture"}
 	req.Approval.Options = []approval.Option{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_session", Kind: "allow_once"}, {ID: "allow_always", Kind: "allow_always"}, {ID: "cancel", Kind: "reject_once"}}
-	req.RuntimeRequest.Tool = tool.Definition{Name: "docs__read", Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "source-1"}}
+	req.RuntimeRequest.Tool = tool.Definition{Name: "docs__read", Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "fixture", mcp.MetadataServer: "docs", mcp.MetadataTool: "read", mcp.MetadataSourceFingerprint: "source-1"}}
 	req.RuntimeRequest.Authorization = &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Choices: []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}, {OptionID: "allow_session", Persistence: session.AuthorizationSession}, {OptionID: "allow_always", Persistence: session.AuthorizationPolicy}}}
 	state, err := guardianScreenState(req, nil)
 	if err != nil {

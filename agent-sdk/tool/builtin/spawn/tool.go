@@ -188,7 +188,6 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 			"required":             []string{"prompt"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}
 }
 

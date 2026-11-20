@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // Complete-schema query budgets do not gate a direct call with known arguments.
@@ -23,7 +24,7 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 			for _, name := range []string{"fixture__small", "fixture__huge"} {
 				def := fixtureMCPDefinition("v1")
 				def.Name = name
-				def.Metadata[tool.MetadataMCPTool] = strings.TrimPrefix(name, "fixture__")
+				def.Metadata[mcp.MetadataTool] = strings.TrimPrefix(name, "fixture__")
 				def.Description = "fixture schema budget lookup"
 				def.InputSchema = map[string]any{"type": "object"}
 				if strings.HasSuffix(name, "huge") {
@@ -31,7 +32,7 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 				}
 				source.items = append(source.items, tool.NamedTool{Def: def, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 					effects++
-					return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"ok":true}`)}}}, nil
 				}})
 			}
 			code := `const s=await tools.search({query:"fixture"});if(s.tools.length!==2||s.tools.some(t=>"input_schema" in t))throw Error("directory lost summaries");return s;`

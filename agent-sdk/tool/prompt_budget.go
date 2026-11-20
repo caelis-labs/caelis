@@ -14,8 +14,7 @@ const (
 )
 
 // EstimateModelPromptTokens returns the approximate model-context cost of the
-// default visible tool specifications when no concrete model is available.
-// Capability-gated tools are therefore included conservatively in this budget.
+// supplied tool specifications.
 func EstimateModelPromptTokens(tools []Tool) int {
 	return EstimateModelSpecsPromptTokens(ModelSpecs(tools))
 }
@@ -24,25 +23,6 @@ func EstimateModelPromptTokens(tools []Tool) int {
 // one projected tool definition.
 func EstimateDefinitionPromptTokens(def Definition) int {
 	return EstimateModelSpecsPromptTokens(modelSpecsFromDefinitions([]Definition{CloneDefinition(def)}))
-}
-
-// EstimateToolSearchResultPromptTokens returns the approximate model-context
-// cost of the complete serialized ToolSearch result, including projected source
-// metadata. It deliberately uses serialized bytes so the admission budget is
-// no weaker than the shared tool-result truncation budget for non-ASCII text.
-func EstimateToolSearchResultPromptTokens(result ToolSearchResult) int {
-	raw, err := json.Marshal(result)
-	if err != nil {
-		return MaxToolSearchResultPromptTokens + 1
-	}
-	if len(raw) == 0 {
-		return 0
-	}
-	tokens := len(raw) / approxPromptRunesPerToken
-	if len(raw)%approxPromptRunesPerToken != 0 {
-		tokens++
-	}
-	return tokens
 }
 
 // EstimateModelSpecsPromptTokens returns the approximate model-context cost of

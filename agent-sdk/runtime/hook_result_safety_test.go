@@ -38,7 +38,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 				accepted := json.RawMessage(`{"value":"ACCEPTED"}`)
 				target := tool.NamedTool{Def: tool.Definition{Name: "ReadSecret"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 					effects.Add(1)
-					r := tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewJSONPart(raw), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.invalid/RAW-SECRET"}, "image/png", "fixture")}, StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0}}
+					r := tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}, tool.Resource{URI: "https://example.invalid/RAW-SECRET", MIMEType: "image/png", Name: "fixture"}}}
 					if mode == "unknown" {
 						return r, errorcode.New(errorcode.UnknownOutcome, "effect unknown")
 					}
@@ -65,11 +65,10 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 						<-ctx.Done()
 						return r, nil
 					case "invalid":
-						r.StructuredContent.ContentIndex = 99
+						r.Content = append(r.Content, tool.StructuredContent{Value: raw})
 						return r, nil
 					}
-					r.Content = []model.Part{model.NewJSONPart(accepted), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.invalid/accepted"}, "image/png", "fixture")}
-					r.StructuredContent = &tool.StructuredContent{Value: accepted, ContentIndex: 0}
+					r.Content = []tool.ContentBlock{tool.StructuredContent{Value: accepted}, tool.Resource{URI: "https://example.invalid/accepted", MIMEType: "image/png", Name: "fixture"}}
 					return r, err
 				}}}}
 				hooks.ModelView = []agent.Hook[model.Message, model.Message]{{Name: "summary", Apply: func(_ context.Context, e agent.HookContext, m model.Message) (model.Message, error) {
@@ -157,10 +156,11 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 						t.Fatalf("effect relabeled: %s", r.Outcome)
 					}
 					if mode == "accepted" {
-						if r.ProcessingFailure != nil || r.Result.StructuredContent == nil || string(r.Result.StructuredContent.Value) != string(accepted) || len(r.Result.Content) != 2 {
+						structured, ok := r.Result.Structured()
+						if r.ProcessingFailure != nil || !ok || string(structured) != string(accepted) || len(r.Result.Content) != 2 {
 							t.Fatal("valid result was discarded")
 						}
-					} else if r.ProcessingFailure == nil || r.Result == nil || r.Result.StructuredContent != nil || len(r.Result.Content) != 1 {
+					} else if r.ProcessingFailure == nil || r.Result == nil || len(r.Result.Content) != 1 {
 						t.Fatalf("unsafe failed result: %+v", r)
 					}
 				}

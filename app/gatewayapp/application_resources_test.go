@@ -47,31 +47,32 @@ func testResource(id, session string, data []byte) sessionprofile.Resource {
 	return sessionprofile.Resource{ID: id, SessionID: session, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
 }
 
-func testResourceCall(t *testing.T, name string, input any) tool.Call {
+func testResourceInput(t *testing.T, input any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tool.Call{Name: name, Input: data, Execution: tool.InvocationContext{SessionID: "session-1", TurnID: "turn-1", ItemID: "step-1"}}
+	return data
 }
 
-func testResourceBridge(t *testing.T, workspace string, store *resourceBridgeStore) (tool.Tool, tool.Tool) {
-	t.Helper()
-	tools := newApplicationResourceTools(store, sessionprofile.Binding{Scope: sessionprofile.Scope{PrincipalID: "user-1"}, SessionID: "session-1"}, workspace)
-	if len(tools) != 2 || tools[0].Definition().Name != "ReadResource" || tools[1].Definition().Name != "PublishArtifact" {
-		t.Fatalf("unexpected resource tools: %v", tools)
+func testResourceBridge(workspace string, store *resourceBridgeStore) applicationResourceBridge {
+	return applicationResourceBridge{
+		store: store, binding: sessionprofile.Binding{Scope: sessionprofile.Scope{PrincipalID: "user-1"}, SessionID: "session-1"}, workspace: workspace,
 	}
-	return tools[0], tools[1]
+}
+
+func testResourceInvocation() tool.InvocationContext {
+	return tool.InvocationContext{SessionID: "session-1", TurnID: "turn-1", ItemID: "step-1"}
 }
 
 func TestApplicationResourceBridgeRoundTrip(t *testing.T) {
 	workspace := t.TempDir()
 	data := []byte{0, 1, 0xff, 'A', '\n'}
 	store := &resourceBridgeStore{resources: map[string][]byte{"resource-1": data}}
-	read, publish := testResourceBridge(t, workspace, store)
-	call := testResourceCall(t, "ReadResource", map[string]string{"resource_id": "resource-1"})
-	result, err := read.Call(t.Context(), call)
+	bridge := testResourceBridge(workspace, store)
+	call := testResourceInput(t, map[string]string{"resource_id": "resource-1"})
+	result, err := bridge.read(t.Context(), call, testResourceInvocation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,11 @@ func TestApplicationResourceBridgeRoundTrip(t *testing.T) {
 		Resource sessionprofile.Resource `json:"resource"`
 		Path     string                  `json:"path"`
 	}
-	if err := json.Unmarshal([]byte(result.Content[0].Text.Text), &delivered); err != nil {
+	deliveredJSON, ok := result.Structured()
+	if !ok {
+		t.Fatalf("resource delivery returned no structured result: %+v", result)
+	}
+	if err := json.Unmarshal(deliveredJSON, &delivered); err != nil {
 		t.Fatal(err)
 	}
 	if delivered.Resource.SHA256 != testResource("resource-1", "session-1", data).SHA256 || !filepath.IsLocal(delivered.Path) || filepath.Dir(delivered.Path) != ".resources" {
@@ -89,32 +94,36 @@ func TestApplicationResourceBridgeRoundTrip(t *testing.T) {
 	if err != nil || !bytes.Equal(got, data) {
 		t.Fatalf("delivered bytes = %v, %v", got, err)
 	}
-	if _, err := read.Call(t.Context(), call); err != nil {
+	if _, err := bridge.read(t.Context(), call, testResourceInvocation()); err != nil {
 		t.Fatalf("same resource can be read again: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, delivered.Path), []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := read.Call(t.Context(), call); !errors.Is(err, sessionprofile.ErrConflict) {
+	if _, err := bridge.read(t.Context(), call, testResourceInvocation()); !errors.Is(err, sessionprofile.ErrConflict) {
 		t.Fatalf("changed existing resource must fail: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "output.bin"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	result, err = publish.Call(t.Context(), testResourceCall(t, "PublishArtifact", map[string]string{"path": "output.bin", "name": "Output", "media_type": "application/octet-stream"}))
+	result, err = bridge.publish(t.Context(), testResourceInput(t, map[string]string{"path": "output.bin", "name": "Output", "media_type": "application/octet-stream"}), testResourceInvocation())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var published struct {
 		Resource sessionprofile.Resource `json:"resource"`
 	}
-	if err := json.Unmarshal([]byte(result.Content[0].Text.Text), &published); err != nil {
+	publishedJSON, ok := result.Structured()
+	if !ok {
+		t.Fatalf("resource publication returned no structured result: %+v", result)
+	}
+	if err := json.Unmarshal(publishedJSON, &published); err != nil {
 		t.Fatal(err)
 	}
 	if published.Resource.Name != "Output" || published.Resource.MediaType != "application/octet-stream" || published.Resource.SHA256 != delivered.Resource.SHA256 || !bytes.Equal(store.created, data) {
 		t.Fatalf("published snapshot does not match artifact: %+v", published)
 	}
-	if store.operation != resourceOperationID(call.Execution) {
+	if store.operation != resourceOperationID(testResourceInvocation()) {
 		t.Fatalf("publish operation not derived from native item: %q", store.operation)
 	}
 }
@@ -138,10 +147,10 @@ func TestApplicationPublishArtifactConfinesPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &resourceBridgeStore{}
-	_, publish := testResourceBridge(t, workspace, store)
+	bridge := testResourceBridge(workspace, store)
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
-			_, err := publish.Call(t.Context(), testResourceCall(t, "PublishArtifact", map[string]string{"path": path, "name": "name", "media_type": "text/plain"}))
+			_, err := bridge.publish(t.Context(), testResourceInput(t, map[string]string{"path": path, "name": "name", "media_type": "text/plain"}), testResourceInvocation())
 			if err == nil {
 				t.Fatal("unsafe artifact path accepted")
 			}
@@ -156,10 +165,10 @@ func TestApplicationReadResourceRejectsMalformedAndSymlinkDelivery(t *testing.T)
 	workspace := t.TempDir()
 	outside := t.TempDir()
 	store := &resourceBridgeStore{resources: map[string][]byte{"resource-1": []byte("safe")}}
-	read, _ := testResourceBridge(t, workspace, store)
-	call := testResourceCall(t, "ReadResource", map[string]string{"resource_id": "resource-1"})
+	bridge := testResourceBridge(workspace, store)
+	call := testResourceInput(t, map[string]string{"resource_id": "resource-1"})
 	applicationDirectoryLink(t, filepath.Join(workspace, ".resources"), outside)
-	if _, err := read.Call(t.Context(), call); !errors.Is(err, sessionprofile.ErrInvalid) {
+	if _, err := bridge.read(t.Context(), call, testResourceInvocation()); !errors.Is(err, sessionprofile.ErrInvalid) {
 		t.Fatalf("symlink resource directory accepted: %v", err)
 	}
 	if files, err := os.ReadDir(outside); err != nil || len(files) != 0 {
@@ -170,11 +179,11 @@ func TestApplicationReadResourceRejectsMalformedAndSymlinkDelivery(t *testing.T)
 	}
 	// A provider-supplied ID never becomes a filesystem path; only the Store
 	// determines which ID and bytes belong to this Session.
-	if _, err := read.Call(t.Context(), testResourceCall(t, "ReadResource", map[string]string{"resource_id": "../outside"})); !errors.Is(err, sessionprofile.ErrNotFound) {
+	if _, err := bridge.read(t.Context(), testResourceInput(t, map[string]string{"resource_id": "../outside"}), testResourceInvocation()); !errors.Is(err, sessionprofile.ErrNotFound) {
 		t.Fatalf("unknown resource unexpectedly materialized: %v", err)
 	}
 	store.resources["resource-1"] = []byte("safe")
-	if _, err := read.Call(t.Context(), call); err != nil {
+	if _, err := bridge.read(t.Context(), call, testResourceInvocation()); err != nil {
 		t.Fatalf("valid snapshot not delivered: %v", err)
 	}
 }
@@ -214,25 +223,32 @@ func TestApplicationArtifactChangedDuringSnapshot(t *testing.T) {
 func TestApplicationResourceBridgeLimitsAndNativeIdentity(t *testing.T) {
 	workspace := t.TempDir()
 	store := &resourceBridgeStore{resources: map[string][]byte{"oversize": bytes.Repeat([]byte("a"), sessionprofile.MaxResourceBytes+1)}}
-	read, publish := testResourceBridge(t, workspace, store)
-	if _, err := read.Call(t.Context(), testResourceCall(t, "ReadResource", map[string]string{"resource_id": "oversize"})); !errors.Is(err, sessionprofile.ErrInvalid) {
+	bridge := testResourceBridge(workspace, store)
+	if _, err := bridge.read(t.Context(), testResourceInput(t, map[string]string{"resource_id": "oversize"}), testResourceInvocation()); !errors.Is(err, sessionprofile.ErrInvalid) {
 		t.Fatalf("oversize resource accepted: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "oversize"), bytes.Repeat([]byte("b"), sessionprofile.MaxResourceBytes+1), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := publish.Call(t.Context(), testResourceCall(t, "PublishArtifact", map[string]string{"path": "oversize", "name": "name", "media_type": "text/plain"})); !errors.Is(err, sessionprofile.ErrInvalid) {
+	if _, err := bridge.publish(t.Context(), testResourceInput(t, map[string]string{"path": "oversize", "name": "name", "media_type": "text/plain"}), testResourceInvocation()); !errors.Is(err, sessionprofile.ErrInvalid) {
 		t.Fatalf("oversize artifact accepted: %v", err)
 	}
-	for _, execution := range []tool.InvocationContext{{}, {SessionID: "other", TurnID: "turn-1", ItemID: "step-1"}, {SessionID: "session-1", ItemID: "step-1"}, {SessionID: "session-1", TurnID: "turn-1"}} {
-		call := testResourceCall(t, "ReadResource", map[string]string{"resource_id": "oversize"})
-		call.Execution = execution
-		if _, err := read.Call(t.Context(), call); !errors.Is(err, sessionprofile.ErrUnauthorized) {
+	readInput := testResourceInput(t, map[string]string{"resource_id": "oversize"})
+	publishInput := testResourceInput(t, map[string]string{"path": "oversize", "name": "name", "media_type": "text/plain"})
+	tools := newApplicationResourceTools(store, bridge.binding, workspace)
+	for i, call := range []tool.Call{{Name: "ReadResource", Input: readInput}, {Name: "PublishArtifact", Input: publishInput}} {
+		if tools[i].Definition().Name != call.Name {
+			t.Fatalf("resource tool %d = %s, want %s", i, tools[i].Definition().Name, call.Name)
+		}
+		if _, err := tools[i].Call(t.Context(), call); !errors.Is(err, sessionprofile.ErrUnauthorized) {
+			t.Fatalf("%s accepted absent invocation identity: %v", call.Name, err)
+		}
+	}
+	for _, execution := range []tool.InvocationContext{{SessionID: "other", TurnID: "turn-1", ItemID: "step-1"}, {SessionID: "session-1", ItemID: "step-1"}, {SessionID: "session-1", TurnID: "turn-1"}} {
+		if _, err := bridge.read(t.Context(), readInput, execution); !errors.Is(err, sessionprofile.ErrUnauthorized) {
 			t.Fatalf("untrusted read identity %+v: %v", execution, err)
 		}
-		call = testResourceCall(t, "PublishArtifact", map[string]string{"path": "oversize", "name": "name", "media_type": "text/plain"})
-		call.Execution = execution
-		if _, err := publish.Call(t.Context(), call); !errors.Is(err, sessionprofile.ErrUnauthorized) {
+		if _, err := bridge.publish(t.Context(), publishInput, execution); !errors.Is(err, sessionprofile.ErrUnauthorized) {
 			t.Fatalf("untrusted publish identity %+v: %v", execution, err)
 		}
 	}

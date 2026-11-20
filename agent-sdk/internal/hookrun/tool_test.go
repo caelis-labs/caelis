@@ -2,12 +2,12 @@ package hookrun
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -25,13 +25,25 @@ func TestInvokeProducerFailureRemainsOriginal(t *testing.T) {
 			calls := 0
 			result, err := InvokeTool(ctx, tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) {
 				calls++
-				return tool.Result{IsError: true, Content: []model.Part{model.NewTextPart("original failure")}}, original
+				return tool.Result{Content: []tool.ContentBlock{tool.Text("original failure")}}, original
 			})
 			var processing *ProcessingError
-			if !errors.Is(err, original) || errors.As(err, &processing) || !strings.Contains(err.Error(), original.Error()) || !result.IsError || calls != 1 {
+			if !errors.Is(err, original) || errors.As(err, &processing) || !strings.Contains(err.Error(), original.Error()) || len(result.Content) != 1 || result.Content[0] != tool.Text("original failure") || calls != 1 {
 				t.Fatalf("producer failure hidden: calls=%d result=%+v error=%v", calls, result, err)
 			}
 		})
+	}
+}
+
+func TestFullResultRejectsDuplicateBusinessBlocksWithoutLosingEffect(t *testing.T) {
+	r := tool.Result{Content: []tool.ContentBlock{
+		tool.StructuredContent{Value: json.RawMessage(`1`)},
+		tool.StructuredContent{Value: json.RawMessage(`2`)},
+	}}
+	r, err := FullResult(t.Context(), tool.Definition{}, tool.Call{}, r, nil)
+	var processing *ProcessingError
+	if !errors.As(err, &processing) || processing.EffectError != nil || len(r.Content) != 1 || r.Content[0].ContentType() != tool.ContentTypeText {
+		t.Fatalf("invalid result did not become a processing failure with a known effect: %+v, %v", r, err)
 	}
 }
 
@@ -44,12 +56,12 @@ func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
 	calls := 0
 	r, err := InvokeTool(WithRun(t.Context(), hooks, agent.HookContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) {
 		calls++
-		return tool.Result{Content: []model.Part{model.NewTextPart("known committed business value")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("known committed business value")}}, nil
 	})
 	var phase *agent.HookError
 	var processing *ProcessingError
 	actual, actualErr := EffectResult(r, err)
-	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "forged-flag" || !errors.As(err, &processing) || actualErr != nil || actual.TurnComplete || calls != 1 || len(actual.Content) != 1 || strings.Contains(actual.Content[0].Text.Text, "known committed business value") {
+	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "forged-flag" || !errors.As(err, &processing) || actualErr != nil || actual.TurnComplete || calls != 1 || len(actual.Content) != 1 || strings.Contains(string(actual.Content[0].(tool.Text)), "known committed business value") {
 		t.Fatalf("known effect lost: calls=%d result=%+v err=%v", calls, r, err)
 	}
 }

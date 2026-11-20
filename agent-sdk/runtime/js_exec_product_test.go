@@ -31,6 +31,7 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestMain(m *testing.M) {
@@ -69,17 +70,17 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	def := fixtureMCPDefinition("v1")
 	def.Name = "fixture__exec"
 	def.InputSchema = map[string]any{"type": "object", "properties": map[string]any{"script": map[string]any{"type": "string", "enum": []string{"observe"}}}, "required": []string{"script"}, "additionalProperties": false}
-	def.Metadata[tool.MetadataMCPServer] = "desktop-world"
-	def.Metadata[tool.MetadataMCPTool] = "exec"
+	def.Metadata[mcp.MetadataServer] = "desktop-world"
+	def.Metadata[mcp.MetadataTool] = "exec"
 	var bitmap bytes.Buffer
 	if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
 		t.Fatal(err)
 	}
-	imagePart := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: base64.StdEncoding.EncodeToString(bitmap.Bytes())}, "image/png", "selected.png")
+	imagePart := tool.Image{Data: bitmap.Bytes(), MIMEType: "image/png", Name: "selected.png"}
 	var effects int
 	source.items = []tool.Tool{tool.NamedTool{Def: def, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		effects++
-		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`)), imagePart}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"value":42}`)}, imagePart}}, nil
 	}}}
 	scripts := []string{
 		`const s=await tools.search({name:"fixture__exec"});if(!s.input_schema.properties.script)throw Error("incomplete search schema");return s;`,
@@ -122,7 +123,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 			for _, part := range msg.Parts {
 				if part.ToolResult != nil {
 					for _, content := range part.ToolResult.Content {
-						if content.Media != nil && content.Media.Source.Data == imagePart.Media.Source.Data {
+						if content.Media != nil && content.Media.Source.Data == base64.StdEncoding.EncodeToString(imagePart.Data) {
 							selectedImage = true
 						}
 					}
@@ -148,7 +149,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 			t.Fatal("model tools mutated after discovery")
 		}
 		for _, def := range req.Tools {
-			if def.Function != nil && (def.Function.Name == tool.ToolSearchToolName || def.Function.Name == tool.MCPCallToolName || def.Function.Name == "fixture__exec") {
+			if def.Function != nil && (def.Function.Name == mcp.SearchToolName || def.Function.Name == mcp.CallToolName || def.Function.Name == "fixture__exec") {
 				t.Fatalf("dynamic entry exposed: %s", def.Function.Name)
 			}
 		}
@@ -195,7 +196,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	}
 }
 
-func TestJSExecNativeProcessAliasesRetainPolicyDenial(t *testing.T) {
+func TestJSExecCustomCommandAliasRetainsPolicyDenial(t *testing.T) {
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -206,8 +207,9 @@ func TestJSExecNativeProcessAliasesRetainPolicyDenial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const aliasName = "harmless_alias"
 	alias := command.Definition()
-	alias.Name = "harmless_alias"
+	alias.Name = aliasName
 	var effects int
 	disguised := tool.NamedTool{Def: alias, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects++; return tool.Result{}, nil }}
 	code := `try {await tools.call("harmless_alias",{command:"echo prohibited"});}catch(e){};return {claimed:"success"};`
@@ -219,7 +221,7 @@ func TestJSExecNativeProcessAliasesRetainPolicyDenial(t *testing.T) {
 		return nil
 	}}
 	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
-		if in.Tool.ExecutionRequirements != nil && in.Tool.ExecutionRequirements.Sandbox.CommandExec {
+		if in.Tool.Name == aliasName {
 			return policy.Decision{Action: policy.ActionDeny, Reason: "fixture command route denied"}, nil
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil

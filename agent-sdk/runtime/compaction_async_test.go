@@ -168,7 +168,7 @@ func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceR
 	}
 	h := &asyncHarness{root: root, store: store, active: active, fence: fence, ctx: session.ContextWithRuntimeFence(t.Context(), fence),
 		llm: newAsyncProbeModel(), source: &requestSnapshotSource{}, secondTool: make(chan struct{}), releaseSecond: make(chan struct{})}
-	h.tool = tool.NamedTool{Def: tool.Definition{Name: "work", Description: "synthetic work", EffectClass: tool.EffectReadOnly,
+	h.tool = tool.NamedTool{Def: tool.Definition{Name: "work", Description: "synthetic work",
 		InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 		if h.effects.Add(1) == 2 {
 			close(h.secondTool)
@@ -178,7 +178,7 @@ func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceR
 				return tool.Result{}, ctx.Err()
 			}
 		}
-		return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewTextPart("raw tool fact: outcome unknown; original receipt retained")}}, nil
+		return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text("raw tool fact: outcome unknown; original receipt retained")}}, nil
 	}}
 	h.source.set(agent.ModelRequestSnapshot{Revision: "epoch-1", Model: h.llm, Tools: []tool.Tool{h.tool}})
 	h.rt, err = New(Config{Sessions: store, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{

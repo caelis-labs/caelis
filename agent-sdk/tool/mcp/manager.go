@@ -14,6 +14,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -86,7 +87,6 @@ type Manager struct {
 	refreshWorkers sync.WaitGroup
 	workers        sync.WaitGroup
 	owners         map[string]string
-	nextBinding    uint64
 	onFailure      func(ServerFailure)
 }
 
@@ -96,15 +96,6 @@ func (m *Manager) Initialized() <-chan struct{} { return m.initialized }
 
 func formatToolName(serverName, toolName string) string {
 	raw := fmt.Sprintf("%s__%s", serverName, toolName)
-	name := sanitizeToolName(raw)
-	if len(name) <= 64 {
-		return name
-	}
-	return shortenToolName(name, raw)
-}
-
-func legacyToolName(pluginID, serverName, toolName string) string {
-	raw := fmt.Sprintf("mcp__%s__%s__%s", pluginID, serverName, toolName)
 	name := sanitizeToolName(raw)
 	if len(name) <= 64 {
 		return name
@@ -208,6 +199,45 @@ func (m *Manager) reconcile(specs []ServerSpec, initial *sync.WaitGroup) error {
 	return nil
 }
 
+// borrowClient orders dispatch with server retirement and published client
+// closure. It does not recheck the catalog for the selected callable.
+func (m *Manager) borrowClient(ctx context.Context, server *managedServer) (func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	server.client.identityMu.Lock()
+	defer server.client.identityMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.closed {
+		return nil, tool.NewError(errorcode.Unavailable, "MCP source is closed")
+	}
+	if err := checkClientAvailableLocked(server); err != nil {
+		return nil, err
+	}
+	server.inFlight++
+	return func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		server.inFlight--
+		if server.inFlight == 0 && server.drained != nil {
+			close(server.drained)
+			server.drained = nil
+		}
+	}, nil
+}
+
+// Requires Manager.mu to check the server's retirement state.
+func checkClientAvailableLocked(server *managedServer) error {
+	if server.revoked {
+		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+	}
+	if server.client.closedError() != nil {
+		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
+	}
+	return nil
+}
+
 // retireLocked stops admission before waiting for calls which already borrowed
 // the client. A startup that has not published its client cleans up itself.
 func (m *Manager) retireLocked(server *managedServer) {
@@ -305,12 +335,6 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 // Rebuild in configured order, never connection completion order. Previously
 // returned tools and their definitions remain immutable while readers use them.
 func (mgr *Manager) rebuildToolsLocked() {
-	previous := make(map[string]*MCPTool, len(mgr.tools))
-	for _, item := range mgr.tools {
-		if remote, ok := item.(*MCPTool); ok {
-			previous[remote.def.Name] = remote
-		}
-	}
 	mgr.tools = nil
 	mgr.warnings = make(map[string][]string)
 	toolsByProjectedName := map[string]*MCPTool{}
@@ -343,18 +367,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 			identitySpec.Env = nil
 			identitySpec.CleanEnvironment = false
 		}
-		groupBytes, groupErr := json.Marshal(struct {
-			Server          ServerSpec
-			LaunchIdentity  string
-			Implementation  *mcpsdk.Implementation
-			ProtocolVersion string
-		}{identitySpec, client.launchIdentity, implementation, protocolVersion})
-		catalogBytes, catalogErr := json.Marshal(toolInfos)
-		if groupErr != nil || catalogErr != nil {
-			mgr.addWarning(key, "cannot identify MCP source catalog")
-			continue
-		}
-		groupHash, catalogHash := sha256.Sum256(groupBytes), sha256.Sum256(catalogBytes)
 		for _, info := range toolInfos {
 			if info == nil || strings.TrimSpace(info.Name) == "" {
 				continue
@@ -371,10 +383,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 				}
 				owner := key + "/" + info.Name
 				if pinned := mgr.owners[name]; pinned != "" && pinned != owner {
-					// Preserve legacy replay names without transferring the pinned live binding.
-					if winner := toolsByProjectedName[name]; winner != nil {
-						winner.addReplayAliases(legacyToolNames(spec, info.Name))
-					}
 					continue
 				}
 			}
@@ -390,21 +398,18 @@ func (mgr *Manager) rebuildToolsLocked() {
 				continue
 			}
 			sourceHash := sha256.Sum256(sourceBytes)
-			legacyNames := legacyToolNames(spec, info.Name)
-			if winner := toolsByProjectedName[name]; winner != nil {
-				winner.addReplayAliases(legacyNames)
+			if toolsByProjectedName[name] != nil {
 				continue
 			}
 			def := tool.Definition{
 				Name:        name,
 				Description: info.Description,
 				Metadata: map[string]any{
-					tool.MetadataToolKind:             tool.MetadataToolKindMCP,
-					tool.MetadataPluginID:             spec.PluginID,
-					tool.MetadataMCPServer:            spec.Name,
-					tool.MetadataMCPTool:              info.Name,
-					tool.MetadataMCPSourceFingerprint: hex.EncodeToString(sourceHash[:]),
-					tool.MetadataReplayAliases:        legacyNames,
+					MetadataKind:              KindTool,
+					MetadataPluginID:          spec.PluginID,
+					MetadataServer:            spec.Name,
+					MetadataTool:              info.Name,
+					MetadataSourceFingerprint: hex.EncodeToString(sourceHash[:]),
 				},
 			}
 			if info.OutputSchema != nil {
@@ -414,7 +419,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 					continue
 				}
 			}
-			def.Source = &tool.SourceFacts{IntegrationID: spec.IntegrationID, ID: key, Revision: hex.EncodeToString(groupHash[:]), CapabilityRevision: hex.EncodeToString(catalogHash[:])}
 			def, warning, err := normalizeListedToolDefinition(def, info.InputSchema)
 			if warning != "" {
 				mgr.addWarning(key, fmt.Sprintf("tool %s: %s", toolLabel, warning))
@@ -427,19 +431,11 @@ func (mgr *Manager) rebuildToolsLocked() {
 				mgr.owners[name] = key + "/" + info.Name
 			}
 			t := &MCPTool{
-				client:     client,
-				manager:    mgr,
-				server:     server,
-				pluginID:   spec.PluginID,
-				serverName: spec.Name,
-				origName:   info.Name,
-				def:        def,
-			}
-			if old := previous[name]; old != nil && sameCatalogTool(old, t) {
-				t.bindingID = old.bindingID
-			} else {
-				mgr.nextBinding++
-				t.bindingID = mgr.nextBinding
+				client:   client,
+				manager:  mgr,
+				server:   server,
+				origName: info.Name,
+				def:      def,
 			}
 			toolsByProjectedName[name] = t
 			mgr.tools = append(mgr.tools, t)
@@ -473,23 +469,6 @@ func (mgr *Manager) awaitingHigherPriorityServer(index int) bool {
 // Host admission can reject ambiguous explicit selections before starting clients.
 func ServerToolNamePrefix(serverName string) string {
 	return strings.TrimSuffix(sanitizeToolName(serverName+"__tool"), "tool")
-}
-
-func legacyToolNames(spec ServerSpec, toolName string) []string {
-	sourceIDs := make([]string, 0, 1+len(spec.ReplaySourceIDs))
-	sourceIDs = append(sourceIDs, spec.PluginID)
-	sourceIDs = append(sourceIDs, spec.ReplaySourceIDs...)
-	seen := make(map[string]struct{}, len(sourceIDs))
-	names := make([]string, 0, len(sourceIDs))
-	for _, sourceID := range sourceIDs {
-		name := legacyToolName(sourceID, spec.Name, toolName)
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-		names = append(names, name)
-	}
-	return names
 }
 
 func mcpWarningToolName(name string) string {
@@ -689,9 +668,14 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 // SearchTools returns only currently dispatchable directory candidates. Status
 // and refresh diagnostics retain the last whole directory through Tools.
 func (m *Manager) SearchTools() []tool.Tool {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var ready []tool.Tool
-	for _, one := range m.Tools() {
-		if remote, ok := one.(*MCPTool); ok && m.admitCatalogTool(context.Background(), remote) == nil {
+	for _, one := range m.tools {
+		if remote, ok := one.(*MCPTool); ok && m.checkCatalogReadyLocked(context.Background(), remote.server) == nil {
 			ready = append(ready, one)
 		}
 	}

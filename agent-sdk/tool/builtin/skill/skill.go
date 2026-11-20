@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -58,7 +57,6 @@ func (t *Tool) Definition() tool.Definition {
 				},
 			},
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
 	}
 }
 
@@ -101,11 +99,9 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 		return tool.Result{}, fmt.Errorf("load skill %q: %w", meta.Name, err)
 	}
 	return tool.Result{
-		ID:   call.ID,
-		Name: call.Name,
-		Content: []model.Part{
-			model.NewTextPart(skillModelOutput(bundle)),
-		},
+		ID:      call.ID,
+		Name:    call.Name,
+		Content: []tool.ContentBlock{tool.Text(skillModelOutput(bundle))},
 		Metadata: map[string]any{
 			"caelis": map[string]any{
 				"version": 1,

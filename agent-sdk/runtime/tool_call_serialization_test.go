@@ -23,126 +23,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-// The map is deliberately unsynchronized: Runtime owns serialization for this
-// default-capability tool. Overlap returns before touching it so a regression
-// reports a useful assertion instead of crashing the process with a map write.
-type serializationStateTool struct {
-	def     tool.Definition
-	started chan struct{}
-	release <-chan struct{}
-	active  atomic.Int32
-	maximum atomic.Int32
-	calls   atomic.Int32
-	values  map[int]int
-}
-
-func (t *serializationStateTool) Definition() tool.Definition { return tool.CloneDefinition(t.def) }
-
-func (t *serializationStateTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	active := t.active.Add(1)
-	defer t.active.Add(-1)
-	for previous := t.maximum.Load(); active > previous; previous = t.maximum.Load() {
-		if t.maximum.CompareAndSwap(previous, active) {
-			break
-		}
-	}
-	if active != 1 {
-		return tool.Result{}, errors.New("default-capability tool called concurrently")
-	}
-	if t.calls.Add(1) == 1 {
-		close(t.started)
-		select {
-		case <-t.release:
-		case <-ctx.Done():
-			return tool.Result{}, ctx.Err()
-		}
-	}
-	var args struct {
-		Index int `json:"index"`
-	}
-	if err := json.Unmarshal(call.Input, &args); err != nil {
-		return tool.Result{}, err
-	}
-	t.values[args.Index]++
-	return tool.Result{}, nil
-}
-
-func TestJSExecSerializesDefaultTargetPromiseAll(t *testing.T) {
-	for _, mcp := range []bool{false, true} {
-		t.Run(fmt.Sprint("mcp-", mcp), func(t *testing.T) {
-			const count = 24
-			store, active, _ := codeModeStore(t)
-			release := make(chan struct{})
-			unblock := sync.OnceFunc(func() { close(release) })
-			defer unblock()
-			def := tool.Definition{Name: "State", InputSchema: map[string]any{"type": "object"}}
-			if mcp {
-				def = fixtureMCPDefinition("serialized-state")
-				def.Name = "z__target"
-			}
-			target := &serializationStateTool{def: def, started: make(chan struct{}), release: release, values: make(map[int]int)}
-			admitted := make(chan struct{})
-			var admissions atomic.Int32
-			registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
-				if in.Tool.Name == def.Name && admissions.Add(1) == count {
-					close(admitted)
-				}
-				return policy.Decision{Action: policy.ActionAllow}, nil
-			}}}
-			releaseTool := tool.NamedTool{Def: tool.Definition{Name: "Release", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
-				for _, signal := range []<-chan struct{}{target.started, admitted} {
-					select {
-					case <-signal:
-					case <-ctx.Done():
-						return tool.Result{}, ctx.Err()
-					}
-				}
-				unblock()
-				return tool.Result{}, nil
-			}}
-			code := fmt.Sprintf(`await tools.search({name:%q}); const pending = Array.from({length:%d}, (_, index) => tools.call(%q, {index})); await tools.call("Release", {}); await Promise.all(pending); return {count:pending.length};`, def.Name, count, def.Name)
-			script := func() []model.ToolCall {
-				raw, _ := json.Marshal(map[string]any{"code": code, "yield_time_ms": 60000})
-				return []model.ToolCall{{ID: "parallel-state", Name: codemode.ToolName, Args: string(raw)}}
-			}
-			var spec agent.AgentSpec
-			if mcp {
-				source := &h1Source{items: []tool.Tool{target}}
-				driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
-					if i == 0 {
-						return script()
-					}
-					return nil
-				}}
-				spec = h1Spec(source, driver)
-				spec.Tools = append(spec.Tools, releaseTool)
-			} else {
-				driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-					if i == 0 {
-						return script()
-					}
-					return nil
-				}}
-				spec = agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, releaseTool, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}
-			}
-			runCodeMode(t, store, active, spec, registry, nil)
-			if target.maximum.Load() != 1 || target.calls.Load() != count || len(target.values) != count {
-				t.Fatalf("maximum=%d calls=%d state entries=%d; want 1, %d, %d", target.maximum.Load(), target.calls.Load(), len(target.values), count, count)
-			}
-			for index := range count {
-				if target.values[index] != 1 {
-					t.Fatalf("state[%d]=%d, want one effect", index, target.values[index])
-				}
-			}
-		})
-	}
-}
-
-func TestToolCallSerializationCancellationBeforeClaim(t *testing.T) {
+func TestCodeModeCancelsPendingApprovalWithoutEffect(t *testing.T) {
 	store, active, _ := codeModeStore(t)
-	started, approved := make(chan struct{}), make(chan struct{})
+	started, approvalStarted := make(chan struct{}), make(chan struct{})
 	var effects atomic.Int32
-	target := tool.NamedTool{Def: tool.Definition{Name: "State", EffectClass: tool.EffectReadOnly, InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+	target := tool.NamedTool{Def: tool.Definition{Name: "State", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
 		if effects.Add(1) == 1 {
 			close(started)
 		}
@@ -155,9 +40,10 @@ func TestToolCallSerializationCancellationBeforeClaim(t *testing.T) {
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		close(approved)
-		return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
+	requester := approvalRequesterFunc(func(ctx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		close(approvalStarted)
+		<-ctx.Done()
+		return agent.ApprovalResponse{}, ctx.Err()
 	})
 	var queuedErr error
 	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
@@ -179,7 +65,7 @@ func TestToolCallSerializationCancellationBeforeClaim(t *testing.T) {
 			queuedDone <- err
 		}()
 		select {
-		case <-approved:
+		case <-approvalStarted:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -229,26 +115,45 @@ func TestToolCallSerializationCancellationBeforeClaim(t *testing.T) {
 
 }
 
-func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T) {
+func TestCodeModeYieldedCallOverlapsSameTargetFromNativeSnapshot(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	release := make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
 	defer unblock()
-	target := &serializationStateTool{def: tool.Definition{Name: "State", InputSchema: map[string]any{"type": "object"}}, started: make(chan struct{}), release: release, values: make(map[int]int)}
-	var admissions atomic.Int32
-	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
-		if in.Tool.Name == "State" && admissions.Add(1) == 2 {
+	started := make(chan struct{})
+	var effects sync.Map
+	target := tool.NamedTool{Def: tool.Definition{Name: "State", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+		var args struct {
+			Index int `json:"index"`
+		}
+		if err := json.Unmarshal(call.Input, &args); err != nil {
+			return tool.Result{}, err
+		}
+		if _, duplicate := effects.LoadOrStore(args.Index, struct{}{}); duplicate {
+			t.Errorf("duplicate effect at index %d", args.Index)
+		}
+		switch args.Index {
+		case 1:
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return tool.Result{}, ctx.Err()
+			case <-time.After(5 * time.Second):
+				t.Error("native call did not enter the target while the yielded call was active")
+			}
+		case 3:
 			unblock()
 		}
-		return policy.Decision{Action: policy.ActionAllow}, nil
-	}}}
+		return tool.Result{}, nil
+	}}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
 			return []model.ToolCall{{ID: "script-one", Name: codemode.ToolName, Args: `{"code":"return await tools.call('State',{index:1})","yield_time_ms":0}`}}
 		case 1:
 			select {
-			case <-target.started:
+			case <-started:
 			case <-time.After(5 * time.Second):
 				t.Error("first yielded script did not enter its tool")
 				return nil
@@ -293,13 +198,18 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 	spec := agent.AgentSpec{Model: driver, Tools: tools, ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
 		return agent.ModelRequestSnapshot{Model: driver, Tools: tools, Revision: fmt.Sprint(snapshots.Add(1)), Validate: func(context.Context) (func(), error) { return func() {}, nil }}, nil
 	}}
-	_, rt := runCodeMode(t, store, active, spec, registry, nil)
+	_, rt := runCodeMode(t, store, active, spec, mcpFixturePolicy(), nil)
 	busy := errorDeliveryModelResult(t, driver.requests[2], "overlap")
 	if !busy.IsError || !strings.Contains(string(errorDeliveryJSON(t, busy.Content)), "busy") {
 		t.Fatalf("overlapping VM submission not rejected: %+v", busy)
 	}
-	if snapshots.Load() < 2 || target.maximum.Load() != 1 || target.calls.Load() != 3 || len(target.values) != 3 {
-		t.Fatalf("snapshots=%d maximum=%d calls=%d state=%v", snapshots.Load(), target.maximum.Load(), target.calls.Load(), target.values)
+	if snapshots.Load() < 2 {
+		t.Fatalf("snapshots=%d, want a replacement snapshot", snapshots.Load())
+	}
+	for _, index := range []int{1, 2, 3} {
+		if _, found := effects.Load(index); !found {
+			t.Errorf("missing effect for index %d", index)
+		}
 	}
 	entries, err := rt.tasks.store.ListSession(t.Context(), active.SessionRef)
 	if err != nil || len(entries) != 2 {
@@ -312,12 +222,12 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 	}
 }
 
-type serializationFactStore struct {
+type taskWaitFactStore struct {
 	session.Service
 	started func(*session.EventTool)
 }
 
-func (s serializationFactStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+func (s taskWaitFactStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	event, err := s.Service.AppendEvent(ctx, req)
 	if err == nil && req.Event != nil && req.Event.Type == session.EventTypeToolCall && req.Event.Tool != nil {
 		s.started(req.Event.Tool)
@@ -325,11 +235,11 @@ func (s serializationFactStore) AppendEvent(ctx context.Context, req session.App
 	return event, err
 }
 
-func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
+func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	files, active, _ := codeModeStore(t)
 	waitStarted := make(chan struct{})
 	markWait := sync.OnceFunc(func() { close(waitStarted) })
-	store := serializationFactStore{Service: files, started: func(record *session.EventTool) {
+	store := taskWaitFactStore{Service: files, started: func(record *session.EventTool) {
 		if record.Name == tasktool.ToolName && record.Parent == nil && record.Status == "pending" {
 			markWait()
 		}
@@ -342,7 +252,7 @@ func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
 			return tool.Result{}, ctx.Err()
 		}
 		raw, err := json.Marshal(map[string]any{"handle": <-handles})
-		return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0}}, err
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, err
 	}}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		switch i {

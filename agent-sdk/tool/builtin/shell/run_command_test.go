@@ -22,9 +22,6 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	definition := runCommandTool.Definition()
-	if !definition.Capabilities.ParallelSafe {
-		t.Fatal("Definition().Capabilities.ParallelSafe = false, want explicit concurrent-call declaration")
-	}
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}
@@ -336,16 +333,14 @@ func TestRunCommandCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	}
 	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool error result", err)
+		t.Fatalf("Call() error = %v, want structured command exit result", err)
 	}
-	if result.IsError {
-		t.Fatal("result.IsError = true for command exit status, want false")
-	}
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	structured, ok := result.Structured()
+	if len(result.Content) == 0 || !ok {
 		t.Fatalf("result.Content = %#v, want json payload", result.Content)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if resultText, _ := payload["result"].(string); !strings.Contains(resultText, "module cache denied") {
@@ -380,13 +375,11 @@ func TestRunCommandCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.
 	}
 	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool error result", err)
-	}
-	if result.IsError {
-		t.Fatal("result.IsError = true for shell command exit status, want false")
+		t.Fatalf("Call() error = %v, want structured command exit result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	resultText, _ := payload["result"].(string)
@@ -423,13 +416,11 @@ func TestRunCommandCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testin
 	}
 	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool error result", err)
-	}
-	if result.IsError {
-		t.Fatal("result.IsError = true for shell command exit status, want false")
+		t.Fatalf("Call() error = %v, want structured command exit result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	resultText, _ := payload["result"].(string)
@@ -467,10 +458,11 @@ func TestRunCommandCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testin
 	}
 	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool error result", err)
+		t.Fatalf("Call() error = %v, want structured command exit result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if _, ok := payload["error"]; ok {
@@ -502,7 +494,8 @@ fatal: Could not read from remote repository.`
 		t.Fatalf("Call() error = %v, want structured tool result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if text, _ := payload["result"].(string); !strings.Contains(text, "couldn't create signal pipe") {
@@ -541,7 +534,8 @@ func TestRunCommandCallDoesNotHintNativeOpenSSHPublicKeyFailure(t *testing.T) {
 		t.Fatalf("Call() error = %v, want structured tool result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if _, ok := payload["system_hint"]; ok {
@@ -570,7 +564,8 @@ func TestRunCommandCallAddsHostExecutionApprovalHint(t *testing.T) {
 		t.Fatalf("Call() error = %v, want structured tool result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if got, _ := payload["system_hint"].(string); got != sandbox.HostExecutionRequiresApprovalMessage {
@@ -603,7 +598,8 @@ func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
 		t.Fatalf("Call() error = %v, want structured tool result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "Git index write is blocked") || !strings.Contains(got, "THIS SAME command once") {
@@ -633,7 +629,8 @@ func TestRunCommandCallAddsWindowsSChannelNoCredentialsHint(t *testing.T) {
 		t.Fatalf("Call() error = %v, want structured tool result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "SChannel TLS can fail") {
@@ -668,10 +665,11 @@ func TestRunCommandCallPreservesWindowsDACLRefreshFailure(t *testing.T) {
 	}
 	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool error result", err)
+		t.Fatalf("Call() error = %v, want structured command exit result", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if got, _ := payload["error_code"].(string); got != string(tool.ErrorCodeSandboxDenied) {

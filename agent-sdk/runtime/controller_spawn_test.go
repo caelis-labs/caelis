@@ -86,7 +86,7 @@ func testControllerSpawn(t *testing.T, recoverController bool) {
 		t.Fatal("stale epoch created a child")
 	}
 	result, err := r.CallControllerSpawn(ctx, active.SessionRef, epoch, base, call)
-	if err != nil || result.IsError {
+	if err != nil {
 		t.Fatalf("Spawn: %#v %v", result, err)
 	}
 	entries, err := r.tasks.store.ListSession(ctx, active.SessionRef)

@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -103,15 +102,20 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := tools[0].Call(t.Context(), tool.Call{ID: call.CallID, Name: call.Name, Input: call.Arguments, Execution: tool.InvocationContext{SessionID: b.SessionID, TurnID: call.TurnID, ItemID: call.ItemID}})
-	if err != nil || got.IsError || got.ID != call.CallID || len(got.Content) != 4 {
+	got, err := tools[0].(callbackTool).invoke(t.Context(), tool.Call{ID: call.CallID, Name: call.Name, Input: call.Arguments}, tool.InvocationContext{SessionID: b.SessionID, TurnID: call.TurnID, ItemID: call.ItemID})
+	if err != nil || got.ID != call.CallID || len(got.Content) != 4 {
 		t.Fatalf("projection shape: %+v, %v", got, err)
 	}
-	if got.Content[0].Text.Text != before || got.Content[1].Media.MimeType != "image/png" || got.Content[1].Media.Source.Data != encoded || got.Content[2].Text.Text != after {
+	image, ok := got.Content[1].(tool.Image)
+	if got.Content[0] != tool.Text(before) || !ok || image.MIMEType != "image/png" || base64.StdEncoding.EncodeToString(image.Data) != encoded || got.Content[2] != tool.Text(after) {
 		t.Fatal("typed order or image bytes changed")
 	}
+	structured, ok := got.Content[3].(tool.StructuredContent)
+	if !ok {
+		t.Fatalf("missing structured receipt: %+v", got.Content)
+	}
 	var receipt map[string]any
-	if err := json.Unmarshal(got.Content[3].JSON.Value, &receipt); err != nil {
+	if err := json.Unmarshal(structured.Value, &receipt); err != nil {
 		t.Fatal(err)
 	}
 	if receipt["outcome"] != "succeeded" || receipt["receipt_id"] != call.ID || !reflect.DeepEqual(receipt["structuredContent"], result.StructuredContent) {
@@ -128,8 +132,12 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 			t.Fatal(err)
 		}
 		out, err := reopened.projectResult(t.Context(), next.CallContext, next.Name, ResultFormatContentV1, result)
-		if err != nil || !out.IsError || !bytes.Contains(out.Content[3].JSON.Value, []byte(`"outcome":"`+outcome+`"`)) {
+		raw, ok := out.Structured()
+		if !tool.HasFailedReply(err) || err.Error() != before || !ok || !bytes.Contains(raw, []byte(`"outcome":"`+outcome+`"`)) {
 			t.Fatalf("lost %s receipt: %+v %v", outcome, out, err)
+		}
+		if !reflect.DeepEqual(out.Content[:len(out.Content)-1], got.Content[:len(got.Content)-1]) {
+			t.Fatalf("%s receipt changed diagnostic blocks: %+v", outcome, out.Content)
 		}
 	}
 }
@@ -210,8 +218,13 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
-	if err != nil || len(out.Content) != 2 || out.Content[0].Kind != model.PartKindMedia || !bytes.Contains(out.Content[1].JSON.Value, []byte(r.ID)) {
+	raw, ok := out.Structured()
+	if err != nil || len(out.Content) != 2 || !ok || !bytes.Contains(raw, []byte(r.ID)) {
 		t.Fatalf("resource not resolved with provenance: %+v %v", out, err)
+	}
+	snapshot, ok := out.Content[0].(tool.Image)
+	if !ok || snapshot.MIMEType != r.MediaType || snapshot.Name != r.Name {
+		t.Fatalf("expected resolved image, got %+v", out.Content[0])
 	}
 	otherSession := contentBinding(t, s, c, "other-session")
 	foreign := testOwner(t, s, 2)
@@ -244,10 +257,11 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 	next := claimContent(t, s, b, "expired")
 	assertError(t, s.CompleteCall(t.Context(), c.Scope, b.SessionID, next.ID, result), ErrResourceExpired)
 	expired, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
-	if err != nil || !expired.IsError || len(expired.Content) != 1 || !bytes.Contains(expired.Content[0].JSON.Value, []byte(`"outcome":"succeeded"`)) || !bytes.Contains(expired.Content[0].JSON.Value, []byte(`"content_error"`)) {
+	raw, ok = expired.Structured()
+	if !tool.HasFailedReply(err) || err.Error() != ErrResourceExpired.Error() || len(expired.Content) != 1 || !ok || !bytes.Contains(raw, []byte(`"outcome":"succeeded"`)) || !bytes.Contains(raw, []byte(`"content_error"`)) {
 		t.Fatalf("expiry changed effect outcome or silently dropped content: %+v %v", expired, err)
 	}
-	if out.Content[0].Media.Source.Data != base64.StdEncoding.EncodeToString(data) {
+	if !bytes.Equal(snapshot.Data, data) {
 		t.Fatal("historical snapshot changed on resource expiry")
 	}
 }
@@ -273,13 +287,32 @@ func TestContentV1CatalogAndLegacyCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, "", result)
-	if err != nil || len(out.Content) != 1 || out.Content[0].Kind != model.PartKindText {
+	if err != nil || len(out.Content) != 1 {
+		t.Fatalf("legacy receipt shape: %+v, %v", out, err)
+	}
+	if _, ok := out.Content[0].(tool.Text); !ok {
 		t.Fatal("legacy image-shaped JSON incorrectly became visual input")
 	}
 	tools := b.Profile.Tools
 	tools[0].ResultFormat = ResultFormatContentV1
 	_, err = s.UpdateConfiguration(mutationContext(t.Context()), c.Scope, b.SessionID, UpdateConfigurationRequest{OperationID: "change-format", ExpectedConfigurationRevision: 1, Patch: ConfigurationPatch{Tools: &tools}}, nil)
 	assertError(t, err, ErrConflict)
+}
+
+func TestLegacyCallbackFailurePreservesOpaqueReceipt(t *testing.T) {
+	s, _ := testStore(t)
+	c := testOwner(t, s, 1)
+	b := testBinding(t, s, c, "legacy")
+	call := claimContent(t, s, b, "legacy")
+	result := CallResult{Outcome: "failed", Content: json.RawMessage(`{"message":"fixture refused the request","details":["unchanged",9223372036854775807]}`)}
+	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.projectResult(t.Context(), call.CallContext, call.Name, "", result)
+	if !tool.HasFailedReply(err) || err.Error() != "fixture refused the request" || len(out.Content) != 1 ||
+		out.Content[0] != tool.Text(`{"outcome":"failed","content":{"message":"fixture refused the request","details":["unchanged",9223372036854775807]}}`) {
+		t.Fatalf("failed callback changed: %+v, %v", out, err)
+	}
 }
 
 func TestContentV1UnknownLifecycleCannotReissue(t *testing.T) {
@@ -326,7 +359,8 @@ func TestContentV1UnknownLifecycleCannotReissue(t *testing.T) {
 				}
 				if claimed {
 					out, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, result)
-					if err != nil || !out.IsError || !bytes.Contains(out.Content[0].JSON.Value, []byte(`"outcome":"unknown"`)) {
+					raw, ok := out.Structured()
+					if !tool.HasFailedReply(err) || err.Error() != "Application callback outcome: unknown" || !ok || !bytes.Contains(raw, []byte(`"outcome":"unknown"`)) {
 						t.Fatal("unknown effect lost")
 					}
 				}

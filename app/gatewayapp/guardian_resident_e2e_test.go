@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -138,7 +137,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 	}
 	t.Run("concurrent_delegated_approvals", func(t *testing.T) {
 		before := len(all)
-		refs := tool.NewConcurrentModelStepRefs("development-step", 8)
+		refs := agent.NewConcurrentModelStepRefs("development-step", 8)
 		var pending sync.WaitGroup
 		for i, ref := range refs {
 			pending.Add(1)

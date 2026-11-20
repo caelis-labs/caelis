@@ -14,7 +14,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/plugin"
 )
@@ -74,7 +73,7 @@ func TestProductPolicyNativeFixtureAutomatedApproval(t *testing.T) {
 	names := map[string]string{}
 	for _, item := range manager.Tools() {
 		def := item.Definition()
-		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := def.Metadata[mcp.MetadataTool].(string)
 		names[remote] = def.Name
 		t.Logf("catalog %s -> %s", remote, def.Name)
 	}

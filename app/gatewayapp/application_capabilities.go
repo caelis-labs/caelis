@@ -13,6 +13,7 @@ import (
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
@@ -24,7 +25,7 @@ type applicationCapabilities struct {
 	skillBundles []skill.PluginBundle
 	skills       []sessionprofile.SkillStatus
 	plugins      []sessionprofile.PluginStatus
-	source       tool.Source
+	source       toolset.Source
 }
 
 type applicationMCPSource struct {

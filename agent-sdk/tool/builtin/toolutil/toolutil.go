@@ -6,22 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
-
-// AnnotationMetadata returns advisory tool hints. Sandbox, approval, and
-// runtime validation remain the enforcement boundary.
-func AnnotationMetadata(readOnly, destructive, idempotent, openWorld bool) map[string]any {
-	return map[string]any{
-		"annotations": map[string]any{
-			"readOnlyHint":    readOnly,
-			"destructiveHint": destructive,
-			"idempotentHint":  idempotent,
-			"openWorldHint":   openWorld,
-		},
-	}
-}
 
 func DecodeArgs(call tool.Call) (map[string]any, error) {
 	call = tool.CloneCall(call)
@@ -62,10 +48,9 @@ func JSONResult(name string, payload map[string]any, metaExtra ...map[string]any
 		}
 	}
 	return tool.Result{
-		Name:              name,
-		Content:           []model.Part{model.NewJSONPart(raw)},
-		StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0},
-		Metadata:          metadata,
+		Name:     name,
+		Content:  []tool.ContentBlock{tool.StructuredContent{Value: raw}},
+		Metadata: metadata,
 	}, nil
 }
 

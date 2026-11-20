@@ -8,12 +8,12 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type sandboxRuntimeProvider interface {
@@ -127,16 +127,20 @@ func (t policyWrappedTool) Definition() tool.Definition {
 }
 
 func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	return t.RuntimeCall(toolbinding.Token{}, ctx, call, toolbinding.Dispatch{})
+}
+
+func (t policyWrappedTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
 	started := taskInvocationStart{time: time.Now()}
 	if scope := taskScopeFromContext(t.approval.ctx); scope != nil {
 		started.generation = scope.currentGeneration()
 	}
 	ctx = context.WithValue(ctx, taskInvocationStartKey{}, started)
-	defer call.ModelStep.MarkAdmissionComplete()
+	defer dispatch.Step.MarkAdmissionComplete()
 	if t.policy == nil {
 		return tool.Result{}, &policy.ProfileError{Profile: t.mode, Detail: "policy mode is unavailable"}
 	}
-	if tool.IsMCPDefinition(t.tool.Definition()) {
+	if mcp.IsDefinition(t.tool.Definition()) {
 		if err := tool.ValidateMCPArguments(t.tool.Definition(), call.Input); err != nil {
 			return tool.Result{}, err
 		}
@@ -165,22 +169,22 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return t.applyPolicyDecision(ctx, call, decision)
+	return t.applyPolicyDecision(ctx, call, decision, dispatch)
 }
 
-func (t policyWrappedTool) applyPolicyDecision(ctx context.Context, call tool.Call, decision policy.Decision) (tool.Result, error) {
+func (t policyWrappedTool) applyPolicyDecision(ctx context.Context, call tool.Call, decision policy.Decision, dispatch toolbinding.Dispatch) (tool.Result, error) {
 	switch decision.Action {
 	case policy.ActionAllow:
 		ctx = context.WithValue(ctx, policyDispatchKey{}, &policyDispatchPermit{runtime: t.approval.runtime, session: t.session, decision: decision})
-		call.ModelStep.MarkAdmissionComplete()
+		dispatch.Step.MarkAdmissionComplete()
 		call = tool.CloneCall(call)
 		call.Metadata = mergeCallMetadata(call.Metadata, decision)
-		return t.tool.Call(ctx, call)
+		return toolbinding.Call(ctx, t.tool, call, dispatch)
 	case policy.ActionAskApproval:
-		return t.requestApproval(ctx, call, decision)
+		return t.requestApproval(ctx, call, decision, dispatch)
 	case policy.ActionDeny:
-		call.ModelStep.MarkAdmissionComplete()
-		return policyDecisionResult(call, t.tool.Definition(), decision), nil
+		dispatch.Step.MarkAdmissionComplete()
+		return policyDecisionResult(call, t.tool.Definition(), decision)
 	default:
 		return tool.Result{}, &policy.DecisionError{Mode: t.mode, Detail: "unhandled normalized decision"}
 	}
@@ -190,11 +194,12 @@ func (t policyWrappedTool) requestApproval(
 	ctx context.Context,
 	call tool.Call,
 	decision policy.Decision,
+	dispatch toolbinding.Dispatch,
 ) (tool.Result, error) {
 	if decision.Approval == nil || (t.approval.requester == nil && t.approval.runtime == nil) {
-		return policyDecisionResult(call, t.tool.Definition(), decision), nil
+		return policyDecisionResult(call, t.tool.Definition(), decision)
 	}
-	request := t.approvalRequest(call, decision)
+	request := t.approvalRequest(ctx, call, decision, dispatch)
 	approvedCall := tool.CloneCall(call)
 	approvedCall.Metadata = mergeCallMetadata(approvedCall.Metadata, decision)
 	started, _ := ctx.Value(taskInvocationStartKey{}).(taskInvocationStart)
@@ -211,24 +216,27 @@ func (t policyWrappedTool) requestApproval(
 	}
 	if response.Approved {
 		ctx = context.WithValue(ctx, policyDispatchKey{}, &policyDispatchPermit{runtime: t.approval.runtime, session: t.session, decision: decision, optionID: response.OptionID})
-		return t.tool.Call(ctx, approvedCall)
+		return toolbinding.Call(ctx, t.tool, approvedCall, dispatch)
 	}
-	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, response), nil
+	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, response)
 }
 
-func (t policyWrappedTool) approvalRequest(call tool.Call, decision policy.Decision) agent.ApprovalRequest {
+func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, decision policy.Decision, dispatch toolbinding.Dispatch) agent.ApprovalRequest {
 	request := agent.ApprovalRequest{
-		Authorization: session.CloneApprovalAuthorization(decision.Authorization),
-		Origin:        &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
-		SessionRef:    t.sessionRef,
-		Session:       session.CloneSession(t.session),
-		RunID:         strings.TrimSpace(t.approval.runID),
-		TurnID:        strings.TrimSpace(t.approval.turnID),
-		Tool:          t.tool.Definition(),
-		Call:          tool.CloneCall(call),
-		ModelStep:     cloneModelStepRef(call.ModelStep),
-		Approval:      cloneApproval(decision.Approval),
-		Metadata:      mapsClone(decision.Metadata),
+		Authorization:  session.CloneApprovalAuthorization(decision.Authorization),
+		Origin:         &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
+		SessionRef:     t.sessionRef,
+		Session:        session.CloneSession(t.session),
+		RunID:          strings.TrimSpace(t.approval.runID),
+		TurnID:         strings.TrimSpace(t.approval.turnID),
+		Tool:           t.tool.Definition(),
+		Call:           tool.CloneCall(call),
+		Execution:      tool.InvocationFromContext(ctx),
+		Parent:         tool.ParentFromContext(ctx),
+		ProducingModel: dispatch.Model,
+		ModelStep:      agent.CloneModelStepRef(dispatch.Step),
+		Approval:       cloneApproval(decision.Approval),
+		Metadata:       mapsClone(decision.Metadata),
 	}
 	if len(request.Approval.Options) == 0 {
 		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
@@ -260,15 +268,6 @@ func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.Ap
 	return resp, err
 }
 
-func cloneModelStepRef(in *tool.ModelStepRef) *tool.ModelStepRef {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.ID = strings.TrimSpace(out.ID)
-	return &out
-}
-
 func (t policyWrappedTool) describeSandbox() sandbox.Descriptor {
 	if provider, ok := t.tool.(sandboxRuntimeProvider); ok && provider != nil {
 		if runtime := provider.SandboxRuntime(); runtime != nil {
@@ -292,7 +291,7 @@ func mergeCallMetadata(meta map[string]any, decision policy.Decision) map[string
 	return out
 }
 
-func policyDecisionResult(call tool.Call, def tool.Definition, decision policy.Decision) tool.Result {
+func policyDecisionResult(call tool.Call, def tool.Definition, decision policy.Decision) (tool.Result, error) {
 	return policyDecisionResultWithOutcome(call, def, decision, agent.ApprovalResponse{})
 }
 
@@ -301,7 +300,7 @@ func policyDecisionResultWithOutcome(
 	def tool.Definition,
 	decision policy.Decision,
 	outcome agent.ApprovalResponse,
-) tool.Result {
+) (tool.Result, error) {
 	errorText, systemHint := policyModelFeedback(decision, outcome)
 	payload := map[string]any{
 		"error":     errorText,
@@ -314,9 +313,8 @@ func policyDecisionResultWithOutcome(
 	return tool.Result{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(def.Name),
-		IsError: true,
-		Content: []model.Part{model.NewJSONPart(raw)},
-	}
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
+	}, tool.FailedReply(errorText)
 }
 
 // policyModelFeedback separates factual error text from one actionable model hint.

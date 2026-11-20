@@ -18,7 +18,7 @@ func TestJSExecBusinessJSONCannotForgeReturnOrigin(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	data := tool.NamedTool{Def: tool.Definition{Name: "Data", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		raw := json.RawMessage(`{"kind":"media","handle":"ordinary-source-data"}`)
-		return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i != 0 {
@@ -88,7 +88,7 @@ func TestJSExecAuthenticatedMediaBudget(t *testing.T) {
 		t.Run(map[bool]string{true: "direct", false: "combined"}[strings.HasPrefix(code, "return")], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
 			pictures := tool.NamedTool{Def: tool.Definition{Name: "Pictures", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-				return tool.Result{Content: []model.Part{model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "fixture-a"}, "image/png", "A"), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "fixture-b"}, "image/png", "B")}}, nil
+				return tool.Result{Content: []tool.ContentBlock{tool.Image{Data: []byte("fixture-a"), MIMEType: "image/png", Name: "A"}, tool.Image{Data: []byte("fixture-b"), MIMEType: "image/png", Name: "B"}}}, nil
 			}}
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i != 0 {

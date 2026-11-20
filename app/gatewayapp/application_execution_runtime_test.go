@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -136,7 +135,7 @@ func (t *applicationToolProbe) Definition() tool.Definition {
 }
 func (t *applicationToolProbe) Call(context.Context, tool.Call) (tool.Result, error) {
 	t.calls++
-	return tool.Result{Content: []model.Part{model.NewTextPart("effect")}}, nil
+	return tool.Result{Content: []tool.ContentBlock{tool.Text("effect")}}, nil
 }
 
 func TestSessionRuntimeClosurePreventsDelayedNativeEffects(t *testing.T) {

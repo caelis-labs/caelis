@@ -10,6 +10,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // wrapModelRequestResolver admits changing model-facing values through the same
@@ -128,7 +130,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 				return one, true, nil
 			}
 		}
-		if source, ok := spec.DeferredTools.(tool.NamedSource); ok {
+		if source, ok := spec.DeferredTools.(toolset.NamedSource); ok {
 			return source.Lookup(ctx, name)
 		}
 
@@ -152,7 +154,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	if discovery != nil {
 		visible := make([]tool.Tool, 0, len(spec.Tools))
 		for _, candidate := range spec.Tools {
-			if candidate != nil && !tool.IsToolSearchDefinition(candidate.Definition()) && !tool.IsMCPCallDefinition(candidate.Definition()) {
+			if candidate != nil && !mcp.IsSearchDefinition(candidate.Definition()) && !mcp.IsCallDefinition(candidate.Definition()) {
 				visible = append(visible, candidate)
 			}
 		}

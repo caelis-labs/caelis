@@ -13,9 +13,9 @@ import (
 )
 
 func sharedMediaEvent(t testing.TB, size int) Event {
-	image := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("YWJj", size/4)}, "image/png", "screen")
-	message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "call", Name: "screen", Content: []model.Part{image}}}}}
-	return Event{Schema: EventSchemaVersion, Type: EventTypeToolResult, Message: &message, Tool: &EventTool{ID: "call", Name: "screen", Result: &tool.Result{ID: "call", Name: "screen", Content: []model.Part{image}}}}
+	image := tool.Image{Data: []byte(strings.Repeat("abc", size/4)), MIMEType: "image/png", Name: "screen"}
+	message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "call", Name: "screen", Content: tool.ModelParts([]tool.ContentBlock{image})}}}}
+	return Event{Schema: EventSchemaVersion, Type: EventTypeToolResult, Message: &message, Tool: &EventTool{ID: "call", Name: "screen", Result: &tool.Result{ID: "call", Name: "screen", Content: []tool.ContentBlock{image}}}}
 }
 func TestEventMediaSharesPayloadAndCompleteResult(t *testing.T) {
 	original := sharedMediaEvent(t, 64<<10)
@@ -24,7 +24,7 @@ func TestEventMediaSharesPayloadAndCompleteResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := original.Tool.Result.Content[0].Media.Source.Data
+	data := original.Message.ToolResults()[0].Content[0].Media.Source.Data
 	if bytes.Count(raw, []byte(data)) != 1 {
 		t.Fatal("media not shared")
 	}

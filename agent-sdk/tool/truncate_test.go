@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestTruncateMapPreservesKeysAndReportsMetadata(t *testing.T) {
@@ -42,10 +40,10 @@ func TestResultNeedsTruncationDoesNotConstructCanonicalResult(t *testing.T) {
 	t.Parallel()
 
 	policy := TruncationPolicy{MaxTokens: 10}
-	if ResultNeedsTruncation(Result{Content: []model.Part{model.NewTextPart("small")}}, policy) {
+	if ResultNeedsTruncation(Result{Content: []ContentBlock{Text("small")}}, policy) {
 		t.Fatal("ResultNeedsTruncation(small) = true")
 	}
-	if !ResultNeedsTruncation(Result{Content: []model.Part{model.NewTextPart(strings.Repeat("large", 100))}}, policy) {
+	if !ResultNeedsTruncation(Result{Content: []ContentBlock{Text(strings.Repeat("large", 100))}}, policy) {
 		t.Fatal("ResultNeedsTruncation(large) = false")
 	}
 }
@@ -219,21 +217,26 @@ func TestTruncatePartsReservesLaterTrustedArtifactFields(t *testing.T) {
 	protected := map[string]any{"_caelis": map[string]any{"runtime": map[string]any{
 		"artifact": map[string]any{"path": "C:\\owned\\complete.json", "model_visible_content_truncated": true},
 	}}}
-	parts := []model.Part{
-		model.NewTextPart(strings.Repeat("large documentation ", 1000)),
-		model.NewJSONPart(json.RawMessage(`{"schema":"original"}`)),
+	parts := []ContentBlock{
+		Text(strings.Repeat("large documentation ", 1000)),
+		StructuredContent{Value: json.RawMessage(`{"schema":"original"}`)},
 	}
-	out, info := truncatePartsWithProtectedJSONFields(parts, TruncationPolicy{MaxTokens: 200}, protected)
+	result, info := TruncateResultWithInfoAndProtectedJSONFields(Result{Content: parts}, TruncationPolicy{MaxTokens: 200}, protected)
+	out := result.Content
+	if got := string(parts[1].(StructuredContent).Value); got != `{"schema":"original"}` {
+		t.Fatalf("truncation changed original JSON: %s", got)
+	}
 	if !info.Truncated {
 		t.Fatal("expected truncation")
 	}
 	found := false
 	for _, part := range out {
-		if part.JSON == nil {
+		data, ok := part.(StructuredContent)
+		if !ok {
 			continue
 		}
 		var payload map[string]any
-		if err := json.Unmarshal(part.JSON.Value, &payload); err != nil {
+		if err := json.Unmarshal(data.Value, &payload); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(payload["_caelis"], protected["_caelis"]) {
@@ -244,10 +247,10 @@ func TestTruncatePartsReservesLaterTrustedArtifactFields(t *testing.T) {
 	if !found {
 		t.Fatal("earlier text consumed the later protected artifact reference")
 	}
-	if estimateTokensForParts(out) > 200 {
+	if estimateTokensForBlocks(out) > 200 {
 		t.Fatal("protected reference exceeded the complete result budget")
 	}
-	if again, second := truncatePartsWithProtectedJSONFields(out, TruncationPolicy{MaxTokens: 200}, protected); second.Truncated || !reflect.DeepEqual(again, out) {
+	if again, second := TruncateResultWithInfoAndProtectedJSONFields(result, TruncationPolicy{MaxTokens: 200}, protected); second.Truncated || !reflect.DeepEqual(again.Content, out) {
 		t.Fatal("protected multipart output is not canonical")
 	}
 }
@@ -357,21 +360,26 @@ func TestTruncateLineUnitsLargeMultilineOutputCompletesPromptly(t *testing.T) {
 func TestTruncatePartsWithProtectedJSONFieldsPreservesMediaAndTruncatesText(t *testing.T) {
 	t.Parallel()
 
-	parts := []model.Part{
-		model.NewTextPart(strings.Repeat("alpha ", 200)),
-		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.test/img.png"}, "image/png", "img"),
+	parts := []ContentBlock{
+		Text(strings.Repeat("alpha ", 200)),
+		Image{Data: []byte("image"), MIMEType: "image/png", Name: "img"},
 	}
-	out, info := truncatePartsWithProtectedJSONFields(parts, TruncationPolicy{MaxTokens: 30}, nil)
+	result, info := TruncateResultWithInfo(Result{Content: parts}, TruncationPolicy{MaxTokens: 30})
+	out := result.Content
 	if !info.Truncated {
 		t.Fatal("info.Truncated = false, want true")
 	}
 	if len(out) != 2 {
 		t.Fatalf("len(out) = %d, want 2", len(out))
 	}
-	if out[1].Media == nil || out[1].Media.Source.URI == "" {
+	if img, ok := out[1].(Image); !ok || string(img.Data) != "image" {
 		t.Fatalf("media part = %#v, want preserved", out[1])
 	}
-	if out[0].Text == nil || !strings.Contains(out[0].Text.Text, "tokens truncated") {
+	out[1].(Image).Data[0] = 'X'
+	if string(parts[1].(Image).Data) != "image" {
+		t.Fatal("truncated result shares image bytes with the input")
+	}
+	if text, ok := out[0].(Text); !ok || !strings.Contains(string(text), "tokens truncated") {
 		t.Fatalf("text part = %#v, want truncation marker", out[0])
 	}
 }

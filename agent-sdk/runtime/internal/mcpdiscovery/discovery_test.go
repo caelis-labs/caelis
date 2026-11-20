@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
 	b := tool.Binding{Name: "docs__read", Identity: "source", Version: "schema-v1"}
 	entry := map[string]any{"name": b.Name, "binding": b, "input_schema": map[string]any{"type": "object"}}
-	event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: tool.ToolSearchToolName, Status: "completed", Output: map[string]any{"tools": []any{entry}}}, Meta: map[string]any{MetadataKey: true}}
+	event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Status: "completed", Output: map[string]any{"tools": []any{entry}}}, Meta: map[string]any{MetadataKey: true}}
 	if got := FromEvents([]*session.Event{event}); got[b.Name] != b {
 		t.Fatalf("canonical binding=%v", got)
 	}
@@ -36,7 +36,7 @@ func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
 func TestFullDiscoveryResultsRequireTheirOwningSource(t *testing.T) {
 	binding := tool.Binding{Name: "docs__read", Identity: "source", Version: "v1"}
 	raw, _ := json.Marshal(map[string]any{"tools": []any{map[string]any{"name": binding.Name, "binding": binding, "input_schema": map[string]any{"type": "object"}}}})
-	original := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: tool.ToolSearchToolName, Outcome: session.ToolOutcomeSucceeded, Result: &tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{MetadataKey: true}}}}
+	original := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Outcome: session.ToolOutcomeSucceeded, Result: &tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{MetadataKey: true}}}}
 	for _, nested := range []bool{false, true} {
 		event := session.CloneEvent(original)
 		if nested {

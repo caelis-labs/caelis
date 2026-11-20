@@ -13,7 +13,6 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -1014,7 +1013,7 @@ func TestSessionModelCapabilitiesRoundTrip(t *testing.T) {
 func TestSessionSkillStatusRoundTrip(t *testing.T) {
 	want := sessionprofile.MCPStatus{
 		SessionID: "session-1", ConfigurationRevision: "2",
-		Servers: []sessionprofile.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
+		Servers: []sessionprofile.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: "Look up a document"}}}},
 		Skills: []sessionprofile.SkillStatus{
 			{Path: "/selected", Kind: "directory", Status: "ready"},
 			{Path: "/selected/healthy", Kind: "skill", Name: "healthy", Status: "ready"},

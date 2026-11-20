@@ -119,7 +119,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			if tc.caught {
 				wantCompletion = "completed"
 			}
-			if !persisted.IsError || persisted.TurnComplete || persisted.Metadata[codemode.MetadataScriptCompletion] != wantCompletion || persisted.Metadata["code_mode_outcome"] != codemode.OutcomeFailed {
+			if persisted.TurnComplete || persisted.Metadata[codemode.MetadataScriptCompletion] != wantCompletion || persisted.Metadata["code_mode_outcome"] != codemode.OutcomeFailed {
 				t.Fatalf("script completion differs from its trusted receipt: %+v", persisted)
 			}
 			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
@@ -138,8 +138,15 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			if callID == "" {
 				t.Fatal("missing durable failed MCP execution receipt")
 			}
-			for name, parts := range map[string][]model.Part{"next_model": visible.Content, "persisted_task": persisted.Content} {
+			for name, parts := range map[string][]model.Part{"next_model": visible.Content, "persisted_task": tool.ModelParts(persisted.Content)} {
 				t.Run(name, func(t *testing.T) {
+					if name == "next_model" && tc.yield {
+						var snapshot struct{ Result json.RawMessage }
+						if err := json.Unmarshal(parts[0].JSON.Value, &snapshot); err != nil || !json.Valid(snapshot.Result) {
+							t.Fatalf("invalid Task result: %v", err)
+						}
+						parts = []model.Part{model.NewJSONPart(snapshot.Result)}
+					}
 					failure := errorDeliveryFailure(t, parts)
 					if failure.Tool != "live__fail" || failure.CallID != callID || failure.Outcome != codemode.OutcomeFailed {
 						t.Fatalf("failure identity/disposition changed: %+v", failure)

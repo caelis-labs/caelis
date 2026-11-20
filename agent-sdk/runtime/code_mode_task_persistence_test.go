@@ -154,7 +154,7 @@ func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 		close(start)
 		select {
 		case <-release:
-			return tool.Result{Content: []model.Part{model.NewTextPart("original-effect-receipt")}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.Text("original-effect-receipt")}}, nil
 		case <-ctx.Done():
 			return tool.Result{}, ctx.Err()
 		}
@@ -262,4 +262,56 @@ func TestJSExecSDKOnlyDeclarationCanWaitOriginalTask(t *testing.T) {
 		}
 	}
 	t.Fatal("SDK Task.wait did not complete through Runtime")
+}
+
+func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
+	const identifier = `9007199254740993123456789`
+	encodeSnapshot := func(handle string, content []tool.ContentBlock) taskapi.Snapshot {
+		t.Helper()
+		raw, err := json.Marshal(tool.Result{Content: content})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return taskapi.Snapshot{Kind: taskapi.KindCodeMode, Handle: handle, State: taskapi.StateCompleted, Result: map[string]any{"tool_result_json": string(raw)}}
+	}
+	image := tool.Image{Data: []byte("abc"), MIMEType: "image/png"}
+	first := encodeSnapshot("one", []tool.ContentBlock{tool.Text("before"), tool.StructuredContent{Value: json.RawMessage(identifier)}, image})
+	second := encodeSnapshot("two", []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`null`)}, tool.Text("after")})
+	call, def := tool.Call{ID: "observe"}, tool.Definition{Name: "Task"}
+	single, err := taskControlSnapshotToolResult(call, def, first, "wait", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := taskBatchControlToolResult(call, def, []taskBatchControlItem{{Snapshot: first}, {Snapshot: second}}, "wait", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		result    tool.Result
+		wantParts int
+	}{
+		{"single", single, 3},
+		{"batch", batch, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, ok := tc.result.Structured()
+			if !ok || len(tc.result.Content) != tc.wantParts || tool.ValidateContent(tc.result.Content) != nil || strings.Contains(string(raw), "tool_result_json") {
+				t.Fatalf("unexpected Task result: %+v", tc.result)
+			}
+			var payload struct {
+				Result json.RawMessage
+				Tasks  []struct{ Result json.RawMessage }
+			}
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "single" && string(payload.Result) != identifier || tc.name == "batch" && (len(payload.Tasks) != 2 || string(payload.Tasks[0].Result) != identifier || string(payload.Tasks[1].Result) != "null") {
+				t.Fatalf("Task changed structured values: %s", raw)
+			}
+			if tc.result.Content[1] != tool.Text("before") || string(tc.result.Content[2].(tool.Image).Data) != "abc" || tc.name == "batch" && tc.result.Content[3] != tool.Text("after") {
+				t.Fatalf("Task reordered attachments: %+v", tc.result.Content)
+			}
+		})
+	}
 }

@@ -14,13 +14,14 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/toolpolicy"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 )
 
 func TestDTWAPPApprovalRenderedScope(t *testing.T) {
-	input := policy.ToolContext{Session: session.Session{SessionRef: session.SessionRef{SessionID: "fixture-session"}, CWD: "/task/workspace", CreatedAt: time.Unix(1000000000, 0).UTC()}, Tool: tool.Definition{Name: "dtw__look", EffectClass: tool.EffectNonIdempotent, Source: &tool.SourceFacts{IntegrationID: "desktop-world/atomic-v1", ID: "desktop-world/dtw", Revision: "source-v1", CapabilityRevision: "atomic-15"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "desktop-world", tool.MetadataMCPServer: "dtw", tool.MetadataMCPTool: "look", tool.MetadataMCPSourceFingerprint: "look-schema-v1"}}, Call: tool.Call{ID: "actual-call", Name: "dtw__look", Input: []byte(`{"app":"dev.caelis.fixture"}`)}}
+	input := policy.ToolContext{Session: session.Session{SessionRef: session.SessionRef{SessionID: "fixture-session"}, CWD: "/task/workspace", CreatedAt: time.Unix(1000000000, 0).UTC()}, Tool: tool.Definition{Name: "dtw__look", Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "desktop-world", mcp.MetadataServer: "dtw", mcp.MetadataTool: "look", mcp.MetadataSourceFingerprint: "look-schema-v1"}}, Call: tool.Call{ID: "actual-call", Name: "dtw__look", Input: []byte(`{"app":"dev.caelis.fixture"}`)}}
 	decision, err := (toolpolicy.Mode{Base: presets.WorkspaceWriteMode(), Authority: "fixture-owner"}).DecideTool(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)

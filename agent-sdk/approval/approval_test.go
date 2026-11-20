@@ -12,6 +12,32 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
+func TestCloneRuntimeRequestKeepsSharedModelStepAdmission(t *testing.T) {
+	steps := agentsdk.NewConcurrentModelStepRefs("step-1", 2)
+	first := agentsdk.ApprovalRequest{ModelStep: steps[0]}
+	cloned := CloneRuntimeRequest(first)
+	if cloned.ModelStep == steps[0] || cloned.ModelStep.ID != "step-1" || cloned.ModelStep.Index != 0 || cloned.ModelStep.CallCount != 2 {
+		t.Fatalf("cloned model step = %#v; want isolated position at index 0 of step-1", cloned.ModelStep)
+	}
+	done := cloned.ModelStep.AdmissionDone()
+	if done == nil || done != steps[0].AdmissionDone() || done != steps[1].AdmissionDone() {
+		t.Fatal("approval clone did not retain shared batch admission")
+	}
+	cloned.ModelStep.MarkAdmissionComplete()
+	steps[0].MarkAdmissionComplete() // Completing the same index through the owner is harmless.
+	select {
+	case <-done:
+		t.Fatal("admission closed before the sibling completed")
+	default:
+	}
+	steps[1].MarkAdmissionComplete()
+	select {
+	case <-done:
+	default:
+		t.Fatal("admission did not close after the sibling completed")
+	}
+}
+
 func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	req := agentsdk.ApprovalRequest{
 		Tool: tool.Definition{Name: "custom_tool"},

@@ -114,6 +114,18 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 		if err := decoder.Decode(&decoded.Result); err != nil {
 			return err
 		}
+		// Older receipts could carry failure only on the returned value.
+		if decoded.Outcome == "" {
+			var legacy struct {
+				IsError bool `json:"is_error"`
+			}
+			if err := json.Unmarshal(fields.Result, &legacy); err != nil {
+				return err
+			}
+			if legacy.IsError {
+				decoded.Outcome = ToolOutcomeFailed
+			}
+		}
 	}
 	*t = EventTool(decoded)
 	return nil
@@ -195,11 +207,14 @@ type Event struct {
 func (e *Event) UnmarshalJSON(data []byte) error {
 	type eventAlias Event
 	var decoded eventAlias
+	data, err := expandEventMedia(data)
+	if err != nil {
+		return err
+	}
 	fields := struct {
 		*eventAlias
-		Meta    json.RawMessage   `json:"_meta"`
-		Media   map[string]string `json:"media"`
-		Journal json.RawMessage   `json:"journal"`
+		Meta    json.RawMessage `json:"_meta"`
+		Journal json.RawMessage `json:"journal"`
 	}{eventAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -221,14 +236,10 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	if err := decodeRetiredJournal((*Event)(&decoded)); err != nil {
 		return err
 	}
-	expanded, err := expandEventMedia(Event(decoded), fields.Media)
-	if err != nil {
+	if err := validateCheckpointContract((*Event)(&decoded)); err != nil {
 		return err
 	}
-	if err := validateCheckpointContract(&expanded); err != nil {
-		return err
-	}
-	*e = expanded
+	*e = Event(decoded)
 	return nil
 }
 

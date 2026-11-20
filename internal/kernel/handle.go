@@ -412,7 +412,7 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 		next.Kind = eventstream.KindApprovalReview
 		if req != nil {
 			next.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(req.ApprovalRequestID))
-			review.ItemID = strings.TrimSpace(req.Call.Execution.ItemID)
+			review.ItemID = strings.TrimSpace(req.Execution.ItemID)
 		}
 		next.ApprovalReview = review
 		next.ApprovalSubject = session.CloneApprovalSubject(payload.Subject)

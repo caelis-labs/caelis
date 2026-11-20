@@ -2,7 +2,6 @@ package tool
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,24 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/google/jsonschema-go/jsonschema"
 )
-
-const MCPCallToolName = "mcp_call"
-
-// NewMCPCallTool declares the fixed MCP invocation envelope. Runtime resolves
-// it to an already discovered real Tool before entering its execution wrappers.
-func NewMCPCallTool() Tool {
-	return NamedTool{Def: Definition{Name: MCPCallToolName, Description: "Call a previously bound MCP tool by exact name using arguments matching its input_schema.", InputSchema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []any{"tool_name", "arguments"}, "properties": map[string]any{
-			"tool_name": map[string]any{"type": "string", "minLength": 1}, "arguments": map[string]any{"type": "object", "additionalProperties": true},
-		}}, Metadata: map[string]any{MetadataToolKind: MCPCallToolName}}, Invoke: func(_ context.Context, _ Call) (Result, error) {
-		return Result{}, NewError(ErrorCodeInvalidInput, "mcp_call requires Runtime discovery and routing")
-	}}
-}
-
-// IsMCPCallDefinition recognizes the Runtime's fixed MCP envelope declaration.
-func IsMCPCallDefinition(def Definition) bool {
-	return def.Name == MCPCallToolName && definitionKind(def) == MCPCallToolName
-}
 
 // ParseMCPCall converts the model envelope into a real call, preserving its ID.
 // It performs no lookup and grants no authority to the returned name.

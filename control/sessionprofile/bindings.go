@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -131,7 +131,7 @@ func ValidateProfile(p Profile) error {
 		if def.Name == codemode.ToolName || def.Name == "Task" {
 			return fmt.Errorf("%w: callback collides with fixed Code Mode/Task entry", ErrInvalid)
 		}
-		if def.Name == "Skill" || def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName {
+		if def.Name == "Skill" || def.Name == mcp.SearchToolName || def.Name == mcp.CallToolName {
 			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
 		}
 		for _, server := range p.MCPServers {

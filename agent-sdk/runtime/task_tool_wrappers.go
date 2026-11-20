@@ -11,7 +11,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -187,7 +186,7 @@ func sendMessageToolResult(call tool.Call, target string) tool.Result {
 	return tool.Result{
 		ID:       strings.TrimSpace(call.ID),
 		Name:     sendmessage.ToolName,
-		Content:  []model.Part{model.NewTextPart("Message sent.")},
+		Content:  []tool.ContentBlock{tool.Text("Message sent.")},
 		Metadata: meta,
 	}
 }
@@ -250,7 +249,7 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	if !ok || runtime == nil {
 		return t.base.Call(ctx, call)
 	}
-	req, err := t.commandRequest(call, runtime)
+	req, err := t.commandRequest(ctx, call, runtime)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -273,27 +272,26 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 					payload["system_hint"] = hint
 				}
 			}
-			result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
-			result.IsError = true
+			result, _ := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
 			if approved && !isCommandToolError(err) {
 				// The approval continuation must see claim or persistence errors
 				// even when StartCommand could also return a Task snapshot.
 				return result, err
 			}
-			return result, nil
+			return result, tool.FailedReply(err.Error())
 		}
 		if approved {
 			return tool.Result{}, err
 		}
 		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
-			return result, nil
+			return result, tool.FailedReply(err.Error())
 		}
 		return tool.Result{}, err
 	}
-	return taskSnapshotToolResult(call, t.base.Definition(), snapshot), nil
+	return taskSnapshotToolResult(call, t.base.Definition(), snapshot)
 }
 
-func (t runtimeCommandTool) commandRequest(call tool.Call, runtime sandbox.Runtime) (taskapi.CommandStartRequest, error) {
+func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, runtime sandbox.Runtime) (taskapi.CommandStartRequest, error) {
 	args, err := decodeJSONMap(call.Input)
 	if err != nil {
 		return taskapi.CommandStartRequest{}, err
@@ -320,7 +318,7 @@ func (t runtimeCommandTool) commandRequest(call tool.Call, runtime sandbox.Runti
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
-	req := taskapi.CommandStartRequest{OperationID: toolTaskOperationID(call),
+	req := taskapi.CommandStartRequest{OperationID: toolTaskOperationID(ctx, call),
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),
 		TTY:         tty,
@@ -330,9 +328,9 @@ func (t runtimeCommandTool) commandRequest(call tool.Call, runtime sandbox.Runti
 		ParentTool:  strings.TrimSpace(call.Name),
 		Constraints: constraintsFromMetadata(call.Metadata),
 		Observer: taskToolObserver{
-			call:     call,
-			def:      t.base.Definition(),
-			observer: call.Observer,
+			ctx:  ctx,
+			call: call,
+			def:  t.base.Definition(),
 		},
 	}
 	return req, nil
@@ -363,8 +361,7 @@ func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, comma
 	return tool.Result{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(def.Name),
-		IsError: true,
-		Content: []model.Part{model.NewJSONPart(raw)},
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
 	}, true
 }
 
@@ -385,9 +382,6 @@ type runtimeSpawnTool struct {
 
 func (t runtimeSpawnTool) Definition() tool.Definition {
 	def := tool.CloneDefinition(t.base.Definition())
-	// Runtime serializes only the short participant-binding commit. External
-	// child startup and stream production are independent per Task.
-	def.Capabilities.ParallelSafe = true
 	if t.runtime == nil || t.runtime.controllerContextRouter == nil {
 		hideSpawnIncludeContext(&def)
 	}
@@ -448,7 +442,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		contextTransfer, contextUnsupported = t.resolveDelegatedSpawnContext(ctx)
 	}
 	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, delegation.NormalizeTarget(target), taskapi.SubagentStartRequest{
-		SpawnID:            firstNonEmpty(toolTaskOperationID(call), strings.TrimSpace(call.ID)),
+		SpawnID:            firstNonEmpty(toolTaskOperationID(ctx, call), strings.TrimSpace(call.ID)),
 		Prompt:             strings.TrimSpace(prompt),
 		Handle:             requestedHandle,
 		Context:            contextTransfer,
@@ -469,7 +463,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if spawnContextUnsupported(snapshot) {
 		payload["system_hint"] = spawnContextUnsupportedHint
 	}
-	result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
+	result, _ := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
 	return result, nil
 }
 
@@ -686,9 +680,8 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 
 func (t runtimeTaskTool) Definition() tool.Definition {
 	def := tool.CloneDefinition(t.base.Definition())
-	// Task control owns per-task mutation claims; observations and cancellation
-	// must remain independent of waits that can join the observed producer.
-	def.Capabilities.ParallelSafe = true
+	// A completed Code Mode task can carry its selected tool's disposition.
+	def.MayCompleteTurn = true
 	return def
 }
 
@@ -719,7 +712,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			yield = time.Duration(*value) * time.Millisecond
 		}
 	}
-	if call.Parent != nil && call.Parent.Kind == codemode.ToolKind {
+	if parent := tool.ParentFromContext(ctx); parent != nil && parent.Kind == codemode.ToolKind {
 		for _, handle := range handles {
 			identity, err := t.resolveJobHandle(ctx, handle)
 			if err != nil {
@@ -730,7 +723,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			}
 			if identity.kind == taskapi.KindCodeMode && (yield > 0 || strings.EqualFold(action, "cancel")) {
 				entry, ok := t.tasks.storedTaskEntryByID(ctx, t.sessionRef, identity.taskID)
-				if ok && taskStringValue(entry.Metadata["parent_call"]) == call.Parent.ID {
+				if ok && taskStringValue(entry.Metadata["parent_call"]) == parent.ID {
 					return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "a script cannot wait on or cancel its own Task")
 				}
 			}
@@ -748,11 +741,10 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, fmt.Errorf("task action %q accepts exactly one handle", normalizedAction)
 	}
 	if normalizedAction == "wait" && len(handles) > 1 {
-		return t.callBatchTaskWaitAny(ctx, call, handles, yield), nil
+		return t.callBatchTaskWaitAny(ctx, call, handles, yield)
 	}
 	if len(handles) > 1 {
-		result := t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
-		return result, nil
+		return t.callBatchTaskControl(ctx, call, normalizedAction, handles, input)
 	}
 	identity, err := t.resolveJobHandle(ctx, handles[0])
 	if err != nil {
@@ -781,9 +773,9 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, controlErr
 	}
 
-	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, actualWaitMS)
+	result, resultErr := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction, actualWaitMS)
 	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yield, actualWaitMS, snapshot)
-	return result, nil
+	return result, resultErr
 }
 
 func durationMillis(value time.Duration) int {
@@ -793,7 +785,7 @@ func durationMillis(value time.Duration) int {
 	return int(value / time.Millisecond)
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, handles []string, input string) tool.Result {
+func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, handles []string, input string) (tool.Result, error) {
 	items := make([]taskBatchControlItem, 0, len(handles))
 	for _, handle := range handles {
 		identity, resolveErr := t.resolveJobHandle(ctx, handle)
@@ -818,12 +810,12 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true})
 	}
 
-	result := taskBatchControlToolResult(call, t.base.Definition(), items, action, 0)
+	result, resultErr := taskBatchControlToolResult(call, t.base.Definition(), items, action, 0)
 	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, 0, 0, items)
-	return result
+	return result, resultErr
 }
 
-func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Call, handles []string, yield time.Duration) tool.Result {
+func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Call, handles []string, yield time.Duration) (tool.Result, error) {
 	type target struct {
 		handle   string
 		identity taskControlIdentity
@@ -903,9 +895,9 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, call tool.Cal
 		items = append(items, itemsByHandle[handle])
 	}
 	actualWaitMS := durationMillis(time.Since(started))
-	result := taskBatchControlToolResult(call, t.base.Definition(), items, "wait", actualWaitMS)
+	result, resultErr := taskBatchControlToolResult(call, t.base.Definition(), items, "wait", actualWaitMS)
 	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, "wait", "", yield, actualWaitMS, items)
-	return result
+	return result, resultErr
 }
 
 func (t runtimeTaskTool) callTaskControl(ctx context.Context, action string, req taskapi.ControlRequest) (taskapi.Snapshot, error) {

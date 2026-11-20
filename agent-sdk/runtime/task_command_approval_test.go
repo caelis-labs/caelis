@@ -121,7 +121,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	identity := approval.Call.Execution
+	identity := approval.Execution
 	if identity.SessionID != active.SessionID || identity.TurnID != approval.TurnID || identity.ItemID == "" {
 		t.Fatalf("approval invocation identity = %#v", identity)
 	}
@@ -271,8 +271,8 @@ func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 					t.Fatalf("inline time = %s, approval = %s", elapsed, delay)
 				}
 				var payload map[string]any
-				if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
-					t.Fatal(err)
+				if raw, _ := result.Structured(); json.Unmarshal(raw, &payload) != nil {
+					t.Fatal("invalid structured Task payload")
 				}
 				if delay > 10*time.Second && payload["state"] != string(taskapi.StateWaitingApproval) {
 					t.Fatalf("payload = %#v", payload)
@@ -363,7 +363,7 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 					<-start
 					return target.Call(ctx, call)
 				})
-				if err != nil || result.IsError {
+				if err != nil {
 					t.Fatalf("submit = %#v, %v", result, err)
 				}
 				<-approved
@@ -382,7 +382,7 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 					t.Fatal("pending command accepted stdin")
 				}
 				duplicate, err := target.submitApproval(owner, call, taskApproval{owner: owner}, nil)
-				if err != nil || duplicate.IsError {
+				if err != nil {
 					t.Fatalf("duplicate submission = %#v, %v", duplicate, err)
 				}
 				work := scope.active[id]
@@ -623,8 +623,8 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
-		t.Fatal(err)
+	if raw, _ := result.Structured(); json.Unmarshal(raw, &payload) != nil {
+		t.Fatal("invalid structured Task payload")
 	}
 	if payload["state"] != "cancelled" || approvals != 0 || backend.startCalls() != 0 {
 		t.Fatalf("late admission = %#v, approvals=%d starts=%d", payload, approvals, backend.startCalls())

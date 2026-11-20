@@ -241,17 +241,21 @@ func TestSendMessageToolResultContainsNoTargetLifecycle(t *testing.T) {
 	if got := testToolResultText(t, result); got != "Message sent." {
 		t.Fatalf("result = %q, want ordinary input acknowledgement", got)
 	}
-	if result.Content[0].JSON != nil {
+	if _, ok := result.Content[0].(tool.StructuredContent); ok {
 		t.Fatalf("result exposed lifecycle payload: %#v", result.Content[0])
 	}
 }
 
 func testToolResultText(t *testing.T, result tool.Result) string {
 	t.Helper()
-	if len(result.Content) != 1 || result.Content[0].Text == nil {
+	if len(result.Content) != 1 {
 		t.Fatalf("result content = %#v, want one text part", result.Content)
 	}
-	return result.Content[0].Text.Text
+	text, ok := result.Content[0].(tool.Text)
+	if !ok {
+		t.Fatalf("result content = %#v, want text", result.Content[0])
+	}
+	return string(text)
 }
 
 func TestRuntimeSendMessageToolRoutesUnknownHandleThroughExternal(t *testing.T) {
@@ -433,11 +437,7 @@ func TestRuntimeRunCommandToolAddsHostApprovalHintWhenStartRejected(t *testing.T
 	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
 		"command": "git log --oneline -3",
 		"workdir": activeSession.CWD,
-	})
-
-	if !result.IsError {
-		t.Fatal("result.IsError = false, want structured command start failure")
-	}
+	}, true)
 	payload := testToolResultPayload(t, result)
 	if got, _ := payload["system_hint"].(string); got != sandbox.HostExecutionRequiresApprovalMessage {
 		t.Fatalf("system_hint = %q, want %q", got, sandbox.HostExecutionRequiresApprovalMessage)
@@ -550,7 +550,7 @@ func TestTaskRejectsParticipantHandlesForEveryAction(t *testing.T) {
 	}
 	raw := []byte(`{"action":"wait","handle":"worker,missing"}`)
 	result, err := target.Call(t.Context(), tool.Call{ID: "batch", Input: raw})
-	if err != nil || !result.IsError {
+	if !tool.HasFailedReply(err) {
 		t.Fatalf("batch %v %v", result, err)
 	}
 }

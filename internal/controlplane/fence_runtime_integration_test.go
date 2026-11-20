@@ -38,11 +38,11 @@ func TestStartupHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutco
 	started := make(chan struct{})
 	finish := make(chan struct{})
 	target := tool.NamedTool{
-		Def: tool.Definition{Name: "SIDE_EFFECT", EffectClass: tool.EffectNonIdempotent, InputSchema: map[string]any{"type": "object"}},
+		Def: tool.Definition{Name: "SIDE_EFFECT", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 			close(started)
 			<-finish // Deliberately ignore cancellation and fence loss.
-			return tool.Result{ID: "call-fenced", Name: "SIDE_EFFECT", Content: []model.Part{model.NewTextPart("stale success")}}, nil
+			return tool.Result{ID: "call-fenced", Name: "SIDE_EFFECT", Content: []tool.ContentBlock{tool.Text("stale success")}}, nil
 		},
 	}
 	runtimeA, err := localruntime.New(localruntime.Config{Sessions: service, AgentFactory: chat.Factory{}, Clock: clock.Now, PolicyRegistry: registry, DefaultPolicyMode: "allow"})

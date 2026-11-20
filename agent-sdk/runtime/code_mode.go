@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type codeModeAdmissionKey struct{}
@@ -28,6 +29,7 @@ var errCodeModeComplete = errors.New("code mode host admission is closed by Turn
 var errCodeModeHostClosed = errors.New("code mode host admission is closed")
 
 type runtimeCodeModeTool struct {
+	producingModel model.LLM
 	runtime        *Runtime
 	execution      *codeModeExecution
 	declaration    *codemode.Tool
@@ -42,6 +44,11 @@ type runtimeCodeModeTool struct {
 }
 
 func (t runtimeCodeModeTool) Definition() tool.Definition { return t.declaration.Definition() }
+
+func (t runtimeCodeModeTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
+	t.producingModel = dispatch.Model
+	return t.Call(ctx, call)
+}
 
 func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	limits, err := t.declaration.EffectiveLimits()
@@ -139,11 +146,12 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	if completed.err == nil && !validCodeModeOutput(completed.output, limits.OutputBytes) {
 		completed.err = errors.Join(completed.err, fmt.Errorf("code mode output must be bounded JSON"))
 	}
-	result := tool.Result{ID: call.ID, Name: call.Name, IsError: host.isError && !host.turnComplete, TurnComplete: host.turnComplete,
+	result := tool.Result{ID: call.ID, Name: call.Name, TurnComplete: host.turnComplete,
 		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	if completed.err == nil {
 		result.Content, completed.err = host.returnedParts(completed.output)
 	}
+	var payload map[string]any
 	if len(host.failures) > 0 {
 		result.Metadata["code_mode_outcome"] = codemode.OutcomeFailed
 		for _, failure := range host.failures {
@@ -151,7 +159,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 				result.Metadata["code_mode_outcome"] = codemode.OutcomeUnknown
 			}
 		}
-		result.Content = append(result.Content, host.failureParts(completed.err != nil))
+		payload = host.failurePayload(completed.err != nil)
 	}
 	result.Metadata[codemode.MetadataScriptCompletion] = "completed"
 	if completed.err != nil || host.fatal != nil {
@@ -167,16 +175,42 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		} else if host.fatal != nil {
 			publicErr = codemode.PublicHostError(call.Name, host.fatal)
 		}
-		payload := tool.ErrorPayload(publicErr)
-		code, _ := payload["error_code"].(string)
-		raw, _ := json.Marshal(payload)
-		result.Content = append(result.Content, model.NewJSONPart(raw))
-		result.IsError = true
+		diagnostic := tool.ErrorPayload(publicErr)
+		code, _ := diagnostic["error_code"].(string)
+		for key, value := range payload {
+			diagnostic[key] = value
+		}
+		appendCodeModePayload(&result, diagnostic)
 		// Outcome classification follows the normalized disposition, including
 		// an unknown effect among concurrently failed calls.
 		return result, &codemode.ExecutionError{Message: publicErr.Error(), Code: tool.ErrorCode(code), Err: errors.Join(host.fatal, completed.err, host.firstCallError)}
 	}
+	if payload != nil {
+		appendCodeModePayload(&result, payload)
+	}
+	if host.isError && !host.turnComplete {
+		if result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown {
+			const message = "tool outcome is unknown; do not replay"
+			return result, tool.WrapError(errorcode.UnknownOutcome, tool.FailedReply(message), message)
+		}
+		return result, tool.FailedReply("one or more script tool calls failed")
+	}
 	return result, nil
+}
+
+// Keep a script’s standalone JSON unchanged; diagnostics add an envelope only
+// when there is additional classification to report.
+func appendCodeModePayload(result *tool.Result, payload map[string]any) {
+	for i, block := range result.Content {
+		if structured, ok := block.(tool.StructuredContent); ok {
+			payload["result"] = structured.Value
+			raw, _ := json.Marshal(payload)
+			result.Content[i] = tool.StructuredContent{Value: raw}
+			return
+		}
+	}
+	raw, _ := json.Marshal(payload)
+	result.Content = append(result.Content, tool.StructuredContent{Value: raw})
 }
 
 type codeModeTarget struct {
@@ -337,7 +371,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.mu.Unlock()
 		return codemode.Reply{}, fmt.Errorf("code mode host admission is closed")
 	}
-	callID := fmt.Sprintf("%s/%s/host-%d", h.parent.Execution.TurnID, h.parent.Execution.ItemID, ordinal)
+	parentExecution := tool.InvocationFromContext(h.ctx)
+	callID := fmt.Sprintf("%s/%s/host-%d", parentExecution.TurnID, parentExecution.ItemID, ordinal)
 	h.mu.Unlock()
 	ctx, cancel := context.WithCancel(h.ctx)
 	defer cancel()
@@ -352,29 +387,34 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, err
 	}
 	release()
-	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
-		Parent:       &tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
-		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
+	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...)}
+	parent := tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, ItemID: parentExecution.ItemID}
 	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, &codeModeAdmissionBinding{
-		callID: call.ID, name: call.Name, parent: *call.Parent, validate: admission, validateTarget: validateTarget,
+		callID: call.ID, name: call.Name, parent: parent, validate: admission, validateTarget: validateTarget,
 	})
-	if tool.IsMCPDefinition(target.definition) {
-		binding := tool.BindingForDefinition(target.definition)
-		call.TargetBinding = &binding
+	var targetBinding *tool.Binding
+	if mcp.IsDefinition(target.definition) {
+		binding := mcp.BindingForDefinition(target.definition)
+		targetBinding = &binding
 	}
-	call, synthetic, prepareErr := toolbinding.PrepareEffective(ctx, target.tool, call)
-	if prepareErr != nil {
+	ctx = toolbinding.WithOccurrence(ctx, toolbinding.Allocate(target.tool, call), &parent, targetBinding)
+	call, synthetic, prepareErr := toolbinding.PrepareArguments(ctx, target.tool, call)
+	if prepareErr != nil && synthetic == nil {
 		return codemode.Reply{}, prepareErr
 	}
-	ctx = toolbinding.WithPrepared(ctx, call, synthetic)
+	ctx = toolbinding.WithPrepared(ctx, call, synthetic, prepareErr)
 	if err := h.appendToolFact(ctx, call, nil, nil, target); err != nil {
 		h.fail(err)
 		return codemode.Reply{}, err
 	}
-	if publish, ok := ctx.Value(nestedToolEventSinkKey{}).(func(*session.Event)); ok && ownsNestedCommandPresentation(call, target.tool) {
-		call.Observer = nestedCommandObserver{publish: publish, call: call, target: target.tool}
+	var report func(tool.Result)
+	if publish, ok := ctx.Value(nestedToolEventSinkKey{}).(func(*session.Event)); ok && ownsNestedCommandPresentation(ctx, call, target.tool) {
+		report = (nestedCommandObserver{publish: publish, fact: runtimeToolFact(ctx, call, "", nil), target: target.tool}).ObserveToolResult
 	}
-	result, callErr := target.tool.Call(ctx, call)
+	callCtx, stopProgress := context.WithCancel(toolbinding.WithProgress(ctx, report))
+	defer stopProgress()
+	result, callErr := toolbinding.Call(callCtx, target.tool, call, toolbinding.Dispatch{Model: h.owner.producingModel})
+	stopProgress()
 	outcome := codeModeOutcome(result, callErr)
 	persistErr := h.appendToolFact(ctx, call, &result, callErr, target)
 	if persistErr != nil {
@@ -383,8 +423,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.isError = h.isError || result.IsError || callErr != nil
-	if result.TurnComplete && !result.IsError {
+	h.isError = h.isError || callErr != nil
+	if result.TurnComplete && callErr == nil {
 		h.turnComplete = true
 		h.closed = true
 		if scope := taskScopeFromContext(h.ctx); scope != nil {
@@ -406,6 +446,9 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 			reply, projectErr := h.project(callID, result, outcome, target.definition)
 			if projectErr == nil {
 				reply.IsError = true
+				if tool.HasFailedReply(callErr) && errorcode.CodeOf(callErr) == errorcode.Unknown {
+					return reply, nil
+				}
 				return reply, callErr
 			}
 			callErr = errors.Join(callErr, projectErr)
@@ -420,11 +463,11 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 }
 
 func codeModeOutcome(result tool.Result, err error) string {
-	result, err = hookrun.EffectResult(result, err)
+	_, err = hookrun.EffectResult(result, err)
 	if errorcode.Is(err, errorcode.UnknownOutcome) || errorcode.Is(err, errorcode.Cancelled) || errors.Is(err, context.Canceled) {
 		return codemode.OutcomeUnknown
 	}
-	if err != nil || result.IsError {
+	if err != nil {
 		return codemode.OutcomeFailed
 	}
 	return codemode.OutcomeSucceeded
@@ -440,7 +483,7 @@ func (h *codeModeHost) fail(err error) {
 }
 
 func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error, target codeModeTarget) error {
-	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, h.parent.Execution.TurnID, call, result, callErr, toolFactTarget{definition: target.definition, source: target.tool})
+	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, tool.InvocationFromContext(h.ctx).TurnID, call, result, callErr, toolFactTarget{definition: target.definition, source: target.tool})
 }
 
 // Only the ToolResult owner publishes this result after durable persistence
@@ -456,6 +499,9 @@ func settledCodeModeToolError(err error) bool {
 				return false
 			}
 		}
+		return true
+	}
+	if tool.HasFailedReply(err) {
 		return true
 	}
 	switch errorcode.CodeOf(err) {

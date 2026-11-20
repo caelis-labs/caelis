@@ -100,7 +100,7 @@ func TestMCPStdioWindowsNoConsole(t *testing.T) {
 				t.Fatalf("stdio tool listing = %+v, %v", listed, err)
 			}
 			result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: "probe", Arguments: map[string]any{"value": name}})
-			if err != nil || result.IsError || len(result.Content) != 1 {
+			if err != nil || len(result.Content) != 1 {
 				t.Fatalf("stdio round trip = %+v, %v", result, err)
 			}
 			var observed struct {

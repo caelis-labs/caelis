@@ -134,11 +134,6 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				"then": map[string]any{"required": []string{"justification"}},
 			}},
 		},
-		Metadata:     toolutil.AnnotationMetadata(false, true, false, true),
-		Capabilities: tool.Capabilities{ParallelSafe: true},
-		ExecutionRequirements: &tool.ExecutionRequirements{
-			Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
-		},
 	}
 }
 

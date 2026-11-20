@@ -54,8 +54,8 @@ func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testin
 	}}
 	target := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
-		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
+		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
 
@@ -150,9 +150,9 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	var observed []tool.InvocationContext
 	target := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
-		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			observed = append(observed, call.Execution)
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
+		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			observed = append(observed, tool.InvocationFromContext(ctx))
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
 	core, err := New(Config{
@@ -207,8 +207,8 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 		t.Fatalf("approvals = %d, invocations = %d", len(approvals), len(observed))
 	}
 	for i, execution := range observed {
-		if approvals[i].Call.Execution != execution {
-			t.Fatalf("approval identity = %#v, callback identity = %#v", approvals[i].Call.Execution, execution)
+		if approvals[i].Execution != execution {
+			t.Fatalf("approval identity = %#v, callback identity = %#v", approvals[i].Execution, execution)
 		}
 		var pending, resolved bool
 		for _, event := range loaded.Events {
@@ -308,9 +308,9 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 	var identities []tool.InvocationContext
 	base := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
-		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			identities = append(identities, call.Execution)
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
+		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			identities = append(identities, tool.InvocationFromContext(ctx))
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
 	firstWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-1", "turn-1", sequence)

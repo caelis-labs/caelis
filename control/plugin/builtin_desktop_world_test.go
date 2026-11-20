@@ -43,14 +43,11 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, b := first.MCPServerSpecs[0], second.MCPServerSpecs[0]
-	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) || a.IntegrationID != "desktop-world/atomic-v1" {
+	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) {
 		t.Fatal("package sharing crossed Session data or approval boundaries")
 	}
 	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || len(a.Args) != 2 || a.Args[0] != "mcp" || a.Args[1] != "--atomic" {
 		t.Fatal("fixed package did not use its standard stdio executable")
-	}
-	if a.IntegrationID != "desktop-world/atomic-v1" {
-		t.Fatal("app execution acquired blanket builtin trust")
 	}
 }
 
@@ -97,7 +94,7 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 	var names []string
 	for _, candidate := range manager.Tools() {
 		definition := candidate.Definition()
-		name, _ := definition.Metadata[tool.MetadataMCPTool].(string)
+		name, _ := definition.Metadata[mcp.MetadataTool].(string)
 		names = append(names, name)
 		if name == "exec" {
 			t.Fatal("atomic catalog contains exec")
@@ -111,8 +108,8 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 				t.Fatalf("atomic %s does not require app: %s", name, raw)
 			}
 		}
-		if definition.Source == nil || definition.Source.IntegrationID != "desktop-world/atomic-v1" {
-			t.Fatal("catalog lost configured integration identity")
+		if definition.Metadata[mcp.MetadataPluginID] != spec.PluginID || definition.Metadata[mcp.MetadataServer] != spec.Name {
+			t.Fatal("catalog lost configured plugin or server identity")
 		}
 
 	}
@@ -126,7 +123,7 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 				continue
 			}
 			result, err := candidate.Call(ctx, tool.Call{ID: "windows-app-enumeration", Name: candidate.Definition().Name, Input: []byte(`{"state":"running","limit":1}`)})
-			if err != nil || result.IsError {
+			if err != nil {
 				t.Fatalf("Windows app discovery = %+v, %v", result, err)
 			}
 		}

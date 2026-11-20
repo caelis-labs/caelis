@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -139,7 +138,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	})
 	validateWireValue(t, "MCPServerSnapshot", appserver.MCPServerSnapshot{
 		Name: "documents", Status: "running", Tools: []string{"lookup"},
-		ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}},
+		ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: "Look up a document"}},
 	})
 }
 
@@ -520,7 +519,7 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		},
 		"SessionMCPStatus": sessionprofile.MCPStatus{
 			SessionID: "session-1", ConfigurationRevision: "7",
-			Servers: []sessionprofile.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
+			Servers: []sessionprofile.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: "Look up a document"}}}},
 			Skills:  []sessionprofile.SkillStatus{{Path: "/tmp/selected-skills", Kind: "directory", Status: "ready"}, {Path: "/tmp/selected-skill", Kind: "skill", Name: "selected-skill", Status: "failed", Warning: "synthetic metadata failure"}},
 		},
 		"UpdateSessionConfigurationRequest": sessionprofile.UpdateConfigurationRequest{

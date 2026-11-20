@@ -38,10 +38,14 @@ type codeModeProducerTool struct {
 
 func (t codeModeProducerTool) Definition() tool.Definition { return t.base.Definition() }
 
-func (t codeModeProducerTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.Call {
-	return toolbinding.Prepare(t.base, call)
+func (t codeModeProducerTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.InvocationContext {
+	return toolbinding.Allocate(t.base, call)
 }
 func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	return t.RuntimeCall(toolbinding.Token{}, ctx, call, toolbinding.Dispatch{})
+}
+
+func (t codeModeProducerTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
@@ -64,7 +68,7 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 	var durabilityErr error
 	// Retain the producer lifetime while carrying only the validated private
 	// invocation credential. Caller-authored Execution never supplies it.
-	ctx = context.WithValue(toolbinding.WithPrepared(work.ctx, call, toolbinding.PreparedResult(ctx)), codeModeProducerErrorKey{}, func(err error) {
+	ctx = context.WithValue(toolbinding.RebasePrepared(work.ctx, ctx), codeModeProducerErrorKey{}, func(err error) {
 		errorMu.Lock()
 		durabilityErr = errors.Join(durabilityErr, err)
 		errorMu.Unlock()
@@ -75,7 +79,7 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 		return durabilityErr
 	}
 	ctx = context.WithValue(context.WithValue(ctx, codeModeProducerIdentityKey{}, id), codeModeProducerLifetimeKey{}, func(ch <-chan struct{}, completionError func() error) { done = ch; producerError = completionError })
-	result, callErr := t.base.Call(ctx, call)
+	result, callErr := toolbinding.Call(ctx, t.base, call, dispatch)
 	if done == nil {
 		t.scope.complete(id, work, completionError())
 	} else {

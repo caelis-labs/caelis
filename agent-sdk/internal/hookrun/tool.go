@@ -18,6 +18,8 @@ func toolEvidence(ctx context.Context, def tool.Definition, call tool.Call) agen
 	e := FromContext(ctx).Evidence
 	c := tool.CloneCall(call)
 	d := tool.CloneDefinition(def)
+	e.ToolExecution = tool.InvocationFromContext(ctx)
+	e.ToolParent = tool.ParentFromContext(ctx)
 	e.Tool = &c
 	e.ToolDefinition = &d
 	return e
@@ -93,8 +95,9 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 	}
 	call.Input = append(json.RawMessage(nil), p.Input...)
 	if p.Kind == agent.ToolPrepareBlock {
-		r := tool.Result{ID: call.ID, Name: call.Name, IsError: true, Content: []model.Part{model.NewTextPart("Tool preparation blocked this call")}}
-		return call, &r, nil
+		const message = "Tool preparation blocked this call"
+		r := tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text(message)}}
+		return call, &r, tool.FailedReply(message)
 	}
 	if p.Result != nil {
 		if p.Result.ID != "" && p.Result.ID != call.ID || p.Result.Name != "" && p.Result.Name != call.Name {
@@ -105,20 +108,27 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 		if p.Result.TurnComplete {
 			return failure(fmt.Errorf("synthetic tool result cannot complete the Turn"))
 		}
-		if err := ValidateResult(def, *p.Result); err != nil {
+		if err := validateResult(def, *p.Result, nil); err != nil {
 			return failure(err)
 		}
 	}
 	return call, p.Result, nil
 }
 
-// ValidateResult checks structured provenance, output schema and serializable
-// media/data before a transformed value reaches either JS Body or persistence.
-func ValidateResult(def tool.Definition, r tool.Result) error {
+func validateResult(def tool.Definition, r tool.Result, cause error) error {
 	if _, err := json.Marshal(r); err != nil {
 		return err
 	}
-	for _, p := range r.Content {
+	if value, ok := r.Structured(); ok && cause == nil && def.OutputSchema != nil {
+		if err := tool.ValidateOutput(def.OutputSchema, value); err != nil {
+			return fmt.Errorf("structured output schema: %w", err)
+		}
+	}
+	return nil
+}
+
+func validateModelViewParts(parts []model.Part) error {
+	for _, p := range parts {
 		count := 0
 		for _, set := range []bool{p.Text != nil, p.JSON != nil, p.Media != nil, p.FileRef != nil, p.ToolUse != nil, p.ToolResult != nil, p.Reasoning != nil} {
 			if set {
@@ -164,16 +174,6 @@ func ValidateResult(def tool.Definition, r tool.Result) error {
 			return fmt.Errorf("unsupported business result part %q", p.Kind)
 		}
 	}
-	if s := r.StructuredContent; s != nil {
-		if s.ContentIndex < 0 || s.ContentIndex >= len(r.Content) || !json.Valid(s.Value) || r.Content[s.ContentIndex].JSON == nil || string(r.Content[s.ContentIndex].JSON.Value) != string(s.Value) {
-			return fmt.Errorf("invalid structured result provenance")
-		}
-		if !r.IsError && def.OutputSchema != nil {
-			if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: def.OutputSchema}, s.Value); err != nil {
-				return fmt.Errorf("structured output schema: %w", err)
-			}
-		}
-	}
 	return nil
 }
 
@@ -182,25 +182,30 @@ func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result
 	if errors.As(cause, &processing) {
 		return failedProcessingResult(call, result), cause
 	}
+	if err := tool.ValidateContent(result.Content); err != nil {
+		return failedProcessingResult(call, result), &ProcessingError{Cause: err, EffectError: cause}
+	}
 	e := toolEvidence(ctx, def, call)
 	for _, h := range FromContext(ctx).Hooks.ToolResult {
 		input := agent.ToolOutcome{Result: result, Error: cause}
 		next, err := Call(ctx, "tool_result", h, e, input, func(o agent.ToolOutcome) agent.ToolOutcome { o.Result, _ = tool.CloneResult(o.Result, nil); return o }, func(r tool.Result) tool.Result { r, _ = tool.CloneResult(r, nil); return r })
-		if err == nil && (next.ID != result.ID || next.Name != result.Name || next.TurnComplete != result.TurnComplete || next.IsError != result.IsError || !reflect.DeepEqual(next.Metadata, result.Metadata) || !reflect.DeepEqual(next.Meta, result.Meta)) {
-			err = fmt.Errorf("result identity, error and system fields cannot change")
+		if err == nil && (next.ID != result.ID || next.Name != result.Name || next.TurnComplete != result.TurnComplete || !reflect.DeepEqual(next.Metadata, result.Metadata) || !reflect.DeepEqual(next.Meta, result.Meta)) {
+			err = fmt.Errorf("result identity and system fields cannot change")
 		}
 		if err == nil {
-			if result.StructuredContent != nil && next.StructuredContent == nil && def.OutputSchema != nil {
+			_, hadStructured := result.Structured()
+			_, hasStructured := next.Structured()
+			if cause == nil && hadStructured && !hasStructured && def.OutputSchema != nil {
 				err = fmt.Errorf("structured business result cannot evade its output schema")
 			}
 			if err == nil {
-				err = ValidateResult(def, next)
+				err = validateResult(def, next, cause)
 			}
 		}
 		if err != nil {
 			// Never fall back to raw content after a failed redaction. The error
 			// preserves that an effect may have succeeded; callers never replay.
-			return failedProcessingResult(call, result), &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause, Failed: result.IsError}
+			return failedProcessingResult(call, result), &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause}
 		}
 		result = next
 	}
@@ -210,7 +215,7 @@ func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result
 // failedProcessingResult retains system disposition without retaining business
 // content, structured values, media or open metadata after failed processing.
 func failedProcessingResult(call tool.Call, result tool.Result) tool.Result {
-	return tool.Result{ID: call.ID, Name: call.Name, IsError: result.IsError, TurnComplete: result.TurnComplete, Content: []model.Part{model.NewTextPart("Tool completed; result processing failed. Do not repeat the operation.")}}
+	return tool.Result{ID: call.ID, Name: call.Name, TurnComplete: result.TurnComplete, Content: []tool.ContentBlock{tool.Text("Tool completed; result processing failed. Do not repeat the operation.")}}
 }
 
 func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base func(context.Context) (tool.Result, error)) (tool.Result, error) {
@@ -236,19 +241,19 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 	}
 	r, err := chain(ctx)
 	if err != nil && actual != nil && (!errors.Is(err, actualErr) || !errors.Is(actualErr, err)) {
-		return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
+		return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr}
 	}
 	if err == nil && len(entries) > 0 {
-		if r.ID != "" && r.ID != call.ID || r.Name != "" && r.Name != call.Name || actual == nil && r.TurnComplete || actual != nil && (r.TurnComplete != actual.TurnComplete || r.IsError != actual.IsError || !reflect.DeepEqual(r.Meta, actual.Meta) || !reflect.DeepEqual(r.Metadata, actual.Metadata)) {
+		if r.ID != "" && r.ID != call.ID || r.Name != "" && r.Name != call.Name || actual == nil && r.TurnComplete || actual != nil && (r.TurnComplete != actual.TurnComplete || !reflect.DeepEqual(r.Meta, actual.Meta) || !reflect.DeepEqual(r.Metadata, actual.Metadata)) {
 			err = fmt.Errorf("middleware changed tool identity or completion")
 		}
 		if err == nil {
-			err = ValidateResult(def, r)
+			err = validateResult(def, r, err)
 		}
 		if err != nil {
 			err = &agent.HookError{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
 			if actual != nil {
-				return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
+				return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr}
 			}
 			return tool.Result{}, err
 		}
@@ -268,7 +273,7 @@ func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model
 				if a.ToolUseID != b.ToolUseID || a.Name != b.Name || a.IsError != b.IsError {
 					err = fmt.Errorf("model view changed tool identity or error")
 				} else {
-					err = ValidateResult(tool.Definition{}, tool.Result{Content: a.Content})
+					err = validateModelViewParts(a.Content)
 				}
 			}
 		}
@@ -283,7 +288,6 @@ func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model
 // ProcessingError separates a failed presentation from the producer's known outcome.
 type ProcessingError struct {
 	Cause, EffectError error
-	Failed             bool
 }
 
 func (e *ProcessingError) Error() string {
@@ -298,7 +302,6 @@ func (e *ProcessingError) Retryable() bool { return false }
 func EffectResult(result tool.Result, err error) (tool.Result, error) {
 	var e *ProcessingError
 	if errors.As(err, &e) {
-		result.IsError = e.Failed
 		return result, e.EffectError
 	}
 	return result, err

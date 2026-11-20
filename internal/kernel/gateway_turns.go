@@ -201,10 +201,10 @@ func (g *Gateway) runTurn(
 	normalizeRunRequestPolicyProfile(&runReq)
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		reviewModel := runReq.AgentSpec.Model
-		if req.Call.RuntimeModel != nil {
+		if req.ProducingModel != nil {
 			// A later model request can select a different model during this
 			// Turn. Approval keeps the model pinned to the producing tool call.
-			reviewModel = req.Call.RuntimeModel
+			reviewModel = req.ProducingModel
 		}
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, reviewModel)
 	})

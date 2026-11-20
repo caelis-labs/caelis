@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -251,7 +251,7 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 						"id":    "call_plugin_e2e_search",
 						"type":  "function",
 						"function": map[string]any{
-							"name":      tool.ToolSearchToolName,
+							"name":      mcp.SearchToolName,
 							"arguments": `{"query":"read e2e fixture"}`,
 						},
 					}},
@@ -292,7 +292,7 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 						"id":    "call_plugin_e2e",
 						"type":  "function",
 						"function": map[string]any{
-							"name":      tool.MCPCallToolName,
+							"name":      mcp.CallToolName,
 							"arguments": fmt.Sprintf(`{"tool_name":%q,"arguments":{"name":"fixture"}}`, pluginE2EToolName),
 						},
 					}},
@@ -425,7 +425,7 @@ func (p *pluginSystemE2EProvider) Assert(t *testing.T, events string) {
 		t.Fatalf("provider did not observe plugin hook context in model request; %s; events=%s", p.summaryLocked(), events)
 	}
 	if !p.sawToolSearch {
-		t.Fatalf("provider did not observe %s declaration; %s; events=%s", tool.ToolSearchToolName, p.summaryLocked(), events)
+		t.Fatalf("provider did not observe %s declaration; %s; events=%s", mcp.SearchToolName, p.summaryLocked(), events)
 	}
 	if p.sawToolBeforeSearch {
 		t.Fatalf("provider observed concrete MCP tool before tool_search result; %s; events=%s", p.summaryLocked(), events)

@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // ModelRequestResolver supplies a complete configuration for the next unsent
@@ -25,7 +26,7 @@ type ModelRequestSnapshot struct {
 	Revision      string
 	Model         model.LLM
 	Tools         []tool.Tool
-	DeferredTools tool.Source
+	DeferredTools toolset.Source
 	Instructions  []model.Part
 	Reasoning     model.ReasoningConfig
 	Request       ModelRequestOptions

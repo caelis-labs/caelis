@@ -8,7 +8,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -92,16 +91,16 @@ func Definitions(controller bool) []tool.Definition {
 		return map[string]any{"type": "string", "minLength": 1, "description": description}
 	}
 	definitions := []tool.Definition{
-		{Name: "ReadMessages", Description: "Read one unread page of explicit Session group messages, including directed mail. Each member has independent progress. Does not consume directed mail or start work. A lost response can be replayed with an earlier cursor; explicit cursor reads do not change unread progress. Retention gaps are reported.", InputSchema: object(map[string]any{"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 128}, "cursor": map[string]any{"type": "integer", "minimum": 0}}), EffectClass: tool.EffectNonIdempotent},
-		{Name: "ListThreads", Description: "List participants and their Session-scoped handles.", InputSchema: object(map[string]any{}), EffectClass: tool.EffectReadOnly},
-		{Name: "SendMessage", Description: "Queue mail, then independently take your pending mail. Success means queued, not delivered. Wait for a reply or explicitly send a new message if needed; another send may duplicate an unconfirmed delivery. Delivery occurs at a supported input boundary or through a SendMessage reply. Use received IDs as reply_to.", InputSchema: object(map[string]any{"to": text("Recipient handle from ListThreads."), "message": text("Message body."), "reply_to": map[string]any{"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Optional UUID of the message being answered."}}, "to", "message"), EffectClass: tool.EffectNonIdempotent},
+		{Name: "ReadMessages", Description: "Read one unread page of explicit Session group messages, including directed mail. Each member has independent progress. Does not consume directed mail or start work. A lost response can be replayed with an earlier cursor; explicit cursor reads do not change unread progress. Retention gaps are reported.", InputSchema: object(map[string]any{"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 128}, "cursor": map[string]any{"type": "integer", "minimum": 0}})},
+		{Name: "ListThreads", Description: "List participants and their Session-scoped handles.", InputSchema: object(map[string]any{})},
+		{Name: "SendMessage", Description: "Queue mail, then independently take your pending mail. Success means queued, not delivered. Wait for a reply or explicitly send a new message if needed; another send may duplicate an unconfirmed delivery. Delivery occurs at a supported input boundary or through a SendMessage reply. Use received IDs as reply_to.", InputSchema: object(map[string]any{"to": text("Recipient handle from ListThreads."), "message": text("Message body."), "reply_to": map[string]any{"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Optional UUID of the message being answered."}}, "to", "message")},
 	}
 	if !controller {
 		return definitions
 	}
 	return append(definitions, []tool.Definition{
-		{Name: "ReadThread", Description: "Read a participant's latest public result and status. Pass cursor as after to omit unchanged output; full history is not returned.", InputSchema: object(map[string]any{"handle": text("Participant handle from ListThreads."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle"), EffectClass: tool.EffectReadOnly},
-		{Name: "WaitThread", Description: "Wait for mail, new input, or selected threads to finish or need attention. Returned mail is removed; already admitted input is not repeated. Pass each cursor as after to suppress repeated results. Timeout leaves work running.", InputSchema: object(map[string]any{"threads": map[string]any{"type": "array", "maxItems": 8, "items": object(map[string]any{"handle": text("Participant handle."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 60}}), EffectClass: tool.EffectNonIdempotent},
+		{Name: "ReadThread", Description: "Read a participant's latest public result and status. Pass cursor as after to omit unchanged output; full history is not returned.", InputSchema: object(map[string]any{"handle": text("Participant handle from ListThreads."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")},
+		{Name: "WaitThread", Description: "Wait for mail, new input, or selected threads to finish or need attention. Returned mail is removed; already admitted input is not repeated. Pass each cursor as after to suppress repeated results. Timeout leaves work running.", InputSchema: object(map[string]any{"threads": map[string]any{"type": "array", "maxItems": 8, "items": object(map[string]any{"handle": text("Participant handle."), "after": map[string]any{"type": "integer", "minimum": 0}}, "handle")}, "timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 60}})},
 	}...)
 }
 
@@ -126,5 +125,5 @@ func (t boundTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{ID: call.ID, Name: t.definition.Name, Content: []model.Part{model.NewTextPart(string(result))}}, nil
+	return tool.Result{ID: call.ID, Name: t.definition.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: result}}}, nil
 }

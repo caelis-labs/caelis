@@ -242,7 +242,7 @@ func TestCodeModeValueFixturesOffline(t *testing.T) {
 			input = []byte(`{"batch_id":"batch-a"}`)
 		}
 		result, err := one.Call(t.Context(), tool.Call{ID: name, Name: name, Input: input})
-		if err != nil || result.IsError || result.ID != name {
+		if err != nil || result.ID != name {
 			t.Fatalf("fixture MCP failed: %+v %v", result, err)
 		}
 	}

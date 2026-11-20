@@ -32,9 +32,8 @@ import (
 // Runtime, and public HTTP client. It returns a callback for each user turn and
 // a terminal answer only after the native tool result enters the model context.
 type applicationHTTPModel struct {
-	mu            sync.Mutex
-	requests      [][]byte
-	terminalBatch bool
+	mu       sync.Mutex
+	requests [][]byte
 }
 
 func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -44,7 +43,6 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	m.mu.Lock()
 	m.requests = append(m.requests, append([]byte(nil), raw...))
-	terminalBatch := m.terminalBatch
 	m.mu.Unlock()
 	var decoded struct {
 		Messages []struct {
@@ -66,13 +64,6 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 				"name": "ApplicationLookup", "arguments": `{"key":"one","execution":{"session_id":"forged-session","turn_id":"forged-turn","item_id":"forged-item"}}`,
 			},
 		}}}
-		if terminalBatch {
-			message["tool_calls"] = append(message["tool_calls"].([]any), map[string]any{
-				"id": "provider-later-id", "index": 1, "type": "function", "function": map[string]any{
-					"name": "ApplicationLookup", "arguments": `{"key":"must-not-run"}`,
-				},
-			})
-		}
 		finish = "tool_calls"
 	}
 	payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": message, "finish_reason": finish}}})
@@ -644,7 +635,7 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	}
 }
 
-func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T) {
+func TestApplicationHTTPCallbackCompletesOriginalTurnWithoutAnotherModelRequest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -652,7 +643,9 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	provider := &applicationHTTPModel{terminalBatch: true}
+	// The provider supports parallel tool batches. Serial sibling suppression
+	// is covered by TestChatAgentTerminalToolResultStopsSameBatchAndNextModelStep.
+	provider := &applicationHTTPModel{}
 	store := filepath.Join(root, "store")
 	host := startApplicationHTTPHost(t, store, workspace, provider)
 	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
@@ -670,7 +663,7 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", credentialPath)
 	sessionID := createApplicationHTTPSession(t, ctx, client, "terminal")
 	prompt, err := client.Prompt(ctx, appserver.PromptRequest{
-		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "prompt-terminal"}, Input: "Finish after the first callback.", SourceKind: "user"})
+		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "prompt-terminal"}, Input: "Finish after the callback.", SourceKind: "user"})
 	if err != nil || (prompt.Outcome != appserver.OutcomeCommitted && prompt.Outcome != appserver.OutcomeAccepted) {
 		t.Fatalf("PromptApplication = %+v, %v", prompt, err)
 	}

@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
@@ -29,92 +28,104 @@ type applicationResourceStore interface {
 // already isolated execution workspace. The caller adds these tools only to a
 // workspace-write application profile, whose workspace has a native sandbox.
 func newApplicationResourceTools(store applicationResourceStore, binding sessionprofile.Binding, workspace string) []tool.Tool {
+	bridge := applicationResourceBridge{store: store, binding: binding, workspace: workspace}
 	resource := tool.NamedTool{Def: tool.Definition{
 		Name: "ReadResource", Description: "Copy one immutable uploaded resource into the isolated execution workspace. Returns its relative path and metadata; use the path with workspace tools to inspect bytes.",
-		EffectClass: tool.EffectIdempotent,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"resource_id": map[string]any{"type": "string"}}, "required": []string{"resource_id"}, "additionalProperties": false},
 	}, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
-		if err := validateResourceCall(call, binding); err != nil {
-			return tool.Result{}, err
-		}
-		var input struct {
-			ResourceID string `json:"resource_id"`
-		}
-		if err := decodeResourceInput(call.Input, &input); err != nil {
-			return tool.Result{}, err
-		}
-		if input.ResourceID == "" || store == nil {
-			return tool.Result{}, sessionprofile.ErrInvalid
-		}
-		meta, data, err := store.ReadResource(ctx, binding.Scope, binding.SessionID, input.ResourceID)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		if err := validateResourceSnapshot(meta, data, binding.SessionID, input.ResourceID); err != nil {
-			return tool.Result{}, err
-		}
-		root, err := os.OpenRoot(workspace)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		defer root.Close()
-		path, err := materializeResource(root, input.ResourceID, data)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		return resourceToolResult(struct {
-			Resource sessionprofile.Resource `json:"resource"`
-			Path     string                  `json:"path"`
-		}{meta, path})
+		return bridge.read(ctx, call.Input, tool.InvocationFromContext(ctx))
 	}}
 	artifact := tool.NamedTool{Def: tool.Definition{
 		Name: "PublishArtifact", Description: "Snapshot one regular file from the isolated execution workspace as an immutable, application-owned resource readable via the resource HTTP endpoint. Path must be relative to the workspace.",
-		EffectClass: tool.EffectIdempotent,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"}, "media_type": map[string]any{"type": "string"}}, "required": []string{"path", "name", "media_type"}, "additionalProperties": false},
 	}, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
-		if err := validateResourceCall(call, binding); err != nil {
-			return tool.Result{}, err
-		}
-		var input struct {
-			Path      string `json:"path"`
-			Name      string `json:"name"`
-			MediaType string `json:"media_type"`
-		}
-		if err := decodeResourceInput(call.Input, &input); err != nil {
-			return tool.Result{}, err
-		}
-		if !localArtifactPath(input.Path) || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.MediaType) == "" || store == nil {
-			return tool.Result{}, sessionprofile.ErrInvalid
-		}
-		root, err := os.OpenRoot(workspace)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		defer root.Close()
-		data, err := readStableWorkspaceFile(root, input.Path, nil, nil)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		// A native durable ItemID distinguishes two invocations even if the
-		// provider reuses its untrusted Call.ID. Retrying the same native item
-		// retains exactly one Store operation and conflicts on changed bytes.
-		op := resourceOperationID(call.Execution)
-		meta, err := store.CreateResource(ctx, binding.Scope, binding.SessionID, op, input.Name, input.MediaType, data)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		if err := validateResourceSnapshot(meta, data, binding.SessionID, meta.ID); err != nil {
-			return tool.Result{}, err
-		}
-		return resourceToolResult(struct {
-			Resource sessionprofile.Resource `json:"resource"`
-		}{meta})
+		return bridge.publish(ctx, call.Input, tool.InvocationFromContext(ctx))
 	}}
 	return []tool.Tool{resource, artifact}
 }
 
-func validateResourceCall(call tool.Call, binding sessionprofile.Binding) error {
-	id := call.Execution
+type applicationResourceBridge struct {
+	store     applicationResourceStore
+	binding   sessionprofile.Binding
+	workspace string
+}
+
+func (b applicationResourceBridge) read(ctx context.Context, inputJSON json.RawMessage, id tool.InvocationContext) (tool.Result, error) {
+	if err := validateResourceInvocation(id, b.binding); err != nil {
+		return tool.Result{}, err
+	}
+	var input struct {
+		ResourceID string `json:"resource_id"`
+	}
+	if err := decodeResourceInput(inputJSON, &input); err != nil {
+		return tool.Result{}, err
+	}
+	if input.ResourceID == "" || b.store == nil {
+		return tool.Result{}, sessionprofile.ErrInvalid
+	}
+	meta, data, err := b.store.ReadResource(ctx, b.binding.Scope, b.binding.SessionID, input.ResourceID)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := validateResourceSnapshot(meta, data, b.binding.SessionID, input.ResourceID); err != nil {
+		return tool.Result{}, err
+	}
+	root, err := os.OpenRoot(b.workspace)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	defer root.Close()
+	path, err := materializeResource(root, input.ResourceID, data)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return resourceToolResult(struct {
+		Resource sessionprofile.Resource `json:"resource"`
+		Path     string                  `json:"path"`
+	}{meta, path})
+}
+
+func (b applicationResourceBridge) publish(ctx context.Context, inputJSON json.RawMessage, id tool.InvocationContext) (tool.Result, error) {
+	if err := validateResourceInvocation(id, b.binding); err != nil {
+		return tool.Result{}, err
+	}
+	var input struct {
+		Path      string `json:"path"`
+		Name      string `json:"name"`
+		MediaType string `json:"media_type"`
+	}
+	if err := decodeResourceInput(inputJSON, &input); err != nil {
+		return tool.Result{}, err
+	}
+	if !localArtifactPath(input.Path) || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.MediaType) == "" || b.store == nil {
+		return tool.Result{}, sessionprofile.ErrInvalid
+	}
+	root, err := os.OpenRoot(b.workspace)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	defer root.Close()
+	data, err := readStableWorkspaceFile(root, input.Path, nil, nil)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	// A native durable ItemID distinguishes two invocations even if the
+	// provider reuses its untrusted Call.ID. Retrying the same native item
+	// retains exactly one Store operation and conflicts on changed bytes.
+	op := resourceOperationID(id)
+	meta, err := b.store.CreateResource(ctx, b.binding.Scope, b.binding.SessionID, op, input.Name, input.MediaType, data)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := validateResourceSnapshot(meta, data, b.binding.SessionID, meta.ID); err != nil {
+		return tool.Result{}, err
+	}
+	return resourceToolResult(struct {
+		Resource sessionprofile.Resource `json:"resource"`
+	}{meta})
+}
+
+func validateResourceInvocation(id tool.InvocationContext, binding sessionprofile.Binding) error {
 	if id.SessionID == "" || id.TurnID == "" || id.ItemID == "" || id.SessionID != binding.SessionID || binding.Archived {
 		return fmt.Errorf("%w: resource invocation lacks bound native execution identity", sessionprofile.ErrUnauthorized)
 	}
@@ -144,7 +155,7 @@ func resourceToolResult(value any) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{Content: []model.Part{model.NewTextPart(string(data))}}, nil
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: data}}}, nil
 }
 
 func validateResourceSnapshot(meta sessionprofile.Resource, data []byte, sessionID, resourceID string) error {

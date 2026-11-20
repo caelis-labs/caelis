@@ -35,10 +35,6 @@ func TestAgentPluginLocalUpgradeKeepsManifestIdentityAndData(t *testing.T) {
 		if err != nil || len(contributions.MCPServerSpecs) != 1 {
 			t.Fatalf("v%d contributions = %+v, %v", version, contributions, err)
 		}
-		spec := contributions.MCPServerSpecs[0]
-		if spec.IntegrationID != "" {
-			t.Fatalf("v%d raw plugin assembly gained policy authority: %+v", version, spec)
-		}
 		data := contributions.MCPServerSpecs[0].DataDir
 		if version == 1 {
 			firstData = data
@@ -349,8 +345,8 @@ func TestClaudePluginRootCWDAndEnvironmentReachSubprocess(t *testing.T) {
 		t.Fatalf("Claude environment tool not ready: %+v", mgr.GetServerInfos("claude"))
 	}
 	result, err := envTool.Call(ctx, tool.Call{ID: "env-call", Name: envTool.Definition().Name, Input: []byte(`{}`)})
-	if err != nil || result.IsError || len(result.Content) != 1 || result.Content[0].Text == nil ||
-		result.Content[0].Text.Text != realRoot+"|"+realRoot {
+	if err != nil || len(result.Content) != 1 ||
+		result.Content[0] != tool.Text(realRoot+"|"+realRoot) {
 		t.Fatalf("Claude child environment = %+v, %v", result, err)
 	}
 }

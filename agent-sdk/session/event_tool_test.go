@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestEventToolReadsLegacyFailureIntoOutcome(t *testing.T) {
+	const raw = `{"result":{"is_error":true,"content":[{"kind":"text","text":{"text":"failed"}}]}}`
+	var decoded EventTool
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Outcome != ToolOutcomeFailed || len(decoded.Result.Content) != 1 {
+		t.Fatalf("legacy failure lost: %+v", decoded)
+	}
+	const knownEffect = `{"outcome":"succeeded","result":{"is_error":true}}`
+	if err := json.Unmarshal([]byte(knownEffect), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Outcome != ToolOutcomeSucceeded {
+		t.Fatalf("legacy result overrode outcome: %+v", decoded)
+	}
+}
+
 func TestEventToolUnmarshalPreservesOnlyInputNumbers(t *testing.T) {
 	t.Parallel()
 	var event Event

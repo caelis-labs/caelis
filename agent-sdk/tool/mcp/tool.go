@@ -6,63 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type MCPTool struct {
-	client     *Client
-	manager    *Manager
-	server     *managedServer
-	bindingID  uint64
-	pluginID   string
-	serverName string
-	origName   string
-	def        tool.Definition
+	client   *Client
+	manager  *Manager
+	server   *managedServer
+	origName string
+	def      tool.Definition
 }
 
 func (t *MCPTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.def)
-}
-
-// AdmitSource validates the callable's frozen source and capability revisions
-// against the Manager's current directory. The returned guard orders permission
-// consumption with directory replacement and invalidation. Release it before
-// persistence or tool I/O; it does not make a Policy decision.
-func (t *MCPTool) AdmitSource(ctx context.Context) (func(), error) {
-	if t.manager == nil {
-		return nil, nil
-	}
-	return t.manager.guardCatalogTool(ctx, t)
-}
-
-func (t *MCPTool) addReplayAliases(in []string) {
-	if t == nil || len(in) == 0 {
-		return
-	}
-	if t.def.Metadata == nil {
-		t.def.Metadata = map[string]any{}
-	}
-	aliases, _ := t.def.Metadata[tool.MetadataReplayAliases].([]string)
-	for _, alias := range in {
-		if alias == "" {
-			continue
-		}
-		found := false
-		for _, existing := range aliases {
-			if existing == alias {
-				found = true
-				break
-			}
-		}
-		if !found {
-			aliases = append(aliases, alias)
-		}
-	}
-	t.def.Metadata[tool.MetadataReplayAliases] = aliases
 }
 
 func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -79,7 +40,7 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	}
 
 	if t.manager != nil {
-		release, err := t.manager.borrowClient(ctx, t)
+		release, err := t.manager.borrowClient(ctx, t.server)
 		if err != nil {
 			return tool.Result{}, err
 		}
@@ -91,60 +52,65 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	})
 	if err != nil {
 		result := tool.Result{
-			ID:      call.ID,
-			Name:    call.Name,
-			IsError: true,
-			Content: []model.Part{
-				model.NewTextPart(fmt.Sprintf("MCP execution error: %s", err.Error())),
+			ID:   call.ID,
+			Name: call.Name,
+			Content: []tool.ContentBlock{
+				tool.Text(fmt.Sprintf("MCP execution error: %s", err.Error())),
 			},
 		}
-		if tool.EffectClassOf(t.def) != tool.EffectReadOnly {
-			return result, tool.WrapError(errorcode.UnknownOutcome, err, "MCP execution outcome is unknown: "+err.Error())
-		}
-		return result, nil
+		return result, tool.WrapError(errorcode.UnknownOutcome, err, "MCP execution outcome is unknown: "+err.Error())
 	}
 
 	if resp == nil {
-		result := tool.Result{ID: call.ID, Name: call.Name, IsError: true,
-			Content: []model.Part{model.NewTextPart("MCP server returned no tool result")}}
-		if tool.EffectClassOf(t.def) != tool.EffectReadOnly {
-			return result, tool.NewError(errorcode.UnknownOutcome, "MCP server returned no tool execution receipt")
-		}
-		return result, nil
+		result := tool.Result{ID: call.ID, Name: call.Name,
+			Content: []tool.ContentBlock{tool.Text("MCP server returned no tool result")}}
+		return result, tool.NewError(errorcode.UnknownOutcome, "MCP server returned no tool execution receipt")
 	}
-	parts, contentErr := mcpContentParts(resp.Content)
-	var source *tool.StructuredContent
+	blocks, contentErr := mcpContentBlocks(resp.Content)
 	if resp.StructuredContent != nil {
-		structured, err := structuredContentPart(resp.StructuredContent)
+		structured, err := structuredContentBlock(resp.StructuredContent)
 		if err != nil {
 			contentErr = errors.Join(contentErr, err)
 		} else {
-			source = &tool.StructuredContent{Value: structured.JSON.Value, ContentIndex: len(parts)}
-			parts = append(parts, structured)
+			// MCP may send serialized structuredContent as a compatibility text
+			// block. Only drop exact echoes; other text belongs to the server.
+			echo := tool.Text(structured.Value)
+			blocks = slices.DeleteFunc(blocks, func(block tool.ContentBlock) bool {
+				text, ok := block.(tool.Text)
+				return ok && text == echo
+			})
+			blocks = append(blocks, structured)
 			if t.def.OutputSchema != nil && !resp.IsError {
-				if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: t.def.OutputSchema}, source.Value); err != nil {
+				if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: t.def.OutputSchema}, structured.Value); err != nil {
 					contentErr = errors.Join(contentErr, fmt.Errorf("structuredContent does not match outputSchema: %w", err))
 				}
 			}
 		}
 	}
-	if t.def.OutputSchema != nil && source == nil && !resp.IsError {
+	result := tool.Result{ID: call.ID, Name: call.Name, Content: blocks}
+	if _, ok := result.Structured(); t.def.OutputSchema != nil && !ok && !resp.IsError {
 		contentErr = errors.Join(contentErr, errors.New("outputSchema requires structuredContent"))
 	}
+	var contentMessage string
 	if contentErr != nil {
-		parts = append(parts, model.NewTextPart("MCP content not delivered: "+contentErr.Error()))
+		contentMessage = "MCP content not delivered: " + contentErr.Error()
+		result.Content = append(result.Content, tool.Text(contentMessage))
 	}
-	if len(parts) == 0 {
-		parts = append(parts, model.NewTextPart(""))
+	if len(result.Content) == 0 {
+		result.Content = append(result.Content, tool.Text(""))
 	}
-
-	return tool.Result{
-		ID:                call.ID,
-		Name:              call.Name,
-		Content:           parts,
-		StructuredContent: source,
-		IsError:           resp.IsError || contentErr != nil,
-	}, nil
+	if resp.IsError {
+		for _, block := range resp.Content {
+			if text, ok := block.(*mcpsdk.TextContent); ok && strings.TrimSpace(text.Text) != "" {
+				return result, tool.FailedReply(text.Text)
+			}
+		}
+		return result, tool.FailedReply("MCP server reported a tool failure")
+	}
+	if contentErr != nil {
+		return result, tool.FailedReply(contentMessage)
+	}
+	return result, nil
 }
 
 var _ tool.Tool = (*MCPTool)(nil)

@@ -313,7 +313,7 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	executor := &gojaexec.Executor{Observe: func(m gojaexec.Metrics) { mu.Lock(); defer mu.Unlock(); metrics = append(metrics, m) }}
 	var approvals []map[string]any
 	requester := approvalRequesterFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		if r.Tool.Name != r.Call.Name || r.Tool.Metadata[tool.MetadataMCPServer] != "dtw" || r.Call.Parent == nil || r.Call.Parent.Kind != codemode.ToolKind || r.Call.TargetBinding == nil || r.Call.Execution.SessionID == "" || r.Call.Execution.TurnID == "" || r.Call.Execution.ItemID == "" {
+		if r.Tool.Name != r.Call.Name || r.Tool.Metadata[tool.MetadataMCPServer] != "dtw" || r.Parent == nil || r.Parent.Kind != codemode.ToolKind || mcp.BindingForDefinition(r.Tool).Identity == "" || r.Execution.SessionID == "" || r.Execution.TurnID == "" || r.Execution.ItemID == "" {
 			return agent.ApprovalResponse{}, fmt.Errorf("approval lost real MCP target: %s", r.Tool.Name)
 		}
 		var args map[string]any
@@ -654,11 +654,13 @@ func dtwAtomicResultPNGs(t *testing.T, result *tool.Result) [][]byte {
 	if result == nil {
 		t.Fatal("nested ToolResult is missing its complete result")
 	}
-	raw, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
+	var images [][]byte
+	for _, block := range result.Content {
+		if image, ok := block.(tool.Image); ok && image.MIMEType == "image/png" {
+			images = append(images, image.Data)
+		}
 	}
-	return dtwAtomicPNGs(t, raw)
+	return images
 }
 
 // Decode only typed inline media sources; plain text containing base64 is not

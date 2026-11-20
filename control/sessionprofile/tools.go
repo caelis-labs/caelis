@@ -9,7 +9,7 @@ import (
 
 // ToolsForConfiguration binds callbacks to an exact stored historical revision,
 // not the latest profile. Binding remains the immutable creation ownership record.
-// Runtime supplies invocation Session, Turn and item through tool.Call.Execution.
+// Runtime supplies invocation Session, Turn and item through the call context.
 func (s *Store) ToolsForConfiguration(ctx context.Context, binding Binding, configuration Configuration, source Source) ([]tool.Tool, error) {
 	if err := ValidateSource(source); err != nil {
 		return nil, err
@@ -56,14 +56,12 @@ func (s *Store) ToolsForConfiguration(ctx context.Context, binding Binding, conf
 	out := make([]tool.Tool, 0, len(pinned.Profile.Tools))
 	for _, def := range pinned.Profile.Tools {
 		definition := tool.Definition{
-			Name:        def.Name,
-			Description: tool.ExternalCapabilityDescriptionPrefix + "\n" + def.Description,
-			InputSchema: def.InputSchema,
-			EffectClass: tool.EffectNonIdempotent,
+			Name:            def.Name,
+			MayCompleteTurn: true,
+			Description:     def.Description,
+			InputSchema:     def.InputSchema,
 			Metadata: map[string]any{
-				tool.MetadataExternalCapability:   true,
-				tool.MetadataDescriptionAuthority: tool.MetadataAuthorityNonAuthorizing,
-				callbackPolicyMetadataKey:         callbackPolicyMetadata{approvalPolicy: def.ApprovalPolicy},
+				callbackPolicyMetadataKey: callbackPolicyMetadata{approvalPolicy: def.ApprovalPolicy},
 			},
 		}
 		out = append(out, callbackTool{store: s, binding: stored, configuration: pinned, source: source, resultFormat: def.ResultFormat, definition: definition})
@@ -82,7 +80,10 @@ type callbackTool struct {
 
 func (t callbackTool) Definition() tool.Definition { return tool.CloneDefinition(t.definition) }
 func (t callbackTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	identity := call.Execution
+	return t.invoke(ctx, call, tool.InvocationFromContext(ctx))
+}
+
+func (t callbackTool) invoke(ctx context.Context, call tool.Call, identity tool.InvocationContext) (tool.Result, error) {
 	if identity.SessionID != t.binding.SessionID || !validID(identity.TurnID) || !validID(identity.ItemID) || call.Name != t.definition.Name {
 		return tool.Result{}, ErrUnauthorized
 	}

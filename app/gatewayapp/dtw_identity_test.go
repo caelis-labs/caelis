@@ -48,7 +48,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 					t.Fatalf("selected package identity/root = %+v", got)
 				}
 				spec := got.MCPServerSpecs[0]
-				if spec.Name != name || spec.PluginID != "desktop-world" || spec.PackageRoot != root || spec.PackageVersion != "development" || spec.IntegrationID != "desktop-world/atomic-v1" {
+				if spec.Name != name || spec.PluginID != "desktop-world" || spec.PackageRoot != root || spec.PackageVersion != "development" {
 					t.Fatalf("service identity or app approval configuration = %+v", spec)
 				}
 				metas, err := applicationPluginSkills(got.SkillBundles)
@@ -151,16 +151,16 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 	// Cleanup runs in reverse registration order, so release before closing either manager.
 	t.Cleanup(releaseOld)
 	old, fresh := tools["desktop-world"], tools["dtw"]
-	oldBinding, newBinding := tool.BindingForDefinition(old.Definition()), tool.BindingForDefinition(fresh.Definition())
+	oldBinding, newBinding := mcp.BindingForDefinition(old.Definition()), mcp.BindingForDefinition(fresh.Definition())
 	if oldBinding.Identity == newBinding.Identity {
 		t.Fatal("server rename transferred the old tool identity")
 	}
 	for _, pair := range []struct{ current, other string }{{"desktop-world", "dtw"}, {"dtw", "desktop-world"}} {
 		manager := managers[pair.current]
-		if err := manager.CheckToolBinding(ctx, tool.BindingForDefinition(tools[pair.current].Definition())); err != nil {
+		if err := manager.CheckToolBinding(ctx, mcp.BindingForDefinition(tools[pair.current].Definition())); err != nil {
 			t.Fatalf("own activation binding rejected: %v", err)
 		}
-		if err := manager.CheckToolBinding(ctx, tool.BindingForDefinition(tools[pair.other].Definition())); err == nil {
+		if err := manager.CheckToolBinding(ctx, mcp.BindingForDefinition(tools[pair.other].Definition())); err == nil {
 			t.Fatal("old/new activations recognized each other's binding")
 		}
 		if _, found, err := manager.Lookup(ctx, tools[pair.other].Definition().Name); err != nil || found {
@@ -191,13 +191,13 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 		t.Fatal("revoked old handle admitted another dispatch")
 	}
 	freshResult, err := fresh.Call(ctx, tool.Call{ID: "new-activation", Name: fresh.Definition().Name, Input: call.Input})
-	if err != nil || freshResult.IsError || freshResult.Name != "dtw__look" {
+	if err != nil || freshResult.Name != "dtw__look" {
 		t.Fatalf("new activation positive control = %+v, %v", freshResult, err)
 	}
 	releaseOld()
 	select {
 	case got := <-done:
-		if got.err != nil || got.result.IsError || got.result.ID != call.ID || got.result.Name != call.Name || len(got.result.Content) != 1 || got.result.Content[0].Text == nil || got.result.Content[0].Text.Text != "desktop-world original receipt" {
+		if got.err != nil || got.result.ID != call.ID || got.result.Name != call.Name || len(got.result.Content) != 1 || got.result.Content[0] != tool.Text("desktop-world original receipt") {
 			t.Fatalf("old accepted result lost its original identity: %+v, %v", got.result, got.err)
 		}
 	case <-ctx.Done():

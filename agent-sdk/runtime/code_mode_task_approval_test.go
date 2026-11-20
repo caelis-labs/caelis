@@ -60,7 +60,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 			}}}
 			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 				approvals.Add(1)
-				if req.Tool.Name != "Write" || req.Call.Parent == nil || req.Call.Parent.ID != "script" {
+				if req.Tool.Name != "Write" || req.Parent == nil || req.Parent.ID != "script" {
 					t.Error("approval lost original child identity")
 				}
 				if !revision.TryLock() {

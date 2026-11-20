@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -26,7 +27,7 @@ func TestCodeModeUnknownOutcomePrecedesJavaScriptError(t *testing.T) {
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
-		return tool.Result{IsError: true}, errorcode.New(errorcode.UnknownOutcome, "effect response was lost")
+		return tool.Result{}, errorcode.New(errorcode.UnknownOutcome, "effect response was lost")
 	}}
 	var checked atomic.Bool
 	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
@@ -145,4 +146,37 @@ func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
 	if !checked.Load() || !unknown || effects.Load() != 1 {
 		t.Fatalf("checked=%v unknown=%v effects=%d", checked.Load(), unknown, effects.Load())
 	}
+}
+
+func TestCodeModeKnownReceiptPreservesUnknownOutcomeWhenCaught(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	const diagnostic = "callback receipt"
+	target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{Content: []tool.ContentBlock{tool.Text(diagnostic)}}, tool.WrapError(errorcode.UnknownOutcome, tool.FailedReply(diagnostic), diagnostic)
+	}}
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: `{"code":"try { await Effect({}); } catch (e) { return {code:e.code, text:e.result.text()}; }"}`}}
+		}
+		return nil
+	}}
+	runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
+	visible := errorDeliveryModelResult(t, driver.requests[1], "script")
+	raw := errorDeliveryJSON(t, visible.Content)
+	if !visible.IsError || !bytes.Contains(raw, []byte(`"code":"unknown_outcome","text":"callback receipt"`)) {
+		t.Fatalf("catchable unknown result was lost: %s", raw)
+	}
+	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == "script" {
+			if event.Tool.Outcome != session.ToolOutcomeUnknown || event.Tool.Result.Metadata[codemode.MetadataScriptCompletion] != "completed" {
+				t.Fatalf("script lost outcome or completion: %+v", event.Tool)
+			}
+			return
+		}
+	}
+	t.Fatal("script result missing")
 }

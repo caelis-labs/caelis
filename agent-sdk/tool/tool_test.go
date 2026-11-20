@@ -6,22 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
-
-func TestCloneDefinitionIsolatesExecutionRequirements(t *testing.T) {
-	t.Parallel()
-
-	original := Definition{ExecutionRequirements: &ExecutionRequirements{
-		Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
-	}}
-	clone := CloneDefinition(original)
-	clone.ExecutionRequirements.Sandbox.CommandExec = false
-	clone.ExecutionRequirements.Sandbox.AsyncSessions = false
-	if !original.ExecutionRequirements.Sandbox.CommandExec || !original.ExecutionRequirements.Sandbox.AsyncSessions {
-		t.Fatalf("mutating clone changed original requirements: %+v", original.ExecutionRequirements)
-	}
-}
 
 func TestModelSpecsClonesStableToolContracts(t *testing.T) {
 	t.Parallel()
@@ -165,39 +150,24 @@ func TestModelSpecsDoesNotInferStrictForConditionalSchema(t *testing.T) {
 	}
 }
 
-func TestToolSearchNameWithoutMetadataDoesNotEnableDeferral(t *testing.T) {
+func TestModelSpecsProjectsSuppliedToolsRegardlessOfMetadata(t *testing.T) {
 	t.Parallel()
 
-	searchStub := NamedTool{Def: Definition{Name: ToolSearchToolName}}
-	mcp := NamedTool{Def: Definition{
-		Name:        "mcp__plugin__server__read",
-		Description: "Read external data",
-		InputSchema: map[string]any{"type": "object"},
-		Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
-	}}
-	specs := ModelSpecs([]Tool{searchStub, mcp})
-	if got, want := toolSpecNames(specs), []string{ToolSearchToolName}; !equalStrings(got, want) {
+	tools := []Tool{
+		NamedTool{Def: Definition{Name: "inspect"}},
+		nil,
+		NamedTool{},
+		NamedTool{Def: Definition{
+			Name:     "remote_read",
+			Metadata: map[string]any{"caelis.tool.kind": "mcp"},
+		}},
+		NamedTool{Def: Definition{
+			Name:     "tool_search",
+			Metadata: map[string]any{"caelis.tool.kind": "tool_search"},
+		}},
+	}
+	if got, want := toolSpecNames(ModelSpecs(tools)), []string{"inspect", "remote_read", "tool_search"}; !equalStrings(got, want) {
 		t.Fatalf("ModelSpecs names = %v, want %v", got, want)
-	}
-}
-
-func TestParseToolSearchOutput(t *testing.T) {
-	t.Parallel()
-
-	result := ParseToolSearchOutput(map[string]any{
-		"tools": []any{
-			map[string]any{"name": "direct"},
-			map[string]any{"function": map[string]any{"name": "nested"}},
-			map[string]any{"name": "   "},
-		},
-	})
-	if got, want := result.DiscoveredToolNames(), []string{"direct", "nested"}; !equalStrings(got, want) {
-		t.Fatalf("DiscoveredToolNames = %v, want %v", got, want)
-	}
-
-	malformed := ParseToolSearchOutput(map[string]any{"tools": "not-an-array"})
-	if got := malformed.DiscoveredToolNames(); len(got) != 0 {
-		t.Fatalf("malformed DiscoveredToolNames = %v, want empty", got)
 	}
 }
 
@@ -212,11 +182,10 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 			}
 			call.Metadata["mutated"] = true
 			call.Metadata["nested"].(map[string]any)["value"] = "invoke-mutated"
-			call.ModelStep.ID = "invoke-mutated"
 			return Result{
 				Name: "echo",
-				Content: []model.Part{
-					model.NewTextPart("ok"),
+				Content: []ContentBlock{
+					Text("ok"),
 				},
 				Meta: map[string]any{
 					"source": "invoke",
@@ -227,9 +196,8 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	}
 
 	call := Call{
-		Name:      "echo",
-		Input:     json.RawMessage(`{"value":"ok"}`),
-		ModelStep: &ModelStepRef{ID: "step-1", Index: 0, CallCount: 1},
+		Name:  "echo",
+		Input: json.RawMessage(`{"value":"ok"}`),
 		Metadata: map[string]any{
 			"trace":  "1",
 			"nested": map[string]any{"value": "caller"},
@@ -242,8 +210,8 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	if got := result.Name; got != "echo" {
 		t.Fatalf("result.Name = %q, want %q", got, "echo")
 	}
-	if got := result.Content[0].Text.Text; got != "ok" {
-		t.Fatalf("result.Content[0].Text.Text = %q, want %q", got, "ok")
+	if got := result.Content[0]; got != Text("ok") {
+		t.Fatalf("result.Content[0] = %q, want %q", got, "ok")
 	}
 	if _, ok := call.Metadata["mutated"]; ok {
 		t.Fatal("input call metadata should be cloned")
@@ -251,47 +219,9 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	if got := call.Metadata["nested"].(map[string]any)["value"]; got != "caller" {
 		t.Fatalf("input call nested metadata leaked mutation: %v", got)
 	}
-	if got := call.ModelStep.ID; got != "step-1" {
-		t.Fatalf("input call model step leaked mutation: %q", got)
-	}
 	result.Meta["nested"].(map[string]any)["value"] = "caller-mutated"
 	if got := result.Meta["nested"].(map[string]any)["value"]; got != "caller-mutated" {
 		t.Fatalf("result nested metadata mutation = %v", got)
-	}
-}
-
-func TestConcurrentModelStepAdmissionSurvivesCallCloning(t *testing.T) {
-	t.Parallel()
-
-	refs := NewConcurrentModelStepRefs("step-1", 2)
-	if len(refs) != 2 || refs[0].AdmissionDone() == nil || refs[0].AdmissionDone() != refs[1].AdmissionDone() {
-		t.Fatalf("concurrent model-step refs = %#v, want one shared admission barrier", refs)
-	}
-	cloned := CloneCall(Call{ModelStep: refs[0]})
-	cloned.ModelStep.MarkAdmissionComplete()
-	select {
-	case <-refs[0].AdmissionDone():
-		t.Fatal("admission barrier closed before every call completed admission")
-	default:
-	}
-	refs[1].MarkAdmissionComplete()
-	select {
-	case <-refs[0].AdmissionDone():
-	default:
-		t.Fatal("admission barrier remained open after every call completed admission")
-	}
-}
-
-func TestEffectClassOfDefaultsFailSafe(t *testing.T) {
-	t.Parallel()
-	if got := EffectClassOf(Definition{}); got != EffectNonIdempotent {
-		t.Fatalf("EffectClassOf(empty) = %q, want non_idempotent", got)
-	}
-	if got := EffectClassOf(Definition{Metadata: map[string]any{"annotations": map[string]any{"readOnlyHint": true}}}); got != EffectReadOnly {
-		t.Fatalf("EffectClassOf(readonly) = %q, want read_only", got)
-	}
-	if got := EffectClassOf(Definition{EffectClass: EffectIdempotent}); got != EffectIdempotent {
-		t.Fatalf("EffectClassOf(explicit) = %q, want idempotent", got)
 	}
 }
 

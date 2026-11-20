@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
@@ -17,12 +16,12 @@ func TestOriginalReturnKeepsOutputAndMediaBudgets(t *testing.T) {
 			limits.OutputBytes = 64
 			limits.Calls = 1
 			h := &codeModeHost{limits: limits, codeModeResults: newCodeModeResults()}
-			result := tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"large":"` + strings.Repeat("x", 100) + `"}`))}}
+			result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"large":"` + strings.Repeat("x", 100) + `"}`)}}}
 			if media {
 				limits.OutputBytes = 4096
 				h.limits = limits
-				part := model.Part{Kind: model.PartKindMedia, Media: &model.MediaPart{MimeType: "image/png"}}
-				result.Content = []model.Part{part, part}
+				part := tool.Image{Data: []byte("fixture"), MIMEType: "image/png"}
+				result.Content = []tool.ContentBlock{part, part}
 			}
 			if _, err := h.project("original", result, codemode.OutcomeSucceeded, tool.Definition{}); err != nil {
 				t.Fatal(err)

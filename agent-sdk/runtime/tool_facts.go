@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type toolFactTarget struct {
@@ -35,14 +36,15 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 	if result != nil {
 		kind = session.EventTypeToolResult
 		status = "completed"
-		if result.IsError || callErr != nil {
+		if callErr != nil {
 			status = "failed"
 		}
 	}
+	execution := tool.InvocationFromContext(ctx)
 	event := &session.Event{Type: kind, Visibility: session.VisibilityMirror,
-		ID:    fmt.Sprintf("tool:%s:%s:%s", call.Execution.TurnID, call.Execution.ItemID, kind),
+		ID:    fmt.Sprintf("tool:%s:%s:%s", execution.TurnID, execution.ItemID, kind),
 		Scope: &session.EventScope{TurnID: turnID, Source: "runtime_tool"}, Actor: session.ActorRef{Kind: session.ActorKindTool, ID: call.ID, Name: call.Name},
-		Tool: runtimeToolFact(call, status, input)}
+		Tool: runtimeToolFact(ctx, call, status, input)}
 	event.IdempotencyKey = event.ID
 	var processingErr error
 	if result != nil {
@@ -56,7 +58,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		if event.Tool.Outcome == session.ToolOutcomeSucceeded {
 			event.Tool.Status = "completed"
 		}
-		message := chat.CanonicalToolResult(model.ToolCall{ID: call.ID, Name: call.Name}, full)
+		message := chat.CanonicalToolResult(model.ToolCall{ID: call.ID, Name: call.Name}, full, callErr)
 		original := model.CloneMessage(message)
 		def := tool.Definition{Name: call.Name}
 		var source tool.Tool
@@ -70,10 +72,8 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			event.Tool.Error = processingErr.Error()
 		}
 		event.Message = &message
-		if ownsNestedCommandPresentation(call, source) {
-			view := full
-			view.IsError = view.IsError || callErr != nil
-			chat.ApplyRuntimeToolResultPresentation(event, view, source)
+		if ownsNestedCommandPresentation(ctx, call, source) {
+			chat.ApplyRuntimeToolResultPresentation(event, full, source, callErr)
 		}
 		event.Tool.ErrorCode = string(errorcode.CodeOf(callErr))
 		event.Tool.ProcessingFailure = hookrun.ProcessingFailure(errors.Join(callErr, processingErr))
@@ -82,8 +82,8 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
 	defer cancel()
 	var release func()
-	bindingIntent := result == nil && isCodeModeChild(call) && call.TargetBinding != nil
-	if result != nil && call.Name == tool.ToolSearchToolName || bindingIntent {
+	bindingIntent := result == nil && isCodeModeChild(ctx) && toolbinding.Target(ctx) != nil
+	if result != nil && call.Name == mcp.SearchToolName || bindingIntent {
 		var err error
 		release, err = r.acquireSessionWrite(cleanup, ref)
 		if err != nil {
@@ -95,7 +95,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			if err != nil {
 				return err
 			}
-			if err := validateRecordedCodeModeBinding(events, call); err != nil {
+			if err := validateRecordedCodeModeBinding(ctx, events, call); err != nil {
 				return err
 			}
 		}
@@ -114,31 +114,35 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 	return processingErr
 }
 
-func runtimeToolFact(call tool.Call, status string, input map[string]any) *session.EventTool {
-	fact := &session.EventTool{ID: call.ID, Name: call.Name, Status: status, Input: input, Execution: call.Execution, Binding: call.TargetBinding, ModelCall: call.ModelCall, ProposedCall: call.ProposedCall}
-	if call.Parent != nil {
-		fact.Parent = &session.EventParentTool{Kind: call.Parent.Kind, CallID: call.Parent.ID, Name: call.Parent.Name, Execution: call.Parent.Execution}
+func runtimeToolFact(ctx context.Context, call tool.Call, status string, input map[string]any) *session.EventTool {
+	execution := tool.InvocationFromContext(ctx)
+	fact := &session.EventTool{ID: call.ID, Name: call.Name, Status: status, Input: input, Execution: execution, Binding: toolbinding.Target(ctx)}
+	if parent := tool.ParentFromContext(ctx); parent != nil {
+		parentExecution := execution
+		parentExecution.ItemID = parent.ItemID
+		fact.Parent = &session.EventParentTool{Kind: parent.Kind, CallID: parent.ID, Name: parent.Name, Execution: parentExecution}
 	}
 	return fact
 }
 
-func ownsNestedCommandPresentation(call tool.Call, target tool.Tool) bool {
-	return isCodeModeChild(call) && call.Name == shell.RunCommandToolName && toolbinding.IsTaskResultSource(target)
+func ownsNestedCommandPresentation(ctx context.Context, call tool.Call, target tool.Tool) bool {
+	return isCodeModeChild(ctx) && call.Name == shell.RunCommandToolName && toolbinding.IsTaskResultSource(target)
 }
 
 type nestedCommandObserver struct {
 	publish func(*session.Event)
-	call    tool.Call
+	fact    *session.EventTool
 	target  tool.Tool
 }
 
 func (o nestedCommandObserver) ObserveToolResult(result tool.Result) {
+	fact := *o.fact
 	event := &session.Event{
 		Type: session.EventTypeToolResult, Visibility: session.VisibilityUIOnly,
-		Scope: &session.EventScope{TurnID: o.call.Parent.Execution.TurnID, Source: "runtime_tool"},
-		Actor: session.ActorRef{Kind: session.ActorKindTool, ID: o.call.ID, Name: o.call.Name},
-		Tool:  runtimeToolFact(o.call, "", nil),
+		Scope: &session.EventScope{TurnID: fact.Execution.TurnID, Source: "runtime_tool"},
+		Actor: session.ActorRef{Kind: session.ActorKindTool, ID: fact.ID, Name: fact.Name},
+		Tool:  &fact,
 	}
-	chat.ApplyRuntimeToolResultPresentation(event, result, o.target)
+	chat.ApplyRuntimeToolResultPresentation(event, result, o.target, nil)
 	o.publish(event)
 }

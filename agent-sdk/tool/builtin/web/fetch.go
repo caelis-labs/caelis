@@ -65,7 +65,6 @@ func (t *FetchTool) Definition() tool.Definition {
 			"required":             []string{"url"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, false, true),
 	}
 }
 

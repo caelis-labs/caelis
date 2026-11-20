@@ -56,7 +56,7 @@ func (f codeOutputExecutorFunc) Execute(ctx context.Context, source codemode.Sou
 func codeModeModel(search bool) *mcpScriptModel {
 	return &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if search && i == 0 {
-			return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"live__read"}`}}
+			return []model.ToolCall{{ID: "search", Name: mcp.SearchToolName, Args: `{"query":"live__read"}`}}
 		}
 		if (!search && i == 0) || (search && i == 1) {
 			return []model.ToolCall{{ID: "script", Name: "js_repl", Args: `{"code":"fixture"}`}}
@@ -155,9 +155,10 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var policyNames []string
-	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-		if input.Call.Parent != nil {
-			if input.Call.Parent.ID != "script" || input.Call.Execution.SessionID != active.SessionID || input.Call.Execution.ItemID == "" {
+	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(ctx context.Context, input policy.ToolContext) (policy.Decision, error) {
+		if parent := tool.ParentFromContext(ctx); parent != nil {
+			execution := tool.InvocationFromContext(ctx)
+			if parent.ID != "script" || execution.SessionID != active.SessionID || execution.ItemID == "" {
 				t.Errorf("lost nested identity: %+v", input.Call)
 			}
 			policyNames = append(policyNames, input.Tool.Name)
@@ -275,20 +276,20 @@ func TestCodeModeAssembledToolsDoNotRequireSearch(t *testing.T) {
 			source := &runtimeDeferredSource{}
 			source.publish(tool.NamedTool{Def: def, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 				effects.Add(1)
-				return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
+				return tool.Result{Content: []tool.ContentBlock{tool.Text("ok")}}, nil
 			}})
 			declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 				_, err := host.Call(ctx, "docs__read", []byte(`{}`))
 				if err != nil {
 					return nil, err
 				}
-				if _, err := host.Call(ctx, tool.ToolSearchToolName, []byte(`{"query":"docs__read"}`)); err == nil {
+				if _, err := host.Call(ctx, mcp.SearchToolName, []byte(`{"query":"docs__read"}`)); err == nil {
 					return nil, errors.New("raw ToolSearch bypassed admission")
 				}
 				return []byte(`{"checked":true}`), nil
 			})}
 			llm := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-				searchCall := model.ToolCall{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs__read"}`}
+				searchCall := model.ToolCall{ID: "search", Name: mcp.SearchToolName, Args: `{"query":"docs__read"}`}
 				codeCall := model.ToolCall{ID: "script", Name: "js_repl", Args: `{"code":"fixture"}`}
 				if mode == "prior-search" {
 					if i == 0 {
@@ -317,10 +318,10 @@ func TestCodeModeTerminalReceiptsSurviveDiscardedAggregate(t *testing.T) {
 	var effects atomic.Int32
 	completed := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
-		return tool.Result{Content: []model.Part{model.NewTextPart("original receipt")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("original receipt")}}, nil
 	}}
 	failed := tool.NamedTool{Def: tool.Definition{Name: "Fail", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{IsError: true, Content: []model.Part{model.NewJSONPart([]byte(`{"failed":true}`))}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"failed":true}`)}}}, tool.FailedReply("fixture tool failure")
 	}}
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 		if _, err := host.Call(ctx, "Write", []byte(`{}`)); err != nil {
@@ -374,7 +375,7 @@ func TestCodeModeReceiptFailureClosesBridgeAndRecoversOriginalUnknown(t *testing
 	var effects atomic.Int32
 	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
-		return tool.Result{Content: []model.Part{model.NewTextPart("effect happened")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("effect happened")}}, nil
 	}}
 	var checked atomic.Bool
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {

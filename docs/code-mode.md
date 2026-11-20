@@ -57,14 +57,14 @@ falling back to a keyword query.
 Successful tool calls return a Body, through direct functions and `tools.call`
 alike:
 
-- `result.data` contains only explicitly structured output, validated against the
-  tool's declared output schema, if any. Missing structured output is `undefined`;
-  explicit JSON `null` stays `null`. Text and JSON content blocks are not promoted
-  into `.data`. For Read file text, use `result.data.content`.
+- `result.data` comes from the result's single structured content block and is
+  validated against the tool's declared output schema when one exists. A missing
+  block yields `undefined`. A block containing JSON `null` yields `null`. For
+  Read file text, use `result.data.content`.
 - `result.text` is a string property that joins only text blocks in content order
   with newlines. It is empty when there are no text blocks.
-- `result.media` contains the original media and file references in content order.
-  Copying their handle fields grants no media authority.
+- `result.media` contains the original images and resource handles in content
+  order. Copying their handle fields grants no media authority.
 
 Return the Body itself to deliver all original blocks and preserve raw JSON
 tokens. To return a subset, select data or text and any original media references
@@ -74,7 +74,7 @@ omit undefined fields or use null. An omitted return is null.
 Inspect `error.message`, `error.code` and `error.result` when present;
 `error.reply` aliases `error.result`. Script and local validation errors may
 omit these properties. Only a failed tool's diagnostic Body retains the legacy
-readers: `error.result.text()` joins text and raw JSON blocks in content order
+readers. `error.result.text()` joins text and diagnostic JSON in content order
 with newlines, and `error.result.json()` parses that entire string as a single
 JSON document. Empty text or multiple independent documents produce a parsing
 error. Unverified structured output is not exposed by those readers. Returning
@@ -124,8 +124,8 @@ One script occupies the environment until its execution terminates. Foreground
 yield is not termination: observe the original Task to completion before sending
 the next script, or use `reset:true` to interrupt the occupied environment. A busy
 error is a fallback for overlapping submissions, not a scheduling mechanism. Task wait/cancel remains outside the VM. Within one
-script, await dependent operations; independent operations may be expressed
-concurrently. Runtime schedules their actual execution.
+script, await dependent operations. Independent operations can execute
+concurrently, even when they call the same tool.
 Current Run cancellation, approvals, Guardian, tool facts and Task ownership remain
 authoritative; retained variables do not keep an old Run alive or grant new tool
 authority. Execution cancellation interrupts and, if necessary, kills the original
@@ -167,16 +167,15 @@ schema, policy, approval, Guardian, cancellation, tool facts, media and budget
 checks. A stale schema requires a fresh search before a later call; old arguments
 are never automatically executed.
 
-Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
+Sources may implement `toolset.NamedSource` for exact name lookup.
 Lookup grants no authority; both admission boundaries and the final dispatch check
 remain in the original wrapper chain. Sources without Lookup retain the linear
 fallback; fuzzy search retains its existing selector budgets. No source or
 discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
 software API change creates its own presentation snapshot, not a new grant cache.
 
-Runtime schedules tool execution through the
-[Run-owned execution gate](agent-sdk-boundary.md#runtime-and-capabilities).
-Discovery, call budgets, cancellation and receipts keep their existing owners.
+Independent tool calls can run concurrently, including calls to the same
+registered tool. Each call has its own budget, cancellation, and receipt.
 
 ## Authority and invalidation
 
@@ -189,14 +188,11 @@ and each tool's schema still apply. The process protocol uses a uint32 payload
 length per frame. Source, reply, output, retention, call and CPU budgets remain
 independent of argument size.
 
-Calls pass through the existing real Tool policy, Guardian/approval, source and
-generation admission, dispatch admission and lifecycle wrappers. Discovery
-is not an execution grant. Refresh remains low-frequency Manager-owned work;
-searches do not push full catalog updates into prompts. Before an old binding
-can execute, a changed source/schema produces a distinct stale-binding error:
-the catalog was refreshed and tools.search({name}) must reload it. Old
-arguments are not dispatched or automatically retried with a new schema.
-Offline and revoked access retain their own errors.
+Calls pass through Tool Policy, Guardian/approval, generation admission, and
+lifecycle checks. The Manager refreshes the directory independently of prompt
+assembly. If lookup detects a stale binding, `tools.search({name})` can reload
+the schema for a later invocation. Offline and revoked access have distinct
+errors.
 
 The model receives only explicitly selected summaries and original media.
 Actual child names, exact arguments, results, failures, unknown outcomes and

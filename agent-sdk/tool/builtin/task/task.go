@@ -117,7 +117,6 @@ func (Tool) Definition() tool.Definition {
 				}}},
 			}},
 		},
-		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}
 }
 

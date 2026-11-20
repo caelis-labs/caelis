@@ -90,7 +90,7 @@ func dtwCandidateTools(t *testing.T, manager *mcp.Manager) map[string]tool.Tool 
 	t.Helper()
 	all := map[string]tool.Tool{}
 	for _, candidate := range manager.Tools() {
-		remote, _ := candidate.Definition().Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := candidate.Definition().Metadata[mcp.MetadataTool].(string)
 		all[remote] = candidate
 	}
 	if len(all) != 4 || all["apps"] == nil || all["api"] == nil || all["exec"] == nil || all["result"] == nil {
@@ -106,20 +106,24 @@ func dtwCandidateInvoke(t *testing.T, ctx context.Context, candidate tool.Tool, 
 		t.Fatal(err)
 	}
 	result, err := candidate.Call(ctx, tool.Call{ID: "candidate", Name: candidate.Definition().Name, Input: raw})
-	if err != nil || result.IsError {
+	if err != nil {
 		detail, _ := json.Marshal(result)
 		t.Fatalf("candidate %s = %s, %v", candidate.Definition().Name, detail, err)
 	}
-	for _, part := range result.Content {
-		var raw []byte
-		if part.JSON != nil {
-			raw = part.JSON.Value
-		} else if part.Text != nil {
-			raw = []byte(part.Text.Text)
-		}
+	if value, ok := result.Structured(); ok {
 		var data map[string]json.RawMessage
-		if json.Unmarshal(raw, &data) == nil && data != nil {
-			return data
+		if err := json.Unmarshal(value, &data); err != nil || data == nil {
+			t.Fatalf("candidate structured result = %s, want JSON object: %v", value, err)
+		}
+		return data
+	}
+	// MCP servers that omit structured content may still return JSON text.
+	for _, block := range result.Content {
+		if text, ok := block.(tool.Text); ok {
+			var data map[string]json.RawMessage
+			if json.Unmarshal([]byte(text), &data) == nil && data != nil {
+				return data
+			}
 		}
 	}
 	t.Fatalf("candidate returned no JSON object: %+v", result)

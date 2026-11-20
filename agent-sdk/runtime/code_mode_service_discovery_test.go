@@ -6,7 +6,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
@@ -36,30 +35,6 @@ func TestCodeModeConcurrentSearchFailuresRetainEachAttempt(t *testing.T) {
 	}
 	if len(host.failures) != 2 {
 		t.Fatalf("concurrent discovery lost a failure: %+v", host.failures)
-	}
-}
-
-func TestCodeModeServiceFiltersEligibilityBeforeLimit(t *testing.T) {
-	store, active, _ := codeModeStore(t)
-	source := h1Directory(20)
-	for i := 0; i < 16; i++ {
-		one := source.items[i].(h1Tool)
-		if i < 8 {
-			one.def.RequiredModelCapabilities = model.Capabilities{ImageInput: true}
-		} else {
-			one.def.ExecutionRequirements = &tool.ExecutionRequirements{Sandbox: sandbox.CapabilitySet{CommandExec: true}}
-		}
-		source.items[i] = one
-	}
-	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
-		if i == 0 {
-			return h1Script(`const s=await tools.search();if(s.tools.length!==12||s.truncated||s.next||s.omitted_count)throw Error("eligibility after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
-		}
-		return nil
-	}}
-	runCodeMode(t, store, active, agent.AgentSpec{Model: m, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
-	if source.snapshot().Effects != 1 {
-		t.Fatalf("later eligible tools were hidden: %+v", source.snapshot())
 	}
 }
 

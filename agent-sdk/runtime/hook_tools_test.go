@@ -25,7 +25,7 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 				probe := tool.NamedTool{Def: tool.Definition{Name: "operate", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"app": map[string]any{"type": "string"}}, "required": []string{"app"}}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 					effects.Add(1)
 					actualInput = string(c.Input)
-					return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("full")}}, nil
+					return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("full")}}, nil
 				}}
 				driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 					if i == 0 {
@@ -43,13 +43,13 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 				}}}
 				hooks := agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "target", Apply: func(_ context.Context, e agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
 					prepares.Add(1)
-					if e.Tool == nil || e.Tool.Execution.ItemID == "" || e.ToolDefinition.Name != "operate" {
+					if e.Tool == nil || e.ToolExecution.ItemID == "" || e.ToolDefinition.Name != "operate" {
 						t.Error("missing frozen identity/definition")
 					}
 					p.Input = json.RawMessage(`{"app":"B"}`)
 					if synthetic {
 						p.Kind = agent.ToolPrepareRespond
-						p.Result = &tool.Result{Content: []model.Part{model.NewTextPart("cached")}}
+						p.Result = &tool.Result{Content: []tool.ContentBlock{tool.Text("cached")}}
 					}
 					return p, nil
 				}}}, ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "full", Apply: func(_ context.Context, _ agent.HookContext, o agent.ToolOutcome) (tool.Result, error) {
@@ -97,7 +97,7 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 					if synthetic {
 						expected = "cached"
 					}
-					if p.Result.Tool.Result.Content[0].Text.Text != expected || p.Result.Message.ToolResults()[0].Content[0].Text.Text != "model view" {
+					if string(p.Result.Tool.Result.Content[0].(tool.Text)) != expected || p.Result.Message.ToolResults()[0].Content[0].Text.Text != "model view" {
 						t.Fatal("full result and model view conflated")
 					}
 				}

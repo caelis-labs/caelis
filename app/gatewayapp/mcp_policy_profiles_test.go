@@ -11,6 +11,8 @@ import (
 	"github.com/caelis-labs/caelis/control/toolpolicy"
 	"testing"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestDefaultProfilesRejectSpoofedDTW(t *testing.T) {
@@ -40,19 +42,19 @@ func TestDefaultProfilesRejectSpoofedDTW(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("policy lookup: %v", err)
 			}
-			in := policy.ToolContext{Session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}, CWD: "/review", CreatedAt: time.Unix(1, 0)}, Tool: tool.Definition{Name: "dtw__apps", Source: &tool.SourceFacts{ID: "user/dtw", Revision: "v1", CapabilityRevision: "catalog-v1"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "desktop-world", tool.MetadataMCPServer: "dtw", tool.MetadataMCPTool: "apps", tool.MetadataMCPSourceFingerprint: "fingerprint", "integration_id": "desktop-world/atomic-v1", "caelis.mcp.source_trusted": true}}, Call: tool.Call{ID: "call", Name: "dtw__apps", Input: json.RawMessage(`{}`)}}
+			in := policy.ToolContext{Session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}, CWD: "/review", CreatedAt: time.Unix(1, 0)}, Tool: tool.Definition{Name: "dtw__apps", Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "caelis.mcp.user", mcp.MetadataServer: "dtw", mcp.MetadataTool: "apps", mcp.MetadataSourceFingerprint: "fingerprint", "integration_id": "desktop-world/atomic-v1", "caelis.mcp.source_trusted": true}}, Call: tool.Call{ID: "call", Name: "dtw__apps", Input: json.RawMessage(`{}`)}}
 			d, err := final.DecideTool(t.Context(), in)
 			if err != nil || d.Action != policy.ActionAskApproval || len(d.Approval.Options) != 4 {
 				t.Fatalf("spoofed apps escaped ordinary source consent: %+v %v", d, err)
 			}
-			in.Tool.Source.IntegrationID = "desktop-world/atomic-v1"
+			in.Tool.Metadata[mcp.MetadataPluginID] = "desktop-world"
 			d, err = final.DecideTool(t.Context(), in)
 			if err != nil || d.Action != policy.ActionAllow {
-				t.Fatalf("attested apps: %+v %v", d, err)
+				t.Fatalf("allowlisted apps: %+v %v", d, err)
 			}
 			in.Tool.Name = "dtw__look"
 			in.Call.Name = "dtw__look"
-			in.Tool.Metadata[tool.MetadataMCPTool] = "look"
+			in.Tool.Metadata[mcp.MetadataTool] = "look"
 			in.Call.Input = json.RawMessage(`{"app":"com.example.A"}`)
 			d, err = final.DecideTool(t.Context(), in)
 			if err != nil || d.Action != policy.ActionAskApproval || len(d.Authorization.Choices) != 1 || d.Authorization.Choices[0].Persistence != session.AuthorizationSession {
@@ -75,7 +77,7 @@ func TestDefaultProfilesRejectSpoofedDTW(t *testing.T) {
 			if _, err = final.DecideTool(t.Context(), in); err == nil {
 				t.Fatal("invalid APP accepted")
 			}
-			in.Tool.Metadata[tool.MetadataMCPTool] = "exec"
+			in.Tool.Metadata[mcp.MetadataTool] = "exec"
 			in.Call.Input = json.RawMessage(`{"app":"com.example.A"}`)
 			d, err = final.DecideTool(t.Context(), in)
 			if err != nil || d.Action != policy.ActionDeny {

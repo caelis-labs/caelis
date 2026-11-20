@@ -27,8 +27,8 @@ type taskApproval struct {
 type approvedToolCall func(context.Context, tool.Call) (tool.Result, error)
 
 // taskApprovalProducer is implemented by trusted Runtime producers which own
-// durable submission, cancellation and observation. ParallelSafe and a tool
-// name alone do not grant this capability. Another producer can reuse policy
+// durable submission, cancellation and observation. A tool name alone does not
+// grant this capability. Another producer can reuse policy
 // admission without inheriting command-specific persistence or execution.
 type taskApprovalProducer interface {
 	submitApproval(context.Context, tool.Call, taskApproval, approvedToolCall) (tool.Result, error)

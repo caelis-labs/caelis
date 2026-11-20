@@ -122,11 +122,15 @@ func TestGuardianHarnessOnlyProjectsUserAuthorityWithoutQueries(t *testing.T) {
 			}
 			raw, _ := json.Marshal(map[string]any{"command": command})
 			result, err := runner.Call(t.Context(), tool.Call{ID: call.Tool.ID, Name: "RunCommand", Input: raw})
-			if err != nil || result.IsError {
+			if err != nil {
 				t.Fatalf("wrapper result=%+v err=%v", result, err)
 			}
 			var payload map[string]any
-			if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+			value, ok := result.Structured()
+			if !ok {
+				t.Fatalf("shell result has no structured content: %+v", result)
+			}
+			if err := json.Unmarshal(value, &payload); err != nil {
 				t.Fatal(err)
 			}
 			late := guardianSource(0, session.EventTypeToolResult, "")

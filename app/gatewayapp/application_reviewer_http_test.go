@@ -696,7 +696,7 @@ func TestApplicationReviewerHTTPDenyAndFailureNeverDispatch(t *testing.T) {
 				for _, event := range reviewerHTTPFacts(t, ctx, host, session) {
 					if event.Type == sessionapi.EventTypeToolResult && event.Tool != nil && event.Tool.Execution.TurnID == prompted.Target.TurnID {
 						results++
-						if event.Tool.Execution.ItemID != step || event.Tool.Outcome != sessionapi.ToolOutcomeFailed || event.Tool.Result == nil || !event.Tool.Result.IsError {
+						if event.Tool.Execution.ItemID != step || event.Tool.Outcome != sessionapi.ToolOutcomeFailed || event.Tool.Result == nil {
 							t.Fatalf("denial lost complete original outcome: %+v", event.Tool)
 						}
 					}

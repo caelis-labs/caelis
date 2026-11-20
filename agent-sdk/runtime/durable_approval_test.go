@@ -162,7 +162,7 @@ func TestRequestDurableApprovalExposesApprovalRequestIDToRequester(t *testing.T)
 		RunID:      runID,
 		TurnID:     turnID,
 		Tool:       tool.Definition{Name: "Write"},
-		Call:       tool.Call{ID: "call-approval-request-id", Name: "Write", Execution: tool.InvocationContext{ItemID: "item-approval-request-id"}},
+		Call:       tool.Call{ID: "call-approval-request-id", Name: "Write"}, Execution: tool.InvocationContext{ItemID: "item-approval-request-id"},
 	}, approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		observed = req
 		return decision, nil
@@ -414,7 +414,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			go func() {
 				_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
 					SessionRef: active.SessionRef, Session: active, RunID: runID, TurnID: turnID,
-					Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call-" + kind, Name: "Write", Execution: tool.InvocationContext{ItemID: "item-" + kind}},
+					Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call-" + kind, Name: "Write"}, Execution: tool.InvocationContext{ItemID: "item-" + kind},
 				}, nil)
 				result <- requestErr
 			}()

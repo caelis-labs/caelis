@@ -2403,9 +2403,9 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	handle := newTestTurnHandle()
-	stepRefs := map[string][]*tool.ModelStepRef{
-		"step-1": tool.NewConcurrentModelStepRefs("step-1", 2),
-		"step-2": tool.NewConcurrentModelStepRefs("step-2", 2),
+	stepRefs := map[string][]*agent.ModelStepRef{
+		"step-1": agent.NewConcurrentModelStepRefs("step-1", 2),
+		"step-2": agent.NewConcurrentModelStepRefs("step-2", 2),
 	}
 	stepRefs["step-1"][1].MarkAdmissionComplete()
 	stepRefs["step-2"][1].MarkAdmissionComplete()
@@ -2516,7 +2516,7 @@ func TestResolveApprovalRequestRunsSameModelStepAutoReviewsConcurrently(t *testi
 		t.Fatal(err)
 	}
 	handle := newTestTurnHandle()
-	stepRefs := tool.NewConcurrentModelStepRefs("shared-step", 2)
+	stepRefs := agent.NewConcurrentModelStepRefs("shared-step", 2)
 	request := func(callID string, index int) *agent.ApprovalRequest {
 		return &agent.ApprovalRequest{
 			SessionRef: activeSession.SessionRef,

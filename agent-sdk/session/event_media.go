@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -25,25 +24,19 @@ const minSharedMediaBytes = 4096
 
 type eventJSON Event
 
-type eventMediaJSON struct {
-	*eventJSON
-	Media map[string]string `json:"media,omitempty"`
-}
-
 // MarshalEventJSON encodes a durable event with repeated large inline media
-// shared within that record. Ordinary json.Marshal retains the fully expanded
-// representation for semantic comparisons and non-storage consumers. Both forms
-// decode to the same Event. No media depends on another record or external file.
+// shared within that record. Ordinary json.Marshal retains expanded values.
 func MarshalEventJSON(e *Event) ([]byte, error) {
 	if e == nil {
 		return []byte("null"), nil
 	}
-	if e.Schema != EventSchemaVersion {
-		return json.Marshal(eventJSON(*e))
+	raw, err := json.Marshal(eventJSON(*e))
+	if err != nil || e.Schema != EventSchemaVersion {
+		return raw, err
 	}
 	counts := map[string]int{}
-	_, err := mapEventMedia(*e, model.MediaSourceInline, func(source model.MediaSource) (model.MediaSource, error) {
-		if source.Kind == model.MediaSourceInline && len(source.Data) >= minSharedMediaBytes {
+	_, err = mapEventMedia(raw, model.MediaSourceInline, func(source model.MediaSource) (model.MediaSource, error) {
+		if len(source.Data) >= minSharedMediaBytes {
 			counts[source.Data]++
 		}
 		return source, nil
@@ -61,21 +54,22 @@ func MarshalEventJSON(e *Event) ([]byte, error) {
 		}
 	}
 	if len(media) == 0 {
-		return json.Marshal(eventJSON(*e))
+		return raw, nil
 	}
-	packed, err := mapEventMedia(*e, model.MediaSourceInline, func(source model.MediaSource) (model.MediaSource, error) {
-		if source.Kind == model.MediaSourceInline {
-			if id, ok := refs[source.Data]; ok {
-				source.Kind, source.Data = eventMediaSourceKind, id
-			}
+	packed, err := mapEventMedia(raw, model.MediaSourceInline, func(source model.MediaSource) (model.MediaSource, error) {
+		if id, ok := refs[source.Data]; ok {
+			source.Kind, source.Data = eventMediaSourceKind, id
 		}
 		return source, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	alias := eventJSON(packed)
-	return json.Marshal(eventMediaJSON{eventJSON: &alias, Media: media})
+	encoded, err := json.Marshal(media)
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(packed, "media", encoded)
 }
 
 func eventMediaID(data string) string {
@@ -83,17 +77,25 @@ func eventMediaID(data string) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func expandEventMedia(e Event, media map[string]string) (Event, error) {
-	if media != nil && e.Schema != 2 && e.Schema != 3 && e.Schema != EventSchemaVersion {
-		return Event{}, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
+func expandEventMedia(raw []byte) ([]byte, error) {
+	var media map[string]string
+	table := gjson.GetBytes(raw, "media")
+	if table.Exists() {
+		if err := json.Unmarshal([]byte(table.Raw), &media); err != nil {
+			return nil, err
+		}
+	}
+	schema := gjson.GetBytes(raw, "schema").Int()
+	if media != nil && schema != 2 && schema != 3 && schema != EventSchemaVersion {
+		return nil, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
 	}
 	for id, data := range media {
 		if eventMediaID(data) != id {
-			return Event{}, fmt.Errorf("agent-sdk/session: event media digest mismatch: %s", id)
+			return nil, fmt.Errorf("agent-sdk/session: event media digest mismatch: %s", id)
 		}
 	}
 	used := map[string]bool{}
-	out, err := mapEventMedia(e, eventMediaSourceKind, func(source model.MediaSource) (model.MediaSource, error) {
+	out, err := mapEventMedia(raw, eventMediaSourceKind, func(source model.MediaSource) (model.MediaSource, error) {
 		if source.Kind != eventMediaSourceKind {
 			return source, nil
 		}
@@ -106,74 +108,23 @@ func expandEventMedia(e Event, media map[string]string) (Event, error) {
 		return source, nil
 	})
 	if err != nil {
-		return Event{}, err
+		return nil, err
 	}
 	if len(used) != len(media) {
-		return Event{}, fmt.Errorf("agent-sdk/session: unreferenced event media")
+		return nil, fmt.Errorf("agent-sdk/session: unreferenced event media")
 	}
 	return out, nil
 }
 
-// mapEventMedia traverses complete current tool values and passive legacy media.
-func mapEventMedia(e Event, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (Event, error) {
-	out := e
-	if e.InputEvidence != nil {
-		v := *e.InputEvidence
-		v.Message = model.CloneMessage(v.Message)
-		if err := visitPartMedia(v.Message.Parts, visit); err != nil {
-			return Event{}, err
-		}
-		out.InputEvidence = &v
-	}
-	if e.Message != nil {
-		m := model.CloneMessage(*e.Message)
-		if err := visitPartMedia(m.Parts, visit); err != nil {
-			return Event{}, err
-		}
-		out.Message = &m
-	}
-	if e.Tool != nil && e.Tool.Result != nil {
-		t := *e.Tool
-		result, err := tool.CloneResult(*e.Tool.Result, nil)
+func mapEventMedia(raw json.RawMessage, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (json.RawMessage, error) {
+	for _, path := range []string{"input_evidence.message.parts", "message.parts", "tool.result.content", "journal.tool_execution.result.content"} {
+		var err error
+		raw, err = mapRawMedia(raw, path, kind, visit)
 		if err != nil {
-			return Event{}, err
-		}
-		if err := visitPartMedia(result.Content, visit); err != nil {
-			return Event{}, err
-		}
-		t.Result = &result
-		out.Tool = &t
-	}
-	if len(e.legacyJournal) > 0 {
-		raw, err := mapRawMedia(e.legacyJournal, "tool_execution.result.content", kind, visit)
-		if err != nil {
-			return Event{}, err
-		}
-		out.legacyJournal = raw
-	}
-	return out, nil
-}
-
-func visitPartMedia(parts []model.Part, visit func(model.MediaSource) (model.MediaSource, error)) error {
-	for i := range parts {
-		if parts[i].Media != nil {
-			source, err := visit(parts[i].Media.Source)
-			if err != nil {
-				return err
-			}
-			parts[i].Media.Source = source
-		}
-		if parts[i].ToolResult != nil {
-			if err := visitPartMedia(parts[i].ToolResult.Content, visit); err != nil {
-				return err
-			}
+			return nil, err
 		}
 	}
-	return nil
-}
-
-func mapReceiptMedia(raw json.RawMessage, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (json.RawMessage, error) {
-	return mapRawMedia(raw, "content", kind, visit)
+	return raw, nil
 }
 
 func mapRawMedia(raw json.RawMessage, contentPath string, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (json.RawMessage, error) {
@@ -188,6 +139,39 @@ func mapRawMedia(raw json.RawMessage, contentPath string, kind model.MediaSource
 		}
 		for i, part := range content.Array() {
 			prefix := path + "." + strconv.Itoa(i)
+			if part.Get("type").String() == "image" {
+				field := "data"
+				if kind == eventMediaSourceKind {
+					field = "media_ref"
+				}
+				value := part.Get(field)
+				if !value.Exists() {
+					continue
+				}
+				if kind == eventMediaSourceKind && (value.Type != gjson.String || part.Get("data").Exists()) {
+					return fmt.Errorf("agent-sdk/session: invalid image media reference")
+				}
+				source := model.MediaSource{Kind: kind, Data: value.String()}
+				next, err := visit(source)
+				if err != nil {
+					return err
+				}
+				if next != source {
+					out, err = sjson.DeleteBytes(out, prefix+"."+field)
+					if err != nil {
+						return err
+					}
+					field = "data"
+					if next.Kind == eventMediaSourceKind {
+						field = "media_ref"
+					}
+					out, err = sjson.SetBytes(out, prefix+"."+field, next.Data)
+					if err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			switch part.Get("kind").String() {
 			case string(model.PartKindMedia):
 				sourceRaw := part.Get("media.source")
@@ -243,12 +227,8 @@ func rejectLegacyEventMedia(raw json.RawMessage, object map[string]json.RawMessa
 	if media, ok := object["media"]; ok && !bytes.Equal(bytes.TrimSpace(media), []byte("null")) {
 		return fmt.Errorf("legacy event cannot contain an event media table")
 	}
-	for _, path := range []string{"message.parts", "journal.tool_execution.result.content"} {
-		if _, err := mapRawMedia(raw, path, eventMediaSourceKind, func(source model.MediaSource) (model.MediaSource, error) {
-			return source, fmt.Errorf("legacy event cannot contain an event media reference")
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := mapEventMedia(raw, eventMediaSourceKind, func(source model.MediaSource) (model.MediaSource, error) {
+		return source, fmt.Errorf("legacy event cannot contain an event media reference")
+	})
+	return err
 }

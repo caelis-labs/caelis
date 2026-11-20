@@ -442,7 +442,8 @@ func runPatch(t *testing.T, patchTool *PatchTool, args map[string]any) map[strin
 		t.Fatalf("PATCH error = %v", err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("Unmarshal(result) error = %v", err)
 	}
 	return payload

@@ -83,13 +83,11 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		}}
 	instance.applicationChildren = children
 	var execRuntime *applicationExecutionRuntime
-	var sandboxDescriptor sandbox.DescriptorProvider = applicationNoNativeExecution{}
 	if binding.Profile.Execution == "workspace-write" {
 		execRuntime, err = newApplicationExecutionRuntime(active.CWD, a.deps.authorities.storeDir, a.deps.authorities.sandboxHostAuthorityDir, binding.Profile, instance.executionConfig)
 		if err != nil {
 			return nil, err
 		}
-		sandboxDescriptor = execRuntime
 	}
 	bundleCreated := false
 	defer func() {
@@ -196,10 +194,6 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	validator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{Sandbox: sandboxDescriptor})
-	if err != nil {
-		return nil, err
-	}
 	var approver kernel.ApprovalApprover
 	if sessionprofile.EffectiveApprovalMode(binding.Profile) == string(kernel.ApprovalModeAutoReview) {
 		bundle.Guardian = newApplicationGuardianApprover(sessions, a.deps.authorities.diagnostics)
@@ -207,7 +201,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	bundle.Gateway, err = kernel.New(kernel.Config{
 		Sessions: sessions, Runtime: fencedRuntime, TurnStartGate: a.deps.authorities.approvalRecovery,
-		Resolver: resolver, ExecutionValidator: validator,
+		Resolver: resolver, ExecutionValidator: controlplane.ExecutionValidator{},
 		DefaultApprovalMode: kernel.ApprovalMode(sessionprofile.EffectiveApprovalMode(binding.Profile)),
 		ApprovalApprover:    approver,
 		Control:             sessionControl,
@@ -222,9 +216,6 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	return instance, nil
 }
 
-// applicationNoNativeExecution advertises no filesystem/process capabilities.
-// Tools-only profiles have no native executor to probe, borrow, or accidentally
-// expose: a misassembled native tool fails preflight instead of running on Host.
 // applicationLeasedTool guards resource materialization and publication after
 // approval resumes, rather than trusting only the Turn's initial lease check.
 // Callback tools enforce this natively in the application Store.
@@ -240,10 +231,6 @@ func (t applicationLeasedTool) Call(ctx context.Context, call tool.Call) (tool.R
 	}
 	return t.Tool.Call(ctx, call)
 }
-
-type applicationNoNativeExecution struct{}
-
-func (applicationNoNativeExecution) Describe() sandbox.Descriptor { return sandbox.Descriptor{} }
 
 type applicationTurnResolver struct {
 	composition *runtimeComposition
@@ -412,7 +399,7 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 		if decision, handled, err := sessionprofile.CallbackPolicyDecision(input); handled || err != nil {
 			return decision, err
 		}
-		if input.Tool.Name == codemode.ToolName && input.Tool.Metadata[tool.MetadataToolKind] == codemode.ToolKind {
+		if input.Tool.Name == codemode.ToolName && codemode.IsDefinition(input.Tool) {
 			var source struct {
 				File string `json:"file"`
 			}
@@ -435,7 +422,7 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 			}
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
-		if tool.IsMCPDefinition(input.Tool) || tool.IsToolSearchDefinition(input.Tool) || input.Tool.Name == "Skill" {
+		if mcp.IsDefinition(input.Tool) || mcp.IsSearchDefinition(input.Tool) || input.Tool.Name == "Skill" {
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
 		switch input.Tool.Name {

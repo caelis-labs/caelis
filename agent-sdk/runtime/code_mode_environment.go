@@ -6,7 +6,6 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -16,12 +15,12 @@ import (
 type codeModeResults struct {
 	mu       sync.Mutex
 	retained int
-	handles  map[string]model.Part
+	handles  map[string]tool.ContentBlock
 	replies  map[string]codemode.Reply
 }
 
 func newCodeModeResults() *codeModeResults {
-	return &codeModeResults{handles: map[string]model.Part{}, replies: map[string]codemode.Reply{}}
+	return &codeModeResults{handles: map[string]tool.ContentBlock{}, replies: map[string]codemode.Reply{}}
 }
 
 type codeModeEnvironment struct {
@@ -125,7 +124,7 @@ func (r *Runtime) resetCodeMode(ref session.SessionRef, executor codemode.Execut
 		go func() { _ = old.engine.Close() }()
 	}
 	raw, _ := json.Marshal(codemode.ExecutionState{Generation: next.generation})
-	return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{codemode.MetadataScriptCompletion: "completed"}}
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{codemode.MetadataScriptCompletion: "completed"}}
 }
 
 // ReleaseCodeModeEnvironments releases disposable language state after the host

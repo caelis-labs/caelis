@@ -110,37 +110,6 @@ func TestCoreToolsExposeCanonicalNames(t *testing.T) {
 	}
 }
 
-func TestCoreToolsDeclareActualSandboxRequirements(t *testing.T) {
-	t.Parallel()
-
-	rt, err := host.New(host.Config{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("host.New() error = %v", err)
-	}
-	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
-	if err != nil {
-		t.Fatalf("BuildCoreTools() error = %v", err)
-	}
-	for index, configuredTool := range tools {
-		definition := configuredTool.Definition()
-		requirements := definition.ExecutionRequirements
-		switch {
-		case index < 6:
-			if requirements == nil || !requirements.Sandbox.FileSystem {
-				t.Fatalf("%s requirements = %+v, want filesystem", definition.Name, requirements)
-			}
-		case definition.Name == shell.RunCommandToolName:
-			if requirements == nil || !requirements.Sandbox.CommandExec || !requirements.Sandbox.AsyncSessions {
-				t.Fatalf("%s requirements = %+v, want command exec and async sessions", definition.Name, requirements)
-			}
-		default:
-			if requirements != nil {
-				t.Fatalf("%s requirements = %+v, want no sandbox dependency", definition.Name, requirements)
-			}
-		}
-	}
-}
-
 func TestCoreToolSchemasDisallowUnknownRootProperties(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +129,7 @@ func TestCoreToolSchemasDisallowUnknownRootProperties(t *testing.T) {
 	}
 }
 
-func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
+func TestCoreToolSchemasExposeGuidanceAndBounds(t *testing.T) {
 	t.Parallel()
 
 	rt, err := host.New(host.Config{CWD: t.TempDir()})
@@ -181,21 +150,15 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "offset", 0, nil)
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "limit", 1, ptrAny(400))
 	requireDescriptionContains(t, defs[filesystem.ReadToolName], "numbered lines", "small offsets", "has_more", "revision", "if_revision", "Write")
-	requireAnnotations(t, defs[filesystem.ReadToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.ViewImageToolName], "path", 1)
 	requireDescriptionContains(t, defs[filesystem.ViewImageToolName], "View one local", "visual inspection", "Read for text")
-	requireAnnotations(t, defs[filesystem.ViewImageToolName], true, false, true, false)
-	if !defs[filesystem.ViewImageToolName].RequiredModelCapabilities.ImageInput {
-		t.Fatal("ViewImage required model capabilities do not declare image input")
-	}
 
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "pattern", 1)
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "path", 1)
 	requireNoProperty(t, defs[filesystem.GlobToolName], "exclude")
 	requireNoProperty(t, defs[filesystem.GlobToolName], "limit")
 	requireDescriptionContains(t, defs[filesystem.GlobToolName], "Find files", "glob pattern", "direct children", "recursive discovery", "100 files", "rg --files")
-	requireAnnotations(t, defs[filesystem.GlobToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.SearchToolName], "path", 1)
 	requireStringMinLength(t, defs[filesystem.SearchToolName], "pattern", 1)
@@ -206,48 +169,39 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireNoProperty(t, defs[filesystem.SearchToolName], "regex")
 	requireNoProperty(t, defs[filesystem.SearchToolName], "case_sensitive")
 	requireDescriptionContains(t, defs[filesystem.SearchToolName], "Search file contents", "regular expression", "case-sensitive", "100 lines", "Read", "RunCommand")
-	requireAnnotations(t, defs[filesystem.SearchToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.WriteToolName], "path", 1)
 	requireNoMinLength(t, defs[filesystem.WriteToolName], "content")
 	requireDescriptionContains(t, defs[filesystem.WriteToolName], "Prefer Patch", "if_revision")
-	requireAnnotations(t, defs[filesystem.WriteToolName], false, true, true, false)
 
 	requireStringMinLength(t, defs[filesystem.PatchToolName], "path", 1)
 	requireNoProperty(t, defs[filesystem.PatchToolName], "if_revision")
 	requirePatchEditSchema(t, defs[filesystem.PatchToolName])
 	requireDescriptionContains(t, defs[filesystem.PatchToolName], "surgical text replacements", "current file", "replacement batch", "Copy old exactly", "new changes only line bodies", "no edits are written")
-	requireAnnotations(t, defs[filesystem.PatchToolName], false, true, true, false)
 
 	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)
 	requireIntegerBounds(t, defs[shell.RunCommandToolName], "yield_time_ms", 0, nil)
 	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "tests, builds", "async Task", "file tools")
-	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
 	requireStringMinLength(t, defs[task.ToolName], "handle", 1)
 	requireNoProperty(t, defs[task.ToolName], "task_id")
 	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", 0, ptrAny(300000))
 	requireNoProperty(t, defs[task.ToolName], "wait_until_done")
-	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 
 	requirePlanSchema(t, defs[plan.ToolName])
 	requireDescriptionContains(t, defs[plan.ToolName], "multi-step execution checklist", "insert or append", "do not overwrite or delete history")
-	requireAnnotations(t, defs[plan.ToolName], false, false, true, false)
 
 	requireStringMinLength(t, defs[skilltool.ToolName], "name", 1)
 	requireDescriptionContains(t, defs[skilltool.ToolName], "Load a specialized skill", "available skills", "SKILL.md")
-	requireAnnotations(t, defs[skilltool.ToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[web.SearchToolName], "query", 1)
 	requireIntegerBounds(t, defs[web.SearchToolName], "max_results", 1, ptrAny(10))
 	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "specific result", "visible Markdown links")
 	requirePropertyDescriptionContains(t, defs[web.SearchToolName], "query", "Concise keyword query", "site:", "filetype:")
-	requireAnnotations(t, defs[web.SearchToolName], true, false, false, true)
 
 	requireStringMinLength(t, defs[web.FetchToolName], "url", 1)
 	requireIntegerBounds(t, defs[web.FetchToolName], "timeout", 1, ptrAny(120))
 	requireDescriptionContains(t, defs[web.FetchToolName], "specific http or https URL", "cleaned markdown", "does not search")
-	requireAnnotations(t, defs[web.FetchToolName], true, false, false, true)
 }
 
 func TestCoreToolsFitModelContextBudgets(t *testing.T) {
@@ -585,12 +539,12 @@ func runToolJSON(t *testing.T, targetTool tool.Tool, args map[string]any) map[st
 	if len(result.Content) == 0 {
 		t.Fatalf("%s returned no content", targetTool.Definition().Name)
 	}
-	part := result.Content[0]
-	if part.Kind != model.PartKindJSON || part.JSON == nil {
+	structured, ok := result.Structured()
+	if !ok {
 		t.Fatalf("%s returned non-json result", targetTool.Definition().Name)
 	}
 	var out map[string]any
-	if err := json.Unmarshal(part.JSONValue(), &out); err != nil {
+	if err := json.Unmarshal(structured, &out); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	return out
@@ -736,24 +690,6 @@ func requirePlanSchema(t *testing.T, def tool.Definition) {
 	contentProp, _ := props["content"].(map[string]any)
 	if got := contentProp["minLength"]; got != 1 {
 		t.Fatalf("PLAN entries.content minLength = %#v, want 1", got)
-	}
-}
-
-func requireAnnotations(t *testing.T, def tool.Definition, readOnly, destructive, idempotent, openWorld bool) {
-	t.Helper()
-	annotations, _ := def.Metadata["annotations"].(map[string]any)
-	if len(annotations) == 0 {
-		t.Fatalf("%s annotations missing: %#v", def.Name, def.Metadata)
-	}
-	for key, want := range map[string]bool{
-		"readOnlyHint":    readOnly,
-		"destructiveHint": destructive,
-		"idempotentHint":  idempotent,
-		"openWorldHint":   openWorld,
-	} {
-		if got := annotations[key]; got != want {
-			t.Fatalf("%s annotations[%s] = %#v, want %v", def.Name, key, got, want)
-		}
 	}
 }
 

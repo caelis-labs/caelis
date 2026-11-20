@@ -106,15 +106,14 @@ func invalidToolCallWarningEvents(message model.Message, err error, includeNarra
 			Meta: toolMeta(call.Name),
 		}))
 		result := tool.Result{
-			ID:      call.ID,
-			Name:    call.Name,
-			IsError: true,
-			Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			ID:   call.ID,
+			Name: call.Name,
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 				"error":      invalidToolCallWarningText(call, err),
 				"error_code": "invalid_input",
-			}))},
+			})}},
 		}
-		out = append(out, session.MarkUIOnly(toolResultEvent(call, result, nil)))
+		out = append(out, session.MarkUIOnly(toolResultEvent(call, result, err, nil)))
 	}
 	return out
 }

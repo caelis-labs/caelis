@@ -11,7 +11,7 @@ import (
 	_ "image/png"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // ResultFormatContentV1 selects the bounded MCP-style text, image and owned
@@ -150,19 +150,19 @@ func validateImage(data []byte, mime string) error {
 	return nil
 }
 
-// contentParts resolves under the Store lock. It performs no filesystem or
+// contentBlocks resolves under the Store lock. It performs no filesystem or
 // network I/O; the result is a historical byte snapshot, not a live image URL.
-func (s *Store) contentParts(ctx context.Context, c CallContext, raw json.RawMessage) ([]model.Part, []ContentBlock, error) {
+func (s *Store) contentBlocks(ctx context.Context, c CallContext, raw json.RawMessage) ([]tool.ContentBlock, []ContentBlock, error) {
 	blocks, err := decodeContent(raw)
 	if err != nil {
 		return nil, nil, err
 	}
-	parts := make([]model.Part, 0, len(blocks)+1)
+	parts := make([]tool.ContentBlock, 0, len(blocks)+1)
 	var references []ContentBlock
 	total := 0
 	for _, block := range blocks {
 		if block.Type == "text" {
-			parts = append(parts, model.NewTextPart(*block.Text))
+			parts = append(parts, tool.Text(*block.Text))
 			continue
 		}
 		var data []byte
@@ -192,10 +192,7 @@ func (s *Store) contentParts(ctx context.Context, c CallContext, raw json.RawMes
 		if err := validateImage(data, block.MIMEType); err != nil {
 			return nil, nil, err
 		}
-		parts = append(parts, model.Part{Kind: model.PartKindMedia, Media: &model.MediaPart{
-			Modality: model.MediaModalityImage, MimeType: block.MIMEType, Name: block.Name,
-			Source: model.MediaSource{Kind: model.MediaSourceInline, Data: base64.StdEncoding.EncodeToString(data)},
-		}})
+		parts = append(parts, tool.Image{Data: data, MIMEType: block.MIMEType, Name: block.Name})
 	}
 	return parts, references, nil
 }
@@ -228,7 +225,7 @@ func (s *Store) validateCallResult(ctx context.Context, call Call, result CallRe
 	if result.ResultFormat != ResultFormatContentV1 {
 		return ErrUnsupported
 	}
-	parts, references, err := s.contentParts(ctx, call.CallContext, result.Content)
+	parts, references, err := s.contentBlocks(ctx, call.CallContext, result.Content)
 	if err != nil {
 		return err
 	}
@@ -238,8 +235,8 @@ func (s *Store) validateCallResult(ctx context.Context, call Call, result CallRe
 	}
 	textBytes := len(receipt)
 	for _, part := range parts {
-		if part.Text != nil {
-			textBytes += len(part.Text.Text)
+		if text, ok := part.(tool.Text); ok {
+			textBytes += len(text)
 		}
 	}
 	if textBytes > MaxResultTextBytes {

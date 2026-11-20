@@ -22,6 +22,7 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
@@ -2070,8 +2071,8 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
 			}, nil
 		},
@@ -2202,8 +2203,8 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong","detail":"tool result that must survive step-level compact"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"tool result that must survive step-level compact"}`)},
 				},
 			}, nil
 		},
@@ -2332,7 +2333,7 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
 	}
@@ -2428,8 +2429,8 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong","detail":"tool result before failed compact"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"tool result before failed compact"}`)},
 				},
 			}, nil
 		},
@@ -2537,8 +2538,8 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong","detail":"retry exhausted high-water tool result"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"retry exhausted high-water tool result"}`)},
 				},
 			}, nil
 		},
@@ -2671,7 +2672,7 @@ func (m *toolListProbeModel) Generate(_ context.Context, req *model.Request) ite
 
 func toolSearchOutputMapForTest(t *testing.T, definitions ...tool.Definition) map[string]any {
 	t.Helper()
-	raw, err := json.Marshal(tool.NewToolSearchResult(definitions))
+	raw, err := json.Marshal(mcp.NewToolSearchResult(definitions))
 	if err != nil {
 		t.Fatalf("marshal tool_search result: %v", err)
 	}

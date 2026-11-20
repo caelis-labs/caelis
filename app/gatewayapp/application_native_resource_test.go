@@ -30,16 +30,20 @@ func TestApplicationNativeResourceStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := newApplicationResourceTools(store, binding, workspace)
+	bridge := applicationResourceBridge{store: store, binding: binding, workspace: workspace}
 	input, _ := json.Marshal(map[string]string{"resource_id": resource.ID})
-	read, err := tools[0].Call(t.Context(), tool.Call{Name: "ReadResource", Input: input, Execution: tool.InvocationContext{SessionID: binding.SessionID, TurnID: "turn", ItemID: "step-read"}})
+	read, err := bridge.read(t.Context(), input, tool.InvocationContext{SessionID: binding.SessionID, TurnID: "turn", ItemID: "step-read"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var delivery struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal([]byte(read.Content[0].Text.Text), &delivery); err != nil {
+	deliveryJSON, ok := read.Structured()
+	if !ok {
+		t.Fatalf("resource delivery returned no structured result: %+v", read)
+	}
+	if err := json.Unmarshal(deliveryJSON, &delivery); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(workspace, delivery.Path))
@@ -50,14 +54,18 @@ func TestApplicationNativeResourceStoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	input, _ = json.Marshal(map[string]string{"path": "result.txt", "name": "result.txt", "media_type": "text/plain"})
-	published, err := tools[1].Call(t.Context(), tool.Call{Name: "PublishArtifact", Input: input, Execution: tool.InvocationContext{SessionID: binding.SessionID, TurnID: "turn", ItemID: "step-publish"}})
+	published, err := bridge.publish(t.Context(), input, tool.InvocationContext{SessionID: binding.SessionID, TurnID: "turn", ItemID: "step-publish"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var output struct {
 		Resource sessionprofile.Resource `json:"resource"`
 	}
-	if err := json.Unmarshal([]byte(published.Content[0].Text.Text), &output); err != nil {
+	outputJSON, ok := published.Structured()
+	if !ok {
+		t.Fatalf("resource publication returned no structured result: %+v", published)
+	}
+	if err := json.Unmarshal(outputJSON, &output); err != nil {
 		t.Fatal(err)
 	}
 	_, retained, err := store.ReadResource(t.Context(), binding.Scope, binding.SessionID, output.Resource.ID)

@@ -35,7 +35,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 						"command": tc.command, "workdir": "/workspace/subdir",
 						"sandbox_permissions": route, "justification": "The requested setup needs the declared execution boundary.",
 					})
-					if err != nil {
+					if err != nil && approved {
 						t.Fatal(err)
 					}
 					call := tool.Call{ID: "command", Name: "RunCommand", Input: input}
@@ -57,14 +57,14 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 						})},
 					}
 					result, err := wrapped.Call(t.Context(), call)
-					if err != nil {
+					if err != nil && approved {
 						t.Fatal(err)
 					}
 					if requests != 1 || len(observed.calls) != map[bool]int{false: 0, true: 1}[approved] {
 						t.Fatalf("requests=%d executions=%d", requests, len(observed.calls))
 					}
 					if !approved {
-						if !result.IsError || result.ID != call.ID || result.Name != call.Name {
+						if !tool.HasFailedReply(err) || result.ID != call.ID || result.Name != call.Name {
 							t.Fatalf("denial did not report a caller-bound error: %+v", result)
 						}
 						return

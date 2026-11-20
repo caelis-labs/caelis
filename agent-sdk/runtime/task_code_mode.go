@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -56,7 +55,8 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		}
 		yield = time.Duration(*args.Yield) * time.Millisecond
 	}
-	taskID, err := commandTaskID(owner.ref, "code-mode/"+call.Execution.TurnID+"/"+call.Execution.ItemID+"/"+call.ID)
+	execution := tool.InvocationFromContext(ctx)
+	taskID, err := commandTaskID(owner.ref, "code-mode/"+execution.TurnID+"/"+execution.ItemID+"/"+call.ID)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -71,7 +71,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		}
 		if existing, getErr := tm.store.Get(ctx, taskID); getErr == nil && existing != nil {
 			release()
-			return taskSnapshotToolResult(call, owner.Definition(), codeModeSnapshot(existing)), nil
+			return taskSnapshotToolResult(call, owner.Definition(), codeModeSnapshot(existing))
 		}
 	}
 	handle, err := tm.reserveTaskHandle(ctx, owner.active, owner.ref, taskapi.KindCodeMode, "script")
@@ -80,7 +80,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		return tool.Result{}, err
 	}
 	now := tm.runtime.now()
-	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": call.Execution.TurnID, "code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
+	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": execution.TurnID, "code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	// This context is registered under the original Run producer owner. It must
 	// outlive the foreground observation, not the original Run's authority.
 	workCtx, cancel := context.WithCancel(ctx)
@@ -129,7 +129,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		task.mu.Lock()
 		snapshot := codeModeSnapshot(task.entry)
 		task.mu.Unlock()
-		return taskSnapshotToolResult(call, owner.Definition(), snapshot), nil
+		return taskSnapshotToolResult(call, owner.Definition(), snapshot)
 	case <-ctx.Done():
 		cancel()
 		<-task.done
@@ -172,11 +172,11 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 			next.State = taskapi.StateUnknownOutcome
 		case ctx.Err() != nil:
 			next.State = taskapi.StateCancelled
-		case executeErr != nil || result.IsError:
+		case executeErr != nil:
 			next.State = taskapi.StateFailed
 		}
 		next.Result = map[string]any{"tool_result_json": string(raw)}
-		if executeErr != nil {
+		if executeErr != nil && !tool.HasFailedReply(executeErr) {
 			next.Result["error"] = executeErr.Error()
 		}
 		persistErr = tm.persistTaskEntry(cleanup, next)
@@ -191,8 +191,7 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 	if persistErr != nil {
 		// Keep the last committed entry authoritative. Report producer closure and
 		// failed durability without publishing an uncommitted completed snapshot.
-		result.IsError = true
-		result.Content = append(result.Content, model.NewTextPart("script terminal status could not be persisted; preserve original receipts and do not replay effects: "+persistErr.Error()))
+		result.Content = append(result.Content, tool.Text("script terminal status could not be persisted; preserve original receipts and do not replay effects: "+persistErr.Error()))
 		raw, _ = json.Marshal(result)
 	}
 	task.mu.Lock()

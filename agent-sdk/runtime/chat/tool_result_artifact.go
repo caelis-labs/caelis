@@ -55,7 +55,7 @@ func (s *toolResultArtifactStore) write(result tool.Result) (string, bool) {
 	if s == nil {
 		return "", false
 	}
-	content, extension, ok := rawToolResultArtifact(result.Content)
+	content, extension, ok := rawToolResultArtifact(tool.ModelParts(result.Content))
 	if !ok || len(content) == 0 || (s.fileMax > 0 && int64(len(content)) > s.fileMax) {
 		return "", false
 	}

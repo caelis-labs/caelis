@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -44,7 +45,7 @@ func TestNativeApprovalDirectRequestersCannotChangeOriginalPermission(t *testing
 				switch role {
 				case "builtin":
 					wrapped := policyWrappedTool{tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { allowed = true; return tool.Result{}, nil }}, approval: approvalContext{requester: requester}}
-					_, err = wrapped.requestApproval(t.Context(), tool.Call{ID: "native-call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: permission})
+					_, err = wrapped.requestApproval(t.Context(), tool.Call{ID: "native-call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: permission}, toolbinding.Dispatch{})
 				case "controller":
 					response, responseErr := (controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "owner"}, requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", Approval: permission})
 					allowed, err = response.Approved, responseErr
@@ -52,7 +53,8 @@ func TestNativeApprovalDirectRequestersCannotChangeOriginalPermission(t *testing
 					response, responseErr := (subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: requester}).RequestSubagentApproval(t.Context(), agent.SubagentApprovalRequest{Origin: agent.ApprovalOrigin{SessionID: "child", Endpoint: agent.ApprovalEndpointExternalACP}, TaskID: "native-task", Approval: permission})
 					allowed, err = response.Approved, responseErr
 				}
-				if (err == nil) != test.valid || allowed != test.allow {
+				wantFailedReply := role == "builtin" && test.valid && !test.allow
+				if tool.HasFailedReply(err) != wantFailedReply || (err == nil || wantFailedReply) != test.valid || allowed != test.allow {
 					t.Fatalf("allowed=%v err=%v", allowed, err)
 				}
 				if len(permission.Options) != 2 || permission.Options[0].ID != "native-allow" || string(permission.Context.NativeRequestID) != `"native-rpc"` || string(permission.Context.RawSubject) != `{"type":"command","command":"exact"}` {

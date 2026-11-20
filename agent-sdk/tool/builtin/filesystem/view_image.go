@@ -3,12 +3,10 @@ package filesystem
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"path/filepath"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
@@ -20,7 +18,7 @@ const (
 	maxViewImageBytes = int64(20_000_000)
 )
 
-// ViewImageTool reads one local image for an image-capable model.
+// ViewImageTool reads one local image.
 type ViewImageTool struct {
 	runtime sandbox.Runtime
 }
@@ -45,15 +43,15 @@ func (t *ViewImageTool) Definition() tool.Definition {
 			"required":             []string{"path"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
-		RequiredModelCapabilities: model.Capabilities{
-			ImageInput: true,
-		},
-		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 
 func (t *ViewImageTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	return t.CallWithImageInput(ctx, call, true)
+}
+
+// CallWithImageInput checks the receiving model's image capability before any file access.
+func (t *ViewImageTool) CallWithImageInput(ctx context.Context, call tool.Call, imageInput bool) (tool.Result, error) {
 	if err := toolutil.WithContextCancel(ctx); err != nil {
 		return tool.Result{}, err
 	}
@@ -68,7 +66,7 @@ func (t *ViewImageTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if !tool.AvailableForModel(t, call.RuntimeModel) {
+	if !imageInput {
 		return tool.Result{}, tool.NewError(tool.ErrorCodeUnsupported, "ViewImage requires a model that supports image input")
 	}
 
@@ -103,12 +101,9 @@ func (t *ViewImageTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 
 	return tool.Result{
 		Name: ViewImageToolName,
-		Content: []model.Part{
-			model.NewTextPart(fmt.Sprintf("Viewed image %q (%s, %d bytes).", targetPath, mimeType, len(data))),
-			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
-				Kind: model.MediaSourceInline,
-				Data: base64.StdEncoding.EncodeToString(data),
-			}, mimeType, filepath.Base(targetPath)),
+		Content: []tool.ContentBlock{
+			tool.Text(fmt.Sprintf("Viewed image %q (%s, %d bytes).", targetPath, mimeType, len(data))),
+			tool.Image{Data: data, MIMEType: mimeType, Name: filepath.Base(targetPath)},
 		},
 	}, nil
 }

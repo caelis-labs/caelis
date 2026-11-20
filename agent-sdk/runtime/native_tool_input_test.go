@@ -84,7 +84,7 @@ func TestRecoverableToolFailuresContinueBatchAndLoop(t *testing.T) {
 			store, active := newTestSessionService(t, "recoverable-batch")
 			var dispatched sync.Map
 			probe := tool.NamedTool{Def: tool.Definition{
-				Name: "probe", Capabilities: tool.Capabilities{ParallelSafe: mode == "parallel"},
+				Name:        "probe",
 				InputSchema: map[string]any{"type": "object", "required": []string{"path"}},
 			}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 				if _, already := dispatched.LoadOrStore(call.ID, true); already {
@@ -98,9 +98,9 @@ func TestRecoverableToolFailuresContinueBatchAndLoop(t *testing.T) {
 				case "ordinary":
 					return tool.Result{}, errors.New("file was removed")
 				case "domain":
-					return tool.Result{IsError: true, Content: []model.Part{model.NewTextPart("document is locked")}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.Text("document is locked")}}, tool.FailedReply("fixture tool failure")
 				case "sibling", "corrected":
-					return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.Text("ok")}}, nil
 				default:
 					t.Errorf("unexpected dispatch: %s", call.ID)
 					return tool.Result{}, errors.New("unexpected call")
@@ -131,7 +131,11 @@ func TestRecoverableToolFailuresContinueBatchAndLoop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "process documents", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{probe}}})
+			var llm model.LLM = driver
+			if mode == "serial" {
+				llm = serialToolCallModel{driver}
+			}
+			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "process documents", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{probe}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -155,4 +159,10 @@ func TestRecoverableToolFailuresContinueBatchAndLoop(t *testing.T) {
 			}
 		})
 	}
+}
+
+type serialToolCallModel struct{ *mcpScriptModel }
+
+func (serialToolCallModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true}
 }

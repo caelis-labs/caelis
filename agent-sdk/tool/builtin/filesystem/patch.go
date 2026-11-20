@@ -50,8 +50,6 @@ func (t *PatchTool) Definition() tool.Definition {
 			"required":             []string{"path", "edits"},
 			"additionalProperties": false,
 		},
-		Metadata:              toolutil.AnnotationMetadata(false, true, true, false),
-		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 
@@ -67,11 +65,8 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		return tool.Result{}, err
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
-	plan, err := planPatchMutation(fsys, args)
+	plan, err := applyFileMutation(ctx, fsys, args, planPatchMutation)
 	if err != nil {
-		return tool.Result{}, err
-	}
-	if err := fsys.WriteFile(plan.path, []byte(plan.after), plan.mode); err != nil {
 		return tool.Result{}, err
 	}
 	diffStats := CountLineDiff(plan.before, plan.after)

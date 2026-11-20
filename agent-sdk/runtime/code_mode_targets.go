@@ -7,14 +7,17 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // Static registration owns its canonical name, as in model-request lookup.
 // Deferred tools have already received the same Runtime wrappers.
-func codeModeAvailableTools(static []tool.Tool, source tool.Source) []tool.Tool {
+func codeModeAvailableTools(static []tool.Tool, source toolset.Source) []tool.Tool {
 	items := append([]tool.Tool(nil), static...)
 	names := map[string]bool{}
 	for _, item := range static {
@@ -55,10 +58,10 @@ func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 	return bindings
 }
 
-func (h *codeModeHost) eligibleTarget(def tool.Definition) bool {
-	return def.Name != h.parent.Name && !tool.IsMCPCallDefinition(def) && !tool.IsToolSearchDefinition(def) &&
-		def.Metadata[tool.MetadataToolKind] != codemode.ToolKind && def.AvailableForModel(h.parent.RuntimeModel) &&
-		(!tool.IsMCPDefinition(def) || tool.BindingForDefinition(def).Identity != "")
+func (h *codeModeHost) eligibleTarget(one tool.Tool, def tool.Definition) bool {
+	return def.Name != h.parent.Name && !mcp.IsCallDefinition(def) && !mcp.IsSearchDefinition(def) &&
+		!codemode.IsDefinition(def) && !toolbinding.HideViewImage(one, h.owner.producingModel) &&
+		(!mcp.IsDefinition(def) || mcp.BindingForDefinition(def).Identity != "")
 }
 
 func (h *codeModeHost) prepareTargets(ctx context.Context, events []*session.Event) error {
@@ -71,7 +74,7 @@ func (h *codeModeHost) prepareTargets(ctx context.Context, events []*session.Eve
 			continue
 		}
 		def := one.Definition()
-		if !h.eligibleTarget(def) {
+		if !h.eligibleTarget(one, def) {
 			continue
 		}
 		if _, duplicate := h.targets[def.Name]; duplicate {
@@ -102,10 +105,10 @@ func (h *codeModeHost) ToolNames(ctx context.Context) ([]codemode.ToolRoute, err
 
 func codeModeToolRoute(def tool.Definition) codemode.ToolRoute {
 	route := codemode.ToolRoute{Name: def.Name}
-	if tool.IsMCPDefinition(def) {
-		route.Server, _ = def.Metadata[tool.MetadataMCPServer].(string)
-		route.Tool, _ = def.Metadata[tool.MetadataMCPTool].(string)
-		route.Plugin, _ = def.Metadata[tool.MetadataPluginID].(string)
+	if mcp.IsDefinition(def) {
+		route.Server, _ = def.Metadata[mcp.MetadataServer].(string)
+		route.Tool, _ = def.Metadata[mcp.MetadataTool].(string)
+		route.Plugin, _ = def.Metadata[mcp.MetadataPluginID].(string)
 	}
 	return route
 }
@@ -115,7 +118,7 @@ func (h *codeModeHost) resolveTarget(ctx context.Context, name string, search bo
 	target, found := h.targets[name]
 	prior, known := h.bindings[name]
 	h.mu.Unlock()
-	stale := !found || tool.IsMCPDefinition(target.definition) && prior != tool.BindingForDefinition(target.definition)
+	stale := !found || mcp.IsDefinition(target.definition) && prior != mcp.BindingForDefinition(target.definition)
 	if !search && known && stale && h.owner.checkBinding != nil {
 		if err := h.owner.checkBinding(ctx, prior); err != nil {
 			return codeModeTarget{}, err
@@ -133,13 +136,13 @@ func (h *codeModeHost) resolveTarget(ctx context.Context, name string, search bo
 			return codeModeTarget{}, tool.NewError(tool.ErrorCodeNotFound, "tool is not available in this Session")
 		}
 		def := one.Definition()
-		if def.Name != name || (!search && !h.eligibleTarget(def)) || (search && !tool.IsToolSearchDefinition(def)) {
+		if def.Name != name || (!search && !h.eligibleTarget(one, def)) || (search && !mcp.IsSearchDefinition(def)) {
 			return codeModeTarget{}, tool.NewError(tool.ErrorCodeNotFound, "tool is not callable from JavaScript")
 		}
 		target = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
 	}
-	if !search && tool.IsMCPDefinition(target.definition) {
-		binding := tool.BindingForDefinition(target.definition)
+	if !search && mcp.IsDefinition(target.definition) {
+		binding := mcp.BindingForDefinition(target.definition)
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		// Re-read after lookup: concurrent search/calls cannot silently replace a

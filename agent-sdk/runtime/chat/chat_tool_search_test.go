@@ -3,8 +3,8 @@ package chat
 import (
 	"context"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func mcpToolForTest(name string) tool.Tool {
@@ -14,18 +14,18 @@ func mcpToolForTest(name string) tool.Tool {
 			Description: "Create calendar events",
 			InputSchema: map[string]any{"type": "object"},
 			Metadata: map[string]any{
-				tool.MetadataToolKind:             tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:             "calendar",
-				tool.MetadataMCPServer:            "demo",
-				tool.MetadataMCPTool:              "create_event",
-				tool.MetadataMCPSourceFingerprint: "fixture-v1",
+				mcp.MetadataKind:              mcp.KindTool,
+				mcp.MetadataPluginID:          "calendar",
+				mcp.MetadataServer:            "demo",
+				mcp.MetadataTool:              "create_event",
+				mcp.MetadataSourceFingerprint: "fixture-v1",
 			},
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"created"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"created"}`)}},
 			}, nil
 		},
 	}

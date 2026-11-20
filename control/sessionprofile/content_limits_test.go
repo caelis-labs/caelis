@@ -117,7 +117,7 @@ func TestContentV1StructuredNumbersRemainExact(t *testing.T) {
 		t.Fatalf("structured number changed in receipt: %+v %v", stored.Result, err)
 	}
 	projected, err := s.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, *stored.Result)
-	if err != nil || !strings.Contains(string(projected.Content[0].JSON.Value), `9007199254740993`) {
+	if raw, ok := projected.Structured(); err != nil || !ok || !strings.Contains(string(raw), `9007199254740993`) {
 		t.Fatal("structured number changed in native content")
 	}
 }
@@ -156,7 +156,7 @@ func TestContentV1EmptyStructuredObjectSurvivesReceipt(t *testing.T) {
 			t.Fatal(err)
 		}
 		projected, err := reopened.projectResult(t.Context(), call.CallContext, call.Name, ResultFormatContentV1, *got.Result)
-		if err != nil || !strings.Contains(string(projected.Content[0].JSON.Value), `"structuredContent":{}`) {
+		if raw, ok := projected.Structured(); err != nil || !ok || !strings.Contains(string(raw), `"structuredContent":{}`) {
 			t.Fatal("empty structured object absent from model receipt")
 		}
 	}

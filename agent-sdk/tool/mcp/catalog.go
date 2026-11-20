@@ -46,97 +46,28 @@ func (c *clientCatalog) invalidate() {
 	default:
 	}
 }
-func (m *Manager) admitCatalogTool(ctx context.Context, remote *MCPTool) error {
-	release, err := m.guardCatalogTool(ctx, remote)
-	if release != nil {
-		release()
-	}
-	return err
-}
 
-func (m *Manager) borrowClient(ctx context.Context, remote *MCPTool) (func(), error) {
-	unlock, err := m.guardCatalogTool(ctx, remote)
-	if err != nil {
-		return nil, err
-	}
-	server := remote.server
-	server.inFlight++
-	unlock()
-	return func() {
-		m.mu.Lock()
-		server.inFlight--
-		if server.inFlight == 0 && server.drained != nil {
-			close(server.drained)
-			server.drained = nil
-		}
-		m.mu.Unlock()
-	}, nil
-}
-
-func (m *Manager) guardCatalogTool(ctx context.Context, remote *MCPTool) (func(), error) {
-	m.mu.Lock()
-	c := remote.client.catalog
-	if c != nil {
-		c.mu.Lock()
-	}
-	release := func() {
-		if c != nil {
-			c.mu.Unlock()
-		}
-		m.mu.Unlock()
-	}
-	if err := m.checkCatalogToolLocked(ctx, remote); err != nil {
-		release()
-		return nil, err
-	}
-	return release, nil
-}
-
-// The owner lock protects the current directory; the catalog lock checks live
-// invalidation. Neither lock is held by Lookup across an approval or tool I/O.
-func (m *Manager) admitCatalogToolLocked(ctx context.Context, remote *MCPTool) error {
-	c := remote.client.catalog
+// checkCatalogReadyLocked checks a current directory entry under Manager.mu.
+// Catalog invalidation affects lookups and binding checks, not client borrowing.
+func (m *Manager) checkCatalogReadyLocked(ctx context.Context, server *managedServer) error {
+	c := server.client.catalog
 	if c != nil {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 	}
-	return m.checkCatalogToolLocked(ctx, remote)
-}
-
-// Both owner locks remain held until the caller's short admission ends. The
-// per-tool binding and the complete frozen source facts have separate roles:
-// another capability can change while this tool's exact binding stays stable.
-func (m *Manager) checkCatalogToolLocked(ctx context.Context, remote *MCPTool) error {
-	c := remote.client.catalog
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if m.closed {
 		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
 	}
-	if remote.server != nil && remote.server.revoked {
-		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+	if err := checkClientAvailableLocked(server); err != nil {
+		return err
 	}
-	if c != nil && c.revoked {
-		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+	if c != nil && c.dirty {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 	}
-	if remote.client.closedError() != nil {
-		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
-	}
-	if c == nil || !c.dirty {
-		current := m.toolsByName[remote.def.Name]
-		if current != nil && current.bindingID == remote.bindingID && sameCatalogTool(current, remote) && sameSourceFacts(current.def.Source, remote.def.Source) {
-			return nil
-		}
-	}
-	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
-}
-
-func sameSourceFacts(a, b *tool.SourceFacts) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
+	return nil
 }
 
 func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
@@ -153,7 +84,7 @@ func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
 }
 
 // RefreshTools retries a failed catalog read explicitly. Failure retains the
-// last whole directory but leaves dispatch blocked until validation succeeds.
+// last whole directory but makes it unavailable for new lookups until validation succeeds.
 func (m *Manager) RefreshTools(ctx context.Context, pluginID, serverName string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -306,12 +237,6 @@ func (m *Manager) RevokeServer(pluginID, serverName string) error {
 	return fmt.Errorf("MCP server %s/%s not found", pluginID, serverName)
 }
 
-// A definition that disappears and later returns gets a new callable binding,
-// even if its schema hash matches. Pending old approvals cannot revive it.
-func sameCatalogTool(a, b *MCPTool) bool {
-	return a.client == b.client && a.origName == b.origName && a.def.Name == b.def.Name && a.def.Metadata[tool.MetadataMCPSourceFingerprint] == b.def.Metadata[tool.MetadataMCPSourceFingerprint]
-}
-
 // CheckToolBinding uses the existing directory/source owner to distinguish a
 // changed schema from a disconnected or revoked source. It dispatches nothing.
 func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
@@ -323,15 +248,15 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 	if m.closed {
 		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
 	}
-	if current := m.toolsByName[binding.Name]; current != nil && tool.BindingForDefinition(current.def) == binding {
-		return m.admitCatalogToolLocked(ctx, current)
+	if current := m.toolsByName[binding.Name]; current != nil && BindingForDefinition(current.def) == binding {
+		return m.checkCatalogReadyLocked(ctx, current.server)
 	}
 	// Missing/replaced bindings retain the original source-specific error
 	// classification, without materializing the current directory's schemas.
 	for _, server := range m.servers {
 		for _, remote := range server.listed {
-			def := tool.Definition{Name: binding.Name, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: server.spec.PluginID, tool.MetadataMCPServer: server.spec.Name, tool.MetadataMCPTool: remote.Name, tool.MetadataMCPSourceFingerprint: "identity-only"}}
-			if tool.BindingForDefinition(def).Identity != binding.Identity {
+			def := tool.Definition{Name: binding.Name, Metadata: map[string]any{MetadataKind: KindTool, MetadataPluginID: server.spec.PluginID, MetadataServer: server.spec.Name, MetadataTool: remote.Name, MetadataSourceFingerprint: "identity-only"}}
+			if BindingForDefinition(def).Identity != binding.Identity {
 				continue
 			}
 			if server.revoked {
@@ -375,7 +300,7 @@ func (m *Manager) Lookup(ctx context.Context, name string) (tool.Tool, bool, err
 	if current == nil {
 		return nil, false, nil
 	}
-	if err := m.admitCatalogToolLocked(ctx, current); err != nil {
+	if err := m.checkCatalogReadyLocked(ctx, current.server); err != nil {
 		return nil, false, err
 	}
 	return current, true, nil

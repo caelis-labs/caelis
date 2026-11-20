@@ -20,7 +20,7 @@ func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
 
 	result := func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{
-			Content: []model.Part{model.NewJSONPart([]byte(`{"handle":"command-7","state":"running"}`))},
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"handle":"command-7","state":"running"}`)}},
 			Metadata: mergeEventMeta(runtimeTaskResultSourceMeta(true), map[string]any{
 				"caelis": map[string]any{"runtime": map[string]any{
 					"task": map[string]any{"task_id": "task-7", "kind": "command"},

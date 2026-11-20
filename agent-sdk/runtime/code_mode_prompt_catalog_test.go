@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
@@ -20,7 +21,7 @@ func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
 	}
 	def := fixtureMCPDefinition("v1")
 	def.Name = "custom__entry"
-	def.Metadata[tool.MetadataMCPTool] = "query-docs"
+	def.Metadata[mcp.MetadataTool] = "query-docs"
 	def.Description = strings.Repeat("界", 70)
 	candidates := []tool.Tool{tool.NamedTool{Def: def}}
 	text, err := rt.codeModeCatalog(t.Context(), active.SessionRef, &jsExecSource{items: candidates}, nil)
