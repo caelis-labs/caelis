@@ -19,7 +19,7 @@ func TestContinuousEnvironmentBindingsAndBody(t *testing.T) {
 		code, want string
 		media      int
 	}{
-		{`let response=await tools.call("Read",{});const file=response.json();var count=1;let v=1;let {content}=file;return {value:content,repeat:response.json()===file,text:response.text()};`, `"repeat":true`, 0},
+		{`let response=await tools.call("Read",{});const file=response.data;var count=1;let v=1;let {content}=file;return {value:content,repeat:response.data===file,text:response.text};`, `"repeat":true`, 0},
 		{`count+=1;v=2;if(v!==2)throw Error("assignment did not update v");content+="-next";return {count,content,file:file.content,state:runtime.state()};`, `"content":"kept-next"`, 0},
 		{`var count=3;return count;`, `3`, 0},
 		{`return response.media[0];`, `image-original`, 1},
@@ -53,8 +53,8 @@ func TestBodyReadsAllTextAndDoesNotGuessFirstJSON(t *testing.T) {
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Parts: []codemode.Part{{Kind: "text", Text: `{"a":1}`}, {Kind: "text", Text: `{"b":2}`}}}, nil
 	}}
-	out, err := (&Executor{}).Execute(t.Context(), fixed(`const r=await tools.call("Many",{});let rejected=false;try{r.json()}catch(e){rejected=true}return {text:r.text(),repeat:r.text()===r.text(),rejected};`), codemode.Limits{}, h)
-	if err != nil || !strings.Contains(string(out.Value), `"rejected":true`) || !strings.Contains(string(out.Value), `\u000a`) {
+	out, err := (&Executor{}).Execute(t.Context(), fixed(`const r=await tools.call("Many",{});return {text:r.text,absent:r.data===undefined};`), codemode.Limits{}, h)
+	if err != nil || !strings.Contains(string(out.Value), `"absent":true`) || !strings.Contains(string(out.Value), `\u000a`) {
 		t.Fatalf("multi-content rule: %+v %v", out, err)
 	}
 }

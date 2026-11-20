@@ -32,9 +32,21 @@ func TestCodeModeRealRunCommand(t *testing.T) {
 		want       string
 	}{
 		{"short", `return await RunCommand({command:` + q(short) + `});`, false, "command-done"},
-		{"inner_yield", `const body=await RunCommand({command:` + q(yielding) + `,yield_time_ms:0});const c=body.json();if(!c.handle)throw Error('missing command handle');return await Task({action:'wait',handle:c.handle});`, false, "command-done"},
+		{"inner_yield", `
+const {data: command} = await RunCommand({command:` + q(yielding) + `, yield_time_ms: 0});
+if (!command.handle) throw Error('missing command handle');
+const {data: task} = await Task({action: 'wait', handle: command.handle});
+if (task.handle !== command.handle || task.state !== 'completed') throw Error('unexpected command Task result');
+return {output: task.result};`, false, "command-done"},
 		{"outer_yield", `return await RunCommand({command:` + q(yielding) + `});`, true, "command-done"},
-		{"cancel_inner", `const body=await RunCommand({command:` + q(long) + `,yield_time_ms:0});const c=body.json();let end;try{end=await Task({action:'cancel',handle:c.handle});}catch(e){end=e.result;}return {state:end.json().state};`, false, "cancelled"},
+		{"cancel_inner", `
+const {data: command} = await RunCommand({command:` + q(long) + `, yield_time_ms: 0});
+try {
+  const {data: task} = await Task({action: 'cancel', handle: command.handle});
+  return {state: task.state};
+} catch (e) {
+  return {state: e.result.json().state};
+}`, false, "cancelled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -71,7 +83,7 @@ func TestCodeModeRealRunCommand(t *testing.T) {
 			}
 			visible := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], id)
 			raw, _ := json.Marshal(visible.Content)
-			if (visible.IsError && tc.name != "cancel_inner") || !bytes.Contains(raw, []byte(tc.want)) {
+			if visible.IsError || !bytes.Contains(raw, []byte(tc.want)) {
 				t.Fatalf("missing actual command result: %s", raw)
 			}
 			entries, err := rt.tasks.store.ListSession(t.Context(), active.SessionRef)

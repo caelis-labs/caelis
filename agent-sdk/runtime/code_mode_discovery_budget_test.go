@@ -34,9 +34,9 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 					return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
 				}})
 			}
-			code := `const s=(await tools.search({query:"fixture"})).json();if(s.tools.length!==2||s.tools.some(t=>"input_schema" in t))throw Error("directory lost summaries");return s;`
+			code := `const s=await tools.search({query:"fixture"});if(s.tools.length!==2||s.tools.some(t=>"input_schema" in t))throw Error("directory lost summaries");return s;`
 			if exact {
-				code = `let rejected=false;try{(await tools.search({name:"fixture__huge"})).json();}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
+				code = `let rejected=false;try{await tools.search({name:"fixture__huge"});}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
 			}
 			m := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {

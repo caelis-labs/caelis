@@ -172,7 +172,7 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 			m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`globalThis.local=1;return [(await tools.search({name:"a__target"})).json(),(await tools.search({name:"z__target"})).json()];`)
+					return h1Script(`globalThis.local=1;return [await tools.search({name:"a__target"}),await tools.search({name:"z__target"})];`)
 				case 1:
 					return h1Script(`if(local!==1)throw Error("VM lost Session state");await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
 				}
@@ -325,7 +325,7 @@ func TestJSExecSearchRejectsUnsupportedObject(t *testing.T) {
 	s := h1Directory(0)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`return (await tools.search({name:"unknown",query:"invalid selector combination"})).json();`)
+			return h1Script(`return await tools.search({name:"unknown",query:"invalid selector combination"});`)
 		}
 		return nil
 	}}

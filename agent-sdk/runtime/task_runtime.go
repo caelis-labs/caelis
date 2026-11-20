@@ -107,6 +107,7 @@ func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []tas
 	payload := taskBatchControlPayload(items, action, actualWaitMS)
 	raw, _ := json.Marshal(payload)
 	result := tool.Result{ID: strings.TrimSpace(call.ID), Name: strings.TrimSpace(def.Name), Content: []model.Part{model.NewJSONPart(raw)}, IsError: taskBatchHasError(items)}
+	result.StructuredContent = &tool.StructuredContent{Value: raw, ContentIndex: 0}
 	if action != "cancel" {
 		for _, item := range items {
 			if item.Err != nil || item.Snapshot.Kind != taskapi.KindCodeMode {

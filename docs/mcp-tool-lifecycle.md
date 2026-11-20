@@ -10,11 +10,13 @@ messages, instructions, model configuration and other request prefixes can chang
 
 ## Discovery and invocation
 
-Use `tools.search()` for the current ready directory, optionally filtered by
+Use `await tools.search()` for the current ready directory, optionally filtered by
 keywords and paginated by name. Pages contain names and descriptions, not schemas
-or bindings. Exact `tools.search({name})` returns a complete schema and records
-the current binding. Neither path calls a model. An empty page means no match
-at that instant, not proof of absence while servers are connecting.
+or bindings. `await tools.search({name})` returns the exact entry and records the
+current binding. Neither path calls a model. An empty page means no match at that
+instant, not proof of absence while servers are connecting. See [Code Mode's
+JavaScript API](code-mode.md#model-tools-and-discovery) for the search objects and
+the Body returned by a tool call.
 
 Control's Session MCP status reports this same Runtime's connection state and
 catalog. `running` alone describes a connection, not a ready catalog: check that
@@ -39,8 +41,9 @@ authentication failure. Inspection and reconnection do not
 activate a cold Runtime. Refresh
 targets an already active Runtime; it is not a startup operation. Integration
 clients must activate through actual work and observe readiness for that
-activation. Search after readiness when a complete schema is needed . Code Mode snapshots current Session names for each
-execution; a direct call needs no search when its schema is known, and canonical `tools.call`
+activation. Search after readiness when a complete schema is needed. Code Mode
+snapshots current Session names for each execution; a direct call needs no search
+when its schema is known, and canonical `tools.call`
 can resolve a newly ready name during the current execution. A provider fixture
 can wait between model responses within that original Turn. It must not inject a
 warmup Prompt, use stale results as evidence of current readiness, or treat

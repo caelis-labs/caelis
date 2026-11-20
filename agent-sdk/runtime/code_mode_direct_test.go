@@ -84,7 +84,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 	if !strings.Contains(string(raw), "schema changed") || !strings.Contains(string(raw), "tools.search") {
 		t.Fatalf("missing explicit refresh diagnostic: %s", raw)
 	}
-	run(reopened, `const schema=(await tools.search({name:"docs__read"})).json();if(schema.name!=="docs__read")throw Error('schema unavailable');const args={value:"new"};return await eval(schema.call_path);`)
+	run(reopened, `const schema=await tools.search({name:"docs__read"});if(schema.name!=="docs__read")throw Error('schema unavailable');const args={value:"new"};return await eval(schema.call_path);`)
 	if effects != 4 {
 		t.Fatalf("explicit refresh did not admit new arguments: effects=%d", effects)
 	}

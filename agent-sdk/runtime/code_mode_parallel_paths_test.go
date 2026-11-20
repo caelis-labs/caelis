@@ -63,7 +63,7 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 					} else if !bytes.Equal(nativePrefix, raw) {
 						t.Fatal("parallel flag changed native declaration prefix")
 					}
-					return h1Script(`return (await tools.search({name:"NativeRead"})).json();`)
+					return h1Script(`return await tools.search({name:"NativeRead"});`)
 				}
 				return nil
 			}}
@@ -80,7 +80,7 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 			}
 			driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return h1Script(`return (await tools.search({name:"a__target"})).json();`)
+					return h1Script(`return await tools.search({name:"a__target"});`)
 				}
 				return nil
 			}}
@@ -95,7 +95,7 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 			// the current wrapped definition.
 			driver = &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return h1Script(`return (await tools.search({name:"z__target"})).json();`)
+					return h1Script(`return await tools.search({name:"z__target"});`)
 				}
 				return nil
 			}}

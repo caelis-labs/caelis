@@ -66,7 +66,7 @@ func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`return (await tools.search({name:"live__read"})).json();`)
+					return h1Script(`return await tools.search({name:"live__read"});`)
 				case 1:
 					return h1Script(`await tools.call("live__read",{value:1});`)
 				}

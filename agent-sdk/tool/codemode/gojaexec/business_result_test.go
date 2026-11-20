@@ -19,13 +19,13 @@ func TestBusinessResultMutationSelectsActualReferences(t *testing.T) {
 	}{
 		{"unchanged", `return r;`, false, false, true},
 		{"nested_unchanged", `return {record:r};`, true, false, false},
-		{"delete", `const value=r.json();value.content=r.media;delete value.content;return value;`, false, false, false},
-		{"nested_delete", `const value=r.json();value.content=r.media;delete value.content;return {record:value};`, false, false, false},
-		{"copy_delete", `const value=r.json();value.content=r.media;delete value.content;return {...value};`, false, false, false},
+		{"delete", `const value=r.data;value.content=r.media;delete value.content;return value;`, false, false, false},
+		{"nested_delete", `const value=r.data;value.content=r.media;delete value.content;return {record:value};`, false, false, false},
+		{"copy_delete", `const value=r.data;value.content=r.media;delete value.content;return {...value};`, false, false, false},
 		{"copy_references", `return {...r};`, true, false, false},
 		{"copied_handle", `return {media:r.media.map(p=>({...p}))};`, false, false, false},
 		{"nested_copied_handle", `return {record:{media:r.media.map(p=>({...p}))}};`, false, false, false},
-		{"select_original", `const value=r.json();delete value.content;return {record:value,image:r.media[0]};`, true, false, false},
+		{"select_original", `const value=r.data;delete value.content;return {record:value,image:r.media[0]};`, true, false, false},
 		{"getter_once", `let n=0;return {get selected(){if(n++)throw Error('read twice');return r.media[0];}};`, true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

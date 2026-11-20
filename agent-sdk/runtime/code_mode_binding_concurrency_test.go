@@ -97,7 +97,7 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 					publish("serial-v2", &effectsV2)
 					code := `return await tools.call("docs__read",{});`
 					if refresh {
-						code = `(await tools.search({name:"docs__read"})).json();` + code
+						code = `await tools.search({name:"docs__read"});` + code
 					}
 					raw, _ := json.Marshal(map[string]any{"code": code})
 					return []model.ToolCall{{ID: "script-b", Name: codemode.ToolName, Args: string(raw)}}

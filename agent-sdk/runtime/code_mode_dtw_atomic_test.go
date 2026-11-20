@@ -298,10 +298,10 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	appJSON, _ := json.Marshal(executable)
 	queryJSON, _ := json.Marshal(fixtureName)
 	geometryJSON, _ := json.Marshal(geometry)
-	prefix := `var app=` + string(appJSON) + `;var g=` + string(geometryJSON) + `;function data(r){return r.json();}function checked(r){const i=data(r).view.image;if(!(i.width>0&&i.height>0)||JSON.stringify(i.bounds)!==JSON.stringify([g.x,g.y,g.width,g.height]))throw Error("capture/fixture coordinate mismatch");return r;}function point(w,i){const r=g[w];return {app,x:(r[0]+r[2]/2)*i.width/g.width,y:(r[1]+r[3]/2)*i.height/g.height};}`
+	prefix := `var app=` + string(appJSON) + `;var g=` + string(geometryJSON) + `;function checked(r){const i=r.data.view.image;if(!(i.width>0&&i.height>0)||JSON.stringify(i.bounds)!==JSON.stringify([g.x,g.y,g.width,g.height]))throw Error("capture/fixture coordinate mismatch");return r;}function point(w,i){const r=g[w];return {app,x:(r[0]+r[2]/2)*i.width/g.width,y:(r[1]+r[3]/2)*i.height/g.height};}`
 	token := "caelis_atomic_731"
 	scripts := []string{
-		prefix + `const r=await dtw.apps({query:` + string(queryJSON) + `,state:"running"});const a=r.json().apps;if(a.length!==1||a[0].app!==app)throw Error("fixture identity mismatch");await dtw.look({app});return checked(await dtw.capture({app}));`,
+		prefix + `const r=await dtw.apps({query:` + string(queryJSON) + `,state:"running"});const a=r.data.apps;if(a.length!==1||a[0].app!==app)throw Error("fixture identity mismatch");await dtw.look({app});return checked(await dtw.capture({app}));`,
 		prefix + `var previousImage=__PREVIOUS_IMAGE__;await dtw.click(point("button",previousImage));return checked(await dtw.capture({app}));`,
 		// The click below consumes the previous script's capture binding, without
 		// another capture or focus call replacing the connection's app context.

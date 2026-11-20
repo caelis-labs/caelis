@@ -21,28 +21,11 @@ func toolProgressEvent(call model.ToolCall, result tool.Result, extraMeta ...map
 }
 
 func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
-	rawInput := mustObject(call.Args)
-	view, _ := canonicalToolResult(result, nil)
-	if message != nil && len(message.ToolResults()) > 0 {
-		view.Content = message.ToolResults()[0].Content
-	}
-	rawOutput := toolResultRawOutput(view)
-	trustedTaskResult := runtimeTaskResultSourceDeclared(extraMeta)
-	resultMetadata := session.CloneState(result.Metadata)
-	resultMetadata = withoutUntrustedRuntimeTaskAuthority(resultMetadata, trustedTaskResult)
-	metaParts := []map[string]any{resultMetadata}
-	metaParts = append(metaParts, extraMeta...)
-	metaParts = append(metaParts, toolMeta(call.Name), runtimeTaskResultSourceMeta(trustedTaskResult))
-	status := strings.TrimSpace(statusOverride)
-	if status == "" {
-		status = toolCallStatus(call, result, rawOutput, trustedTaskResult)
-	}
-	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
-		Tool: toolEventPayload(call, status, rawInput, rawOutput, nil),
-		Meta: meta,
+		Tool: toolEventPayload(call, "", mustObject(call.Args), nil, nil),
 	}
+	applyToolResultPresentation(event, call, result, message, statusOverride, extraMeta...)
 	if statusOverride == "" && !result.IsError {
 		event.Tool.TurnComplete = result.TurnComplete
 	}
@@ -58,6 +41,34 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 		event.Text = message.TextContent()
 	}
 	return event
+}
+
+// ApplyRuntimeToolResultPresentation applies the chat tool display fields to a
+// Runtime-authored tool event. Task authority comes from the bound target.
+func ApplyRuntimeToolResultPresentation(event *session.Event, result tool.Result, target tool.Tool) {
+	call := model.ToolCall{ID: event.Tool.ID, Name: event.Tool.Name}
+	applyToolResultPresentation(event, call, result, event.Message, "", runtimeTaskResultSourceMeta(toolbinding.IsTaskResultSource(target)))
+}
+
+func applyToolResultPresentation(event *session.Event, call model.ToolCall, result tool.Result, message *model.Message, statusOverride string, extraMeta ...map[string]any) {
+	view, _ := canonicalToolResult(result, nil)
+	if message != nil && len(message.ToolResults()) > 0 {
+		view.Content = message.ToolResults()[0].Content
+	}
+	rawOutput := toolResultRawOutput(view)
+	trustedTaskResult := runtimeTaskResultSourceDeclared(extraMeta)
+	resultMetadata := session.CloneState(result.Metadata)
+	resultMetadata = withoutUntrustedRuntimeTaskAuthority(resultMetadata, trustedTaskResult)
+	metaParts := []map[string]any{resultMetadata}
+	metaParts = append(metaParts, extraMeta...)
+	metaParts = append(metaParts, toolMeta(call.Name), runtimeTaskResultSourceMeta(trustedTaskResult))
+	status := strings.TrimSpace(statusOverride)
+	if status == "" {
+		status = toolCallStatus(call, result, rawOutput, trustedTaskResult)
+	}
+	event.Tool.Status = status
+	event.Tool.Output = session.CloneState(rawOutput)
+	event.Meta = mergeEventMeta(metaParts...)
 }
 
 func runtimeTaskResultSourceDeclared(metaParts []map[string]any) bool {

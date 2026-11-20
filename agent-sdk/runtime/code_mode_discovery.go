@@ -212,8 +212,12 @@ func (h *codeModeHost) discoveryReply(id string, value any) (codemode.Reply, err
 	if err != nil {
 		return codemode.Reply{}, fmt.Errorf("encode search result: %w", err)
 	}
-	if len(raw)*6+len(id)*6+256 > h.limits.ReplyBytes {
+	// Reserve fixed envelope overhead, then bound the ID and value using the
+	// transport's conservative JSON escaping factor.
+	const envelopeBytes = 256
+	remaining := h.limits.ReplyBytes - envelopeBytes
+	if remaining < 0 || len(id) > remaining/6 || len(raw) > remaining/6-len(id) {
 		return codemode.Reply{}, tool.NewError(errorcode.ResourceExhausted, "complete search schemas exceed reply budget; narrow the query")
 	}
-	return codemode.Reply{CallID: id, Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "json", JSON: raw}}}, nil
+	return codemode.Reply{CallID: id, Outcome: codemode.OutcomeSucceeded, Value: raw}, nil
 }

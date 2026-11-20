@@ -69,14 +69,18 @@ func TestJSExecMCPReplyPreservesSelectedMediaAndRawJSON(t *testing.T) {
 				continued.Add(1)
 				return tool.Result{}, nil
 			}}
-			code := `(await tools.search({name:"live__diagnose"})).json();
+			code := `await tools.search({name:"live__diagnose"});
 let reply, caught=false;
 try { reply=await tools.call("live__diagnose",{}); }
 catch(e) { reply=e.reply; caught=true; }
 await tools.call("Continue",{});
+if (!caught) {
+  if (typeof reply.data.receipt !== "number" || reply.text !== "") throw Error("unexpected successful Body");
+  return reply;
+}
 return {caught,selected:reply.media[0],raw:reply.text()};`
 			if tc.uncaught {
-				code = `(await tools.search({name:"live__diagnose"})).json(); await tools.call("live__diagnose",{}); await tools.call("Continue",{});`
+				code = `await tools.search({name:"live__diagnose"}); await tools.call("live__diagnose",{}); await tools.call("Continue",{});`
 			} else if tc.copied {
 				code = strings.Replace(code, "selected:reply.media[0]", "selected:{...reply.media[0]}", 1)
 			}
@@ -149,6 +153,13 @@ return {caught,selected:reply.media[0],raw:reply.text()};`
 							}
 						}
 						if content.JSON == nil {
+							continue
+						}
+						if !tc.failed {
+							// Returning the original Body preserves the raw integer, unlike .data.
+							if bytes.Contains(content.JSON.Value, []byte(`"receipt":9223372036854775807`)) {
+								summaries++
+							}
 							continue
 						}
 						var summary struct {

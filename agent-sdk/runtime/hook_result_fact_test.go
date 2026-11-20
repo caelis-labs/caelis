@@ -78,7 +78,7 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 			}
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
-					return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: "{\"code\":\"const b=await tools.call('ReadFact',{});if(b.json().value!=='accepted')throw Error('wrong Body');return b.json();\"}"}}
+					return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: "{\"code\":\"const b=await tools.call('ReadFact',{});if(b.data.value!=='accepted')throw Error('wrong Body');return b.data;\"}"}}
 				}
 				return nil
 			}}

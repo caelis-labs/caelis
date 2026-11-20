@@ -367,13 +367,16 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, prepareErr
 	}
 	ctx = toolbinding.WithPrepared(ctx, call, synthetic)
-	if err := h.appendToolFact(ctx, call, nil, nil, target.definition); err != nil {
+	if err := h.appendToolFact(ctx, call, nil, nil, target); err != nil {
 		h.fail(err)
 		return codemode.Reply{}, err
 	}
+	if publish, ok := ctx.Value(nestedToolEventSinkKey{}).(func(*session.Event)); ok && ownsNestedCommandPresentation(call, target.tool) {
+		call.Observer = nestedCommandObserver{publish: publish, call: call, target: target.tool}
+	}
 	result, callErr := target.tool.Call(ctx, call)
 	outcome := codeModeOutcome(result, callErr)
-	persistErr := h.appendToolFact(ctx, call, &result, callErr, target.definition)
+	persistErr := h.appendToolFact(ctx, call, &result, callErr, target)
 	if persistErr != nil {
 		h.fail(persistErr)
 		callErr = errors.Join(callErr, persistErr)
@@ -436,8 +439,8 @@ func (h *codeModeHost) fail(err error) {
 	h.mu.Unlock()
 }
 
-func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error, definition tool.Definition) error {
-	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, h.parent.Execution.TurnID, call, result, callErr, definition)
+func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error, target codeModeTarget) error {
+	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, h.parent.Execution.TurnID, call, result, callErr, toolFactTarget{definition: target.definition, source: target.tool})
 }
 
 // Only the ToolResult owner publishes this result after durable persistence

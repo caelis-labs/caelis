@@ -58,15 +58,7 @@ func ValidateMCPArguments(def Definition, raw json.RawMessage) error {
 	if len(raw) == 0 {
 		raw = []byte(`{}`)
 	}
-	schemaRaw, err := json.Marshal(def.InputSchema)
-	if err != nil {
-		return fmt.Errorf("invalid MCP schema: %w", err)
-	}
-	var schema jsonschema.Schema
-	if err = json.Unmarshal(schemaRaw, &schema); err != nil {
-		return fmt.Errorf("invalid MCP schema: %w", err)
-	}
-	resolved, err := schema.Resolve(nil)
+	resolved, err := resolveJSONSchema(def.InputSchema)
 	if err != nil {
 		return fmt.Errorf("invalid MCP schema: %w", err)
 	}
@@ -87,6 +79,41 @@ func ValidateMCPArguments(def Definition, raw json.RawMessage) error {
 		return NewError(ErrorCodeInvalidInput, "MCP arguments do not match the discovered input schema: "+err.Error())
 	}
 	return nil
+}
+
+// ValidateOutput checks a structured JSON value against the declared output
+// schema without changing the value or its original number tokens.
+func ValidateOutput(schema map[string]any, raw json.RawMessage) error {
+	resolved, err := resolveJSONSchema(schema)
+	if err != nil {
+		return fmt.Errorf("invalid output schema: %w", err)
+	}
+	if !json.Valid(raw) {
+		return fmt.Errorf("output must be valid JSON")
+	}
+	var value any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	value, err = validationNumbers(value)
+	if err != nil {
+		return err
+	}
+	return resolved.Validate(value)
+}
+
+func resolveJSONSchema(declaration map[string]any) (*jsonschema.Resolved, error) {
+	raw, err := json.Marshal(declaration)
+	if err != nil {
+		return nil, err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	return schema.Resolve(nil)
 }
 
 // The pinned validator classifies json.Number as a string. Convert only this

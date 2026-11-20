@@ -71,7 +71,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			if len(manager.Tools()) != 1 {
 				t.Fatalf("MCP fixture unavailable: %+v", manager.GetServerInfos("fixture"))
 			}
-			args := map[string]any{"code": `(await tools.search({name:"live__fail"})).json();` + tc.body}
+			args := map[string]any{"code": `await tools.search({name:"live__fail"});` + tc.body}
 			if tc.yield {
 				args["yield_time_ms"] = 0
 			}

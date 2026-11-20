@@ -33,18 +33,18 @@ func fixed(code string) codemode.Source {
 	return codemode.Source{Code: code, SHA256: hex.EncodeToString(sum[:])}
 }
 
-func TestFreshWorkerAsyncAndRawJSON(t *testing.T) {
+func TestFreshWorkerAsync(t *testing.T) {
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
-		return codemode.Reply{CallID: "original", Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "json", JSON: json.RawMessage(`{"n":9223372036854775807}`)}}}, nil
+		return codemode.Reply{CallID: "original", Outcome: codemode.OutcomeSucceeded, Value: json.RawMessage(`{"n":17}`)}, nil
 	}}
 	e := Executor{Observe: func(m Metrics) {
 		if !m.Reaped || m.Killed || m.HostCalls != 2 {
 			t.Errorf("metrics: %+v", m)
 		}
 	}}
-	code := `globalThis.saved=42;const results=await Promise.all([tools.call("Read",{}),tools.call("Read",{})]);return {raw:results[0].text(),rounded:results[0].json().n,apis:[typeof process,typeof require,typeof fetch]};`
+	code := `globalThis.saved=42;const results=await Promise.all([tools.call("Read",{}),tools.call("Read",{})]);return {value:results[0].data.n,apis:[typeof process,typeof require,typeof fetch]};`
 	result, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, h)
-	if err != nil || !strings.Contains(string(result.Value), "9223372036854775807") || !strings.Contains(string(result.Value), "undefined") {
+	if err != nil || !strings.Contains(string(result.Value), `"value":17`) || !strings.Contains(string(result.Value), "undefined") {
 		t.Fatalf("%s %v", result.Value, err)
 	}
 	e.Observe = nil
@@ -107,34 +107,29 @@ func TestBudgetsAndDefaultUnboundedHeap(t *testing.T) {
 	}
 }
 
-func TestRawJSONIsExplicitAndDefaultOutputDoesNotDuplicate(t *testing.T) {
-	reply := codemode.Reply{CallID: "original-receipt", Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "json", JSON: json.RawMessage(`{"n":9223372036854775807,"content":"retained payload"}`)}}}
-	raw := reply.Parts[0].JSON
+func TestBodyProjectionAndOriginalReturn(t *testing.T) {
+	raw := json.RawMessage(`{"n":9223372036854775807,"content":"retained payload"}`)
+	reply := codemode.Reply{CallID: "original-receipt", Outcome: codemode.OutcomeSucceeded, Value: raw, Parts: []codemode.Part{{Kind: "json", JSON: raw}}}
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) { return reply, nil }}
-	// Mutating the global intrinsic cannot replace the trusted decoder's captured
-	// defineProperty. Explicit access remains exact; ordinary enumeration omits it.
-	code := `Object.defineProperty=()=>{throw Error("untrusted override")};const r=await tools.call("Read",{});return {reply:r,raw:r.text(),keys:Object.keys(r),spread:{...r},stringified:JSON.stringify(r),content:r.json().content,removed:[typeof output,typeof tools.describe]};`
+	code := `Object.defineProperty=()=>{throw Error("untrusted override")};const r=await tools.call("Read",{});return {reply:r,spread:{...r},content:r.data.content};`
 	result, err := (&Executor{}).Execute(t.Context(), fixed(code), codemode.Limits{}, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
-		Reply       map[string]json.RawMessage `json:"reply"`
-		Raw         string                     `json:"raw"`
-		Keys        []string                   `json:"keys"`
-		Spread      map[string]json.RawMessage `json:"spread"`
-		Stringified string                     `json:"stringified"`
-		Content     string                     `json:"content"`
-		Removed     []string                   `json:"removed"`
+		Reply   map[string]json.RawMessage
+		Spread  map[string]json.RawMessage
+		Content string
 	}
 	if err = json.Unmarshal(result.Value, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Raw != string(raw) || got.Reply["raw_json"] != nil || got.Spread["raw_json"] != nil || strings.Contains(got.Stringified, "raw_json") || got.Content != "retained payload" || got.Reply["media"] == nil || got.Reply["call_id"] != nil {
-		t.Fatalf("unexpected public reply: %s", result.Value)
+	if got.Content != "retained payload" || got.Reply["data"] == nil || string(got.Reply["text"]) != `""` || string(got.Reply["media"]) != `[]` || len(got.Reply) != 3 || string(got.Spread["data"]) != string(got.Reply["data"]) || strings.Contains(string(result.Value), "9223372036854775807") {
+		t.Fatalf("unexpected public Body: %s", result.Value)
 	}
-	if strings.Join(got.Removed, ",") != "undefined,undefined" || !strings.Contains(got.Stringified, "media") {
-		t.Fatalf("interface/Number semantics: %s", result.Value)
+	result, err = (&Executor{}).Execute(t.Context(), fixed(`return await tools.call("Read",{});`), codemode.Limits{}, h)
+	if err != nil || !result.Reply || result.CallID != reply.CallID || len(result.Parts) != 0 || len(result.Value) != 0 {
+		t.Fatalf("original receipt lost: %+v, %v", result, err)
 	}
 }
 

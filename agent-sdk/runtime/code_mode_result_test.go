@@ -10,6 +10,27 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
+func TestCodeModeProjectionDistinguishesNullFromUnmarkedJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		main *tool.StructuredContent
+		want string
+	}{
+		{name: "unmarked"},
+		{name: "structured-null", main: &tool.StructuredContent{Value: json.RawMessage(`null`), ContentIndex: 1}, want: "null"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &codeModeHost{limits: codemode.DefaultLimits(), codeModeResults: newCodeModeResults()}
+			result := tool.Result{Content: []model.Part{model.NewTextPart(`{"not":"data"}`), model.NewJSONPart(json.RawMessage(`null`))}, StructuredContent: tc.main}
+			def := tool.Definition{OutputSchema: map[string]any{"type": "null"}}
+			reply, err := h.project("call", result, codemode.OutcomeSucceeded, def)
+			if err != nil || string(reply.Value) != tc.want || reply.BodyText != `{"not":"data"}` || len(reply.Parts) != 2 {
+				t.Fatalf("unexpected projection: %+v, %v", reply, err)
+			}
+		})
+	}
+}
+
 func TestCodeModeProjectionFailureDoesNotRetainMedia(t *testing.T) {
 	raw := json.RawMessage(`{"ok":true}`)
 	result := tool.Result{Content: []model.Part{
@@ -31,7 +52,7 @@ func TestCodeModeProjectionFailureDoesNotRetainMedia(t *testing.T) {
 			if failure == "structured_budget" {
 				invalid = result
 				// Original parts fit exactly; the additional structured Value does not.
-				h.limits.ReplyBytes = len("failed")*6 + 128 + 256 + len("image/png")*6 + len(raw)*12 + 64
+				h.limits.ReplyBytes = len("failed")*6 + 128 + 256 + len("image/png")*6 + len(raw)*6 + 64
 			}
 			for i := range 5 {
 				if _, err := h.project("failed", invalid, codemode.OutcomeSucceeded, tool.Definition{OutputSchema: map[string]any{"type": "object"}}); err == nil {
