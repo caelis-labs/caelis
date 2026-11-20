@@ -221,9 +221,9 @@ Use block-local let/const for temporaries. Top-level bindings usually persist bu
 
 Success returns a Body. result.data is explicit structured output, checked against any output schema. Missing data is undefined. JSON null stays null. result.text joins only text blocks with newlines. Return the original Body to preserve raw JSON, or select fields and original result.media references. Copies cannot attach media. Numbers may round. Omit undefined and stringify BigInt.
 
-await tools.search({query?,after?}) returns a plain page {tools:[{name,description}],next:string|null}. Pass next as after. await tools.search({name}) returns the exact entry and binds it: {name,description,input_schema,output_format:"body",output_schema?,call_path,server?,tool?,plugin?}. output_schema describes .data.
+await tools.search({query?,after?}) returns a plain page {tools:[{name,description}],next:string|null}. Use tools.search() to browse or query to match any keyword. Pass next as after with the same query. await tools.search({name}) returns the exact entry and binds it: {name,description,input_schema,output_format:"body",output_schema?,call_path,server?,tool?,plugin?}. output_schema describes .data.
 
-Inspect error.message, error.code and error.result (reply alias). error.result.text() joins text and raw JSON. error.result.json() parses that string. Return error.result whole or select its media references. On stale_revision, search again and rebuild args. Check child outcomes before retrying. Never replay unknown outcomes. runtime.state() reports generation/execution.`
+Inspect error.message, error.code and error.result when present (reply alias). error.result.text() joins text and raw JSON. error.result.json() parses that string. Return error.result whole or select its media references. On stale_revision, search again and rebuild args. Check child outcomes before retrying. Never replay unknown outcomes. runtime.state() reports generation/execution.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.
