@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,14 +14,164 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
+
+func TestPersistedTerminalScriptTaskStopsLaterBatchEffects(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	_, err := sessionfile.NewTaskStore(store).Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{
+		TaskID: "finished", Handle: "script", Kind: taskapi.KindCodeMode, State: taskapi.StateCompleted,
+		Session: active.SessionRef, Result: map[string]any{"tool_result_json": `{"turn_complete":true}`},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effects atomic.Int32
+	sibling := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		effects.Add(1)
+		return tool.Result{}, nil
+	}}
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{
+				{ID: "collect", Name: tasktool.ToolName, Args: `{"action":"wait","handle":"script"}`},
+				{ID: "later", Name: "Effect", Args: `{}`},
+			}
+		}
+		return nil
+	}}
+	events, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{tasktool.New(), sibling}}, nil, nil)
+	if len(driver.requests) != 1 || effects.Load() != 0 {
+		t.Fatalf("model requests = %d, sibling effects = %d", len(driver.requests), effects.Load())
+	}
+	control, err := rt.tasks.Cancel(t.Context(), active.SessionRef, taskapi.ControlRequest{
+		TaskID: "finished", Principal: session.ActorKindController, Source: "control",
+	})
+	if err != nil || control.Result["tool_result_json"] != `{"turn_complete":true}` {
+		t.Fatalf("controller cancel lost the previously visible result: %+v %v", control, err)
+	}
+	for _, e := range events {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.ID == "collect" && e.Tool.TurnComplete {
+			return
+		}
+	}
+	t.Fatal("missing terminal Task receipt")
+}
+
+func TestLiveTerminalScriptTaskWaitWithCancelFencesLaterEffect(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	finish, committed, cancelReturned := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	markCommitted := sync.OnceFunc(func() { close(committed) })
+	const receipt = "selected-terminal-script-receipt"
+	terminal := tool.NamedTool{Def: tool.Definition{Name: "Complete", MayCompleteTurn: true}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{TurnComplete: true, Content: []tool.ContentBlock{tool.Text(receipt)}}, nil
+	}}
+	script := &codemode.Tool{Name: codemode.ToolName, Executor: codeOutputExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (codemode.Output, error) {
+		select {
+		case <-finish:
+		case <-ctx.Done():
+			return codemode.Output{}, ctx.Err()
+		}
+		reply, err := host.Call(ctx, "Complete", []byte(`{}`))
+		return codemode.Output{Reply: true, CallID: reply.CallID}, err
+	})}
+	var earlier, later atomic.Int32
+	effect := tool.NamedTool{Def: tool.Definition{Name: "Effect"}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+		if call.ID == "before" {
+			earlier.Add(1)
+		} else {
+			later.Add(1)
+		}
+		return tool.Result{}, nil
+	}}
+	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(ctx context.Context, in policy.ToolContext) (policy.Decision, error) {
+		switch in.Call.ID {
+		case "cancel":
+			if earlier.Load() != 1 {
+				t.Error("cancel crossed the preceding effect")
+			}
+			// Let the producer finish before cancel, then hold wait until
+			// cancel has read the completed script's status snapshot.
+			close(finish)
+			select {
+			case <-committed:
+			case <-ctx.Done():
+				return policy.Decision{}, ctx.Err()
+			}
+		case "wait":
+			select {
+			case <-cancelReturned:
+			case <-ctx.Done():
+				return policy.Decision{}, ctx.Err()
+			}
+		}
+		return policy.Decision{Action: policy.ActionAllow}, nil
+	}}}
+	hook := agent.Hook[agent.ToolOutcome, tool.Result]{Name: "observe-cancel-status", Apply: func(_ context.Context, info agent.HookContext, outcome agent.ToolOutcome) (tool.Result, error) {
+		if info.Tool.ID == "cancel" {
+			close(cancelReturned)
+		}
+		return outcome.Result, nil
+	}}
+	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
+		switch i {
+		case 0:
+			return []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: `{"code":"fixture","yield_time_ms":0}`}}
+		case 1:
+			handle := jsExecTaskHandle(req)
+			if handle == "" {
+				t.Error("missing live script Task handle")
+				return nil
+			}
+			return []model.ToolCall{
+				{ID: "before", Name: "Effect", Args: `{}`},
+				{ID: "wait", Name: tasktool.ToolName, Args: fmt.Sprintf(`{"action":"wait","handle":%q}`, handle)},
+				{ID: "cancel", Name: tasktool.ToolName, Args: fmt.Sprintf(`{"action":"cancel","handle":%q}`, handle)},
+				{ID: "after", Name: "Effect", Args: `{}`},
+			}
+		}
+		return nil
+	}}
+	events := runNativeOrdering(t, store, active, driver, []tool.Tool{script, terminal, effect}, Config{
+		TaskActivityChanged: func(session.SessionRef) { markCommitted() },
+		PolicyRegistry:      registry,
+		Hooks:               agent.Hooks{ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{hook}},
+	})
+	if len(driver.requests) != 2 || earlier.Load() != 1 || later.Load() != 0 {
+		t.Fatalf("terminal boundary lost: model requests=%d preceding effects=%d later effects=%d", len(driver.requests), earlier.Load(), later.Load())
+	}
+	var replies []string
+	for _, event := range events {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != tasktool.ToolName {
+			continue
+		}
+		replies = append(replies, event.Tool.ID)
+		switch event.Tool.ID {
+		case "wait":
+			raw, err := json.Marshal(event.Tool.Result)
+			if err != nil || !event.Tool.TurnComplete || !strings.Contains(string(raw), receipt) {
+				t.Fatalf("wait lost the selected terminal result: terminal=%v result=%s err=%v", event.Tool.TurnComplete, raw, err)
+			}
+		case "cancel":
+			raw, err := json.Marshal(event.Tool.Result)
+			if err != nil || event.Tool.TurnComplete || strings.Contains(string(raw), receipt) || strings.Contains(string(raw), "tool_result_json") {
+				t.Fatalf("cancel exposed the script result: %s, err=%v", raw, err)
+			}
+		}
+	}
+	if !slices.Equal(replies, []string{"wait", "cancel"}) {
+		t.Fatalf("paired canonical results = %v", replies)
+	}
+	assertSubagentSagaModelRoundTrip(t, store, active.SessionRef)
+}
 
 // Repeated real observations must not manufacture durable revisions, including
 // after a nonzero model-output cursor has already committed.
@@ -154,7 +306,7 @@ func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 		close(start)
 		select {
 		case <-release:
-			return tool.Result{Content: []model.Part{model.NewTextPart("original-effect-receipt")}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.Text("original-effect-receipt")}}, nil
 		case <-ctx.Done():
 			return tool.Result{}, ctx.Err()
 		}
@@ -262,4 +414,56 @@ func TestJSExecSDKOnlyDeclarationCanWaitOriginalTask(t *testing.T) {
 		}
 	}
 	t.Fatal("SDK Task.wait did not complete through Runtime")
+}
+
+func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
+	const identifier = `9007199254740993123456789`
+	encodeSnapshot := func(handle string, content []tool.ContentBlock) taskapi.Snapshot {
+		t.Helper()
+		raw, err := json.Marshal(tool.Result{Content: content})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return taskapi.Snapshot{Kind: taskapi.KindCodeMode, Handle: handle, State: taskapi.StateCompleted, Result: map[string]any{"tool_result_json": string(raw)}}
+	}
+	image := tool.Image{Data: []byte("abc"), MIMEType: "image/png"}
+	first := encodeSnapshot("one", []tool.ContentBlock{tool.Text("before"), tool.StructuredContent{Value: json.RawMessage(identifier)}, image})
+	second := encodeSnapshot("two", []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`null`)}, tool.Text("after")})
+	call, def := tool.Call{ID: "observe"}, tool.Definition{Name: "Task"}
+	single, err := taskControlSnapshotToolResult(call, def, first, "wait", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := taskBatchControlToolResult(call, def, []taskBatchControlItem{{Snapshot: first}, {Snapshot: second}}, "wait", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		result    tool.Result
+		wantParts int
+	}{
+		{"single", single, 3},
+		{"batch", batch, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, ok := tc.result.Structured()
+			if !ok || len(tc.result.Content) != tc.wantParts || tool.ValidateContent(tc.result.Content) != nil || strings.Contains(string(raw), "tool_result_json") {
+				t.Fatalf("unexpected Task result: %+v", tc.result)
+			}
+			var payload struct {
+				Result json.RawMessage
+				Tasks  []struct{ Result json.RawMessage }
+			}
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "single" && string(payload.Result) != identifier || tc.name == "batch" && (len(payload.Tasks) != 2 || string(payload.Tasks[0].Result) != identifier || string(payload.Tasks[1].Result) != "null") {
+				t.Fatalf("Task changed structured values: %s", raw)
+			}
+			if tc.result.Content[1] != tool.Text("before") || string(tc.result.Content[2].(tool.Image).Data) != "abc" || tc.name == "batch" && tc.result.Content[3] != tool.Text("after") {
+				t.Fatalf("Task reordered attachments: %+v", tc.result.Content)
+			}
+		})
+	}
 }

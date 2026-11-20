@@ -111,13 +111,12 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 			Name:        "ECHO",
 			Description: "echo",
 			InputSchema: map[string]any{"type": "object"},
-			EffectClass: tool.EffectReadOnly,
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			toolExecutions++
 			return tool.Result{
 				ID: call.ID, Name: call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
 	}
@@ -2429,8 +2428,8 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
 			}, nil
 		},
@@ -2891,7 +2890,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 		t.Fatalf("len(wrapped) = %d, want 1", got)
 	}
 	result, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
-	if err != nil {
+	if !tool.HasFailedReply(err) {
 		t.Fatalf("wrapped tool Call() error = %v", err)
 	}
 	if sawMode != "locked-down" {
@@ -3217,10 +3216,10 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}
 	var calls int
 	targetTool := tool.NamedTool{
-		Def: tool.Definition{Name: "ECHO", EffectClass: tool.EffectNonIdempotent, InputSchema: map[string]any{"type": "object"}},
+		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			calls++
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))}}, nil
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}}}, nil
 		},
 	}
 	run, err := runtime.Run(context.Background(), agent.RunRequest{
@@ -4546,13 +4545,10 @@ func TestRuntimeTaskBatchCancelReturnsPartialFailurePayload(t *testing.T) {
 	}, map[string]any{
 		"action": "cancel",
 		"handle": taskOne + ",stale-id",
-	})
+	}, true)
 
 	if !fakeOne.session.terminated {
 		t.Fatal("first task was not cancelled before stale-id failure")
-	}
-	if !taskResult.IsError {
-		t.Fatal("batch cancel partial failure IsError = false, want true")
 	}
 	payload := testToolResultPayload(t, taskResult)
 	if got, _ := payload["failed"].(float64); got != 1 {
@@ -4737,7 +4733,7 @@ func TestCompactLatestOutputPreservesTrailingNewlineForDeltaBoundaries(t *testin
 func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	t.Parallel()
 
-	result := taskSnapshotToolResult(
+	result, _ := taskSnapshotToolResult(
 		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
 		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
@@ -4756,10 +4752,11 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	)
 
 	var payload map[string]any
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	if got, _ := payload["result"].(string); got != "done\n" {
@@ -4776,7 +4773,7 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	t.Parallel()
 
-	result := taskSnapshotToolResult(
+	result, _ := taskSnapshotToolResult(
 		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
 		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
@@ -4790,14 +4787,12 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 			},
 		},
 	)
-	if result.IsError {
-		t.Fatal("result.IsError = true for shell command exit status, want false")
-	}
 	var payload map[string]any
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	if text, _ := payload["result"].(string); !strings.Contains(text, "/home/test/go/pkg/mod/cache") {
@@ -4814,7 +4809,7 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 	t.Parallel()
 
-	result := taskControlSnapshotToolResult(
+	result, _ := taskControlSnapshotToolResult(
 		tool.Call{ID: "task-cancel-1", Name: tasktool.ToolName, Input: mustJSONRaw(map[string]any{
 			"action": "cancel",
 			"handle": "task-1",
@@ -4853,7 +4848,7 @@ func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 	t.Parallel()
 
 	hugeStderr := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
-	result := taskSnapshotToolResult(
+	result, _ := taskSnapshotToolResult(
 		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
 		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
@@ -4868,10 +4863,11 @@ func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 	)
 
 	var payload map[string]any
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	gotText, _ := payload["result"].(string)
@@ -4889,7 +4885,7 @@ func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T) {
 	t.Parallel()
 
-	result := taskSnapshotToolResult(
+	result, _ := taskSnapshotToolResult(
 		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
 		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
@@ -4931,10 +4927,11 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 		t.Fatalf("metadata output_delta = %#v, want exact terminal delta", got)
 	}
 	var payload map[string]any
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	if got := payload["terminal_id"]; got != nil {
@@ -4960,7 +4957,7 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	t.Parallel()
 
-	result := taskSnapshotToolResult(
+	result, _ := taskSnapshotToolResult(
 		tool.Call{ID: "call-1", Name: spawn.ToolName},
 		tool.Definition{Name: spawn.ToolName},
 		taskapi.Snapshot{
@@ -4980,10 +4977,11 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 		},
 	)
 	var payload map[string]any
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	if got := payload["handle"]; got != "jeff" {
@@ -5023,7 +5021,7 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) {
 	t.Parallel()
 
-	result := taskSnapshotToolResult(
+	result, _ := taskSnapshotToolResult(
 		tool.Call{ID: "call-1", Name: spawn.ToolName},
 		tool.Definition{Name: spawn.ToolName},
 		taskapi.Snapshot{
@@ -5050,10 +5048,11 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 		t.Fatalf("metadata output_cursor = %#v, want 42", got)
 	}
 	var payload map[string]any
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	if got := payload["output_preview"]; got != "child is working" {

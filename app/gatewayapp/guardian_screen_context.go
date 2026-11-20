@@ -6,7 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -41,14 +41,14 @@ func guardianScreenState(req kernel.ApprovalReviewRequest, events []*session.Eve
 
 func guardianMCPSource(req kernel.ApprovalReviewRequest) map[string]any {
 	def := req.RuntimeRequest.Tool
-	if !tool.IsMCPDefinition(def) {
+	if !mcp.IsDefinition(def) {
 		return nil
 	}
 	source := map[string]any{
-		"plugin":             def.Metadata[tool.MetadataPluginID],
-		"server":             def.Metadata[tool.MetadataMCPServer],
-		"remote_tool":        def.Metadata[tool.MetadataMCPTool],
-		"source_fingerprint": def.Metadata[tool.MetadataMCPSourceFingerprint],
+		"plugin":             def.Metadata[mcp.MetadataPluginID],
+		"server":             def.Metadata[mcp.MetadataServer],
+		"remote_tool":        def.Metadata[mcp.MetadataTool],
+		"source_fingerprint": def.Metadata[mcp.MetadataSourceFingerprint],
 	}
 	if authorization := req.RuntimeRequest.Authorization; authorization != nil {
 		scope := authorization.Scope

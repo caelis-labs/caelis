@@ -922,12 +922,13 @@ func firstUsageSnapshot(events []eventstream.Envelope) *session.UsageSnapshot {
 
 func (r *approvalRuntime) approvalRequest() agent.ApprovalRequest {
 	return agent.ApprovalRequest{
-		SessionRef: r.session.SessionRef,
-		Session:    r.session,
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		Tool:       tool.Definition{Name: "RunCommand"},
-		Call:       tool.Call{ID: "approval-call", Name: "RunCommand", RuntimeModel: r.model},
+		SessionRef:     r.session.SessionRef,
+		Session:        r.session,
+		RunID:          "run-1",
+		TurnID:         "turn-1",
+		Tool:           tool.Definition{Name: "RunCommand"},
+		Call:           tool.Call{ID: "approval-call", Name: "RunCommand"},
+		ProducingModel: r.model,
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
 				ID:     "approval-call",

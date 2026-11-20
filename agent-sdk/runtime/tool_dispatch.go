@@ -2,9 +2,9 @@ package runtime
 
 import (
 	"context"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -17,7 +17,6 @@ type dispatchTool struct {
 	base       tool.Tool
 	sessions   session.Service
 	sessionRef session.SessionRef
-	gates      *toolCallGates
 	writes     *sessionWriteQueue
 }
 
@@ -26,17 +25,17 @@ func (t dispatchTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 	return toolbinding.IsTaskResultSource(t.base)
 }
 func (t dispatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	return t.RuntimeCall(toolbinding.Token{}, ctx, call, toolbinding.Dispatch{})
+}
+
+func (t dispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, attachment toolbinding.Dispatch) (tool.Result, error) {
 	admission, err := codeModeAdmissionFor(ctx, call)
 	if err != nil {
 		return tool.Result{}, err
 	}
 	def := t.base.Definition()
-	if t.gates != nil && !def.Capabilities.ParallelSafe {
-		release, err := t.gates.acquire(ctx, def.Name)
-		if err != nil {
-			return tool.Result{}, err
-		}
-		defer release()
+	if err := ctx.Err(); err != nil {
+		return tool.Result{}, err
 	}
 	if admission != nil {
 		releaseWrite, err := t.claimCodeModeBinding(ctx, call)
@@ -48,33 +47,34 @@ func (t dispatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, er
 			releaseWrite()
 			return tool.Result{}, err
 		}
-		err = consumePolicyDispatch(ctx, t.base)
+		err = consumePolicyDispatch(ctx)
 		releaseAdmission()
 		releaseWrite()
 		if err != nil {
 			return tool.Result{}, err
 		}
-	} else if err := consumePolicyDispatch(ctx, t.base); err != nil {
+	} else if err := consumePolicyDispatch(ctx); err != nil {
 		return tool.Result{}, err
 	}
 
 	result, err := hookrun.InvokeTool(ctx, def, call, func(callCtx context.Context) (tool.Result, error) {
-		if synthetic := toolbinding.PreparedResult(ctx); synthetic != nil {
-			return *synthetic, nil
+		if synthetic, err, ok := toolbinding.PreparedReply(ctx); ok {
+			return synthetic, err
 		}
-		return t.base.Call(callCtx, tool.CloneCall(call))
+		result, err := toolbinding.Call(callCtx, t.base, tool.CloneCall(call), toolbinding.Dispatch{Model: attachment.Model})
+		if admission != nil && callCtx.Err() != nil && err != nil {
+			err = errorcode.Wrap(errorcode.UnknownOutcome, "tool result is unconfirmed after cancellation; do not replay", err)
+		}
+		return result, err
 	})
-	if admission != nil && ctx.Err() != nil && (err != nil || result.IsError) && tool.EffectClassOf(def) != tool.EffectReadOnly {
-		err = errorcode.Wrap(errorcode.UnknownOutcome, "tool result is unconfirmed after cancellation; do not replay", err)
-	}
 	return result, err
 }
-func (r *Runtime) wrapToolsForDispatch(ctx context.Context, ref session.SessionRef, tools []tool.Tool) []tool.Tool {
-	gates, _ := ctx.Value(toolCallGatesKey{}).(*toolCallGates)
+
+func (r *Runtime) wrapToolsForDispatch(ref session.SessionRef, tools []tool.Tool) []tool.Tool {
 	out := make([]tool.Tool, 0, len(tools))
 	for _, one := range tools {
 		if one != nil {
-			out = append(out, dispatchTool{base: one, sessions: r.sessions, sessionRef: ref, gates: gates, writes: &r.sessionWrites})
+			out = append(out, dispatchTool{base: one, sessions: r.sessions, sessionRef: ref, writes: &r.sessionWrites})
 		}
 	}
 	return out

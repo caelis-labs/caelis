@@ -8,17 +8,18 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestSelectedCodeModeToolsAreProductPresentationPolicy(t *testing.T) {
 	makeTool := func(name, server, remote string) tool.Tool {
-		return tool.NamedTool{Def: tool.Definition{Name: name, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: server, tool.MetadataMCPTool: remote}}}
+		return tool.NamedTool{Def: tool.Definition{Name: name, Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataServer: server, mcp.MetadataTool: remote}}}
 	}
 	desktop := makeTool("dtw__look", "dtw", "look").(tool.NamedTool)
-	desktop.Def.Source = &tool.SourceFacts{IntegrationID: "desktop-world/atomic-v1"}
-	candidates := []tool.Tool{nil, makeTool("docs_alias", "context7", "query-docs"), desktop, makeTool("untrusted_look", "dtw", "look"), makeTool("unselected", "context7", "other"), tool.NamedTool{Def: tool.Definition{Name: "native", Metadata: map[string]any{tool.MetadataMCPTool: "query-docs"}}}}
+	desktop.Def.Metadata[mcp.MetadataPluginID] = "desktop-world"
+	candidates := []tool.Tool{nil, makeTool("docs_alias", "context7", "query-docs"), desktop, makeTool("untrusted_look", "dtw", "look"), makeTool("unselected", "context7", "other"), tool.NamedTool{Def: tool.Definition{Name: "native", Metadata: map[string]any{mcp.MetadataTool: "query-docs"}}}}
 	if got := selectedCodeModeTools(candidates); !reflect.DeepEqual(got, []string{"docs_alias", "dtw__look"}) {
 		t.Fatalf("selected canonical names=%v", got)
 	}
@@ -48,7 +49,7 @@ func TestCodeModeHintsBoundFirstSnapshotAndSkipLaterTurns(t *testing.T) {
 	source := &codeModeHintSource{}
 	definitions := 0
 	for i := range 2000 {
-		source.tools = append(source.tools, codeModeHintTool{Tool: tool.NamedTool{Def: tool.Definition{Name: fmt.Sprint(i), Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPTool: "unselected"}}}, definitions: &definitions})
+		source.tools = append(source.tools, codeModeHintTool{Tool: tool.NamedTool{Def: tool.Definition{Name: fmt.Sprint(i), Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataTool: "unselected"}}}, definitions: &definitions})
 	}
 	names, err := codeModeHintsForSession(t.Context(), store, active.SessionRef, source)
 	if err != nil || len(names) != 0 || definitions != 256 || source.enumerations != 1 {

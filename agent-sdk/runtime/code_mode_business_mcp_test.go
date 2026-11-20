@@ -58,7 +58,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 	}{
 		{"chain_pure", chain, "checked:business", false},
 		{"chain_mixed", chain, "checked:business", true},
-		{"direct_resource", `return await live.value({});`, "resource_link", true},
+		{"direct_resource", `return await live.value({});`, "https://example.invalid/report", true},
 		{"structured_no_schema", `const r=await live.no_schema({});return r.data.name;`, "business", false},
 		{"direct", `return await live.value({});`, "9223372036854775807", true},
 		{"retained_complete", `return retainedBody;`, "9223372036854775807", true},

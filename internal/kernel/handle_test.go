@@ -139,7 +139,7 @@ func TestTurnHandleChildApprovalReviewIsTransientAndDoesNotPublishUsage(t *testi
 	handle := newTestTurnHandle()
 	request := testChildApprovalRequest("task-review", "review.txt")
 	request.ApprovalRequestID = "pause-review"
-	request.Call.Execution.ItemID = "item-review"
+	request.Execution.ItemID = "item-review"
 	payload := canonicalApprovalPayload(request)
 	payload.ReviewStatus = ApprovalReviewStatusApproved
 	payload.ReviewText = "approved by reviewer"
@@ -935,8 +935,8 @@ func TestSessionApprovalCoordinatorKeepsConcurrentStepOpenForLateSibling(t *test
 	ref := session.SessionRef{SessionID: "session-late-step-approval"}
 	coordinator := newApprovalCoordinator(ref)
 	handle := newTurnHandle(turnHandleConfig{handleID: "turn-a", sessionRef: ref, approvals: coordinator})
-	stepRefs := tool.NewConcurrentModelStepRefs("step-a", 2)
-	request := func(token string, step *tool.ModelStepRef) *agent.ApprovalRequest {
+	stepRefs := agent.NewConcurrentModelStepRefs("step-a", 2)
+	request := func(token string, step *agent.ModelStepRef) *agent.ApprovalRequest {
 		return &agent.ApprovalRequest{
 			SessionRef:        ref,
 			RunID:             "run-a",
@@ -997,7 +997,7 @@ func TestSessionApprovalCoordinatorAbandonReleasesOpenConcurrentStep(t *testing.
 	coordinator := newApprovalCoordinator(ref)
 	firstOwner := newTurnHandle(turnHandleConfig{handleID: "turn-a", sessionRef: ref, approvals: coordinator})
 	otherOwner := newTurnHandle(turnHandleConfig{handleID: "turn-b", sessionRef: ref, approvals: coordinator})
-	stepRefs := tool.NewConcurrentModelStepRefs("step-a", 2)
+	stepRefs := agent.NewConcurrentModelStepRefs("step-a", 2)
 	first, err := firstOwner.enqueueApproval(&agent.ApprovalRequest{
 		SessionRef: ref,
 		RunID:      "run-a",

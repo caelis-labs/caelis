@@ -9,9 +9,11 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestCodeModeLargeCatalogStartup(t *testing.T) {
@@ -27,13 +29,13 @@ func TestCodeModeLargeCatalogStartup(t *testing.T) {
 				remote := fmt.Sprintf("catalog_operation_%04d_with_original_name", i)
 				def := fixtureMCPDefinition("large-catalog-v1")
 				def.Name = server + "__" + remote
-				def.Metadata[tool.MetadataMCPServer] = server
-				def.Metadata[tool.MetadataMCPTool] = remote
-				def.Metadata[tool.MetadataPluginID] = plugin
+				def.Metadata[mcp.MetadataServer] = server
+				def.Metadata[mcp.MetadataTool] = remote
+				def.Metadata[mcp.MetadataPluginID] = plugin
 				routes = append(routes, codeModeToolRoute(def))
-				source.items = append(source.items, tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+				source.items = append(source.items, tool.NamedTool{Def: def, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 					calls = append(calls, call.Name)
-					if call.Parent == nil || call.Parent.Kind != codemode.ToolKind || call.TargetBinding == nil {
+					if parent := tool.ParentFromContext(ctx); parent == nil || parent.Kind != codemode.ToolKind || toolbinding.Target(ctx) == nil {
 						t.Errorf("lost Runtime admission identity: %+v", call)
 					}
 					return tool.Result{}, nil

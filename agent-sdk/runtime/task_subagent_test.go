@@ -1371,7 +1371,7 @@ func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
 	}
 }
 
-func TestRuntimeSpawnToolIsParallelSafeAndConcurrentAttachmentsConverge(t *testing.T) {
+func TestRuntimeSpawnToolConcurrentAttachmentsConverge(t *testing.T) {
 	t.Parallel()
 
 	runner := newOverlappingSubagentRunner(3)
@@ -1387,9 +1387,6 @@ func TestRuntimeSpawnToolIsParallelSafeAndConcurrentAttachmentsConverge(t *testi
 	wrapped := runtimeSpawnTool{
 		base: spawn.New([]delegation.Agent{{Name: "self"}}), session: activeSession,
 		sessionRef: activeSession.SessionRef, tasks: runtime.tasks, runner: runner,
-	}
-	if !wrapped.Definition().Capabilities.ParallelSafe {
-		t.Fatal("runtime Spawn wrapper is not ParallelSafe")
 	}
 	stepModel := &threeSpawnStepModel{}
 	chatAgent, err := chat.NewWithTools("chat", stepModel, []tool.Tool{wrapped}, "Use Spawn.")

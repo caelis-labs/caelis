@@ -209,8 +209,7 @@ func taskControlInvocationFailed(event TranscriptEvent) bool {
 		return false
 	}
 	// A terminal target snapshot means the control call observed the owner.
-	// Last-known running/waiting state on an IsError result is still a control
-	// failure, not a successful observation.
+	// A control failure can still carry the last known running or waiting state.
 	if taskControlObservedTerminalTarget(event) {
 		return false
 	}

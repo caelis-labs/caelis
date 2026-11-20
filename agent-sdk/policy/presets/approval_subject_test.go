@@ -10,13 +10,14 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestNativeApprovalSubjectsUsePolicyTargetsAndScopes(t *testing.T) {
 	command := commandCtx("git fetch", true)
 	command.Session.CWD = "/workspace"
 	file := writeCtx("../outside.txt")
-	mcp := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", EffectClass: tool.EffectReadOnly, Metadata: map[string]any{tool.MetadataPluginID: "docs-plugin", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read"}}, Session: session.Session{CWD: "/workspace"}}
+	mcp := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", Metadata: map[string]any{mcp.MetadataPluginID: "docs-plugin", mcp.MetadataServer: "docs", mcp.MetadataTool: "read"}}, Session: session.Session{CWD: "/workspace"}}
 	for _, tc := range []struct {
 		name                string
 		input               policy.ToolContext

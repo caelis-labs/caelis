@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +41,7 @@ type Agent struct {
 	name                string
 	model               model.LLM
 	tools               []tool.Tool
-	deferredTools       tool.Source
+	deferredTools       toolset.Source
 	toolsByName         map[string]tool.Tool
 	systemPrompt        string
 	reasoning           model.ReasoningConfig
@@ -165,7 +166,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			mcpdiscovery.Apply(a.discoveries, event)
 		}
 		watchdog := newDefaultGenerationWatchdog()
-		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
+		visibility := newToolVisibility(a.tools)
 		for {
 			a.outputStream = nil
 			var assistantMessage model.Message
@@ -324,7 +325,7 @@ func (a *Agent) collectCanonicalModelStep(
 	ctx agent.Context,
 	messages *[]model.Message,
 	watchdog *generationWatchdog,
-	visibility *tool.ToolVisibility,
+	visibility *toolVisibility,
 	yield func(*session.Event) bool,
 ) (model.Message, []model.ToolCall, *model.Response, string, prefixusage.Snapshot, bool, error) {
 	invalidAttempts := 0
@@ -335,12 +336,12 @@ func (a *Agent) collectCanonicalModelStep(
 		if err := a.refreshModelRequest(ctx); err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		*visibility = tool.NewToolVisibilityForModel(a.tools, a.model)
+		*visibility = newToolVisibility(a.tools)
 		stream := a.request.StreamEnabled(false)
 		messageID := uuid.NewString()
 		request := &model.Request{
 			Messages:    *messages,
-			Tools:       visibility.ModelSpecs(),
+			Tools:       visibility.modelSpecs(),
 			Reasoning:   a.reasoning,
 			Output:      a.request.OutputSpec(),
 			ServiceTier: a.request.ServiceTier,
@@ -458,175 +459,6 @@ func (a *Agent) collectCanonicalModelStep(
 			}
 		}
 	}
-}
-
-type stepToolCallResult struct {
-	index   int
-	message model.Message
-	event   *session.Event
-	err     error
-}
-
-func (a *Agent) executeStepToolCalls(
-	ctx context.Context,
-	stepID string,
-	calls []model.ToolCall,
-	yieldProgress func(*session.Event) bool,
-	visibility *tool.ToolVisibility,
-) ([]model.Message, []*session.Event, bool, error) {
-	if len(calls) == 0 {
-		return nil, nil, true, nil
-	}
-	if len(calls) == 1 {
-		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, calls[0], modelStepRef(stepID, 0, len(calls)), yieldProgress, visibility)
-		if toolEvent == nil {
-			return nil, nil, true, err
-		}
-		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, err
-	}
-	if !a.canExecuteStepToolCallsConcurrently(calls, visibility) {
-		return a.executeStepToolCallsSerial(ctx, stepID, calls, yieldProgress, visibility)
-	}
-	stepRefs := tool.NewConcurrentModelStepRefs(stepID, len(calls))
-
-	callCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	progressCh := make(chan *session.Event, len(calls)*16)
-	doneCh := make(chan stepToolCallResult, len(calls))
-	var wg sync.WaitGroup
-	for i, call := range calls {
-		i, call := i, call
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(callCtx, call, stepRefs[i], func(event *session.Event) bool {
-				if event == nil {
-					return true
-				}
-				select {
-				case progressCh <- event:
-					return true
-				case <-callCtx.Done():
-					return false
-				}
-			}, visibility)
-			doneCh <- stepToolCallResult{index: i, message: toolMessage, event: toolEvent, err: err}
-		}()
-	}
-	go func() {
-		wg.Wait()
-		close(doneCh)
-		close(progressCh)
-	}()
-
-	results := make([]stepToolCallResult, len(calls))
-	remaining := len(calls)
-	var firstErr error
-	// Nil the parent-done channel after the first cancel so select cannot
-	// busy-spin on a permanently ready ctx.Done while draining completions.
-	parentDone := ctx.Done()
-	for remaining > 0 {
-		select {
-		case progress, ok := <-progressCh:
-			if !ok {
-				progressCh = nil
-				continue
-			}
-			if progress != nil && yieldProgress != nil && !yieldProgress(progress) {
-				cancel()
-				wg.Wait()
-				return nil, nil, false, nil
-			}
-		case result, ok := <-doneCh:
-			if !ok {
-				doneCh = nil
-				continue
-			}
-			results[result.index] = result
-			remaining--
-			if result.err != nil && firstErr == nil {
-				firstErr = result.err
-				cancel()
-			}
-		case <-parentDone:
-			// Drain in-flight completions so terminal tool journals are not dropped.
-			cancel()
-			parentDone = nil
-		}
-	}
-	if progressCh != nil {
-		for progress := range progressCh {
-			if progress != nil && yieldProgress != nil && !yieldProgress(progress) {
-				cancel()
-				return nil, nil, false, nil
-			}
-		}
-	}
-	messages := make([]model.Message, 0, len(results))
-	events := make([]*session.Event, 0, len(results))
-	for _, result := range results {
-		messages = append(messages, result.message)
-		events = append(events, result.event)
-	}
-	return messages, events, true, firstErr
-}
-
-func (a *Agent) executeStepToolCallsSerial(
-	ctx context.Context,
-	stepID string,
-	calls []model.ToolCall,
-	yieldProgress func(*session.Event) bool,
-	visibility *tool.ToolVisibility,
-) ([]model.Message, []*session.Event, bool, error) {
-	messages := make([]model.Message, 0, len(calls))
-	events := make([]*session.Event, 0, len(calls))
-	for index, call := range calls {
-		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, call, modelStepRef(stepID, index, len(calls)), yieldProgress, visibility)
-		if err != nil {
-			if toolEvent != nil {
-				messages = append(messages, toolMessage)
-				events = append(events, toolEvent)
-			}
-			return messages, events, true, err
-		}
-		if yieldProgress != nil && toolEvent != nil {
-			if !yieldProgress(toolEvent) {
-				return nil, nil, false, nil
-			}
-			if a.yieldedResults == nil {
-				a.yieldedResults = map[*session.Event]bool{}
-			}
-			a.yieldedResults[toolEvent] = true
-			mcpdiscovery.Apply(a.discoveries, toolEvent)
-		}
-		messages = append(messages, toolMessage)
-		events = append(events, toolEvent)
-		if toolEvent != nil && toolEvent.Tool != nil && toolEvent.Tool.TurnComplete {
-			break
-		}
-	}
-	return messages, events, true, nil
-}
-
-func modelStepRef(stepID string, index int, callCount int) *tool.ModelStepRef {
-	stepID = strings.TrimSpace(stepID)
-	if stepID == "" || index < 0 || callCount <= 0 || index >= callCount {
-		return nil
-	}
-	return &tool.ModelStepRef{ID: stepID, Index: index, CallCount: callCount}
-}
-
-func (a *Agent) canExecuteStepToolCallsConcurrently(calls []model.ToolCall, visibility *tool.ToolVisibility) bool {
-	if len(calls) < 2 {
-		return false
-	}
-	for _, call := range calls {
-		item, ok := a.lookupRunTool(call.Name, visibility)
-		if !ok || !item.Definition().Capabilities.ParallelSafe {
-			return false
-		}
-	}
-	return true
 }
 
 func (a *Agent) drainPendingSubmissions(

@@ -15,7 +15,7 @@ func TestSteeringInvalidatesAutomaticApprovalBeforeSettlement(t *testing.T) {
 	owner := newTurnHandle(turnHandleConfig{handleID: "turn", sessionRef: ref, approvals: c})
 	var approvals []*pendingApproval
 	var reviews []context.Context
-	steps := tool.NewConcurrentModelStepRefs("step", 2)
+	steps := agent.NewConcurrentModelStepRefs("step", 2)
 	for i, call := range []tool.Call{{ID: "push", Name: "RunCommand"}, {ID: "update-pr", Name: "github_update_pull_request"}} {
 		request := &agent.ApprovalRequest{SessionRef: ref, RunID: "run", TurnID: "turn", ModelStep: steps[i], Origin: &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain}, Call: call}
 		pending, err := c.enqueue(owner, request, false)

@@ -14,6 +14,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -32,8 +33,8 @@ func TestPolicyIsOnlyMCPApprovalDecision(t *testing.T) {
 				approvals.Add(1)
 				return agent.ApprovalResponse{Outcome: "selected", OptionID: "approve", Approved: true}, nil
 			})}}
-			result, err := wrapped.Call(t.Context(), tool.Call{ID: "original-call", Name: def.Name, Input: []byte(`{}`)})
-			if err != nil {
+			_, err := wrapped.Call(t.Context(), tool.Call{ID: "original-call", Name: def.Name, Input: []byte(`{}`)})
+			if err != nil && action != policy.ActionDeny {
 				t.Fatal(err)
 			}
 			wantApproval, wantEffects := int32(0), int32(1)
@@ -42,7 +43,7 @@ func TestPolicyIsOnlyMCPApprovalDecision(t *testing.T) {
 			}
 			if action == policy.ActionDeny {
 				wantEffects = 0
-				if !result.IsError {
+				if !tool.HasFailedReply(err) {
 					t.Fatal("deny lost paired failure")
 				}
 			}
@@ -147,7 +148,7 @@ func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.
 	if err := r.RevokeAuthorization(t.Context(), active.SessionRef, a.Scope, "original-revoke"); err != nil {
 		t.Fatal(err)
 	}
-	if err := permit.consume(t.Context(), nil); err == nil {
+	if err := permit.consume(t.Context()); err == nil {
 		t.Fatal("revoked queued operation was admitted")
 	}
 	if err := r.checkAuthorization(t.Context(), active, a); err == nil {
@@ -160,10 +161,10 @@ func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.
 	}
 	a.Revocation = evidence.Revocations[a.Scope.Key()]
 	permit = &policyDispatchPermit{runtime: r, session: active, decision: policy.Decision{Action: policy.ActionAllow, Authorization: a}}
-	if err := permit.consume(t.Context(), nil); err != nil {
+	if err := permit.consume(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := permit.consume(t.Context(), nil); err == nil {
+	if err := permit.consume(t.Context()); err == nil {
 		t.Fatal("permission was consumed twice")
 	}
 }
@@ -291,7 +292,7 @@ func TestAuthorizationCommittedRuleFailedSessionSettlementStopsEffect(t *testing
 	target := policyWrappedTool{session: active, sessionRef: active.SessionRef, tool: tool.NamedTool{Def: req.Tool, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, approval: approvalContext{ctx: t.Context(), runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
 	})}}
-	_, err := target.requestApproval(t.Context(), req.Call, policy.Decision{Action: policy.ActionAskApproval, Approval: req.Approval, Authorization: a})
+	_, err := target.requestApproval(t.Context(), req.Call, policy.Decision{Action: policy.ActionAskApproval, Approval: req.Approval, Authorization: a}, toolbinding.Dispatch{})
 	if err == nil || !strings.Contains(err.Error(), "original-rule committed at configuration revision 7") || effects.Load() != 0 || writes.Load() != 1 {
 		t.Fatalf("settlement: err=%v writes=%d effects=%d", err, writes.Load(), effects.Load())
 	}
@@ -311,7 +312,7 @@ func TestAuthorizationPendingCallRejectsCurrentSessionReplacement(t *testing.T) 
 	for _, replacement := range []session.Session{func() session.Session { v := active; v.CreatedAt = v.CreatedAt.Add(time.Second); return v }(), func() session.Session { v := active; v.CWD += "-other"; return v }()} {
 		r.sessions = replacedAuthorizationSession{Service: store, current: replacement}
 		permit := &policyDispatchPermit{runtime: r, session: active, decision: policy.Decision{Action: policy.ActionAllow, Authorization: a}}
-		if err := permit.consume(t.Context(), nil); err == nil {
+		if err := permit.consume(t.Context()); err == nil {
 			t.Fatal("old pending authorization survived a canonical Session replacement")
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -105,7 +106,7 @@ type ToolAugmentContext struct {
 }
 
 type ToolAugmentation struct {
-	DeferredTools              tool.Source
+	DeferredTools              toolset.Source
 	Tools                      []tool.Tool
 	Metadata                   map[string]any
 	ResolveSessionInstructions agent.SessionInstructionsResolver
@@ -349,7 +350,7 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 	}
 	modelResolution.FastMode = fastMode
 	tools := append([]tool.Tool(nil), snap.tools...)
-	var deferredTools tool.Source
+	var deferredTools toolset.Source
 	var resolveSessionInstructions agent.SessionInstructionsResolver
 	if snap.toolAugmenter != nil {
 		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{

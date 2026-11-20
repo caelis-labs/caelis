@@ -50,6 +50,15 @@ func (s *factResultFault) AppendEvent(ctx context.Context, req session.AppendEve
 	}
 	return s.Store.AppendEvent(ctx, req)
 }
+
+type factSerialModel struct{ model.LLM }
+
+func (m factSerialModel) Capabilities() model.Capabilities {
+	caps, _ := model.CapabilitiesOf(m.LLM)
+	caps.ParallelToolCalls = false
+	return caps
+}
+
 func TestToolFactsResultWriteNeverReplaysEffect(t *testing.T) {
 	for _, kind := range []string{"absent", "warning", "unknown", "different"} {
 		t.Run(kind, func(t *testing.T) {
@@ -61,7 +70,7 @@ func TestToolFactsResultWriteNeverReplaysEffect(t *testing.T) {
 				name := name
 				tools = append(tools, tool.NamedTool{Def: tool.Definition{Name: name, InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 					counts[name]++
-					return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"integer":9007199254740993123456789,"body":"complete"}`))}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"integer":9007199254740993123456789,"body":"complete"}`)}}}, nil
 				}})
 			}
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -74,7 +83,7 @@ func TestToolFactsResultWriteNeverReplaysEffect(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "one batch", AgentSpec: agent.AgentSpec{Model: driver, Tools: tools}})
+			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "one batch", AgentSpec: agent.AgentSpec{Model: factSerialModel{driver}, Tools: tools}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +160,7 @@ func TestToolFactsCancellationHoldsFenceUntilProducerEnds(t *testing.T) {
 		effects.Add(1)
 		close(started)
 		<-release
-		return tool.Result{Content: []model.Part{model.NewTextPart("complete late body")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("complete late body")}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
@@ -208,8 +217,8 @@ func TestToolFactsCompleteResultAndModelViewRoundTrip(t *testing.T) {
 				root = filepath.Join(root, "sessions")
 			}
 			raw := json.RawMessage(`{"large":9007199254740993123456789,"decimal":1.00,"body":"` + strings.Repeat("body ", 10000) + `"}`)
-			image := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("YWJj", 8192)}, "image/png", "fixture")
-			full := tool.Result{Content: []model.Part{model.NewJSONPart(raw), image}, StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0}}
+			image := tool.Image{Data: []byte(strings.Repeat("abc", 8192)), MIMEType: "image/png", Name: "fixture"}
+			full := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}, image}}
 			target := tool.NamedTool{Def: tool.Definition{Name: "Full", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { return full, nil }}
 			var foreground []model.Message
 			driver := &mcpScriptModel{steps: func(i int, request *model.Request) []model.ToolCall {
@@ -303,8 +312,8 @@ func TestToolFactsLegacyHalfBatchAndLateRepairRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := tool.Result{ID: "A", Name: "Write", Content: []model.Part{model.NewJSONPart([]byte(`{"full":9007199254740993123456789}`))}}
-	original, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "original-A", Type: session.EventTypeToolResult, Scope: intent.Scope, Tool: &session.EventTool{ID: "A", Name: "Write", Result: &result}, Message: &model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "A", Name: "Write", Content: result.Content}}}}}})
+	result := tool.Result{ID: "A", Name: "Write", Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"full":9007199254740993123456789}`)}}}
+	original, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "original-A", Type: session.EventTypeToolResult, Scope: intent.Scope, Tool: &session.EventTool{ID: "A", Name: "Write", Result: &result}, Message: &model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "A", Name: "Write", Content: tool.ModelParts(result.Content)}}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +374,7 @@ func TestToolFactsRepeatedProviderIDsAcrossBatchesAndTurns(t *testing.T) {
 	var effects int
 	target := tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects++
-		return tool.Result{Content: []model.Part{model.NewJSONPart(factJSON(map[string]int{"effect": effects}))}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: factJSON(map[string]int{"effect": effects})}}}, nil
 	}}
 	rt, _ := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	for range 2 {
@@ -391,7 +400,7 @@ func TestToolFactsRepeatedProviderIDsAcrossBatchesAndTurns(t *testing.T) {
 	seen := map[string]bool{}
 	for i, pair := range pairs {
 		key := pair.Call.Tool.Execution.TurnID + "/" + pair.Call.Tool.Execution.ItemID
-		if seen[key] || pair.Result == nil || string(pair.Result.Tool.Result.Content[0].JSON.Value) != string(factJSON(map[string]int{"effect": i + 1})) {
+		if seen[key] || pair.Result == nil || string(pair.Result.Tool.Result.Content[0].(tool.StructuredContent).Value) != string(factJSON(map[string]int{"effect": i + 1})) {
 			t.Fatal("reused provider ID mixed occurrences")
 		}
 		seen[key] = true
@@ -424,7 +433,7 @@ func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 	late.Seq = 0
 	late.Type = session.EventTypeToolResult
 	late.Message = ptrMessage(model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("same", "Write", map[string]any{"covered": true}, false)))
-	full := tool.Result{ID: "same", Name: "Write", Content: late.Message.ToolResults()[0].Content}
+	full := tool.Result{ID: "same", Name: "Write", Content: []tool.ContentBlock{tool.StructuredContent{Value: late.Message.ToolResults()[0].Content[0].JSONValue()}}}
 	late.Tool.Result = &full
 	late.Tool.Outcome = session.ToolOutcomeSucceeded
 	appendFact(late)
@@ -497,7 +506,7 @@ func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
-		return tool.Result{Content: []model.Part{model.NewTextPart("full result")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("full result")}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
@@ -523,11 +532,11 @@ func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 		t.Fatalf("paired result lost: %v", err)
 	}
 	r := pairs[0].Result.Tool
-	if completionErr == nil || r.Outcome != session.ToolOutcomeSucceeded || r.ProcessingFailure == nil || r.ProcessingFailure.Phase != "tool_invoke" || r.ProcessingFailure.Name != "repeat" || r.Result.ID != "same" || r.Result.Name != "Write" || r.Result.IsError {
+	if completionErr == nil || r.Outcome != session.ToolOutcomeSucceeded || r.ProcessingFailure == nil || r.ProcessingFailure.Phase != "tool_invoke" || r.ProcessingFailure.Name != "repeat" || r.Result.ID != "same" || r.Result.Name != "Write" {
 		t.Fatalf("actual identity/disposition lost: %+v completion=%v", r, completionErr)
 	}
 	raw, _ := json.Marshal(events)
-	if strings.Contains(string(raw), "full result") || !strings.Contains((model.Message{Parts: r.Result.Content}).TextContent(), "Do not repeat") {
+	if strings.Contains(string(raw), "full result") || !strings.Contains((model.Message{Parts: tool.ModelParts(r.Result.Content)}).TextContent(), "Do not repeat") {
 		t.Fatalf("failed processing retained business result: %s", raw)
 	}
 
@@ -609,13 +618,17 @@ func TestToolFactsPlanClearsAfterActualDrainUnderOriginalFence(t *testing.T) {
 	slow := tool.NamedTool{Def: tool.Definition{Name: "Slow"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		close(started)
 		<-release
-		return tool.Result{Content: []model.Part{model.NewTextPart("complete late result")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("complete late result")}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-		if i == 0 {
-			return []model.ToolCall{{ID: "plan", Name: plan.ToolName, Args: `{"entries":[{"content":"Wait for producer","status":"in_progress"}]}`}, {ID: "slow", Name: "Slow", Args: `{}`}}
+		switch i {
+		case 0:
+			return []model.ToolCall{{ID: "plan", Name: plan.ToolName, Args: `{"entries":[{"content":"Wait for producer","status":"in_progress"}]}`}}
+		case 1:
+			return []model.ToolCall{{ID: "slow", Name: "Slow", Args: `{}`}}
+		default:
+			return nil
 		}
-		return nil
 	}}
 	rt, _ := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, TurnID: "owning-turn", Input: "drain plan", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{plan.New(), slow}}})

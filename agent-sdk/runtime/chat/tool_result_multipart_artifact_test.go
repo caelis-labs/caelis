@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,59 +17,67 @@ import (
 
 func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 	t.Parallel()
-	media := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
-		Kind: model.MediaSourceInline, Data: "complete-inline-image-data",
-	}, "image/png", "evidence")
+	media := tool.Image{Data: []byte("complete-inline-image-data"), MIMEType: "image/png", Name: "evidence"}
 	large := strings.Repeat(`{"method":"find","path":"C:\\验收\\item","description":"<value>"}`+"\n", 1200)
-	for name, parts := range map[string][]model.Part{
-		"text-and-structured":   {model.NewTextPart(large), model.NewJSONPart(mustJSON(map[string]any{"schema": large}))},
-		"text-and-media":        {model.NewTextPart(large), media},
-		"text-media-structured": {model.NewTextPart(large), media, model.NewJSONPart(mustJSON(map[string]any{"schema": large}))},
+	link := tool.Resource{URI: "resource://fixture/item", Name: "item", Title: "Item", MIMEType: "text/plain", Description: "fixture resource", Size: new(int64(0))}
+	emptyDocument := link
+	emptyDocument.Text = new(string)
+	document := link
+	document.Text = &large
+	for name, parts := range map[string][]tool.ContentBlock{
+		"text-and-structured":   {tool.Text(large), tool.StructuredContent{Value: mustJSON(map[string]any{"schema": large})}},
+		"text-and-media":        {tool.Text(large), media},
+		"text-media-structured": {tool.Text(large), media, tool.StructuredContent{Value: mustJSON(map[string]any{"schema": large})}},
+		"link-and-embedded":     {tool.Text(large), link, emptyDocument},
+		"embedded-only":         {document},
+		"embedded-then-text":    {document, tool.Text("end of result")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			store := testToolResultArtifactStore(t, 8, 4*1024*1024)
 			result := tool.Result{ID: "multipart", Name: "fixture", Content: parts}
-			before := model.CloneParts(result.Content)
+			before, _ := tool.CloneResult(result, nil)
 			canonical, meta := canonicalToolResult(result, store)
 			var path string
-			for _, part := range canonical.Content {
-				if part.JSON != nil {
-					payload := firstToolResultJSONMap(t, tool.Result{Content: []model.Part{part}})
-					path = artifactPathFromJSONMetadata(t, payload)
-					break
-				}
-				if part.Text != nil && strings.Contains(part.Text.Text, toolResultArtifactHintPrefix) {
-					path = artifactPathFromHint(t, part.Text.Text)
+			if _, ok := canonical.Structured(); ok {
+				path = artifactPathFromJSONMetadata(t, firstToolResultJSONMap(t, canonical))
+			} else {
+				for _, block := range canonical.Content {
+					if text, ok := block.(tool.Text); ok && strings.Contains(string(text), toolResultArtifactHintPrefix) {
+						path = artifactPathFromHint(t, string(text))
+					}
 				}
 			}
 			if path == "" {
 				t.Fatal("multipart truncation lost its complete raw artifact reference")
 			}
-			raw, err := json.Marshal(before)
+			raw, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertFileContent(t, path, raw)
+			var recovered tool.Result
+			if err := json.Unmarshal(raw, &recovered); err != nil || !reflect.DeepEqual(recovered.Content, before.Content) {
+				t.Fatalf("artifact lost typed blocks: recovered %d of %d, decode error: %v", len(recovered.Content), len(before.Content), err)
+			}
 			assertPrivateFileMode(t, path)
-			if !reflect.DeepEqual(before, result.Content) {
+			if !reflect.DeepEqual(before, result) {
 				t.Fatal("canonicalization changed the original result")
 			}
-			var gotMedia []model.Part
-			for _, part := range canonical.Content {
-				if part.Media != nil {
-					gotMedia = append(gotMedia, part)
+			var gotMedia []tool.Image
+			for _, block := range canonical.Content {
+				if image, ok := block.(tool.Image); ok {
+					gotMedia = append(gotMedia, image)
 				}
 			}
-			if strings.Contains(name, "media") && !reflect.DeepEqual(gotMedia, []model.Part{media}) {
+			if strings.Contains(name, "media") && !reflect.DeepEqual(gotMedia, []tool.Image{media}) {
 				t.Fatal("canonicalization changed the model-visible image")
 			}
 			if again, info := tool.TruncateResultWithInfo(canonical, tool.DefaultTruncationPolicy()); info.Truncated || !reflect.DeepEqual(again, canonical) {
 				t.Fatal("canonical multipart result still needs truncation")
 			}
 			call := model.ToolCall{ID: result.ID, Name: result.Name, Args: `{}`}
-			message := toolResultMessageFromCanonical(call, canonical)
-			event := session.CanonicalizeEvent(toolResultEvent(call, canonical, &message, meta))
+			message := toolResultMessageFromCanonical(call, canonical, nil)
+			event := session.CanonicalizeEvent(toolResultEvent(call, canonical, nil, &message, meta))
 			if err := session.ValidateDurableCoreEvent(event); err != nil {
 				t.Fatal(err)
 			}
@@ -101,15 +110,15 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 func TestCanonicalMultipartResultArtifactQuotaFailureStaysBounded(t *testing.T) {
 	t.Parallel()
 	store := testToolResultArtifactStore(t, 1, 32)
-	result := tool.Result{Content: []model.Part{
-		model.NewTextPart(strings.Repeat("large content", 10000)),
-		model.NewJSONPart(mustJSON(map[string]any{"status": "complete"})),
+	result := tool.Result{Content: []tool.ContentBlock{
+		tool.Text(strings.Repeat("large content", 10000)),
+		tool.StructuredContent{Value: mustJSON(map[string]any{"status": "complete"})},
 	}}
 	canonical, meta := canonicalToolResult(result, store)
 	if tool.ResultNeedsTruncation(canonical, tool.DefaultTruncationPolicy()) {
 		t.Fatal("artifact failure bypassed result budget")
 	}
-	for _, part := range canonical.Content {
+	for _, part := range tool.ModelParts(canonical.Content) {
 		if part.Text != nil && strings.Contains(part.Text.Text, toolResultArtifactHintPrefix) {
 			t.Fatal("reference to an unwritten artifact")
 		}
@@ -118,8 +127,8 @@ func TestCanonicalMultipartResultArtifactQuotaFailureStaysBounded(t *testing.T) 
 		}
 	}
 	call := model.ToolCall{ID: "quota", Name: "fixture", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical)
-	if err := session.ValidateDurableCoreEvent(session.CanonicalizeEvent(toolResultEvent(call, canonical, &message, meta))); err != nil {
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	if err := session.ValidateDurableCoreEvent(session.CanonicalizeEvent(toolResultEvent(call, canonical, nil, &message, meta))); err != nil {
 		t.Fatal(err)
 	}
 }

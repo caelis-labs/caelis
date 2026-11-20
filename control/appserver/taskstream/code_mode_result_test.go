@@ -2,10 +2,8 @@ package taskstream
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -13,15 +11,25 @@ import (
 )
 
 func TestScriptFinalFrameProjectsSelectedContent(t *testing.T) {
-	receipt := tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"answer":42}`))}, Metadata: map[string]any{"code_mode_script_completion": "completed", "code_mode_source": map[string]any{"code": "return {answer:42};"}}}
-	raw, _ := json.Marshal(receipt)
+	const selected = `{"answer":9007199254740993}`
+	receipt := tool.Result{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(selected)}},
+		Metadata: map[string]any{
+			"code_mode_script_completion": "completed",
+			"code_mode_source":            map[string]any{"code": "return {answer:9007199254740993};"},
+		},
+	}
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
 	env := streamFinalFrameEvent(taskFrameProjectionRequest{TaskKind: task.KindCodeMode, ToolName: "js_exec", CallID: "script"}, controltaskstream.Frame{Closed: true, State: "completed", Text: string(raw)})
 	update := env.Update.(eventstream.ToolCallUpdate)
-	encoded, _ := json.Marshal(update.Content)
-	if len(update.Content) != 1 || !strings.Contains(string(encoded), `answer`) {
-		t.Fatalf("selected result missing; raw receipt leaked to terminal instead: %+v", update)
+	if len(update.Content) != 1 {
+		t.Fatalf("final script update content = %+v, want one selected result", update.Content)
 	}
-	if strings.Contains(string(encoded), "code_mode_source") {
-		t.Fatal("internal receipt rendered as business return")
+	text, ok := update.Content[0].Content.(eventstream.TextContent)
+	if !ok || text.Text != selected {
+		t.Fatalf("final script update content = %+v, want exact selected result %s", update.Content, selected)
 	}
 }

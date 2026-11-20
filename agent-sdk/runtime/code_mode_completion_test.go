@@ -28,7 +28,7 @@ func TestCodeModeScriptCompletionSurvivesCanonicalErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
 			bad := tool.NamedTool{Def: tool.Definition{Name: "Bad", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-				return tool.Result{IsError: true, Content: []model.Part{model.NewTextPart("original tool failure")}}, nil
+				return tool.Result{Content: []tool.ContentBlock{tool.Text("original tool failure")}}, tool.FailedReply("fixture tool failure")
 			}}
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i > 0 {
@@ -62,10 +62,10 @@ func TestCodeModeScriptCompletionSurvivesCanonicalErrors(t *testing.T) {
 
 func TestCodeModeTaskResultPreservesScriptCompletion(t *testing.T) {
 	for _, completion := range []string{"completed", "failed"} {
-		raw, _ := json.Marshal(tool.Result{IsError: true, Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}, Content: []model.Part{model.NewTextPart("original result")}})
+		raw, _ := json.Marshal(tool.Result{Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}, Content: []tool.ContentBlock{tool.Text("original result")}})
 		snapshot := task.Snapshot{Kind: task.KindCodeMode, State: task.StateFailed}
-		result := taskSnapshotToolResultWithPayload(tool.Call{ID: "observe"}, tool.Definition{Name: "Task"}, snapshot, map[string]any{"tool_result_json": string(raw)})
-		if !result.IsError || result.Metadata[codemode.MetadataScriptCompletion] != completion {
+		result, err := taskSnapshotToolResultWithPayload(tool.Call{ID: "observe"}, tool.Definition{Name: "Task"}, snapshot, map[string]any{"tool_result_json": string(raw)})
+		if !tool.HasFailedReply(err) || result.Metadata[codemode.MetadataScriptCompletion] != completion {
 			t.Fatalf("lost independent Task observation: %+v", result)
 		}
 	}

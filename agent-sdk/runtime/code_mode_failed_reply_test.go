@@ -113,7 +113,7 @@ return {caught,selected:reply.media[0],raw:reply.text()};`
 				if err := json.Unmarshal([]byte(taskStringValue(entries[0].Result["tool_result_json"])), &persisted); err != nil {
 					t.Fatal(err)
 				}
-				for name, parts := range map[string][]model.Part{"next_model": visible.Content, "persisted_task": persisted.Content} {
+				for name, parts := range map[string][]model.Part{"next_model": visible.Content, "persisted_task": tool.ModelParts(persisted.Content)} {
 					failure := errorDeliveryFailure(t, parts)
 					if failure.Reply == nil || failure.Reply.CallID == "" || !failure.Reply.IsError || failure.Reply.Outcome != codemode.OutcomeFailed {
 						t.Fatalf("%s lost failed receipt: %+v", name, failure)
@@ -163,18 +163,20 @@ return {caught,selected:reply.media[0],raw:reply.text()};`
 							continue
 						}
 						var summary struct {
-							Caught *bool  `json:"caught"`
-							Raw    string `json:"raw"`
+							Result struct {
+								Caught *bool  `json:"caught"`
+								Raw    string `json:"raw"`
+							}
 						}
-						if err := json.Unmarshal(content.JSON.Value, &summary); err != nil || summary.Caught == nil {
+						if err := json.Unmarshal(content.JSON.Value, &summary); err != nil || summary.Result.Caught == nil {
 							continue
 						}
 						summaries++
-						if *summary.Caught != tc.failed || !json.Valid([]byte(summary.Raw)) {
+						if *summary.Result.Caught != tc.failed || !json.Valid([]byte(summary.Result.Raw)) {
 							t.Fatalf("Body diagnostic text/catch disposition changed: %+v", summary)
 						}
-						if !bytes.Contains([]byte(summary.Raw), []byte(`"receipt":9223372036854775807`)) {
-							t.Fatalf("exact integer tokens lost: %s", summary.Raw)
+						if !bytes.Contains([]byte(summary.Result.Raw), []byte(`"receipt":9223372036854775807`)) {
+							t.Fatalf("exact integer tokens lost: %s", summary.Result.Raw)
 						}
 					}
 				}

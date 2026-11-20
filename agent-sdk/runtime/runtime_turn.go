@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // RunState reports only execution still owned by this Runtime process.
@@ -62,12 +63,12 @@ func (r *Runtime) resolveAgent(
 // wrapTurnTools is shared by native and externally controlled execution.
 func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
 	concrete := spec.Tools
-	spec.Tools = r.wrapToolsForDispatch(ctx, ref, spec.Tools)
+	spec.Tools = r.wrapToolsForDispatch(ref, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
 		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)
-	return ownCodeModeProducers(ctx, concrete, wrapToolResults(spec.Tools))
+	return ownCodeModeProducers(ctx, concrete, wrapToolResults(concrete, spec.Tools))
 }
 
 func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {
@@ -345,7 +346,7 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	turnID string,
 	event *session.Event,
 ) (*session.Event, error) {
-	if session.IsCanonicalHistoryEvent(event) && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName {
+	if session.IsCanonicalHistoryEvent(event) && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == mcp.SearchToolName {
 		// Native discovery receipts share the binding-claim write order with
 		// nested discovery, accepted ToolCalls and dispatch validation.
 		release, err := r.acquireSessionWrite(ctx, ref)

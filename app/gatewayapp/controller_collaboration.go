@@ -72,18 +72,13 @@ func (b *collaborationBackend) Start(ctx context.Context, identity collaboration
 	call := tool.Call{ID: "collaboration-" + uuid.NewString(), Name: spawn.ToolName, Input: args}
 	result, err := rt.instance.engine.CallControllerSpawn(ctx, active.SessionRef, expected, spawnTool, call)
 	if err != nil {
+		if tool.HasFailedReply(err) {
+			return nil, errors.New("StartThread was rejected by the current execution policy")
+		}
 		return nil, err
 	}
-	if result.IsError {
-		return nil, errors.New("StartThread was rejected by the current execution policy")
-	}
-	for _, part := range result.Content {
-		if part.Text != nil && json.Valid([]byte(part.Text.Text)) {
-			return json.RawMessage(part.Text.Text), nil
-		}
-		if part.JSON != nil {
-			return append(json.RawMessage(nil), part.JSON.Value...), nil
-		}
+	if value, ok := result.Structured(); ok {
+		return value, nil
 	}
 	return nil, errors.New("StartThread returned no structured result")
 }

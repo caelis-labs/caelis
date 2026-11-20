@@ -10,13 +10,16 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
-func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool, code string) (*session.Event, []*session.Event) {
+func runSearchContractResult(t *testing.T, source toolset.Source, extra []tool.Tool, code string) (*session.Event, []*session.Event) {
 	t.Helper()
 	store, active, _ := codeModeStore(t)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -42,7 +45,7 @@ func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool
 	return nil, nil
 }
 
-func runSearchContract(t *testing.T, source tool.Source, extra []tool.Tool, code string) []*session.Event {
+func runSearchContract(t *testing.T, source toolset.Source, extra []tool.Tool, code string) []*session.Event {
 	t.Helper()
 	event, events := runSearchContractResult(t, source, extra, code)
 	if event.Meta[codemode.MetadataScriptCompletion] != "completed" {
@@ -75,22 +78,21 @@ func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
 	const plugin = "plugin'quoted\"name"
 	def := fixtureMCPDefinition("search-contract-v1")
 	def.Name = canonical
-	def.Metadata[tool.MetadataMCPServer] = server
-	def.Metadata[tool.MetadataMCPTool] = remote
-	def.Metadata[tool.MetadataPluginID] = plugin
+	def.Metadata[mcp.MetadataServer] = server
+	def.Metadata[mcp.MetadataTool] = remote
+	def.Metadata[mcp.MetadataPluginID] = plugin
 	def.InputSchema = map[string]any{"type": "object", "required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": "integer"}}}
 	var effects []string
-	invoke := func(_ context.Context, call tool.Call) (tool.Result, error) {
+	invoke := func(ctx context.Context, call tool.Call) (tool.Result, error) {
 		effects = append(effects, call.Name)
-		if call.Parent == nil || call.Parent.Kind != codemode.ToolKind {
+		if parent := tool.ParentFromContext(ctx); parent == nil || parent.Kind != codemode.ToolKind {
 			t.Errorf("call path lost Runtime parent: %+v", call)
 		}
-		if call.Name == canonical && (call.TargetBinding == nil || *call.TargetBinding != tool.BindingForDefinition(def)) {
+		if binding := toolbinding.Target(ctx); call.Name == canonical && (binding == nil || *binding != mcp.BindingForDefinition(def)) {
 			t.Errorf("call path lost exact binding: %+v", call)
 		}
 		return tool.Result{
-			Content:           []model.Part{model.NewJSONPart(call.Input)},
-			StructuredContent: &tool.StructuredContent{Value: call.Input, ContentIndex: 0},
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: call.Input}},
 		}, nil
 	}
 	source := &runtimeDeferredSource{}
@@ -126,17 +128,16 @@ func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
 	source := &runtimeDeferredSource{}
 	def := fixtureMCPDefinition("search-contract-late-v1")
 	def.Name = "late__read"
-	def.Metadata[tool.MetadataMCPServer] = "late-server"
+	def.Metadata[mcp.MetadataServer] = "late-server"
 	effects := 0
-	late := tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+	late := tool.NamedTool{Def: def, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 		effects++
-		if call.Name != def.Name || call.TargetBinding == nil || *call.TargetBinding != tool.BindingForDefinition(def) {
+		if binding := toolbinding.Target(ctx); call.Name != def.Name || binding == nil || *binding != mcp.BindingForDefinition(def) {
 			t.Errorf("newly ready call lost identity: %+v", call)
 		}
 		raw := json.RawMessage(`{"ready":true}`)
 		return tool.Result{
-			Content:           []model.Part{model.NewJSONPart(raw)},
-			StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0},
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
 		}, nil
 	}}
 	publications := 0

@@ -221,8 +221,8 @@ func TestCodeModeLive(t *testing.T) {
 		if in.Tool.Name == "RunCommand" {
 			return policy.Decision{Action: policy.ActionDeny, Reason: "acceptance scope excludes shell"}, nil
 		}
-		if tool.IsMCPDefinition(in.Tool) {
-			remote, _ := in.Tool.Metadata[tool.MetadataMCPTool].(string)
+		if mcp.IsDefinition(in.Tool) {
+			remote, _ := in.Tool.Metadata[mcp.MetadataTool].(string)
 			allowed := remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs" || remote == "apps"
 			if remote == "exec" {
 				var v struct {
@@ -264,7 +264,7 @@ func TestCodeModeLive(t *testing.T) {
 
 	requester := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		approved := false
-		remote, _ := r.Tool.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		switch remote {
 		case "resolve-library-id", "query-docs", "get-library-docs", "apps":
 			approved = true

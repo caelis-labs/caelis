@@ -10,11 +10,13 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testing.T) {
@@ -25,12 +27,12 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 		def := fixtureMCPDefinition(version)
 		def.InputSchema = map[string]any{"type": "object", "additionalProperties": false,
 			"required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": kind}}}
-		source.publish(tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+		source.publish(tool.NamedTool{Def: def, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			effects++
-			if call.Name != "docs__read" || call.TargetBinding == nil || call.Parent == nil || call.Parent.Kind != codemode.ToolKind {
+			if parent := tool.ParentFromContext(ctx); call.Name != "docs__read" || toolbinding.Target(ctx) == nil || parent == nil || parent.Kind != codemode.ToolKind {
 				t.Errorf("lost canonical identity: %+v", call)
 			}
-			return tool.Result{Content: []model.Part{model.NewJSONPart(call.Input)}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: call.Input}}}, nil
 		}})
 	}
 	publish("direct-v1", "integer")
@@ -55,11 +57,11 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if binding := codeModeBindings(events)["docs__read"]; binding != tool.BindingForDefinition(source.Tools()[0].Definition()) {
+	if binding := codeModeBindings(events)["docs__read"]; binding != mcp.BindingForDefinition(source.Tools()[0].Definition()) {
 		t.Fatalf("actual Journal did not retain direct binding: %+v", binding)
 	}
 	for _, event := range events {
-		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == mcp.SearchToolName {
 			t.Fatal("direct path performed discovery")
 		}
 	}
@@ -93,7 +95,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 
 func TestCodeModeDirectBindingDoesNotGrantLegacyMCPDiscovery(t *testing.T) {
 	def := fixtureMCPDefinition("direct-v1")
-	binding := tool.BindingForDefinition(def)
+	binding := mcp.BindingForDefinition(def)
 	events := []*session.Event{{Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{
 		Name: def.Name, Binding: &binding, Status: "pending",
 		Parent: &session.EventParentTool{Kind: codemode.ToolKind},
@@ -108,7 +110,7 @@ func TestCodeModeDirectBindingDoesNotGrantLegacyMCPDiscovery(t *testing.T) {
 
 func TestCodeModeNativeOwnerSupersedesHistoricalMCPBinding(t *testing.T) {
 	prior := fixtureMCPDefinition("v1")
-	binding := tool.BindingForDefinition(prior)
+	binding := mcp.BindingForDefinition(prior)
 	current := tool.NamedTool{Def: tool.Definition{Name: prior.Name, InputSchema: map[string]any{"type": "object"}}}
 	host := &codeModeHost{ctx: t.Context(), limits: codemode.DefaultLimits(), targets: map[string]codeModeTarget{}, owner: runtimeCodeModeTool{
 		availableTools: func() []tool.Tool { return []tool.Tool{current} },

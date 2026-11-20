@@ -13,7 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestGuardianMCPScreeningSettlesOnlySupportedScope(t *testing.T) {
@@ -43,8 +43,8 @@ func TestGuardianMCPScreeningSettlesOnlySupportedScope(t *testing.T) {
 			if tc.mcp {
 				req.RuntimeRequest.Authorization = &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Choices: []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}, {OptionID: "allow_session", Persistence: session.AuthorizationSession}, {OptionID: "allow_always", Persistence: session.AuthorizationPolicy}}}
 				req.RuntimeRequest.Tool.Metadata = map[string]any{
-					tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture",
-					tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "fixture-v1",
+					mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "fixture",
+					mcp.MetadataServer: "docs", mcp.MetadataTool: "read", mcp.MetadataSourceFingerprint: "fixture-v1",
 				}
 			}
 			req.ResolveModel = func(context.Context) (model.LLM, error) {

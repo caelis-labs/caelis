@@ -49,7 +49,7 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 			var stale atomic.Bool
 			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 				approvals.Add(1)
-				if req.Tool.Name != "live__read" || req.Call.Parent == nil || req.Call.Parent.ID != "script" || req.Call.Execution.ItemID == "" {
+				if req.Tool.Name != "live__read" || req.Parent == nil || req.Parent.ID != "script" || req.Execution.ItemID == "" {
 					t.Errorf("approval lost real identity: %+v", req.Call)
 				}
 				switch mode {
@@ -134,20 +134,20 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 			started, release, executorDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
 			write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 				effects.Add(1)
-				return tool.Result{Content: []model.Part{model.NewTextPart("done once")}}, nil
+				return tool.Result{Content: []tool.ContentBlock{tool.Text("done once")}}, nil
 			}}
 			pending := tool.NamedTool{Def: tool.Definition{Name: "Pending", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
 				effects.Add(1)
 				close(started)
 				if responsive {
 					<-ctx.Done()
-					return tool.Result{IsError: true}, ctx.Err()
+					return tool.Result{}, ctx.Err()
 				}
 				<-release
 				if wantStatus == "succeeded" {
-					return tool.Result{Content: []model.Part{model.NewTextPart("confirmed after cancellation")}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.Text("confirmed after cancellation")}}, nil
 				}
-				return tool.Result{IsError: true}, ctx.Err()
+				return tool.Result{}, ctx.Err()
 			}}
 			var retained codemode.Host
 			declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {

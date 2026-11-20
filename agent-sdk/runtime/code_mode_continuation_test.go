@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -14,9 +15,11 @@ func TestCodeModeChildJournalRequiresOriginalAdmission(t *testing.T) {
 	for _, name := range []string{"missing", "wrong-call", "wrong-name", "wrong-parent", "nil-validator", "valid", "ordinary-parent", "no-parent"} {
 		t.Run(name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
-			call := tool.Call{ID: "child", Name: "Write", Input: []byte(`{}`), Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "step"}, Parent: &tool.ParentCall{Kind: codemode.ToolKind, Name: "arbitrary_script_name", ID: "outer"}}
+			call := tool.Call{ID: "child", Name: "Write", Input: []byte(`{}`)}
+			execution := tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "step"}
+			parent := &tool.ParentCall{Kind: codemode.ToolKind, Name: "arbitrary_script_name", ID: "outer"}
 			var effects, validations atomic.Int32
-			binding := &codeModeAdmissionBinding{callID: call.ID, name: call.Name, parent: *call.Parent, validate: func(context.Context) (func(), error) {
+			binding := &codeModeAdmissionBinding{callID: call.ID, name: call.Name, parent: *parent, validate: func(context.Context) (func(), error) {
 				validations.Add(1)
 				return func() {}, nil
 			}}
@@ -30,11 +33,11 @@ func TestCodeModeChildJournalRequiresOriginalAdmission(t *testing.T) {
 			case "nil-validator":
 				binding.validate = nil
 			case "ordinary-parent":
-				call.Parent = &tool.ParentCall{Name: "js_repl", ID: "ordinary-provenance"}
+				parent = &tool.ParentCall{Name: "js_repl", ID: "ordinary-provenance"}
 			case "no-parent":
-				call.Parent = nil
+				parent = nil
 			}
-			ctx := t.Context()
+			ctx := toolbinding.WithOccurrence(t.Context(), execution, parent, nil)
 			if name != "missing" {
 				ctx = context.WithValue(ctx, codeModeAdmissionKey{}, binding)
 			}

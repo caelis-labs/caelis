@@ -133,8 +133,8 @@ func TestAuthorizationRevokeReadbackCancelsOriginalFlight(t *testing.T) {
 	}
 }
 
-// Model the real catalog-refresh interleaving between Code Mode's advisory
-// source check and the single-use permission consumption. The Session lookup
+// Model the real catalog-refresh interleaving between Code Mode's target
+// binding check and the single-use permission consumption. The Session lookup
 // is an existing yield point inside the permission owner, before consume.
 type refreshAuthorizationAtPermitStore struct {
 	session.Service
@@ -150,7 +150,7 @@ func (s *refreshAuthorizationAtPermitStore) Session(ctx context.Context, ref ses
 	}
 	return s.Service.Session(ctx, ref)
 }
-func TestAuthorizationCodeModeCapabilityRefreshBeforeConsume(t *testing.T) {
+func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fixture", Version: "1"}, &mcpsdk.ServerOptions{Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}})
@@ -166,7 +166,7 @@ func TestAuthorizationCodeModeCapabilityRefreshBeforeConsume(t *testing.T) {
 	}
 	ep := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	defer ep.Close()
-	mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "fixture", Name: "fixture", Transport: mcp.TransportStreamableHTTP, URL: ep.URL, IntegrationID: "fixture-group/v1"}}, nil)
+	mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "fixture", Name: "fixture", Transport: mcp.TransportStreamableHTTP, URL: ep.URL}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,8 +186,8 @@ func TestAuthorizationCodeModeCapabilityRefreshBeforeConsume(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if current.Definition().Source.CapabilityRevision == old.Definition().Source.CapabilityRevision {
-			return errors.New("fixture group revision unchanged")
+		if mcp.BindingForDefinition(current.Definition()) != mcp.BindingForDefinition(old.Definition()) {
+			return errors.New("unrelated refresh changed the pinned target")
 		}
 		return nil
 	}}
@@ -230,8 +230,8 @@ func TestAuthorizationCodeModeCapabilityRefreshBeforeConsume(t *testing.T) {
 	if !store.fired.Load() || asks.Load() != 1 {
 		t.Fatal("fixture did not reach permission boundary")
 	}
-	if effects.Load() != 0 {
-		t.Fatalf("Code Mode dispatched stale capability consent: effects=%d want=0", effects.Load())
+	if effects.Load() != 1 {
+		t.Fatalf("unrelated refresh prevented the approved call: effects=%d want=1", effects.Load())
 	}
 }
 
@@ -239,7 +239,7 @@ func TestAuthorizationCodeModeCapabilityRefreshBeforeConsume(t *testing.T) {
 // DTW scope construction is tested by control/toolpolicy, outside the SDK.
 func sourceGroupFixtureMode() policy.Mode {
 	return policy.NamedMode{ID: presets.ModeWorkspaceWrite, Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-		if !tool.IsMCPDefinition(input.Tool) {
+		if !mcp.IsDefinition(input.Tool) {
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
 		decision, err := presets.MCPApprovalDecision(input, sandbox.Constraints{})
@@ -247,9 +247,6 @@ func sourceGroupFixtureMode() policy.Mode {
 			return policy.Decision{}, err
 		}
 		authorization := authorizationTestRequirement(input.Session)
-		authorization.Scope.SourceID = input.Tool.Source.ID
-		authorization.Scope.SourceRevision = input.Tool.Source.Revision
-		authorization.Scope.CapabilityRevision = input.Tool.Source.CapabilityRevision
 		authorization.Scope.CapabilitySet = "fixture-source-group"
 		authorization.Scope.ResourceKind = "fixture"
 		authorization.Choices = []session.AuthorizationChoice{{OptionID: "allow_session", Persistence: session.AuthorizationSession}}

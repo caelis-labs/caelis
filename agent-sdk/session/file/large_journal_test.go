@@ -45,7 +45,7 @@ func TestLargeJournalReceiptSurvivesColdAppendAndReopen(t *testing.T) {
 	if len(loaded.Events) != 3 || loaded.Events[1].ID != persisted.ID || !session.IsModelInvocationReceipt(loaded.Events[1]) {
 		t.Fatal("cold append or reopen lost the journal, receipt or final reply")
 	}
-	if !bytes.Equal(loaded.Events[0].Tool.Result.Content[0].JSON.Value, largeJournalResult()) {
+	if !bytes.Equal(loaded.Events[0].Tool.Result.Content[0].(tool.StructuredContent).Value, largeJournalResult()) {
 		t.Fatal("journal result changed across persistence")
 	}
 	got, ok := session.ModelMessageOf(loaded.Events[2])
@@ -70,7 +70,7 @@ func newLargeJournalFixture(t testing.TB, count int) (*Store, session.Session) {
 	result := largeJournalResult()
 	events := make([]*session.Event, 0, count)
 	for i := range count {
-		resultValue := tool.Result{Content: []model.Part{model.NewJSONPart(result)}}
+		resultValue := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: result}}}
 		events = append(events, &session.Event{ID: fmt.Sprintf("tool-result-%d", i), Type: session.EventTypeToolResult, Visibility: session.VisibilityMirror, Tool: &session.EventTool{ID: fmt.Sprintf("call-%d", i), Name: "screenshot", Result: &resultValue}})
 
 	}

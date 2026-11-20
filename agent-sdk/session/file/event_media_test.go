@@ -18,12 +18,12 @@ import (
 func newSharedMediaFixture(t testing.TB, count int) (*Store, session.Session, []*session.Event) {
 	t.Helper()
 	store, active := newEventPageIndexFixture(t, 0)
-	image := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("YWJj", 256<<10)}, "image/png", "screen")
-	result := tool.Result{Name: "screen", Content: []model.Part{image}}
+	image := tool.Image{Data: []byte(strings.Repeat("abc", 256<<10)), MIMEType: "image/png", Name: "screen"}
+	result := tool.Result{Name: "screen", Content: []tool.ContentBlock{image}}
 	events := make([]*session.Event, count)
 	for i := range count {
 		id := fmt.Sprintf("call-%d", i)
-		message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: id, Name: "screen", Content: []model.Part{image}}}}}
+		message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: id, Name: "screen", Content: tool.ModelParts([]tool.ContentBlock{image})}}}}
 		events[i] = &session.Event{ID: id, Type: session.EventTypeToolResult, Message: &message,
 			Tool: &session.EventTool{ID: id, Name: "screen", Result: &result}}
 	}

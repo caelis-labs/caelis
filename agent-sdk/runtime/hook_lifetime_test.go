@@ -96,7 +96,7 @@ func TestHooksTimedOutProducerRetainsFenceUntilActualDrain(t *testing.T) {
 		<-ctx.Done()
 		close(expired)
 		<-release
-		return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("known completion")}}, nil
+		return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("known completion")}}, nil
 	}}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {

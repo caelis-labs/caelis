@@ -132,13 +132,15 @@ func receiveSnapshotValue[T any](t *testing.T, values <-chan T) T {
 	}
 }
 
-func snapshotTestTool(revision string, calls chan<- tool.Call) tool.Tool {
+func snapshotTestTool(revision string, invocations chan<- tool.InvocationContext) tool.Tool {
 	return tool.NamedTool{Def: tool.Definition{
-		Name: "shared", Description: revision, EffectClass: tool.EffectNonIdempotent,
+		Name: "shared", Description: revision,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{revision: map[string]any{"type": "string"}}},
-	}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-		calls <- call
-		return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewTextPart(revision)}}, nil
+	}, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+		if invocations != nil {
+			invocations <- tool.InvocationFromContext(ctx)
+		}
+		return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text(revision)}}, nil
 	}}
 }
 
@@ -158,7 +160,8 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 		t.Fatal(err)
 	}
 	oldModel, newModel := newRequestSnapshotModel("old-model"), newRequestSnapshotModel("new-model")
-	oldCalls, newCalls := make(chan tool.Call, 1), make(chan tool.Call, 1)
+	oldCalls, newCalls := make(chan tool.InvocationContext, 1), make(chan tool.InvocationContext, 1)
+	approvals := make(chan agent.ApprovalRequest, 2)
 	var oldReleases, newReleases atomic.Int64
 	oldConfig := snapshotTestConfig("old", oldModel, snapshotTestTool("old", oldCalls))
 	oldConfig.Request.ServiceTier = model.ServiceTierPriority
@@ -168,9 +171,11 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	source := &requestSnapshotSource{}
 	source.set(oldConfig)
 	var policyCalls atomic.Int64
-	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "test", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 		policyCalls.Add(1)
-		return policy.Decision{Action: policy.ActionAllow}, nil
+		return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Call.Name},
+		}}, nil
 	}}}
 	interceptor := &concurrentTraceSink{}
 	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", TraceSink: interceptor})
@@ -180,7 +185,10 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	stream := true
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "inspect", TurnID: "canonical-turn", AgentSpec: agent.AgentSpec{
 		ResolveModelRequest: source.resolve, Request: agent.ModelRequestOptions{Stream: &stream, ServiceTier: model.ServiceTierPriority},
-	}})
+	}, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approvals <- req
+		return agent.ApprovalResponse{Approved: true, OptionID: "allow_once"}, nil
+	})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,12 +198,14 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 		t.Fatalf("in-flight old snapshot released %d times", got)
 	}
 	oldModel.responses <- snapshotResponse{response: toolCallResponse("reused-call", "shared")}
+	oldApproval := receiveSnapshotValue(t, approvals)
 	oldCall := receiveSnapshotValue(t, oldCalls)
 	second := receiveSnapshotValue(t, newModel.requests)
 	if oldReleases.Load() != 1 || newReleases.Load() != 0 {
 		t.Fatalf("release after old tool: old=%d new=%d", oldReleases.Load(), newReleases.Load())
 	}
 	newModel.responses <- snapshotResponse{response: toolCallResponse("reused-call", "shared")}
+	newApproval := receiveSnapshotValue(t, approvals)
 	newCall := receiveSnapshotValue(t, newCalls)
 	third := receiveSnapshotValue(t, newModel.requests)
 	if got := newReleases.Load(); got != 1 {
@@ -217,8 +227,12 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 			t.Fatalf("mixed request snapshot %d: %#v", index, request)
 		}
 	}
-	if oldCall.RuntimeModel.Name() != "old-model" || newCall.RuntimeModel.Name() != "new-model" || oldCall.Execution.TurnID != "canonical-turn" || newCall.Execution.TurnID != "canonical-turn" || oldCall.Execution.ItemID == newCall.Execution.ItemID {
-		t.Fatalf("tool model/identity not pinned: old=%#v new=%#v", oldCall, newCall)
+	if oldApproval.ProducingModel == nil || oldApproval.ProducingModel.Name() != "old-model" || newApproval.ProducingModel == nil || newApproval.ProducingModel.Name() != "new-model" {
+		t.Fatalf("approval fallback models = %v / %v, want old-model / new-model", oldApproval.ProducingModel, newApproval.ProducingModel)
+	}
+	if oldCall.TurnID != "canonical-turn" || newCall.TurnID != "canonical-turn" || oldCall.ItemID == "" || newCall.ItemID == "" || oldCall.ItemID == newCall.ItemID ||
+		oldApproval.Execution != oldCall || newApproval.Execution != newCall {
+		t.Fatalf("tool invocations = %#v / %#v, approval invocations = %#v / %#v", oldCall, newCall, oldApproval.Execution, newApproval.Execution)
 	}
 	if policyCalls.Load() != 2 || !interceptor.saw(agent.LifecycleTool, agent.TraceCompleted) || !interceptor.saw(agent.LifecycleModel, agent.TraceCompleted) {
 		t.Fatal("dynamic tools or models bypassed Runtime wrappers")

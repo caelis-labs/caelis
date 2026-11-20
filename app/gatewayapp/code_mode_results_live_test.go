@@ -27,7 +27,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
@@ -174,7 +173,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 					return policy.Decision{Action: policy.ActionDeny, Reason: "only the authorized short command is in scope"}, nil
 				}
 			}
-			if task.ID == "image" && in.Tool.Name != "js_exec" && in.Tool.Name != "tool_search" && in.Tool.Name != "Task" && !tool.IsMCPDefinition(in.Tool) {
+			if task.ID == "image" && in.Tool.Name != "js_exec" && in.Tool.Name != "tool_search" && in.Tool.Name != "Task" && !mcp.IsDefinition(in.Tool) {
 				return policy.Decision{Action: policy.ActionDeny, Reason: "image task only"}, nil
 			}
 			return policy.Decision{Action: policy.ActionAllow}, nil

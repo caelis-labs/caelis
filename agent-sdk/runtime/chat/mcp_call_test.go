@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type mcpRoutingModel struct {
@@ -32,17 +33,17 @@ func (m *mcpRoutingModel) Generate(_ context.Context, _ *model.Request) iter.Seq
 }
 func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T) {
 	calls := 0
-	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read", Description: "Read one numbered document", InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []any{"number"}, "properties": map[string]any{"number": map[string]any{"type": "integer"}}}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "version-1"}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
+	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read", Description: "Read one numbered document", InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []any{"number"}, "properties": map[string]any{"number": map[string]any{"type": "integer"}}}, Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataServer: "docs", mcp.MetadataTool: "read", mcp.MetadataSourceFingerprint: "version-1"}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		calls++
-		return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("read")}}, nil
+		return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("read")}}, nil
 	}}
 	source := &readyMCPSource{tools: []tool.Tool{remote}}
 	llm := &mcpRoutingModel{next: func(i int) []model.ToolCall {
-		call := model.ToolCall{ID: "same-model-id", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__read","arguments":{"number":1}}`}
+		call := model.ToolCall{ID: "same-model-id", Name: mcp.CallToolName, Args: `{"tool_name":"docs__read","arguments":{"number":1}}`}
 		switch i {
 		case 0: // Legacy Exposure and result history cannot authorize this call.
 		case 1:
-			call.Name = tool.ToolSearchToolName
+			call.Name = mcp.SearchToolName
 			call.Args = `{"query":"docs"}`
 		case 2:
 			call.Args = `{"tool_name":"docs__read","arguments":{"number":"wrong"}}`
@@ -55,11 +56,11 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 		case 6:
 			source.tools = []tool.Tool{tool.NamedTool{Def: func() tool.Definition {
 				d := remote.Definition()
-				d.Metadata[tool.MetadataMCPSourceFingerprint] = "version-2"
+				d.Metadata[mcp.MetadataSourceFingerprint] = "version-2"
 				return d
 			}(), Invoke: remote.Invoke}}
 		case 7:
-			call.Name = tool.ToolSearchToolName
+			call.Name = mcp.SearchToolName
 			call.Args = `{"query":"docs"}`
 		case 8:
 		default:
@@ -67,12 +68,12 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 		}
 		return []model.ToolCall{call}
 	}}
-	a, err := NewWithTools("chat", llm, []tool.Tool{tool.NewMCPCallTool()}, "")
+	a, err := NewWithTools("chat", llm, []tool.Tool{mcp.NewCallTool()}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.deferredTools = source
-	binding := tool.BindingForDefinition(remote.Definition())
+	binding := mcp.BindingForDefinition(remote.Definition())
 	payload := map[string]any{"tools": []any{map[string]any{"name": remote.Definition().Name, "binding": binding}}}
 	legacy := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "old-search", Name: "ToolSearch", Status: "completed", Output: payload}, Meta: map[string]any{"caelis.tool_exposure.v1": map[string]any{"version": 1, "active": []tool.Binding{binding}}}}
 	failures := 0
@@ -96,9 +97,9 @@ func TestSameBatchSearchCannotAuthorizeUndiscoveredSibling(t *testing.T) {
 		if i > 0 {
 			return nil
 		}
-		return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}, {ID: "call", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__read","arguments":{}}`}}
+		return []model.ToolCall{{ID: "search", Name: mcp.SearchToolName, Args: `{"query":"docs"}`}, {ID: "call", Name: mcp.CallToolName, Args: `{"tool_name":"docs__read","arguments":{}}`}}
 	}}
-	a, err := NewWithTools("chat", llm, []tool.Tool{tool.NewMCPCallTool()}, "")
+	a, err := NewWithTools("chat", llm, []tool.Tool{mcp.NewCallTool()}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestSameBatchSearchCannotAuthorizeUndiscoveredSibling(t *testing.T) {
 }
 
 func TestMCPRoutingRejectsDuplicateCallIDsBeforeDispatch(t *testing.T) {
-	for _, secondName := range []string{tool.MCPCallToolName, "Read"} {
+	for _, secondName := range []string{mcp.CallToolName, "Read"} {
 		t.Run(secondName, func(t *testing.T) {
 			effects := map[string]int{}
 			invoke := func(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -142,14 +143,14 @@ func TestMCPRoutingRejectsDuplicateCallIDsBeforeDispatch(t *testing.T) {
 			llm := &mcpRoutingModel{next: func(i int) []model.ToolCall {
 				switch i {
 				case 0:
-					return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}}
+					return []model.ToolCall{{ID: "search", Name: mcp.SearchToolName, Args: `{"query":"docs"}`}}
 				case 1:
 					source.tools = []tool.Tool{second}
-					return []model.ToolCall{{ID: "search-second", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}}
+					return []model.ToolCall{{ID: "search-second", Name: mcp.SearchToolName, Args: `{"query":"docs"}`}}
 				case 2:
 					source.tools = []tool.Tool{first, second}
 					return []model.ToolCall{
-						{ID: "duplicate", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__first","arguments":{}}`},
+						{ID: "duplicate", Name: mcp.CallToolName, Args: `{"tool_name":"docs__first","arguments":{}}`},
 						{ID: "duplicate", Name: secondName, Args: secondArgs},
 					}
 				default:
@@ -157,7 +158,7 @@ func TestMCPRoutingRejectsDuplicateCallIDsBeforeDispatch(t *testing.T) {
 				}
 			}}
 			local := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: invoke}
-			a, err := NewWithTools("chat", llm, []tool.Tool{tool.NewMCPCallTool(), local}, "")
+			a, err := NewWithTools("chat", llm, []tool.Tool{mcp.NewCallTool(), local}, "")
 			if err != nil {
 				t.Fatal(err)
 			}

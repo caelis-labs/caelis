@@ -112,6 +112,10 @@ func sendResultPartJSON(t *testing.T, req *model.Request) string {
 	if len(results) != 1 {
 		t.Fatalf("tool result parts = %#v", results)
 	}
+	content := results[0].ToolResult.Content
+	if len(content) != 1 || content[0].Kind != model.PartKindJSON || content[0].JSON == nil {
+		t.Fatalf("expected one structured tool result in model context, got %+v", content)
+	}
 	raw, err := json.Marshal(results[0])
 	if err != nil {
 		t.Fatal(err)

@@ -1169,14 +1169,15 @@ func TestRuntimeCommandToolReturnsUnknownTaskIDOnTripleFailure(t *testing.T) {
 	result, err := (runtimeCommandTool{base: base, session: activeSession, sessionRef: activeSession.SessionRef, tasks: runtime.tasks}).Call(
 		context.Background(), tool.Call{ID: "command-triple-failure", Name: "RunCommand", Input: raw},
 	)
-	if err != nil {
+	if !tool.HasFailedReply(err) {
 		t.Fatalf("Call() error = %v, want canonical error result", err)
 	}
-	if !result.IsError || len(result.Content) == 0 || result.Content[0].JSON == nil {
+	structured, ok := result.Structured()
+	if !ok {
 		t.Fatalf("Call() result = %#v, want JSON error payload", result)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatal(err)
 	}
 	if handle, _ := payload["handle"].(string); strings.TrimSpace(handle) == "" {

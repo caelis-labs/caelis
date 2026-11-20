@@ -141,6 +141,9 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !tools[0].Definition().MayCompleteTurn {
+		t.Fatal("application callbacks must be able to stop later calls in their batch")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	type returned struct {
@@ -148,8 +151,11 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 		err    error
 	}
 	done := make(chan returned, 1)
-	native := tool.Call{ID: "provider-id", Name: "WriteNote", Input: json.RawMessage(`{"note":"hello"}`), Execution: tool.InvocationContext{SessionID: b.SessionID, TurnID: "turn", ItemID: "step"}}
-	go func() { r, e := tools[0].Call(ctx, native); done <- returned{r, e} }()
+	native := tool.Call{ID: "provider-id", Name: "WriteNote", Input: json.RawMessage(`{"note":"hello"}`)}
+	go func() {
+		r, e := tools[0].(callbackTool).invoke(ctx, native, tool.InvocationContext{SessionID: b.SessionID, TurnID: "turn", ItemID: "step"})
+		done <- returned{r, e}
+	}()
 	calls, err := s.WaitCalls(ctx, c.Scope, b.SessionID)
 	if err != nil || len(calls) != 1 {
 		t.Fatalf("intent = %+v %v", calls, err)
@@ -169,7 +175,7 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 	}
 	select {
 	case outcome := <-done:
-		if outcome.err != nil || outcome.result.ID != native.ID || outcome.result.IsError {
+		if outcome.err != nil || outcome.result.ID != native.ID {
 			t.Fatalf("native result %+v %v", outcome.result, outcome.err)
 		}
 	case <-ctx.Done():
@@ -188,7 +194,6 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 	if id == call.ID {
 		t.Fatal("provider id reuse aliased prior effect")
 	}
-	native.Execution = tool.InvocationContext{}
 	native.Metadata = map[string]any{"session_id": b.SessionID, "turn_id": "forged", "item_id": "forged"}
 	_, err = tools[0].Call(ctx, native)
 	assertError(t, err, ErrUnauthorized)

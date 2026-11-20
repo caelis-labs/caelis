@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 type modelRequestAuthorityKey struct{}
@@ -17,7 +17,7 @@ type modelRequestAuthority struct {
 	epoch         string
 	admit         func(context.Context, agent.ModelRequestAdmission) error
 	validate      func(context.Context) (func(), error)
-	deferredTools tool.Source
+	deferredTools toolset.Source
 	resolveIdle   agent.ModelRequestResolver
 	// Runtime guards protect synchronous commits even without a parent guard.
 	// They cannot establish the embedding authority required for speculation.

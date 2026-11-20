@@ -24,9 +24,12 @@ type HookContext struct {
 	InvocationID          string
 	AttemptOrdinal        uint64
 	InputSource           session.ActorRef
-	Tool                  *tool.Call
-	ToolDefinition        *tool.Definition
-	ContextSource         ContextSource
+	// ToolExecution and ToolParent describe the occurrence without carrying its admission.
+	ToolExecution  tool.InvocationContext
+	ToolParent     *tool.ParentCall
+	Tool           *tool.Call
+	ToolDefinition *tool.Definition
+	ContextSource  ContextSource
 }
 
 // HookOutputSource identifies a candidate's origin without claiming provider

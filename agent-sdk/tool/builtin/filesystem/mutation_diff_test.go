@@ -136,7 +136,8 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 	if len(rawHunks) != 2 {
 		t.Fatalf("len(diff_hunks) = %d, want 2: %#v", len(rawHunks), rawHunks)
 	}
-	modelVisible := string(result.Content[0].JSON.Value)
+	structured, _ := result.Structured()
+	modelVisible := string(structured)
 	if strings.Contains(modelVisible, "diff_hunks") {
 		t.Fatalf("model-visible result leaked diff_hunks: %s", modelVisible)
 	}

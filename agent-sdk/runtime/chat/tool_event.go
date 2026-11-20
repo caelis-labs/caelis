@@ -12,30 +12,26 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
-func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
-	return toolEvent(call, result, message, "", extraMeta...)
+func toolResultEvent(call model.ToolCall, result tool.Result, err error, message *model.Message, extraMeta ...map[string]any) *session.Event {
+	return toolEvent(call, result, err, message, "", extraMeta...)
 }
 
 func toolProgressEvent(call model.ToolCall, result tool.Result, extraMeta ...map[string]any) *session.Event {
-	return toolEvent(call, result, nil, "in_progress", extraMeta...)
+	return toolEvent(call, result, nil, nil, "in_progress", extraMeta...)
 }
 
-func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
+func toolEvent(call model.ToolCall, result tool.Result, err error, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
 		Tool: toolEventPayload(call, "", mustObject(call.Args), nil, nil),
 	}
-	applyToolResultPresentation(event, call, result, message, statusOverride, extraMeta...)
-	if statusOverride == "" && !result.IsError {
+	applyToolResultPresentation(event, call, result, err, message, statusOverride, extraMeta...)
+	if statusOverride == "" && err == nil {
 		event.Tool.TurnComplete = result.TurnComplete
 	}
 	full, _ := tool.CloneResult(result, nil)
 	event.Tool.Result = &full
-	if result.IsError {
-		event.Tool.Outcome = "failed"
-	} else {
-		event.Tool.Outcome = "succeeded"
-	}
+	event.Tool.Outcome = processingOutcome(err)
 	if message != nil {
 		event.Message = message
 		event.Text = message.TextContent()
@@ -45,17 +41,20 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 
 // ApplyRuntimeToolResultPresentation applies the chat tool display fields to a
 // Runtime-authored tool event. Task authority comes from the bound target.
-func ApplyRuntimeToolResultPresentation(event *session.Event, result tool.Result, target tool.Tool) {
+func ApplyRuntimeToolResultPresentation(event *session.Event, result tool.Result, target tool.Tool, err error) {
 	call := model.ToolCall{ID: event.Tool.ID, Name: event.Tool.Name}
-	applyToolResultPresentation(event, call, result, event.Message, "", runtimeTaskResultSourceMeta(toolbinding.IsTaskResultSource(target)))
+	applyToolResultPresentation(event, call, result, err, event.Message, "", runtimeTaskResultSourceMeta(toolbinding.IsTaskResultSource(target)))
 }
 
-func applyToolResultPresentation(event *session.Event, call model.ToolCall, result tool.Result, message *model.Message, statusOverride string, extraMeta ...map[string]any) {
-	view, _ := canonicalToolResult(result, nil)
+func applyToolResultPresentation(event *session.Event, call model.ToolCall, result tool.Result, err error, message *model.Message, statusOverride string, extraMeta ...map[string]any) {
+	var parts []model.Part
 	if message != nil && len(message.ToolResults()) > 0 {
-		view.Content = message.ToolResults()[0].Content
+		parts = message.ToolResults()[0].Content
+	} else {
+		view, _ := canonicalToolResult(result, nil)
+		parts = tool.ModelParts(view.Content)
 	}
-	rawOutput := toolResultRawOutput(view)
+	rawOutput := toolResultRawOutput(parts, err != nil)
 	trustedTaskResult := runtimeTaskResultSourceDeclared(extraMeta)
 	resultMetadata := session.CloneState(result.Metadata)
 	resultMetadata = withoutUntrustedRuntimeTaskAuthority(resultMetadata, trustedTaskResult)
@@ -64,7 +63,7 @@ func applyToolResultPresentation(event *session.Event, call model.ToolCall, resu
 	metaParts = append(metaParts, toolMeta(call.Name), runtimeTaskResultSourceMeta(trustedTaskResult))
 	status := strings.TrimSpace(statusOverride)
 	if status == "" {
-		status = toolCallStatus(call, result, rawOutput, trustedTaskResult)
+		status = toolCallStatus(call, result, err, rawOutput, trustedTaskResult)
 	}
 	event.Tool.Status = status
 	event.Tool.Output = session.CloneState(rawOutput)
@@ -98,8 +97,8 @@ func withoutUntrustedRuntimeTaskAuthority(meta map[string]any, trusted bool) map
 	return meta
 }
 
-func toolResultRawOutput(result tool.Result) map[string]any {
-	for _, part := range result.Content {
+func toolResultRawOutput(parts []model.Part, isError bool) map[string]any {
+	for _, part := range parts {
 		if part.JSON == nil || len(part.JSON.Value) == 0 {
 			continue
 		}
@@ -112,8 +111,8 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 		}
 		return map[string]any{"result": decoded}
 	}
-	texts := make([]string, 0, len(result.Content))
-	for _, part := range result.Content {
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
 		if part.Text != nil {
 			texts = append(texts, part.Text.Text)
 		}
@@ -121,14 +120,14 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 	if len(texts) > 0 {
 		return map[string]any{"result": strings.Join(texts, "\n")}
 	}
-	if result.IsError {
+	if isError {
 		return map[string]any{"error": "tool call failed"}
 	}
 	return map[string]any{}
 }
 
-func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[string]any, trustedTaskResult bool) string {
-	if result.IsError {
+func toolCallStatus(call model.ToolCall, result tool.Result, err error, rawOutput map[string]any, trustedTaskResult bool) string {
+	if err != nil {
 		return "failed"
 	}
 	// A returned result completes the invocation. Only the RunCommand producer

@@ -9,7 +9,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // PolicyConsentWriter commits an explicitly selected persistent Policy rule
@@ -238,7 +237,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 	}
 }
 
-func (p *policyDispatchPermit) consume(ctx context.Context, target tool.Tool) error {
+func (p *policyDispatchPermit) consume(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.used {
@@ -264,20 +263,6 @@ func (p *policyDispatchPermit) consume(ctx context.Context, target tool.Tool) er
 			defer release()
 		}
 	}
-	// Source ownership is checked last: Session/configuration reads above may
-	// yield while the directory changes. Hold its existing owner guard only
-	// through consumption, never through persistence or the remote effect.
-	if source, ok := target.(interface {
-		AdmitSource(context.Context) (func(), error)
-	}); ok {
-		release, err := source.AdmitSource(ctx)
-		if err != nil {
-			return err
-		}
-		if release != nil {
-			defer release()
-		}
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -285,10 +270,10 @@ func (p *policyDispatchPermit) consume(ctx context.Context, target tool.Tool) er
 	return nil
 }
 
-func consumePolicyDispatch(ctx context.Context, target tool.Tool) error {
+func consumePolicyDispatch(ctx context.Context) error {
 	permit, _ := ctx.Value(policyDispatchKey{}).(*policyDispatchPermit)
 	if permit == nil {
 		return nil
 	}
-	return permit.consume(ctx, target)
+	return permit.consume(ctx)
 }

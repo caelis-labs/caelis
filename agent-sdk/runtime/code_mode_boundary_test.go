@@ -57,7 +57,7 @@ func TestCodeModeRepeatedProviderIDsKeepDistinctChildReceipts(t *testing.T) {
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
-		return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("ok")}}, nil
 	}}
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 		_, err := host.Call(ctx, "Read", []byte(`{}`))
@@ -91,7 +91,7 @@ func TestCodeModeTurnCompleteCannotBeSuppressedByExecutor(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	var effects atomic.Int32
 	stop := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{TurnComplete: true, Content: []model.Part{model.NewTextPart("complete")}}, nil
+		return tool.Result{TurnComplete: true, Content: []tool.ContentBlock{tool.Text("complete")}}, nil
 	}}
 	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
@@ -130,12 +130,12 @@ func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
 	unblock := sync.OnceFunc(func() { close(release) })
 	defer unblock()
 	var effects atomic.Int32
-	target := tool.NamedTool{Def: tool.Definition{Name: "Read", Capabilities: tool.Capabilities{ParallelSafe: true}, InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+	target := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
 		effects.Add(1)
 		started <- struct{}{}
 		select {
 		case <-release:
-			return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.Text("ok")}}, nil
 		case <-ctx.Done():
 			return tool.Result{}, ctx.Err()
 		}
@@ -180,10 +180,10 @@ func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
 func TestCodeModeBoundaryReplyBudgets(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	large := tool.NamedTool{Def: tool.Definition{Name: "Large", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{Content: []model.Part{model.NewTextPart(strings.Repeat("x", 1024))}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text(strings.Repeat("x", 1024))}}, nil
 	}}
 	mixed := tool.NamedTool{Def: tool.Definition{Name: "Mixed", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{Content: []model.Part{{Kind: model.PartKindJSON, JSON: &model.JSONPart{Value: []byte(`{}`)}, Text: &model.TextPart{Text: strings.Repeat("x", 1024)}}}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{}`)}, tool.Text("small")}}, nil
 	}}
 	var checked atomic.Bool
 	declaration := &codemode.Tool{Name: "js_repl", Limits: codemode.Limits{ReplyBytes: 2048}, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
@@ -192,7 +192,7 @@ func TestCodeModeBoundaryReplyBudgets(t *testing.T) {
 			return nil, errors.New("oversized result crossed script transfer boundary")
 		}
 		reply, err = host.Call(ctx, "Mixed", []byte(`{}`))
-		if err != nil || len(reply.Parts) != 1 || len(reply.Parts[0].Text) != 0 || string(reply.Parts[0].JSON) != `{}` {
+		if err != nil || len(reply.Parts) != 2 || reply.Parts[1].Text != "small" || string(reply.Parts[0].JSON) != `{}` {
 			return nil, errors.New("part projection and budget used different discriminants")
 		}
 		checked.Store(true)

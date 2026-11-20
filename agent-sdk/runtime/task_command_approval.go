@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -29,7 +30,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 	if !ok || runtime == nil {
 		return tool.Result{}, errors.New("command sandbox is unavailable")
 	}
-	req, err := t.commandRequest(call, runtime)
+	req, err := t.commandRequest(ctx, call, runtime)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -60,7 +61,8 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 	if err != nil {
 		release()
 		if task != nil {
-			return taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now())), err
+			result, _ := taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now()))
+			return result, err
 		}
 		return tool.Result{}, err
 	}
@@ -83,7 +85,8 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		defer cancel()
 		persistErr := t.tasks.finishUnstartedCommandClaimed(cleanup, task, state, code, err.Error())
 		release()
-		return taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now())), persistErr
+		result, resultErr := taskSnapshotToolResult(call, t.Definition(), task.snapshotWithoutSession(time.Now()))
+		return result, errors.Join(persistErr, resultErr)
 	}
 	task.mu.Lock()
 	task.continuation = work
@@ -94,10 +97,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 	if req.Observer != nil {
 		req.Observer.ObserveTaskSnapshot(task.snapshotWithoutSession(time.Now()))
 	}
-	// Only the Task output binding survives the invocation. A returned call's
-	// progress observer must not receive the continuation's final tool result.
 	call = tool.CloneCall(call)
-	call.Observer = nil
 	go func() {
 		err := t.runApprovalContinuation(task, work, call, approval, execute)
 		scope.complete(taskID, work, err)
@@ -172,7 +172,8 @@ func validateApprovedCommandTarget(ctx context.Context, validate func(context.Co
 
 func (t runtimeCommandTool) observeSubmittedCommand(ctx context.Context, call tool.Call, task *commandTask, deadline time.Time) (tool.Result, error) {
 	snapshot, err := t.tasks.waitCommandTask(ctx, t.sessionRef, task, taskapi.ControlRequest{Yield: max(time.Until(deadline), 0)})
-	return taskSnapshotToolResult(call, t.Definition(), snapshot), err
+	result, resultErr := taskSnapshotToolResult(call, t.Definition(), snapshot)
+	return result, errors.Join(err, resultErr)
 }
 
 func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *taskContinuation, call tool.Call, approval taskApproval, execute approvedToolCall) error {
@@ -205,7 +206,8 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 	case !response.Approved:
 		code, reason = "approval_denied", firstNonEmpty(strings.TrimSpace(response.Reason), "approval was denied")
 	default:
-		permitCtx := context.WithValue(work.ctx, taskStartPermitKey{}, taskStartPermit{taskID: task.ref.TaskID, work: work})
+		permitCtx := toolbinding.WithOccurrence(work.ctx, request.Execution, request.Parent, nil)
+		permitCtx = context.WithValue(permitCtx, taskStartPermitKey{}, taskStartPermit{taskID: task.ref.TaskID, work: work})
 		if approval.admission != nil {
 			permitCtx = context.WithValue(permitCtx, codeModeAdmissionKey{}, approval.admission)
 		}
@@ -217,15 +219,18 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 			permitCtx, cancel = context.WithDeadline(permitCtx, deadline)
 			defer cancel()
 		}
-		result, executeErr := execute(permitCtx, call)
-		if executeErr == nil && !result.IsError {
+		// The continuation reports through Task output, not invocation progress.
+		_, executeErr := execute(toolbinding.WithProgress(permitCtx, nil), call)
+		if executeErr == nil {
 			return nil
 		}
 		// A failed admission/claim before Start still has a durable pending intent.
 		// Once claimed, the existing command owner retains its actual outcome.
 		executionFailure = executeErr
 		reason, code = firstNonEmpty(errorText(executeErr), "command could not start"), "command_start_failed"
-		if isCommandToolError(executeErr) {
+		if tool.HasFailedReply(executeErr) {
+			executionFailure = nil
+		} else if isCommandToolError(executeErr) {
 			executionFailure = nil
 			code = string(errorcode.CodeOf(executeErr))
 		}

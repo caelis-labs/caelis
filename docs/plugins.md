@@ -171,10 +171,9 @@ actual selected catalog before choosing an operation.
 `app` argument and share one Session approval for that APP and the complete
 atomic operation set. Reads may start or activate the application, so approval
 also covers reads. The product supports Session and Cancel for this scope;
-Once, Always, a remembered ordinary MCP rule, and remote metadata cannot widen
-it. Changing APP, Session incarnation, launch/source revision or capability
-catalog requires approval again. Concurrent same-APP operations can share the
-pure APP approval; new per-call Policy restrictions still apply.
+This approval covers the exact app, Session incarnation, configured plugin and
+server names, and Policy revision. Concurrent operations on the same app can
+share approval. Per-call Policy restrictions still apply.
 
 The existing package selection chooses the effective version before atomic
 launch assembly. Host-level older overrides lose to a newer embedded release.
@@ -187,24 +186,12 @@ Consecutive DTW calls share a compact `Using Computer` group, with each call
 initially collapsed inside it. Reasoning stays available when the group expands;
 ordinary messages, other tools and reviewed calls keep their separate rows.
 
-An operation supplies only `exec({app, source})`: a stable platform app ID and a
-script for that app. Caelis asks to allow that app for the current Session on
-its first use. Later scripts for the same app reuse that approval; another app
-or another Session requires approval again. Missing, empty, or non-string app
-arguments are rejected before dispatch. Concurrent first calls for the same
-app share the pending approval. Cancelling or denying it does not execute the
-pending scripts. Grants remain bound to the accepted plugin/tool source, so a
-changed source or schema also requires approval again. There is no permanent
-or whole-plugin desktop grant.
-
-For the configured `desktop-world` 0.3 app contract, `apps` skips the ordinary
-MCP source prompt. Explicitly selected released 0.2 packages retain their own
-`apps`, `api`, and `result` source-read rules; pre-0.2 packages use ordinary MCP
-approval. Other tools retain ordinary MCP source approval.
-Neither `dtw` nor `desktop_world` is a plugin-ID alias. A server name alone
-does not inherit these rules. Explicit per-call policy Ask/Deny
-and OS permissions still apply. Caelis owns approval; DTW receives the same
-standard MCP arguments and remains usable with other Agents.
+Control applies the app policy to the configured plugin ID `desktop-world`
+with either server name `dtw` or `desktop-world`. `apps` uses the ordinary
+per-call Policy decision. Other calls to an allowlisted server must use an
+atomic operation and supply an exact application ID. Other MCP integrations
+use ordinary MCP approval. DTW receives standard MCP arguments and OS
+permissions still apply.
 
 Source/schema changes retain the discovery and authorization rules in
 [MCP tools](mcp-tool-lifecycle.md#discovery-and-invocation). A service or Skill

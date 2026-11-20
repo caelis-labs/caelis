@@ -35,12 +35,12 @@ func TestSDKHooksToolArgumentsFullResultAndModelView(t *testing.T) {
 		t.Fatal(err)
 	}
 	var effects, prepares atomic.Int64
-	probe := tool.NamedTool{Def: tool.Definition{Name: "lookup", EffectClass: tool.EffectReadOnly, InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
+	probe := tool.NamedTool{Def: tool.Definition{Name: "lookup", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		effects.Add(1)
 		if string(c.Input) != "{\"app\":\"B\"}" {
 			t.Error("dispatch did not consume final arguments")
 		}
-		return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("original business")}}, nil
+		return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("original business")}}, nil
 	}}
 	hooks := agent.Hooks{
 		ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "cache-tool-proposal", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
@@ -54,7 +54,7 @@ func TestSDKHooksToolArgumentsFullResultAndModelView(t *testing.T) {
 			return p, nil
 		}}},
 		ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "business", Apply: func(_ context.Context, _ agent.HookContext, o agent.ToolOutcome) (tool.Result, error) {
-			o.Result.Content = []model.Part{model.NewTextPart("full accepted business")}
+			o.Result.Content = []tool.ContentBlock{tool.Text("full accepted business")}
 			return o.Result, nil
 		}}},
 		ModelView: []agent.Hook[model.Message, model.Message]{{Name: "summary", Apply: func(_ context.Context, _ agent.HookContext, m model.Message) (model.Message, error) {
@@ -83,7 +83,8 @@ func TestSDKHooksToolArgumentsFullResultAndModelView(t *testing.T) {
 		t.Fatalf("facts=%v err=%v", pairs, err)
 	}
 	p := pairs[0]
-	if effects.Load() != 1 || driver.calls.Load() != 1 || p.Call.Tool.Input["app"] != "B" || p.Call.Tool.ProposedCall == nil || p.Call.Tool.ProposedCall.Args != "{\"app\":\"A\"}" || p.Result.Tool.Result.Content[0].Text.Text != "full accepted business" || p.Result.Message.ToolResults()[0].Content[0].Text.Text != "model summary" {
+	accepted := p.Result.Tool.Result.Content
+	if effects.Load() != 1 || driver.calls.Load() != 1 || p.Call.Tool.Input["app"] != "B" || p.Call.Tool.ProposedCall == nil || p.Call.Tool.ProposedCall.Args != "{\"app\":\"A\"}" || len(accepted) != 1 || accepted[0] != tool.Text("full accepted business") || p.Result.Message.ToolResults()[0].Content[0].Text.Text != "model summary" {
 		t.Fatal("full result and model projection did not share the effective fact")
 	}
 }

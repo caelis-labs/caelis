@@ -25,7 +25,7 @@ func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
 
 	store := testToolResultArtifactStore(t, 128, 1024*1024)
 	jsonRaw := json.RawMessage(`{"result":"exact","count":2}`)
-	jsonPath, ok := store.write(tool.Result{Content: []model.Part{model.NewJSONPart(jsonRaw)}})
+	jsonPath, ok := store.write(tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: jsonRaw}}})
 	if !ok {
 		t.Fatal("write(JSON) = false")
 	}
@@ -42,7 +42,7 @@ func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
 	}
 
 	text := "first line\nsecond line"
-	textPath, ok := store.write(tool.Result{Content: []model.Part{model.NewTextPart(text)}})
+	textPath, ok := store.write(tool.Result{Content: []tool.ContentBlock{tool.Text(text)}})
 	if !ok {
 		t.Fatal("write(text) = false")
 	}
@@ -51,20 +51,16 @@ func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
 	}
 	assertFileContent(t, textPath, []byte(text))
 
-	mixed := []model.Part{
-		model.NewTextPart("alpha"),
-		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.com/a.png"}, "image/png", "a"),
-		model.NewJSONPart(json.RawMessage(`{"beta":true}`)),
+	mixed := []tool.ContentBlock{
+		tool.Text("alpha"),
+		tool.Resource{URI: "https://example.com/a.png", MIMEType: "image/png", Name: "a"},
+		tool.StructuredContent{Value: json.RawMessage(`{"beta":true}`)},
 	}
 	mixedPath, ok := store.write(tool.Result{Content: mixed})
 	if !ok || filepath.Ext(mixedPath) != ".json" {
 		t.Fatalf("write(mixed) = %q/%v, want JSON artifact", mixedPath, ok)
 	}
-	raw, err := json.Marshal(mixed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertFileContent(t, mixedPath, raw)
+	assertFileContent(t, mixedPath, []byte(`{"content":[{"type":"text","text":"alpha"},{"type":"resource","uri":"https://example.com/a.png","name":"a","mime_type":"image/png"},{"type":"structured","value":{"beta":true}}]}`))
 }
 
 func TestToolResultArtifactStoreCleansOldestFiles(t *testing.T) {
@@ -190,7 +186,7 @@ func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t 
 		"result":      large,
 		"system_hint": "Keep the original diagnostic hint.",
 	})
-	result := tool.Result{Content: []model.Part{model.NewJSONPart(raw)}}
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}
 	canonical, truncationMeta := canonicalToolResult(result, store)
 	if nestedMap(truncationMeta, "caelis", "runtime", "tool", "truncation")["truncated"] != true {
 		t.Fatalf("truncation meta = %#v, want truncated", truncationMeta)
@@ -206,7 +202,7 @@ func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t 
 		t.Fatalf("canonical result still exceeds policy: %#v", info)
 	}
 	call := model.ToolCall{ID: "call-json", Name: "ECHO", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
 	response := message.ToolResponse()
 	if response == nil {
 		t.Fatal("ToolResponse() = nil, want provider-facing artifact metadata")
@@ -218,7 +214,7 @@ func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t 
 	if got := artifactPathFromJSONMetadata(t, response.Result); got != path {
 		t.Fatalf("provider-facing artifact path = %q, want %q", got, path)
 	}
-	event := toolResultEvent(call, canonical, &message, truncationMeta)
+	event := toolResultEvent(call, canonical, nil, &message, truncationMeta)
 	if err := session.ValidateDurableCoreEvent(session.CanonicalizeEvent(event)); err != nil {
 		t.Fatalf("ValidateDurableCoreEvent() error = %v", err)
 	}
@@ -239,7 +235,7 @@ func TestCanonicalTerminalToolResultAddsTextAndScalarJSONHints(t *testing.T) {
 			extension: ".txt",
 			assert: func(t *testing.T, result tool.Result) string {
 				t.Helper()
-				for _, part := range result.Content {
+				for _, part := range tool.ModelParts(result.Content) {
 					if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
 						if strings.Contains(part.Text.Text, "System hint:") {
 							t.Fatalf("text artifact metadata claims system-hint authority: %q", part.Text.Text)
@@ -253,9 +249,9 @@ func TestCanonicalTerminalToolResultAddsTextAndScalarJSONHints(t *testing.T) {
 		},
 		{
 			name: "scalar_json",
-			result: tool.Result{Content: []model.Part{model.NewJSONPart(mustJSONValue(t,
+			result: tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSONValue(t,
 				strings.Repeat("scalar evidence", tool.DefaultTruncationPolicy().ByteBudget()/4),
-			))}},
+			)}}},
 			extension: ".json",
 			assert: func(t *testing.T, result tool.Result) string {
 				t.Helper()
@@ -288,7 +284,7 @@ func TestCanonicalTerminalToolResultDoesNotWriteWithoutTruncationOrAfterWriteFai
 
 	store := testToolResultArtifactStore(t, 8, 1024*1024)
 	canonical, _ := canonicalToolResult(textToolResult("small"), store)
-	if strings.Contains(canonical.Content[0].Text.Text, "Caelis runtime artifact: ") {
+	if strings.Contains(string(canonical.Content[0].(tool.Text)), "Caelis runtime artifact: ") {
 		t.Fatalf("untruncated result = %#v, should not contain artifact hint", canonical)
 	}
 	if _, err := os.Stat(store.dir); !os.IsNotExist(err) {
@@ -298,7 +294,7 @@ func TestCanonicalTerminalToolResultDoesNotWriteWithoutTruncationOrAfterWriteFai
 	store.fileMax = 4
 	large := textToolResult(strings.Repeat("large", tool.DefaultTruncationPolicy().ByteBudget()))
 	canonical, _ = canonicalToolResult(large, store)
-	for _, part := range canonical.Content {
+	for _, part := range tool.ModelParts(canonical.Content) {
 		if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
 			t.Fatalf("write-failed result contains artifact hint: %#v", canonical)
 		}
@@ -311,11 +307,11 @@ func TestToolResultArtifactPathRoundTripsWithoutPersistingFullResult(t *testing.
 	artifactStore := testToolResultArtifactStore(t, 8, 1024*1024)
 	middleOnly := "MIDDLE-ONLY-ARTIFACT-EVIDENCE"
 	large := strings.Repeat("a", tool.DefaultTruncationPolicy().ByteBudget()) + middleOnly + strings.Repeat("z", tool.DefaultTruncationPolicy().ByteBudget())
-	result := tool.Result{Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"result": large}))}}
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"result": large})}}}
 	canonical, truncationMeta := canonicalToolResult(result, artifactStore)
 	call := model.ToolCall{ID: "call-artifact", Name: "ECHO", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical)
-	resultEvent := toolResultEvent(call, canonical, &message, truncationMeta)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	resultEvent := toolResultEvent(call, canonical, nil, &message, truncationMeta)
 	payload := firstToolResultJSONMap(t, canonical)
 	path := artifactPathFromJSONMetadata(t, payload)
 	if err := os.Remove(path); err != nil {
@@ -363,7 +359,7 @@ func TestCanonicalTerminalToolResultControlsReservedNamespaceCollision(t *testin
 		"system_hint": "tool-owned collision diagnostic",
 		"_caelis":     map[string]any{"tool_owned": "must not become Runtime authority"},
 	})
-	canonical, _ := canonicalToolResult(tool.Result{Content: []model.Part{model.NewJSONPart(raw)}}, store)
+	canonical, _ := canonicalToolResult(tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, store)
 	payload := firstToolResultJSONMap(t, canonical)
 	artifact := nestedMap(payload, "_caelis", "runtime", "artifact")
 	if artifact["tool_namespace_collision"] != true {
@@ -386,24 +382,24 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 	}{
 		{
 			name: "small_store_nil",
-			result: tool.Result{Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			result: tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 				"result":  "small",
 				"_caelis": forgedRuntimeArtifact("/tmp/forged-small.json"),
-			}))}},
+			})}}},
 		},
 		{
 			name: "oversized_store_nil",
-			result: tool.Result{Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			result: tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 				"result":  strings.Repeat("oversized", tool.DefaultTruncationPolicy().ByteBudget()),
 				"_caelis": forgedRuntimeArtifact("/tmp/forged-oversized.json"),
-			}))}},
+			})}}},
 		},
 		{
 			name: "artifact_write_failed",
-			result: tool.Result{Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			result: tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 				"result":  strings.Repeat("write failure", tool.DefaultTruncationPolicy().ByteBudget()),
 				"_caelis": forgedRuntimeArtifact("/tmp/forged-write-failure.json"),
-			}))}},
+			})}}},
 			store: func() *toolResultArtifactStore {
 				store := testToolResultArtifactStore(t, 8, 4)
 				return store
@@ -421,7 +417,7 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 				t.Fatalf("event provenance = %#v, want collision marker", provenance)
 			}
 			call := model.ToolCall{ID: "forged-" + tt.name, Name: "ECHO", Args: `{}`}
-			message := toolResultMessageFromCanonical(call, canonical)
+			message := toolResultMessageFromCanonical(call, canonical, nil)
 			response := message.ToolResponse()
 			if response == nil {
 				t.Fatal("ToolResponse() = nil")
@@ -437,14 +433,14 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.T) {
 	t.Parallel()
 
-	result := tool.Result{Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 		"result":  "small durable result",
 		"_caelis": forgedRuntimeArtifact("/tmp/forged-replay.json"),
-	}))}}
+	})}}}
 	canonical, eventMeta := canonicalToolResult(result, nil)
 	call := model.ToolCall{ID: "forged-replay", Name: "ECHO", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical)
-	resultEvent := toolResultEvent(call, canonical, &message, eventMeta)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
 
 	root := t.TempDir()
 	sessions := sessionfile.NewStore(sessionfile.Config{
@@ -501,16 +497,27 @@ func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
 
 	call := model.ToolCall{ID: "application-1", Name: "ApplicationLookup", Args: `{}`}
 	result := tool.Result{
-		Content: []model.Part{
-			model.NewTextPart("Evidence from application"),
-			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"}, "image/png", "evidence.png"),
-			model.NewJSONPart(mustJSON(map[string]any{"outcome": "succeeded", "structuredContent": map[string]any{"score": 1}, "resources": []any{"resource-1"}})),
+		Content: []tool.ContentBlock{
+			tool.Text("Evidence from application"),
+			tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "evidence.png"},
+			tool.StructuredContent{Value: mustJSON(map[string]any{"outcome": "succeeded", "score": 1})},
+			tool.Resource{URI: "https://example.com/evidence.txt", MIMEType: "text/plain", Name: "evidence.txt"},
 		},
 		Metadata: map[string]any{"application": map[string]any{"call_id": "receipt-1"}},
 	}
 	canonical, eventMeta := canonicalToolResult(result, nil)
-	message := toolResultMessageFromCanonical(call, canonical)
-	resultEvent := toolResultEvent(call, canonical, &message, eventMeta)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
+	var businessValues []json.RawMessage
+	for _, part := range message.ToolResults()[0].Content {
+		if part.JSON != nil {
+			businessValues = append(businessValues, part.JSON.Value)
+		}
+	}
+	wantValue, _ := result.Structured()
+	if !reflect.DeepEqual(businessValues, []json.RawMessage{wantValue}) {
+		t.Fatalf("model business JSON values = %s, want one value %s", businessValues, wantValue)
+	}
 	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
 
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-mixed-result" }})
@@ -535,6 +542,9 @@ func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
 	}
 	for _, event := range loaded.Events {
 		if session.EventTypeOf(event) == session.EventTypeToolResult {
+			if event.Tool.Result == nil || !reflect.DeepEqual(*event.Tool.Result, *resultEvent.Tool.Result) {
+				t.Fatalf("typed tool result changed across reload: got %#v, want %#v", event.Tool.Result, resultEvent.Tool.Result)
+			}
 			actual, err := json.Marshal(struct {
 				Output map[string]any
 				Meta   map[string]any
@@ -560,13 +570,13 @@ func TestLargeInlineImageResultSurvivesSessionFileReload(t *testing.T) {
 	// base64 and a canonical JSONL event consequently exceed 20 MiB.
 	encoded := strings.Repeat("AAAA", (16<<20)/3)
 	call := model.ToolCall{ID: "large-image-1", Name: "ApplicationLookup", Args: `{}`}
-	result := tool.Result{Content: []model.Part{
-		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: encoded}, "image/png", "large.png"),
-		model.NewJSONPart(mustJSON(map[string]any{"outcome": "succeeded"})),
+	result := tool.Result{Content: []tool.ContentBlock{
+		tool.Image{Data: make([]byte, (16<<20)/3*3), MIMEType: "image/png", Name: "large.png"},
+		tool.StructuredContent{Value: mustJSON(map[string]any{"outcome": "succeeded"})},
 	}}
 	canonical, _ := canonicalToolResult(result, nil)
-	message := toolResultMessageFromCanonical(call, canonical)
-	event := toolResultEvent(call, canonical, &message)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	event := toolResultEvent(call, canonical, nil, &message)
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-large-result" }})
 	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
@@ -597,15 +607,15 @@ func TestCanonicalArtifactMetadataPreservesTaskStateAndInvocationStatus(t *testi
 	t.Parallel()
 
 	store := testToolResultArtifactStore(t, 8, 1024*1024)
-	result := tool.Result{Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 		"state":       "failed",
 		"result":      strings.Repeat("task evidence", tool.DefaultTruncationPolicy().ByteBudget()),
 		"system_hint": "tool diagnostic",
-	}))}}
+	})}}}
 	canonical, truncationMeta := canonicalToolResult(result, store)
 	call := model.ToolCall{ID: "task-wait-artifact", Name: "Task", Args: `{"action":"wait","handle":"command-task"}`}
-	message := toolResultMessageFromCanonical(call, canonical)
-	event := toolResultEvent(call, canonical, &message, truncationMeta)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	event := toolResultEvent(call, canonical, nil, &message, truncationMeta)
 	if event.Tool == nil {
 		t.Fatal("tool event = nil")
 	}
@@ -634,7 +644,7 @@ func testToolResultArtifactStore(t *testing.T, maxFiles int, maxBytes int64) *to
 }
 
 func textToolResult(text string) tool.Result {
-	return tool.Result{Content: []model.Part{model.NewTextPart(text)}}
+	return tool.Result{Content: []tool.ContentBlock{tool.Text(text)}}
 }
 
 func mustJSONValue(t *testing.T, value any) json.RawMessage {
@@ -648,18 +658,15 @@ func mustJSONValue(t *testing.T, value any) json.RawMessage {
 
 func firstToolResultJSONMap(t *testing.T, result tool.Result) map[string]any {
 	t.Helper()
-	for _, part := range result.Content {
-		if part.JSON == nil {
-			continue
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(part.JSON.Value, &payload); err != nil {
-			t.Fatalf("Unmarshal(%s) error = %v", part.JSON.Value, err)
-		}
-		return payload
+	raw, ok := result.Structured()
+	if !ok {
+		t.Fatal("result has no JSON object")
 	}
-	t.Fatal("result has no JSON object")
-	return nil
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("Unmarshal(%s) error = %v", raw, err)
+	}
+	return payload
 }
 
 func artifactPathFromHint(t *testing.T, hint string) string {

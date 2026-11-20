@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // EventValidationError reports a canonical session event that cannot be used to
@@ -300,7 +301,7 @@ func validateRoutedModelCall(payload *EventTool) error {
 	}
 	original := payload.ModelCall
 	actual, err := tool.ParseMCPCall(*original)
-	if original.Name != tool.MCPCallToolName || err != nil || actual.ID != payload.ID || actual.Name != payload.Name {
+	if original.Name != mcp.CallToolName || err != nil || actual.ID != payload.ID || actual.Name != payload.Name {
 		return coreEventValidationError("invalid routed model tool call")
 	}
 	input := mustInputObject(actual.Args)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 const MetadataKey = "caelis.mcp.discovery.v1"
@@ -36,21 +37,19 @@ func FromEvents(events []*session.Event) map[string]tool.Binding {
 // Apply accepts only new-format successful canonical discovery receipts.
 // Old name-only results and Exposure Active/Pending never grant call eligibility.
 func Apply(out map[string]tool.Binding, event *session.Event) {
-	if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName && event.Tool.Result != nil && event.Tool.Outcome == session.ToolOutcomeSucceeded && (session.IsMainInvocationVisibleEvent(event) || event.Tool.Parent != nil && event.Tool.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool") {
+	if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == mcp.SearchToolName && event.Tool.Result != nil && event.Tool.Outcome == session.ToolOutcomeSucceeded && (session.IsMainInvocationVisibleEvent(event) || event.Tool.Parent != nil && event.Tool.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool") {
 		result := event.Tool.Result
-		if !result.IsError && result.Metadata[MetadataKey] == true {
-			for _, part := range result.Content {
-				if part.JSON != nil {
-					var raw map[string]any
-					if json.Unmarshal(part.JSON.Value, &raw) == nil {
-						applyEntries(out, tool.ParseToolSearchOutput(raw))
-					}
+		if result.Metadata[MetadataKey] == true {
+			if value, ok := result.Structured(); ok {
+				var raw map[string]any
+				if json.Unmarshal(value, &raw) == nil {
+					applyEntries(out, mcp.ParseToolSearchOutput(raw))
 				}
 			}
 		}
 		return
 	}
-	if event == nil || !session.IsCanonicalHistoryEvent(event) || event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != tool.ToolSearchToolName || event.Tool.Status != "completed" {
+	if event == nil || !session.IsCanonicalHistoryEvent(event) || event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != mcp.SearchToolName || event.Tool.Status != "completed" {
 		return
 	}
 	admitted, ok := event.Meta[MetadataKey].(bool)
@@ -59,10 +58,10 @@ func Apply(out map[string]tool.Binding, event *session.Event) {
 	}
 	// The receipt's canonical output owns the binding. The metadata marker
 	// distinguishes this admitted format without storing another binding list.
-	applyEntries(out, tool.ParseToolSearchOutput(event.Tool.Output))
+	applyEntries(out, mcp.ParseToolSearchOutput(event.Tool.Output))
 }
 
-func applyEntries(out map[string]tool.Binding, selected tool.ToolSearchResult) {
+func applyEntries(out map[string]tool.Binding, selected mcp.ToolSearchResult) {
 	for _, entry := range selected.Tools {
 		b := entry.Binding
 		if b != nil && entry.Name == b.Name && entry.InputSchema != nil && b.Name != "" && b.Identity != "" && b.Version != "" {

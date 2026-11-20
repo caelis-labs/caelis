@@ -16,7 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-func TestJSExecParallelSafeSameTargetCallsOverlap(t *testing.T) {
+func TestJSExecSameTargetCallsOverlapByDefault(t *testing.T) {
 	testJSExecConcurrentTargets(t, true)
 }
 
@@ -38,14 +38,13 @@ func testJSExecConcurrentTargets(t *testing.T, sameTarget bool) {
 				def = fixtureMCPDefinition("parallel-default")
 				def.Name = "z__target"
 			}
-			def.Capabilities.ParallelSafe = sameTarget
 			target := tool.NamedTool{Def: def, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
 				effects.Add(1)
 				started <- struct{}{}
 				select {
 				case <-release:
 					completed.Add(1)
-					return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.Text("ok")}}, nil
 				case <-ctx.Done():
 					return tool.Result{}, ctx.Err()
 				}

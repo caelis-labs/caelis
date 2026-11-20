@@ -66,7 +66,7 @@ func TestHooksContextEditSurvivesToolRound(t *testing.T) {
 					}}}
 				}
 				target := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
-					return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("read once")}}, nil
+					return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("read once")}}, nil
 				}}
 				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hooks})
 				if err != nil {
@@ -216,7 +216,7 @@ func TestHooksInvokePostFailureDoesNotPersistRaw(t *testing.T) {
 			var effects atomic.Int64
 			probe := tool.NamedTool{Def: tool.Definition{Name: "ReadSecret"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 				effects.Add(1)
-				return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("SECRET-RAW-RESULT")}}, nil
+				return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("SECRET-RAW-RESULT")}}, nil
 			}}
 			h := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "redaction", Invoke: func(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
 				r, err := next(ctx)
@@ -405,7 +405,7 @@ func TestHooksConcurrentNextAndResultReadback(t *testing.T) {
 	var retained agent.ToolNext
 	target := tool.NamedTool{Def: tool.Definition{Name: "WriteOnce"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		effects.Add(1)
-		return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("known result")}}, nil
+		return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("known result")}}, nil
 	}}
 	h := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "concurrent", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
 		retained = next
@@ -519,7 +519,7 @@ func TestHooksContextEditRecoveryUsesCurrentProjection(t *testing.T) {
 				}
 			}}
 			target := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
-				return tool.Result{ID: c.ID, Name: c.Name, Content: []model.Part{model.NewTextPart("read")}}, nil
+				return tool.Result{ID: c.ID, Name: c.Name, Content: []tool.ContentBlock{tool.Text("read")}}, nil
 			}}
 			compactor := &hookBudgetCompactor{}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: h, Compactor: compactor, Compaction: CompactionConfig{Enabled: true}})

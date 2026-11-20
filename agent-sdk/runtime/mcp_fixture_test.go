@@ -13,7 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type mcpScriptModel struct {
@@ -49,7 +49,7 @@ func mcpFixturePolicy() policy.Registry {
 // dispatch/approval behavior without relying on a removed MCP source gate.
 func mcpAskFixturePolicy() policy.Registry {
 	return staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-		if !tool.IsMCPDefinition(input.Tool) {
+		if !mcp.IsDefinition(input.Tool) {
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
 		decision, err := presets.MCPApprovalDecision(input, sandbox.Constraints{})
@@ -57,7 +57,7 @@ func mcpAskFixturePolicy() policy.Registry {
 			return policy.Decision{}, err
 		}
 		decision.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}}
-		binding := tool.BindingForDefinition(input.Tool)
+		binding := mcp.BindingForDefinition(input.Tool)
 		raw, err := json.Marshal(input.Call)
 		if err != nil {
 			return policy.Decision{}, err

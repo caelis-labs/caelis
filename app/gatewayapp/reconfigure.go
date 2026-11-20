@@ -390,13 +390,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{
-		Sandbox: sandboxRuntime,
-	})
-	if err != nil {
-		bundle.Close()
-		return nil, err
-	}
 
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
@@ -512,7 +505,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		TurnStartGate:        s.authorities.approvalRecovery,
 		Control:              sessionControl,
 		Resolver:             resolver,
-		ExecutionValidator:   executionValidator,
+		ExecutionValidator:   controlplane.ExecutionValidator{},
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
 		ApprovalApprover:     guardianApprover,
 		SubmissionReferences: s.submissionReferenceProjector(),

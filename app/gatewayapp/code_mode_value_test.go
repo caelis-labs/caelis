@@ -30,6 +30,7 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -244,10 +245,10 @@ func valuePolicy(workspace string, task valueTask) (*policy.MemoryRegistry, erro
 		if in.Tool.Name == "Patch" {
 			return deny("both routes use Write for the single report; patch paths are not separately authorized")
 		}
-		if requirements := in.Tool.ExecutionRequirements; requirements != nil && requirements.Sandbox.CommandExec {
+		if in.Tool.Name == shell.RunCommandToolName {
 			return deny("frozen task forbids native process identity")
 		}
-		if tool.IsMCPDefinition(in.Tool) {
+		if mcp.IsDefinition(in.Tool) {
 			allowed := false
 			for _, name := range task.Selected {
 				allowed = allowed || name == in.Tool.Name

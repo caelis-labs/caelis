@@ -67,23 +67,6 @@ func TestDefinitionDescribesBoundedCollaboration(t *testing.T) {
 	}
 }
 
-func TestDefinitionExposesOpenWorldAnnotations(t *testing.T) {
-	t.Parallel()
-
-	def := New([]delegation.Agent{{Name: "codex"}}).Definition()
-	annotations, _ := def.Metadata["annotations"].(map[string]any)
-	for key, want := range map[string]bool{
-		"readOnlyHint":    false,
-		"destructiveHint": true,
-		"idempotentHint":  false,
-		"openWorldHint":   true,
-	} {
-		if got := annotations[key]; got != want {
-			t.Fatalf("annotation %s = %#v, want %v; metadata=%#v", key, got, want, def.Metadata)
-		}
-	}
-}
-
 func TestCallRejectsEmptyHandleBeforeRuntimeWrapperError(t *testing.T) {
 	t.Parallel()
 

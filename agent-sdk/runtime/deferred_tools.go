@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // Deferred MCP tools pass through the same wrappers as static tools before a
 // chat run can pin them. Sources cannot inject builtins through this path.
 type deferredToolSource struct {
-	source tool.Source
+	source toolset.Source
 	wrap   func([]tool.Tool) []tool.Tool
 }
 
@@ -22,7 +24,7 @@ func (s *deferredToolSource) Tools() []tool.Tool {
 		candidates = s.source.Tools()
 	}
 	for _, item := range candidates {
-		if item != nil && tool.IsMCPDefinition(item.Definition()) {
+		if item != nil && mcp.IsDefinition(item.Definition()) {
 			ready = append(ready, item)
 		}
 	}
@@ -34,7 +36,7 @@ func (s *deferredToolSource) Tools() []tool.Tool {
 func (s *deferredToolSource) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
 	var target tool.Tool
 	var def tool.Definition
-	if named, ok := s.source.(tool.NamedSource); ok {
+	if named, ok := s.source.(toolset.NamedSource); ok {
 		one, found, err := named.Lookup(ctx, name)
 		if err != nil || !found {
 			return nil, false, err
@@ -68,7 +70,7 @@ func (s *deferredToolSource) Lookup(ctx context.Context, name string) (tool.Tool
 	if target == nil {
 		return nil, false, nil
 	}
-	if def.Name != name || !tool.IsMCPDefinition(def) {
+	if def.Name != name || !mcp.IsDefinition(def) {
 		return nil, false, nil
 	}
 	wrapped := s.wrap([]tool.Tool{target})

@@ -16,23 +16,23 @@ import (
 
 func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
 	t.Parallel()
-	cases := map[string][]model.Part{
-		"json-text": {model.NewTextPart(strings.Repeat(`{"method":"find","value":"C:\\workspace\\item"}`, 1500))},
+	cases := map[string][]tool.ContentBlock{
+		"json-text": {tool.Text(strings.Repeat(`{"method":"find","value":"C:\\workspace\\item"}`, 1500))},
 		"text-and-structured": {
-			model.NewTextPart(strings.Repeat(`{"method":"find","selector":"label"}`, 1500)),
-			model.NewJSONPart(mustJSON(map[string]any{"schema": strings.Repeat("details", 8000)})),
+			tool.Text(strings.Repeat(`{"method":"find","selector":"label"}`, 1500)),
+			tool.StructuredContent{Value: mustJSON(map[string]any{"schema": strings.Repeat("details", 8000)})},
 		},
-		"escaping": {model.NewTextPart(strings.Repeat("\"\\\t\n\r<>&\u2028", 7000))},
+		"escaping": {tool.Text(strings.Repeat("\"\\\t\n\r<>&\u2028", 7000))},
 		"multiple-text": {
-			model.NewTextPart(strings.Repeat("first\t", 5000)),
-			model.NewTextPart(strings.Repeat("second\t", 5000)),
+			tool.Text(strings.Repeat("first\t", 5000)),
+			tool.Text(strings.Repeat("second\t", 5000)),
 		},
-		"scalar-json-envelope": {model.NewJSONPart([]byte(strconv.Quote(strings.Repeat("s", 39998))))},
-		"json-html-escaping":   {model.NewJSONPart([]byte(`{"html":"` + strings.Repeat("<>&", 5000) + `"}`))},
-		"array-html-escaping":  {model.NewJSONPart([]byte(`["` + strings.Repeat("<>&", 5000) + `"]`))},
+		"scalar-json-envelope": {tool.StructuredContent{Value: []byte(strconv.Quote(strings.Repeat("s", 39998)))}},
+		"json-html-escaping":   {tool.StructuredContent{Value: []byte(`{"html":"` + strings.Repeat("<>&", 5000) + `"}`)}},
+		"array-html-escaping":  {tool.StructuredContent{Value: []byte(`["` + strings.Repeat("<>&", 5000) + `"]`)}},
 		"omission-notice": {
-			model.NewTextPart(strings.Repeat("a", 39999)),
-			model.NewTextPart("additional output"),
+			tool.Text(strings.Repeat("a", 39999)),
+			tool.Text("additional output"),
 		},
 	}
 	for name, parts := range cases {
@@ -47,8 +47,8 @@ func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
 			if again, info := tool.TruncateResultWithInfo(canonical, tool.DefaultTruncationPolicy()); info.Truncated || !reflect.DeepEqual(again, canonical) {
 				t.Fatal("canonical result changed on a second truncation pass")
 			}
-			message := toolResultMessageFromCanonical(call, canonical)
-			event := session.CanonicalizeEvent(toolResultEvent(call, canonical, &message, meta))
+			message := toolResultMessageFromCanonical(call, canonical, nil)
+			event := session.CanonicalizeEvent(toolResultEvent(call, canonical, nil, &message, meta))
 			if err := session.ValidateDurableCoreEvent(event); err != nil {
 				t.Fatal(err)
 			}
@@ -90,9 +90,9 @@ func TestCanonicalToolResultPreservesArtifactWhenOnlySerializedOutputExceedsBudg
 	store := testToolResultArtifactStore(t, 8, 1024*1024)
 	canonical, meta := canonicalToolResult(textToolResult(raw), store)
 	var path string
-	for _, part := range canonical.Content {
-		if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
-			path = artifactPathFromHint(t, part.Text.Text)
+	for _, block := range canonical.Content {
+		if text, ok := block.(tool.Text); ok && strings.Contains(string(text), toolResultArtifactHintPrefix) {
+			path = artifactPathFromHint(t, string(text))
 		}
 	}
 	if path == "" {
@@ -100,8 +100,8 @@ func TestCanonicalToolResultPreservesArtifactWhenOnlySerializedOutputExceedsBudg
 	}
 	assertFileContent(t, path, []byte(raw))
 	call := model.ToolCall{ID: "artifact-budget", Name: "fixture", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical)
-	event := toolResultEvent(call, canonical, &message, meta)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
+	event := toolResultEvent(call, canonical, nil, &message, meta)
 	if err := session.ValidateDurableCoreEvent(session.CanonicalizeEvent(event)); err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -32,11 +31,12 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	if got := result.Name; got != ToolName {
 		t.Fatalf("result.Name = %q, want %q", got, ToolName)
 	}
-	if len(result.Content) != 1 || result.Content[0].Kind != model.PartKindJSON {
+	structured, ok := result.Structured()
+	if len(result.Content) != 1 || !ok {
 		t.Fatalf("result.Content = %+v, want single json part", result.Content)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	if got := payload["updated"]; got != true {

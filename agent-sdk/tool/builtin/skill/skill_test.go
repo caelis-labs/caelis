@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -39,10 +38,10 @@ func TestSkillToolLoadsSkillContent(t *testing.T) {
 	if result.ID != "call-1" || result.Name != ToolName {
 		t.Fatalf("result identity = %#v, want call-1/%s", result, ToolName)
 	}
-	if len(result.Content) != 1 || result.Content[0].Kind != model.PartKindText {
+	if len(result.Content) != 1 {
 		t.Fatalf("content = %#v, want one text part", result.Content)
 	}
-	text := result.Content[0].Text.Text
+	text := string(result.Content[0].(tool.Text))
 	for _, want := range []string{
 		`<skill_content name="echo">`,
 		"# Skill: echo",
@@ -86,7 +85,7 @@ func TestSkillToolLoadsPluginSkillByLocalName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	text := result.Content[0].Text.Text
+	text := string(result.Content[0].(tool.Text))
 	if !strings.Contains(text, `<skill_content name="superpowers:brainstorm">`) {
 		t.Fatalf("skill output = %q, want canonical namespaced skill name", text)
 	}
@@ -122,7 +121,7 @@ func TestSkillToolUsesCatalogSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if text := result.Content[0].Text.Text; !strings.Contains(text, "Use cached metadata.") {
+	if text := string(result.Content[0].(tool.Text)); !strings.Contains(text, "Use cached metadata.") {
 		t.Fatalf("skill output = %q, want cached skill content", text)
 	}
 }

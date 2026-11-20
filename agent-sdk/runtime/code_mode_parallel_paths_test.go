@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-func assertScriptSearchOmitsParallelCapability(t *testing.T, events []*session.Event) {
+func assertScriptSearchOmitsDefinitionMetadata(t *testing.T, events []*session.Event) {
 	t.Helper()
 	found := 0
 	for _, ev := range events {
@@ -33,8 +33,8 @@ func assertScriptSearchOmitsParallelCapability(t *testing.T, events []*session.E
 				if json.Unmarshal(output.JSON.Value, &entry) != nil || entry["input_schema"] == nil {
 					continue
 				}
-				if entry["parallel_safe"] != nil {
-					t.Fatalf("leaked concurrency flag: %s", output.JSON.Value)
+				if entry["metadata"] != nil || entry["fixture.private"] != nil {
+					t.Fatalf("leaked private metadata: %s", output.JSON.Value)
 				}
 				found++
 				t.Logf("final model-facing js_exec result: %s", output.JSON.Value)
@@ -46,12 +46,12 @@ func assertScriptSearchOmitsParallelCapability(t *testing.T, events []*session.E
 	}
 }
 
-func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
+func TestJSExecSearchOmitsDefinitionMetadataNativeAndMCPRebuild(t *testing.T) {
 	var nativePrefix, mcpPrefix []byte
-	for _, safe := range []bool{false, true} {
-		t.Run(fmt.Sprint("native-", safe), func(t *testing.T) {
+	for _, private := range []bool{false, true} {
+		t.Run(fmt.Sprint("native-", private), func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
-			target := tool.NamedTool{Def: tool.Definition{Name: "NativeRead", Capabilities: tool.Capabilities{ParallelSafe: safe}, InputSchema: map[string]any{"type": "object"}}}
+			target := tool.NamedTool{Def: tool.Definition{Name: "NativeRead", Metadata: map[string]any{"fixture.private": private}, InputSchema: map[string]any{"type": "object"}}}
 			driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 				if i == 0 {
 					raw, _ := json.Marshal(struct {
@@ -61,21 +61,21 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 					if nativePrefix == nil {
 						nativePrefix = raw
 					} else if !bytes.Equal(nativePrefix, raw) {
-						t.Fatal("parallel flag changed native declaration prefix")
+						t.Fatal("private metadata changed native declaration prefix")
 					}
 					return h1Script(`return await tools.search({name:"NativeRead"});`)
 				}
 				return nil
 			}}
 			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
-			assertScriptSearchOmitsParallelCapability(t, events)
+			assertScriptSearchOmitsDefinitionMetadata(t, events)
 		})
-		t.Run(fmt.Sprint("mcp-fuzzy-exact-rebuild-", safe), func(t *testing.T) {
+		t.Run(fmt.Sprint("mcp-fuzzy-exact-rebuild-", private), func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
 			source := h1Directory(2)
 			for i, item := range source.items {
 				one := item.(h1Tool)
-				one.def.Capabilities.ParallelSafe = safe
+				one.def.Metadata["fixture.private"] = private
 				source.items[i] = one
 			}
 			driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
@@ -85,11 +85,11 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 				return nil
 			}}
 			events, _ := runCodeMode(t, store, active, h1Spec(source, driver), nil, nil)
-			assertScriptSearchOmitsParallelCapability(t, events)
+			assertScriptSearchOmitsDefinitionMetadata(t, events)
 			if mcpPrefix == nil {
 				mcpPrefix = driver.prefixes[0]
 			} else if !bytes.Equal(mcpPrefix, driver.prefixes[0]) {
-				t.Fatal("parallel flag changed MCP declaration prefix")
+				t.Fatal("private metadata changed MCP declaration prefix")
 			}
 			// New Runtime/Host/VM restores the Session binding, then exact discovery uses
 			// the current wrapped definition.
@@ -100,7 +100,7 @@ func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 				return nil
 			}}
 			events, _ = runCodeMode(t, store, active, h1Spec(source, driver), nil, nil)
-			assertScriptSearchOmitsParallelCapability(t, events)
+			assertScriptSearchOmitsDefinitionMetadata(t, events)
 		})
 	}
 }

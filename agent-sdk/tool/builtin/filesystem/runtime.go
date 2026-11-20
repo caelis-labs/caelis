@@ -24,12 +24,6 @@ func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {
 	return runtime, nil
 }
 
-func fileSystemExecutionRequirements() *tool.ExecutionRequirements {
-	return &tool.ExecutionRequirements{
-		Sandbox: sandbox.CapabilitySet{FileSystem: true},
-	}
-}
-
 func fileSystemFromRuntime(runtime sandbox.Runtime, meta map[string]any) sandbox.FileSystem {
 	if runtime == nil {
 		return nil

@@ -48,9 +48,9 @@ func (s Selection) CheckToolBinding(ctx context.Context, binding tool.Binding) e
 	m := s.manager
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if current := m.toolsByName[binding.Name]; current == nil || !s.servers[current.server] || tool.BindingForDefinition(current.def) != binding {
+	if current := m.toolsByName[binding.Name]; current == nil || !s.servers[current.server] || BindingForDefinition(current.def) != binding {
 		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding is outside the current request selection")
 	} else {
-		return m.admitCatalogToolLocked(ctx, current)
+		return m.checkCatalogReadyLocked(ctx, current.server)
 	}
 }

@@ -293,7 +293,11 @@ func CloneRuntimeRequest(in agentsdk.ApprovalRequest) agentsdk.ApprovalRequest {
 	out.OperationTaskID = strings.TrimSpace(in.OperationTaskID)
 	out.Tool = tool.CloneDefinition(in.Tool)
 	out.Call = tool.CloneCall(in.Call)
-	out.ModelStep = tool.CloneModelStepRef(in.ModelStep)
+	if in.Parent != nil {
+		parent := *in.Parent
+		out.Parent = &parent
+	}
+	out.ModelStep = agentsdk.CloneModelStepRef(in.ModelStep)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	if in.Approval != nil {
 		approval := session.CloneProtocolApproval(*in.Approval)

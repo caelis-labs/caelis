@@ -308,7 +308,7 @@ func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"ok":true}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"ok":true}`)}},
 			}, nil
 		},
 	}

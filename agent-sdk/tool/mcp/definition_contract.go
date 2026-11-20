@@ -36,9 +36,9 @@ func normalizeListedToolDefinition(def tool.Definition, rawSchema ...any) (tool.
 		label string
 		limit int
 	}{
-		{tool.MetadataPluginID, "plugin id", maxMCPPluginIDRunes},
-		{tool.MetadataMCPServer, "server name", maxMCPServerNameRunes},
-		{tool.MetadataMCPTool, "remote tool name", maxMCPRemoteToolNameRunes},
+		{MetadataPluginID, "plugin id", maxMCPPluginIDRunes},
+		{MetadataServer, "server name", maxMCPServerNameRunes},
+		{MetadataTool, "remote tool name", maxMCPRemoteToolNameRunes},
 	} {
 		value, exists := def.Metadata[item.key]
 		if !exists {
@@ -54,15 +54,6 @@ func normalizeListedToolDefinition(def tool.Definition, rawSchema ...any) (tool.
 		}
 		def.Metadata[item.key] = text
 	}
-	def.Description = strings.TrimSpace(def.Description)
-	if !strings.HasPrefix(def.Description, tool.ExternalCapabilityDescriptionPrefix) {
-		def.Description = strings.TrimSpace(tool.ExternalCapabilityDescriptionPrefix + " " + def.Description)
-	}
-	if def.Metadata == nil {
-		def.Metadata = map[string]any{}
-	}
-	def.Metadata[tool.MetadataExternalCapability] = true
-	def.Metadata[tool.MetadataDescriptionAuthority] = tool.MetadataAuthorityNonAuthorizing
 	var warning string
 	if utf8.RuneCountInString(def.Description) > maxMCPDescriptionRunes {
 		def.Description = truncateRunes(def.Description, maxMCPDescriptionRunes)
@@ -81,8 +72,8 @@ func normalizeListedToolDefinition(def tool.Definition, rawSchema ...any) (tool.
 	if cost := tool.EstimateDefinitionPromptTokens(def); cost > maxMCPToolPromptTokens {
 		return tool.Definition{}, warning, fmt.Errorf("projected definition costs %d tokens; maximum is %d", cost, maxMCPToolPromptTokens)
 	}
-	discovered := tool.NewToolSearchResult([]tool.Definition{def})
-	if cost := tool.EstimateToolSearchResultPromptTokens(discovered); cost > maxMCPToolPromptTokens {
+	discovered := NewToolSearchResult([]tool.Definition{def})
+	if cost := EstimateToolSearchResultPromptTokens(discovered); cost > maxMCPToolPromptTokens {
 		return tool.Definition{}, warning, fmt.Errorf("projected discovery result costs %d tokens; maximum is %d", cost, maxMCPToolPromptTokens)
 	}
 	return def, warning, nil

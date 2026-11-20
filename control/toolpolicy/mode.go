@@ -16,12 +16,22 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
-const desktopIntegration = "desktop-world/atomic-v1"
+// Advance this revision when changing the product-owned app approval contract;
+// MCP catalog revisions do not change the scope of app consent.
+const desktopAtomicScopeRevision = "desktop-atomic-app-v2"
 
-// AtomicOperations is the APP-scoped contract, independent of projected names.
-// A changed catalog revision invalidates consent for the complete operation set.
+// IsDesktopWorld identifies the product's desktop-world MCP tools by their
+// Host-assigned plugin ID and supported server names.
+func IsDesktopWorld(def tool.Definition) bool {
+	pluginID, _ := def.Metadata[mcp.MetadataPluginID].(string)
+	server, _ := def.Metadata[mcp.MetadataServer].(string)
+	return mcp.IsDefinition(def) && pluginID == "desktop-world" && (server == "dtw" || server == "desktop-world")
+}
+
+// AtomicOperations is the app-scoped contract, independent of projected names.
 func AtomicOperations() []string {
 	return []string{"look", "capture", "readText", "wait", "waitForNewWindow", "click", "setValue", "move", "drag", "typeText", "keypress", "scroll", "focus", "quit"}
 }
@@ -58,19 +68,24 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		return policy.Decision{}, err
 	}
 	decision, err = policy.NormalizeDecision(m.Name(), decision)
-	if err != nil || decision.Action == policy.ActionDeny || !tool.IsMCPDefinition(input.Tool) {
+	if err != nil || decision.Action == policy.ActionDeny || !mcp.IsDefinition(input.Tool) {
 		return decision, err
 	}
-	source := input.Tool.Source
-	if source == nil || source.ID == "" || source.Revision == "" {
-		return policy.Decision{}, errors.New("MCP source facts are incomplete")
+	pluginID, _ := input.Tool.Metadata[mcp.MetadataPluginID].(string)
+	server, _ := input.Tool.Metadata[mcp.MetadataServer].(string)
+	if pluginID == "" || server == "" {
+		return policy.Decision{}, errors.New("MCP source identity is incomplete")
 	}
-	rawName, _ := input.Tool.Metadata[tool.MetadataMCPTool].(string)
-	desktop := source.IntegrationID == desktopIntegration
+	rawName, _ := input.Tool.Metadata[mcp.MetadataTool].(string)
+	desktop := IsDesktopWorld(input.Tool)
 	if desktop && rawName == "apps" {
 		return decision, nil
 	}
-	scope := session.AuthorizationScope{Authority: m.Authority, Workspace: input.Session.CWD, SessionID: input.Session.SessionID, SessionIncarnation: input.Session.CreatedAt.UTC().Format(time.RFC3339Nano), SourceID: source.ID, SourceRevision: source.Revision, PolicyRevision: "product-source-v1/" + m.Name(), Tool: input.Tool.Name}
+	scope := session.AuthorizationScope{
+		Authority: m.Authority, Workspace: input.Session.CWD,
+		SessionID: input.Session.SessionID, SessionIncarnation: input.Session.CreatedAt.UTC().Format(time.RFC3339Nano),
+		SourceID: pluginID + "/" + server,
+	}
 	if desktop {
 		if !slices.Contains(AtomicOperations(), rawName) {
 			return policy.Decision{Action: policy.ActionDeny, Reason: "tool is outside the DTW atomic operation contract"}, nil
@@ -83,20 +98,19 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		if err := json.Unmarshal(args["app"], &app); err != nil || !ValidApplicationIdentity(app) {
 			return policy.Decision{}, errors.New("invalid_app: app must be an exact application identifier from apps")
 		}
-		if source.CapabilityRevision == "" {
-			return policy.Decision{}, errors.New("DTW capability identity is incomplete")
-		}
-		scope.Tool = ""
-		scope.PolicyRevision = "desktop-atomic-app-v1/" + m.Name()
-		scope.CapabilitySet, scope.CapabilityRevision = "desktop-world/atomic-app", source.CapabilityRevision
+		scope.SourceRevision = desktopAtomicScopeRevision
+		scope.PolicyRevision = desktopAtomicScopeRevision + "/" + m.Name()
+		scope.CapabilitySet, scope.CapabilityRevision = "desktop-world/atomic-app", desktopAtomicScopeRevision
 		scope.ResourceKind, scope.Resource = "application", app
 	} else {
 		// Ordinary source consent is deliberately exact to this tool definition.
-		fingerprint, _ := input.Tool.Metadata[tool.MetadataMCPSourceFingerprint].(string)
+		fingerprint, _ := input.Tool.Metadata[mcp.MetadataSourceFingerprint].(string)
 		if fingerprint == "" {
 			return policy.Decision{}, errors.New("MCP callable fingerprint is incomplete")
 		}
 		scope.SourceRevision = fingerprint
+		scope.PolicyRevision = "product-source-v1/" + m.Name()
+		scope.Tool = input.Tool.Name
 	}
 	if err := scope.Validate(); err != nil || input.Session.CreatedAt.IsZero() {
 		return policy.Decision{}, fmt.Errorf("invalid authorization scope: %w", errors.Join(err, errors.New("session incarnation is required")))
@@ -108,7 +122,7 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 			return policy.Decision{}, err
 		}
 	}
-	digest, err := callDigest(input, decision)
+	digest, err := callDigest(ctx, input, decision)
 	if err != nil {
 		return policy.Decision{}, err
 	}
@@ -180,15 +194,30 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 }
 
 // callDigest binds only effective dispatch values, not mutable observer metadata.
-func callDigest(input policy.ToolContext, decision policy.Decision) (string, error) {
+func callDigest(ctx context.Context, input policy.ToolContext, decision policy.Decision) (string, error) {
+	execution := tool.InvocationFromContext(ctx)
+	// Keep existing call digests stable. The parent and child share a Session
+	// and Turn, so only the parent's ItemID comes from the relation.
+	type digestParent struct {
+		Kind      string                 `json:"kind,omitempty"`
+		ID        string                 `json:"id"`
+		Name      string                 `json:"name"`
+		Execution tool.InvocationContext `json:"execution"`
+	}
+	var parent *digestParent
+	if p := tool.ParentFromContext(ctx); p != nil {
+		parentExecution := execution
+		parentExecution.ItemID = p.ItemID
+		parent = &digestParent{Kind: p.Kind, ID: p.ID, Name: p.Name, Execution: parentExecution}
+	}
 	raw, err := json.Marshal(struct {
 		ID, Name    string
 		Input       json.RawMessage
 		Execution   tool.InvocationContext
-		Parent      *tool.ParentCall
+		Parent      *digestParent
 		Binding     tool.Binding
 		Constraints any
-	}{input.Call.ID, input.Call.Name, input.Call.Input, input.Call.Execution, input.Call.Parent, tool.BindingForDefinition(input.Tool), decision.Constraints})
+	}{input.Call.ID, input.Call.Name, input.Call.Input, execution, parent, mcp.BindingForDefinition(input.Tool), decision.Constraints})
 	if err != nil {
 		return "", fmt.Errorf("cannot freeze Policy call: %w", err)
 	}

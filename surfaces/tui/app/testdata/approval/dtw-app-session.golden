@@ -6,11 +6,12 @@
 │ TARGET:      desktop-world/dtw/look                                                                              │
 │ TARGET:      /task/workspace                                                                                     │
 │ TARGET:      dev.caelis.fixture                                                                                  │
-│ EFFECT:      non_idempotent                                                                                      │
+│ EFFECT:      [unavailable]                                                                                       │
 │ SCOPE:       this exact application and all 14 DTW atomic operations in this Session                             │
-│ DEFAULT:     Allow this app for this Session                                                                     │
+│ CONTEXT:     Incomplete or opaque; inspect the original request before granting access.                          │
+│ DEFAULT:     Cancel                                                                                              │
 │                                                                                                                  │
-│ ▎ Allow this app for this Session  allow_once; scope: this exact application and all 14 DTW atomic operations... │
-│   Cancel                           reject_once; scope: no grant                                                  │
+│   Allow this app for this Session  allow_once; scope: this exact application and all 14 DTW atomic operations... │
+│ ▎ Cancel                           reject_once; scope: no grant                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
    ↑/↓ select  enter confirm  esc cancel

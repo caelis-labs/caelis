@@ -26,6 +26,7 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -112,13 +113,13 @@ func TestCodeModeSimpleLive(t *testing.T) {
 	}
 	writeLiveJSON(t, filepath.Join(root, "directory.json"), defs)
 	allowed := func(def tool.Definition, raw json.RawMessage) bool {
-		if def.ExecutionRequirements != nil && def.ExecutionRequirements.Sandbox.CommandExec {
+		if def.Name == shell.RunCommandToolName {
 			return false
 		}
-		if !tool.IsMCPDefinition(def) {
+		if !mcp.IsDefinition(def) {
 			return true
 		}
-		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := def.Metadata[mcp.MetadataTool].(string)
 		switch remote {
 		case "resolve-library-id", "query-docs", "get-library-docs", "apps":
 			return true

@@ -64,11 +64,17 @@ type ApprovalRequest struct {
 	// Requesters which omit the acknowledgment retain synchronous observation.
 	OnAdmission func(context.Context) error `json:"-"`
 	Tool        tool.Definition             `json:"tool"`
-	Call        tool.Call                   `json:"call"`
+	// Execution and Parent are detached Runtime occurrence evidence.
+	Execution tool.InvocationContext `json:"-"`
+	Parent    *tool.ParentCall       `json:"-"`
+	Call      tool.Call              `json:"call"`
+	// ProducingModel is the process-local fallback reviewer from the request
+	// that emitted Call. It is absent for approvals without a producing model.
+	ProducingModel model.LLM `json:"-"`
 	// ModelStep identifies the model-emitted tool-call batch. Concurrent batches
 	// also carry a process-local admission barrier; neither is part of the ACP
 	// permission payload.
-	ModelStep *tool.ModelStepRef        `json:"model_step,omitempty"`
+	ModelStep *ModelStepRef             `json:"model_step,omitempty"`
 	Approval  *session.ProtocolApproval `json:"approval,omitempty"`
 	Metadata  map[string]any            `json:"metadata,omitempty"`
 }

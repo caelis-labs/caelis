@@ -27,7 +27,6 @@ func TestAgentSpecCapabilityValidationRejectsUndeclaredRequestedFeatures(t *test
 		{name: "tool calls", tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "probe"}}}, want: model.CapabilityToolCalls},
 		{name: "structured output", output: &model.OutputSpec{Mode: model.OutputModeSchema, JSONSchema: map[string]any{"type": "object"}}, want: model.CapabilityStructuredOutput},
 		{name: "stream", stream: true, want: model.CapabilityStreaming},
-		{name: "parallel tool", tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "probe", Capabilities: tool.Capabilities{ParallelSafe: true}}}}, want: model.CapabilityToolCalls},
 		{name: "reasoning continuation", declared: model.Capabilities{ReasoningContinuation: true}, want: model.CapabilityReasoningContinuation},
 		{name: "hosted tool", declared: model.Capabilities{HostedTools: true}, want: model.CapabilityHostedTools},
 	}
@@ -46,14 +45,11 @@ func TestAgentSpecCapabilityValidationRejectsUndeclaredRequestedFeatures(t *test
 	}
 }
 
-func TestAgentSpecCapabilityValidationDoesNotRequireParallelModelForParallelSafeTool(t *testing.T) {
+func TestAgentSpecCapabilityValidationDoesNotRequireParallelToolCallsByDefault(t *testing.T) {
 	t.Parallel()
 
 	modelWithSerialToolCalls := limitTestSerialToolModel{}
-	tools := []tool.Tool{tool.NamedTool{Def: tool.Definition{
-		Name:         "probe",
-		Capabilities: tool.Capabilities{ParallelSafe: true},
-	}}}
+	tools := []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "probe"}}}
 	if err := validateAgentSpecCapabilities(modelWithSerialToolCalls, tools, nil, false, model.Capabilities{}); err != nil {
 		t.Fatalf("validateAgentSpecCapabilities() error = %v, want serial tool-call model accepted", err)
 	}

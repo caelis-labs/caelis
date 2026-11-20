@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // Events provides readonly indexed access to one event sequence.
@@ -307,7 +308,7 @@ type AgentSpec struct {
 	// DeferredTools supplies MCP tools as their background initialization finishes.
 	// Runtime applies the same invocation, policy and lifecycle wrappers
 	// as static tools. A run pins each accepted definition and callable together.
-	DeferredTools tool.Source `json:"-"`
+	DeferredTools toolset.Source `json:"-"`
 	// ResolveModelRequest optionally replaces model-facing configuration at
 	// every unsent request boundary. Runtime authority and policy remain fixed.
 	ResolveModelRequest       ModelRequestResolver `json:"-"`

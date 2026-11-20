@@ -7,25 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
-
-func TestAnnotationMetadata(t *testing.T) {
-	t.Parallel()
-
-	got := AnnotationMetadata(true, false, true, false)
-	annotations, ok := got["annotations"].(map[string]any)
-	if !ok {
-		t.Fatalf("annotations type = %T, want map[string]any", got["annotations"])
-	}
-	if annotations["readOnlyHint"] != true ||
-		annotations["destructiveHint"] != false ||
-		annotations["idempotentHint"] != true ||
-		annotations["openWorldHint"] != false {
-		t.Fatalf("annotations = %#v, want expected hint values", annotations)
-	}
-}
 
 func TestDecodeArgs(t *testing.T) {
 	t.Parallel()
@@ -95,11 +78,12 @@ func TestJSONResult(t *testing.T) {
 	if len(result.Content) != 1 {
 		t.Fatalf("len(result.Content) = %d, want 1", len(result.Content))
 	}
-	if result.Content[0].Kind != model.PartKindJSON || result.Content[0].JSON == nil {
+	structured, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content[0] = %#v, want JSON part", result.Content[0])
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(payload) error = %v", err)
 	}
 	if payload["ok"] != true {

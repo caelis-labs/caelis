@@ -14,6 +14,14 @@ const SearchToolName = "WebSearch"
 
 type SearchTool struct{}
 
+// SearchBackend supplies only the provider-native web search operation and its
+// availability information. A zero backend reports search as unavailable.
+type SearchBackend struct {
+	Provider          string
+	UnavailableReason string
+	SearchWeb         func(context.Context, model.WebSearchRequest) (model.WebSearchResponse, error)
+}
+
 func NewSearch() *SearchTool {
 	return &SearchTool{}
 }
@@ -41,12 +49,15 @@ func (t *SearchTool) Definition() tool.Definition {
 			"required":             []string{"query"},
 			"additionalProperties": false,
 		},
-		Metadata:     toolutil.AnnotationMetadata(true, false, false, true),
-		Capabilities: tool.Capabilities{ParallelSafe: true},
 	}
 }
 
 func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	return t.CallWithBackend(ctx, call, SearchBackend{})
+}
+
+// CallWithBackend binds provider search for only this invocation.
+func (t *SearchTool) CallWithBackend(ctx context.Context, call tool.Call, backend SearchBackend) (tool.Result, error) {
 	if err := toolutil.WithContextCancel(ctx); err != nil {
 		return tool.Result{}, err
 	}
@@ -66,18 +77,14 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, err
 	}
 	req := model.NormalizeWebSearchRequest(model.WebSearchRequest{Query: query, MaxResults: maxResults})
-	llm, _ := tool.RuntimeModel(call)
-	provider := runtimeProviderName(llm)
-	if reasoner, ok := llm.(model.WebSearchAvailability); ok {
-		if reason := strings.TrimSpace(reasoner.WebSearchUnavailableReason()); reason != "" {
-			return webSearchUnavailableResult(req, provider, reason)
-		}
+	provider := strings.TrimSpace(backend.Provider)
+	if reason := strings.TrimSpace(backend.UnavailableReason); reason != "" {
+		return webSearchUnavailableResult(req, provider, reason)
 	}
-	searcher, ok := llm.(model.WebSearcher)
-	if !ok {
+	if backend.SearchWeb == nil {
 		return webSearchUnavailableResult(req, provider, "Web search is unavailable for this provider. Use WebFetch with a known URL, or configure a search backend.")
 	}
-	resp, err := searcher.SearchWeb(ctx, req)
+	resp, err := backend.SearchWeb(ctx, req)
 	if err != nil {
 		return webSearchFailedResult(req, provider, err)
 	}
@@ -158,8 +165,10 @@ func webSearchFailedResult(req model.WebSearchRequest, provider string, err erro
 		"query":    req.Query,
 		"provider": provider,
 	})
-	result.IsError = true
-	return result, resultErr
+	if resultErr != nil {
+		return tool.Result{}, resultErr
+	}
+	return result, tool.FailedReply(message)
 }
 
 func webSearchUnavailableResult(req model.WebSearchRequest, provider string, message string) (tool.Result, error) {
@@ -201,16 +210,6 @@ func webSearchResultsPayload(results []model.WebSearchResult) []map[string]any {
 		}
 	}
 	return out
-}
-
-func runtimeProviderName(llm model.LLM) string {
-	if llm == nil {
-		return ""
-	}
-	if provider, ok := llm.(interface{ ProviderName() string }); ok {
-		return strings.TrimSpace(provider.ProviderName())
-	}
-	return ""
 }
 
 func usagePayload(usage model.Usage) map[string]any {

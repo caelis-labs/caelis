@@ -46,7 +46,6 @@ func TestGuardianFileToolsReuseBuiltinDefinitionsAndResults(t *testing.T) {
 		definition := builtin.Definition()
 		t.Run(definition.Name, func(t *testing.T) {
 			query := guardianQueryTool{q, definition.Name}
-			definition.ExecutionRequirements = nil
 			if got := query.Definition(); !reflect.DeepEqual(got, definition) {
 				t.Fatalf("Guardian changed the built-in definition:\ngot: %#v\nwant: %#v", got, definition)
 			}
@@ -111,7 +110,7 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 		t.Fatalf("temporary write failed: %q %v", raw, err)
 	}
 	missing, _ := json.Marshal(map[string]any{"path": outside + ".missing"})
-	if result, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "missing", Input: missing}); err != nil || !result.IsError {
+	if result, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "missing", Input: missing}); !tool.HasFailedReply(err) {
 		t.Fatalf("missing evidence should return a model-visible error: %+v %v", result, err)
 	}
 	call("Read", map[string]any{"path": outside})
@@ -260,21 +259,39 @@ func TestGuardianEvidenceVolumeDoesNotBlockContinuation(t *testing.T) {
 	}
 }
 
-func TestGuardianBoundedResultReportsMissingContentAndPreservesError(t *testing.T) {
-	for _, failed := range []bool{false, true} {
-		q := &guardianQueries{resultBytes: 4096}
-		raw, err := json.Marshal(map[string]any{"stdout": strings.Repeat("large observed output\n", 10000), "exit_code": 7, "stderr": "inspection diagnostic"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		result := q.boundResult(tool.Result{ID: "inspection", Name: "RunCommand", IsError: failed, Content: []model.Part{model.NewJSONPart(raw)}})
-		if result.ID != "inspection" || result.IsError != failed || q.truncated != 1 || tool.ResultNeedsTruncation(result, tool.TruncationPolicy{MaxBytes: q.resultBytes}) {
-			t.Fatalf("bounded result lost identity, outcome or budget: %+v", result)
-		}
-		encoded, _ := json.Marshal(result.Content)
-		if (!strings.Contains(string(encoded), "truncated") && !strings.Contains(string(encoded), "omitted")) || strings.Contains(string(encoded), "evidence_ref") {
-			t.Fatalf("missing content was not reported directly: %s", encoded)
-		}
+func TestGuardianErrorPreservesStructuredDiagnostic(t *testing.T) {
+	q := &guardianQueries{}
+	result, err := q.errorResult("RunCommand", "execution_failed", errors.New("command exited with code 7"), map[string]any{
+		"stdout":    "partial evidence",
+		"exit_code": 7,
+	})
+	if !tool.HasFailedReply(err) {
+		t.Fatalf("expected failed reply, got %v", err)
+	}
+	raw, ok := result.Structured()
+	var got struct {
+		Kind     string `json:"error_kind"`
+		Stdout   string `json:"stdout"`
+		ExitCode int    `json:"exit_code"`
+	}
+	if !ok || json.Unmarshal(raw, &got) != nil || got.Kind != "execution_failed" || got.Stdout != "partial evidence" || got.ExitCode != 7 {
+		t.Fatalf("failed reply lost structured diagnostic: %s", raw)
+	}
+}
+
+func TestGuardianBoundedResultReportsMissingContent(t *testing.T) {
+	q := &guardianQueries{resultBytes: 4096}
+	raw, err := json.Marshal(map[string]any{"stdout": strings.Repeat("large observed output\n", 10000), "exit_code": 7, "stderr": "inspection diagnostic"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := q.boundResult(tool.Result{ID: "inspection", Name: "RunCommand", Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}})
+	if result.ID != "inspection" || q.truncated != 1 || tool.ResultNeedsTruncation(result, tool.TruncationPolicy{MaxBytes: q.resultBytes}) {
+		t.Fatalf("bounded result lost identity or budget: %+v", result)
+	}
+	encoded, _ := json.Marshal(tool.ModelParts(result.Content))
+	if (!strings.Contains(string(encoded), "truncated") && !strings.Contains(string(encoded), "omitted")) || strings.Contains(string(encoded), "evidence_ref") {
+		t.Fatalf("missing content was not reported directly: %s", encoded)
 	}
 }
 

@@ -199,7 +199,6 @@ func (t guardianQueryTool) Definition() tool.Definition {
 	if t.name == "Read" {
 		d = (&filesystem.ReadTool{}).Definition()
 	}
-	d.ExecutionRequirements = nil
 	return d
 }
 
@@ -293,8 +292,7 @@ func (q *guardianQueries) errorResult(name, kind string, err error, partial map[
 	partial["error_kind"], partial["error"] = kind, guardianFold(err.Error(), 512)
 	partial["guidance"] = "This is an evidence limitation, not a risk verdict. Decide using the remaining facts."
 	result, _ := toolutil.JSONResult(name, partial, nil)
-	result.IsError = true
-	return q.boundResult(result), nil
+	return q.boundResult(result), tool.FailedReply(err.Error())
 }
 
 // Queries return bounded observations directly to the model. Omitted content
@@ -309,7 +307,7 @@ func (q *guardianQueries) boundResult(result tool.Result) tool.Result {
 	if info.Truncated {
 		q.truncated++
 	}
-	raw, _ := json.Marshal(bounded.Content)
+	raw, _ := json.Marshal(tool.ModelParts(bounded.Content))
 	q.bytes += len(raw)
 	return bounded
 }

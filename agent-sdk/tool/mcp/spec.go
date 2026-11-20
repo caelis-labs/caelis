@@ -11,8 +11,10 @@ type ServerSpec struct {
 	// when its declared connection is served through a Host-owned proxy.
 	PackageRoot    string `json:",omitempty"`
 	PackageVersion string `json:",omitempty"`
-	// ReplaySourceIDs lists prior source identities for remapping historical
-	// fully qualified names. They never create additional executable names.
+	// ReplaySourceIDs is retained in the Manager's source fingerprint inputs
+	// for authorization compatibility. It does not create aliases or appear
+	// in tool definitions. Preserve existing values and order unless migrating
+	// the corresponding authorization identities.
 	ReplaySourceIDs []string
 	Name            string
 	Transport       string
@@ -28,8 +30,6 @@ type ServerSpec struct {
 	// CleanEnvironment keeps plugin subprocesses from inheriting host-private
 	// credentials while preserving only platform process essentials.
 	CleanEnvironment bool
-	// IntegrationID is attested by product selection, never configuration or remote metadata.
-	IntegrationID string `json:"-"`
 }
 
 // ValidateServerIdentity checks one server before Manager admission. It does

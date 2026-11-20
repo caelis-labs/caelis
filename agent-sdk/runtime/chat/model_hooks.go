@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -13,7 +14,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 )
 
 func cloneResponse(r model.Response) model.Response {
@@ -59,12 +62,11 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 		if err == nil && !validToolPresentation(req.Tools, next.Request.Tools) {
 			err = fmt.Errorf("tool names and schema must match configured bindings")
 		}
-		if err == nil && next.ModelName != "" && next.ModelName != a.model.Name() {
-			selected := a.models[next.ModelName]
-			if selected == nil {
-				err = fmt.Errorf("model selection %q has no admitted configuration binding", next.ModelName)
-			} else {
+		if err == nil && next.ModelName != "" {
+			if selected := a.models[next.ModelName]; selected != nil {
 				a.model = selected
+			} else if next.ModelName != a.model.Name() {
+				err = fmt.Errorf("model selection %q has no admitted configuration binding", next.ModelName)
 			}
 		}
 		if err == nil && next.Response != nil && (next.Response.Message.Role != model.RoleAssistant || len(next.Response.Message.ToolResults()) > 0) {
@@ -100,6 +102,13 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 			return nil, nil, &agent.HookError{Phase: "model_prepare", Name: h.Name, Cause: err}
 		}
 		p = next
+	}
+	// ModelPrepare may select a different model. Apply the native image tool's
+	// presentation rule only after the model and tool presentation are final.
+	if toolbinding.HideViewImage(a.toolsByName[filesystem.ViewImageToolName], a.model) {
+		p.Request.Tools = slices.DeleteFunc(p.Request.Tools, func(spec model.ToolSpec) bool {
+			return spec.Function != nil && spec.Function.Name == filesystem.ViewImageToolName
+		})
 	}
 	if err := model.ValidateRequestCapabilities(a.model, p.Request); err != nil {
 		return nil, nil, err

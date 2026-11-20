@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/appserver"
@@ -115,10 +114,12 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier
 		t.Fatalf("wrong model/profile-instructions prefix: %#v", body)
 	}
 	before, after, hasGuidance := strings.Cut(remainder, codemode.Guidance)
-	if !hasGuidance || strings.Count(actual, codemode.Guidance) != 1 ||
-		(strings.TrimSpace(before) != "" && !strings.HasPrefix(strings.TrimLeft(before, "\n"), "## Skills\n")) ||
-		!strings.HasPrefix(after, "\n\n"+tool.ExternalCapabilityDescriptionPrefix) {
-		t.Fatalf("Code Mode guidance must follow profile/Skills exactly once: %q", actual)
+	isSkillSection := func(text string) bool {
+		text = strings.TrimSpace(text)
+		return text == "" || strings.HasPrefix(text, "## Skills\n")
+	}
+	if !hasGuidance || strings.Count(actual, codemode.Guidance) != 1 || !isSkillSection(before) || !isSkillSection(after) {
+		t.Fatalf("expected Code Mode guidance once alongside the profile and Skills: %q", actual)
 	}
 	reasoning, _ := body["reasoning"].(map[string]any)
 	if reasoning["effort"] != effort {

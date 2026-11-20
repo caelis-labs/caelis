@@ -10,6 +10,25 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
+// FailedReply reports a tool failure whose returned Result contains the
+// diagnostic reply. Return it alongside that result to preserve its blocks.
+func FailedReply(message string) error {
+	if message = strings.TrimSpace(message); message == "" {
+		message = "tool call failed"
+	}
+	return failedReplyError(message)
+}
+
+type failedReplyError string
+
+func (e failedReplyError) Error() string { return string(e) }
+
+// HasFailedReply reports whether err identifies an authoritative diagnostic reply.
+func HasFailedReply(err error) bool {
+	var reply failedReplyError
+	return errors.As(err, &reply)
+}
+
 type ErrorCode = errorcode.Code
 
 const (

@@ -11,11 +11,59 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func policyFixture(t *testing.T, remote string) policy.ToolContext {
 	t.Helper()
-	return policy.ToolContext{Session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}, CWD: "/workspace", CreatedAt: time.Unix(100, 0)}, Tool: tool.Definition{Name: "dtw__" + remote, Source: &tool.SourceFacts{ID: "configured/dtw", Revision: "package-launch-v1", IntegrationID: desktopIntegration, CapabilityRevision: "actual-catalog-v1"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "dtw", tool.MetadataMCPTool: remote, tool.MetadataMCPSourceFingerprint: "per-tool-" + remote}}, Call: tool.Call{ID: "provider-call", Name: "dtw__" + remote, Input: json.RawMessage(`{"app":"com.example.A"}`)}}
+	return policy.ToolContext{
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}, CWD: "/workspace", CreatedAt: time.Unix(100, 0)},
+		Tool: tool.Definition{Name: "dtw__" + remote, Metadata: map[string]any{
+			mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "desktop-world", mcp.MetadataServer: "dtw",
+			mcp.MetadataTool: remote, mcp.MetadataSourceFingerprint: "per-tool-" + remote,
+		}},
+		Call: tool.Call{ID: "provider-call", Name: "dtw__" + remote, Input: json.RawMessage(`{"app":"com.example.A"}`)},
+	}
+}
+
+func TestDesktopPolicyMatchesOnlyHostAssignedPluginAndSupportedServers(t *testing.T) {
+	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"}
+	for _, tc := range []struct {
+		pluginID, server string
+		want             bool
+	}{
+		{"desktop-world", "dtw", true},
+		{"desktop-world", "desktop-world", true},
+		{"configured", "dtw", false},
+		{"configured", "desktop-world", false},
+		{"desktop-world ", "dtw", false},
+		{"Desktop-world", "dtw", false},
+		{"desktop-world", "dtw ", false},
+		{"desktop-world", "DTW", false},
+		{"desktop-world", "other", false},
+	} {
+		t.Run(tc.pluginID+"/"+tc.server, func(t *testing.T) {
+			input := policyFixture(t, "apps")
+			input.Tool.Metadata[mcp.MetadataPluginID] = tc.pluginID
+			input.Tool.Metadata[mcp.MetadataServer] = tc.server
+			if got := IsDesktopWorld(input.Tool); got != tc.want {
+				t.Fatalf("IsDesktopWorld = %v, want %v", got, tc.want)
+			}
+			wantAction := policy.ActionAskApproval
+			if tc.want {
+				wantAction = policy.ActionAllow
+			}
+			d, err := mode.DecideTool(t.Context(), input)
+			if err != nil || d.Action != wantAction || (d.Authorization == nil) != tc.want {
+				t.Fatalf("apps: %+v %v, want %s", d, err, wantAction)
+			}
+		})
+	}
+	def := policyFixture(t, "apps").Tool
+	delete(def.Metadata, mcp.MetadataKind)
+	if IsDesktopWorld(def) {
+		t.Fatal("non-MCP definition matched")
+	}
 }
 
 func TestDesktopPolicySharesOnlyExactSessionApplicationScope(t *testing.T) {
@@ -42,8 +90,7 @@ func TestDesktopPolicySharesOnlyExactSessionApplicationScope(t *testing.T) {
 		"another APP":     func(in *policy.ToolContext) { in.Call.Input = json.RawMessage(`{"app":"com.example.B"}`) },
 		"another Session": func(in *policy.ToolContext) { in.Session.SessionID = "other" },
 		"new incarnation": func(in *policy.ToolContext) { in.Session.CreatedAt = in.Session.CreatedAt.Add(time.Second) },
-		"new source":      func(in *policy.ToolContext) { in.Tool.Source.Revision = "changed" },
-		"new capability":  func(in *policy.ToolContext) { in.Tool.Source.CapabilityRevision = "changed" },
+		"another server":  func(in *policy.ToolContext) { in.Tool.Metadata[mcp.MetadataServer] = "desktop-world" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := policyFixture(t, "click")
@@ -57,11 +104,37 @@ func TestDesktopPolicySharesOnlyExactSessionApplicationScope(t *testing.T) {
 			}
 		})
 	}
-	apps, err := mode.DecideTool(t.Context(), policyFixture(t, "apps"))
-	if err != nil || apps.Action != policy.ActionAllow || apps.Authorization != nil {
-		t.Fatalf("discovery: %+v %v", apps, err)
+	input = policyFixture(t, "exec")
+	input.Authorizations = func(context.Context) (session.AuthorizationEvidence, error) {
+		return session.AuthorizationEvidence{Consents: []session.AuthorizationScope{first.Authorization.Scope}}, nil
 	}
+	if d, err := mode.DecideTool(t.Context(), input); err != nil || d.Action != policy.ActionDeny {
+		t.Fatalf("operation outside the allowlist: %+v %v", d, err)
+	}
+}
 
+func TestDesktopPolicyRequiresFreshApprovalForV1Consent(t *testing.T) {
+	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"}
+	input := policyFixture(t, "look")
+	old := session.AuthorizationScope{
+		Authority: "owner", Workspace: "/workspace", SessionID: "s", SessionIncarnation: input.Session.CreatedAt.UTC().Format(time.RFC3339Nano),
+		SourceID: "desktop-world/dtw", SourceRevision: "package-launch-v1", PolicyRevision: "desktop-atomic-app-v1/" + mode.Name(),
+		CapabilitySet: "desktop-world/atomic-app", CapabilityRevision: "actual-catalog-v1", ResourceKind: "application", Resource: "com.example.A",
+	}
+	input.Authorizations = func(context.Context) (session.AuthorizationEvidence, error) {
+		return session.AuthorizationEvidence{Consents: []session.AuthorizationScope{old}}, nil
+	}
+	d, err := mode.DecideTool(t.Context(), input)
+	if err != nil || d.Action != policy.ActionAskApproval || d.Authorization == nil {
+		t.Fatalf("v1 consent was not replaced by a new Ask: %+v %v", d, err)
+	}
+	want := old
+	want.SourceRevision = "desktop-atomic-app-v2"
+	want.PolicyRevision = "desktop-atomic-app-v2/" + mode.Name()
+	want.CapabilityRevision = "desktop-atomic-app-v2"
+	if d.Authorization.Scope != want || d.Authorization.Scope.Key() == old.Key() {
+		t.Fatalf("v2 scope: %+v, want %+v", d.Authorization.Scope, want)
+	}
 }
 
 func TestPolicyConsentNeverWaivesDenyOrNewCallRestriction(t *testing.T) {
@@ -99,15 +172,18 @@ func TestPolicyConsentNeverWaivesDenyOrNewCallRestriction(t *testing.T) {
 
 func TestOrdinaryMCPAlwaysIsAnExactCurrentPolicyRule(t *testing.T) {
 	input := policyFixture(t, "read")
-	input.Tool.Source.IntegrationID = ""
+	input.Tool.Metadata[mcp.MetadataPluginID] = "configured"
 	var rules []Rule
 	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner", Rules: func(context.Context) ([]Rule, func(), error) { return rules, func() {}, nil }}
 	d, err := mode.DecideTool(t.Context(), input)
 	if err != nil || d.Action != policy.ActionAskApproval || len(d.Approval.Options) != 4 {
 		t.Fatalf("ordinary source: %+v %v", d, err)
 	}
-	scope := d.Authorization.Scope
-	scope.SessionID, scope.SessionIncarnation = "", ""
+	// A rule persisted before this migration must still match byte-for-byte.
+	scope := session.AuthorizationScope{
+		Authority: "owner", Workspace: "/workspace", SourceID: "configured/dtw", SourceRevision: "per-tool-read",
+		PolicyRevision: "product-source-v1/" + mode.Name(), Tool: "dtw__read",
+	}
 	rules = []Rule{{ID: "original-rule", DecisionID: "original-decision", Scope: scope}}
 	input.Session.SessionID = "next-session"
 	d, err = mode.DecideTool(t.Context(), input)
@@ -118,6 +194,12 @@ func TestOrdinaryMCPAlwaysIsAnExactCurrentPolicyRule(t *testing.T) {
 		t.Fatal(err)
 	} else {
 		release()
+	}
+	changed := policyFixture(t, "read")
+	changed.Tool.Metadata[mcp.MetadataPluginID] = "configured"
+	changed.Tool.Metadata[mcp.MetadataSourceFingerprint] = "per-tool-read-updated"
+	if refreshed, err := mode.DecideTool(t.Context(), changed); err != nil || refreshed.Action != policy.ActionAskApproval {
+		t.Fatalf("changed fingerprint reused an exact rule: %+v %v", refreshed, err)
 	}
 	rules[0].Revoked = true
 	if _, err := d.Validate(t.Context(), ""); err == nil {
@@ -144,7 +226,7 @@ func TestDesktopApplicationIdentityMatchesDTWContract(t *testing.T) {
 
 func TestFreshAlwaysRequiresCurrentRuleBeforeDispatch(t *testing.T) {
 	input := policyFixture(t, "look")
-	input.Tool.Source.IntegrationID = ""
+	input.Tool.Metadata[mcp.MetadataPluginID] = "configured"
 	var rules []Rule
 	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner", Rules: func(context.Context) ([]Rule, func(), error) { return rules, func() {}, nil }}
 	d, err := mode.DecideTool(t.Context(), input)

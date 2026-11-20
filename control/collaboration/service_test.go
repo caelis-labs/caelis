@@ -257,7 +257,10 @@ func TestMailboxBatchesUseEncodedByteBudget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw := []byte(result.Content[0].Text.Text)
+		raw, ok := result.Structured()
+		if !ok || len(result.Content) != 1 {
+			t.Fatalf("expected one structured receipt, got %+v", result.Content)
+		}
 		if len(raw) > MaxResponseBytes {
 			t.Fatalf("oversized response: %d", len(raw))
 		}

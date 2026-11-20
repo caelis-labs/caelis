@@ -27,22 +27,6 @@ func TestMCPCallEnvelopeAndExactSchemaValidation(t *testing.T) {
 	}
 }
 
-func TestMCPDefinitionsNeverJoinFixedModelTools(t *testing.T) {
-	search := NamedTool{Def: Definition{Name: ToolSearchToolName, Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch}}}
-	tools := []Tool{NamedTool{Def: Definition{Name: "Read"}}, search}
-	for i := 0; i < 200; i++ {
-		tools = append(tools, NamedTool{Def: Definition{Name: "remote", Metadata: map[string]any{MetadataToolKind: MetadataToolKindMCP}}})
-	}
-	got := toolSpecNames(ModelSpecs(tools))
-	if !equalStrings(got, []string{"Read"}) {
-		t.Fatalf("fixed tools=%v", got)
-	}
-	visibility := NewToolVisibility(tools)
-	if _, ok := visibility.LookupTool("remote"); ok {
-		t.Fatal("direct MCP name remained executable")
-	}
-}
-
 func TestMCPArgumentNumbersPreserveIntegersAndRejectOverflow(t *testing.T) {
 	def := Definition{InputSchema: map[string]any{"type": "object", "properties": map[string]any{"number": map[string]any{"type": "integer"}}}}
 	for _, raw := range []string{`{"number":9007199254740993}`, `{"number":18446744073709551615}`} {

@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -388,8 +389,8 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
 			}, nil
 		},
@@ -477,12 +478,9 @@ func TestChatAgentRetainsUnsupportedImageToolResultBeforeRejectingNextModelReque
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewTextPart("image result"),
-					model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
-						Kind: model.MediaSourceInline,
-						Data: "aW1n",
-					}, "image/png", "result.png"),
+				Content: []tool.ContentBlock{
+					tool.Text("image result"),
+					tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "result.png"},
 				},
 			}, nil
 		},
@@ -572,63 +570,89 @@ func TestExecuteToolCallRetainsProducerUntilDrain(t *testing.T) {
 
 }
 
-func TestChatAgentAnnotatesConcurrentCallsWithOneModelStep(t *testing.T) {
+func TestChatAgentDispatchesModelStepPosition(t *testing.T) {
 	t.Parallel()
 
-	observed := make(chan tool.Call, 2)
-	makeTool := func(name string) tool.Tool {
-		return tool.NamedTool{
-			Def: tool.Definition{Name: name, Capabilities: tool.Capabilities{ParallelSafe: true}},
-			Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-				observed <- call
-				return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
-			},
-		}
-	}
-	chatAgent, err := NewWithTools("chat", &twoCallStepModel{}, []tool.Tool{makeTool("FIRST"), makeTool("SECOND")}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	user := model.NewTextMessage(model.RoleUser, "run both")
-	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
-		Session: session.Session{SessionRef: session.SessionRef{SessionID: "model-step-context"}},
-		Events:  []*session.Event{{Type: session.EventTypeUser, Message: &user, Text: "run both"}},
-	})
-	for _, runErr := range chatAgent.Run(ctx) {
-		if runErr != nil {
-			t.Fatal(runErr)
-		}
-	}
-	close(observed)
-
-	stepID := ""
-	indexes := map[int]bool{}
-	for call := range observed {
-		if call.ModelStep == nil {
-			t.Fatalf("call %q has no model-step reference", call.ID)
-		}
-		if stepID == "" {
-			stepID = call.ModelStep.ID
-		}
-		if call.ModelStep.ID != stepID || call.ModelStep.CallCount != 2 {
-			t.Fatalf("call %q model step = %#v, want shared id and count 2", call.ID, call.ModelStep)
-		}
-		indexes[call.ModelStep.Index] = true
-	}
-	if stepID == "" || !indexes[0] || !indexes[1] || len(indexes) != 2 {
-		t.Fatalf("model step id/indexes = %q/%v, want non-empty id and indexes 0,1", stepID, indexes)
+	for _, tc := range []struct {
+		name     string
+		parallel bool
+	}{
+		{name: "serial"},
+		{name: "concurrent", parallel: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			observed := make(chan *agent.ModelStepRef, 2)
+			makeTool := func(name string) tool.Tool {
+				return stepDispatchTool{
+					Tool: tool.NamedTool{
+						Def: tool.Definition{Name: name},
+						Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+							return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"ok":true}`)}}}, nil
+						},
+					},
+					observe: observed,
+				}
+			}
+			chatAgent, err := NewWithTools("chat", &twoCallStepModel{parallel: tc.parallel}, []tool.Tool{makeTool("FIRST"), makeTool("SECOND")}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			user := model.NewTextMessage(model.RoleUser, "run both")
+			ctx := agent.NewContext(agent.ContextSpec{
+				Context: t.Context(),
+				Session: session.Session{SessionRef: session.SessionRef{SessionID: "model-step-context"}},
+				Events:  []*session.Event{{Type: session.EventTypeUser, Message: &user, Text: "run both"}},
+			})
+			for _, runErr := range chatAgent.Run(ctx) {
+				if runErr != nil {
+					t.Fatal(runErr)
+				}
+			}
+			close(observed)
+			if len(observed) != 2 {
+				t.Fatalf("observed %d Runtime dispatches, want 2", len(observed))
+			}
+			first, second := <-observed, <-observed
+			if first == nil || second == nil || first.ID == "" || first.ID != second.ID || first.CallCount != 2 || second.CallCount != 2 {
+				t.Fatalf("dispatch refs = %#v, %#v; want shared nonempty step ID and call count 2", first, second)
+			}
+			if first.Index == second.Index || first.Index < 0 || first.Index >= 2 || second.Index < 0 || second.Index >= 2 {
+				t.Fatalf("dispatch indexes = %d, %d; want distinct indexes 0 and 1", first.Index, second.Index)
+			}
+			done := first.AdmissionDone()
+			if done != second.AdmissionDone() || (done != nil) != tc.parallel {
+				t.Fatalf("shared dispatch admission barrier = %v; parallel = %v", done, tc.parallel)
+			}
+			if done != nil {
+				select {
+				case <-done:
+				default:
+					t.Fatal("Chat did not complete admission for tools without policy wrappers")
+				}
+			}
+		})
 	}
 }
 
+type stepDispatchTool struct {
+	tool.Tool
+	observe chan<- *agent.ModelStepRef
+}
+
+func (t stepDispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
+	t.observe <- dispatch.Step
+	return t.Call(ctx, call)
+}
+
 type twoCallStepModel struct {
-	calls atomic.Int32
+	calls    atomic.Int32
+	parallel bool
 }
 
 func (*twoCallStepModel) Name() string { return "two-call-step" }
 
-func (*twoCallStepModel) Capabilities() model.Capabilities {
-	return model.Capabilities{ToolCalls: true, ParallelToolCalls: true}
+func (m *twoCallStepModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, ParallelToolCalls: m.parallel}
 }
 
 func (m *twoCallStepModel) Generate(_ context.Context, _ *model.Request) iter.Seq2[*model.StreamEvent, error] {
@@ -672,7 +696,7 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"value": payload["value"]}))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"value": payload["value"]})}},
 			}, nil
 		},
 	}
@@ -839,29 +863,27 @@ func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 	t.Parallel()
 
 	testModel := &contextStabilityModel{toolNames: []string{"RunCommand", "RunCommand"}}
-	var active int32
-	var overlapped atomic.Bool
+	var arrived atomic.Int32
+	bothStarted := make(chan struct{})
 	runCommandTool := tool.NamedTool{
 		Def: tool.Definition{
-			Name:         "RunCommand",
-			Description:  "echo input",
-			InputSchema:  map[string]any{"type": "object"},
-			Capabilities: tool.Capabilities{ParallelSafe: true},
+			Name:        "RunCommand",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
 		},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
-			if atomic.AddInt32(&active, 1) > 1 {
-				overlapped.Store(true)
+			if arrived.Add(1) == 2 {
+				close(bothStarted)
 			}
-			defer atomic.AddInt32(&active, -1)
 			select {
-			case <-time.After(120 * time.Millisecond):
+			case <-bothStarted:
 			case <-ctx.Done():
 				return tool.Result{}, ctx.Err()
 			}
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"value": call.ID}))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"value": call.ID})}},
 			}, nil
 		},
 	}
@@ -869,8 +891,10 @@ func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithTools() error = %v", err)
 	}
+	deadline, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
+		Context: deadline,
 		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-1"}},
 		Events: []*session.Event{{
 			Type:    session.EventTypeUser,
@@ -884,7 +908,7 @@ func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 			t.Fatalf("Run() error = %v", runErr)
 		}
 	}
-	if !overlapped.Load() {
+	if deadline.Err() != nil || arrived.Load() != 2 {
 		t.Fatal("same-step tool calls did not overlap; want concurrent execution")
 	}
 	if got := len(testModel.requests); got != 2 {
@@ -960,10 +984,10 @@ func TestChatAgentExecutesSameStepWebSearchCallsConcurrently(t *testing.T) {
 	}
 }
 
-func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
+func TestChatAgentRespectsSerialToolCallModel(t *testing.T) {
 	t.Parallel()
 
-	testModel := &contextStabilityModel{toolNames: []string{"RunCommand", "ECHO"}}
+	testModel := &contextStabilityModel{toolNames: []string{"RunCommand", "ECHO"}, serialTools: true}
 	var active int32
 	var overlapped atomic.Bool
 	invoke := func(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -979,11 +1003,11 @@ func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 		return tool.Result{
 			ID:      call.ID,
 			Name:    call.Name,
-			Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"value": call.ID}))},
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"value": call.ID})}},
 		}, nil
 	}
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
-		tool.NamedTool{Def: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: invoke},
+		tool.NamedTool{Def: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
 		tool.NamedTool{Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
 	}, "Use tools when needed.")
 	if err != nil {
@@ -1005,7 +1029,7 @@ func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 		}
 	}
 	if overlapped.Load() {
-		t.Fatal("mixed same-step tool calls overlapped; want serial execution when one tool is not parallel-safe")
+		t.Fatal("mixed same-step tool calls overlapped; want serial execution for this model")
 	}
 }
 
@@ -1014,8 +1038,8 @@ func TestChatAgentTerminalToolResultStopsSameBatchAndNextModelStep(t *testing.T)
 	testModel := &contextStabilityModel{toolNames: []string{"bot_dream", "side_effect"}}
 	var sideEffects int
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
-		tool.NamedTool{Def: tool.Definition{Name: "bot_dream", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			return tool.Result{ID: call.ID, Name: call.Name, TurnComplete: true, Content: []model.Part{model.NewJSONPart([]byte(`{"accepted":true}`))}}, nil
+		tool.NamedTool{Def: tool.Definition{Name: "bot_dream", MayCompleteTurn: true, InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{ID: call.ID, Name: call.Name, TurnComplete: true, Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"accepted":true}`)}}}, nil
 		}},
 		tool.NamedTool{Def: tool.Definition{Name: "side_effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			sideEffects++
@@ -1065,7 +1089,7 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
 	}
@@ -1896,9 +1920,9 @@ func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 					"value": payload["value"],
-				}))},
+				})}},
 			}, nil
 		},
 	}
@@ -2262,13 +2286,13 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 	result := tool.Result{
 		ID:      "call-1",
 		Name:    "RunCommand",
-		Content: []model.Part{model.NewJSONPart([]byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`)}},
 	}
 	canonical, _ := canonicalToolResult(result, nil)
 	message := toolResultMessageFromCanonical(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
-	}, canonical)
+	}, canonical, nil)
 
 	results := message.ToolResults()
 	if len(results) != 1 {
@@ -2335,9 +2359,8 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 	}, tool.Result{
 		ID:      "call-1",
 		Name:    "RunCommand",
-		IsError: true,
-		Content: []model.Part{model.NewJSONPart([]byte(`{"error":"terminal session failed"}`))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"error":"terminal session failed"}`)}},
+	}, tool.FailedReply("tool failed"), nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event.Tool = nil, want tool result payload")
@@ -2360,15 +2383,15 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 	}, tool.Result{
 		ID:   "task-wait-1",
 		Name: "Task",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"action":         "wait",
 			"running":        true,
 			"state":          "running",
 			"task_id":        "jack",
 			"target_kind":    "subagent",
 			"output_preview": "正在读取 hello_from_spawn.txt\n",
-		}))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		})}},
+	}, nil, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2395,12 +2418,12 @@ func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
 	}, tool.Result{
 		ID:   "task-wait-1",
 		Name: "Task",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"task_id":       "jeff",
 			"state":         "completed",
 			"final_message": "child final answer\n",
-		}))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		})}},
+	}, nil, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2427,14 +2450,14 @@ func TestToolResultEventSuppressesTaskReadACPContent(t *testing.T) {
 	}, tool.Result{
 		ID:   "task-read-1",
 		Name: "Task",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"action":        "read",
 			"handle":        "command-3",
 			"state":         "running",
 			"target_kind":   "command",
 			"latest_output": "step 2\n",
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2457,12 +2480,12 @@ func TestToolResultEventPreservesTaskWriteRawOutput(t *testing.T) {
 	}, tool.Result{
 		ID:   "task-write-1",
 		Name: "Task",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"task_id":       "jeff",
 			"state":         "running",
 			"latest_output": "input accepted\n",
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2489,7 +2512,7 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 		ID:       "task-wait-1",
 		Name:     "Task",
 		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"action":      "wait",
 			"handle":      "command-2",
 			"target_kind": "command",
@@ -2497,8 +2520,8 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 			"result":      "go: module internal registry: network unreachable\n",
 			"error":       "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
 			"exit_code":   1,
-		}))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		})}},
+	}, nil, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2525,13 +2548,13 @@ func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
 	}, tool.Result{
 		ID:   "task-cancel-1",
 		Name: "Task",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state":     "cancelled",
 			"result":    "cancelled command output\n",
 			"error":     "context canceled",
 			"exit_code": -1,
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2552,14 +2575,13 @@ func TestToolResultEventMarksTaskInvocationErrorFailed(t *testing.T) {
 		Name: "Task",
 		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
-		ID:      "task-wait-1",
-		Name:    "Task",
-		IsError: true,
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		ID:   "task-wait-1",
+		Name: "Task",
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state": "running",
 			"error": "task control transport failed",
-		}))},
-	}, nil)
+		})}},
+	}, tool.FailedReply("tool failed"), nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2580,21 +2602,21 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 	result := tool.Result{
 		ID:   call.ID,
 		Name: call.Name,
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"handle":    "command-task",
 			"state":     "failed",
 			"result":    "go: module internal registry: network unreachable\n",
 			"error":     "Sandbox permission denied.",
 			"exit_code": 1,
-		}))},
+		})}},
 	}
-	event := toolResultEvent(call, result, nil)
+	event := toolResultEvent(call, result, nil, nil)
 	replayed, ok := messageFromDurableEvent(event)
 	if !ok {
 		t.Fatal("messageFromDurableEvent() = false, want Task result")
 	}
 	canonical, _ := canonicalToolResult(result, nil)
-	live := toolResultMessageFromCanonical(call, canonical)
+	live := toolResultMessageFromCanonical(call, canonical, nil)
 	if !reflect.DeepEqual(replayed, live) {
 		t.Fatalf("Task result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
 	}
@@ -2611,19 +2633,14 @@ func TestImageToolResultModelContextRoundTrip(t *testing.T) {
 	result := tool.Result{
 		ID:   call.ID,
 		Name: call.Name,
-		Content: []model.Part{
-			model.NewTextPart("Viewed image."),
-			model.NewMediaPart(
-				model.MediaModalityImage,
-				model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"},
-				"image/png",
-				"pixel.png",
-			),
+		Content: []tool.ContentBlock{
+			tool.Text("Viewed image."),
+			tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "pixel.png"},
 		},
 	}
 	canonical, _ := canonicalToolResult(result, nil)
-	live := toolResultMessageFromCanonical(call, canonical)
-	event := toolResultEvent(call, result, &live)
+	live := toolResultMessageFromCanonical(call, canonical, nil)
+	event := toolResultEvent(call, result, nil, &live)
 	replayed, ok := messageFromDurableEvent(event)
 	if !ok {
 		t.Fatal("messageFromDurableEvent() = false, want ViewImage result")
@@ -2695,11 +2712,11 @@ func TestToolResultEventCompletesSpawnInvocationWhileChildRuns(t *testing.T) {
 	}, tool.Result{
 		ID:   "spawn-1",
 		Name: "StartThread",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"task_id": "task-1",
 			"state":   "running",
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2716,10 +2733,10 @@ func TestToolResultEventCompletesSendMessageInvocationWhileTargetRuns(t *testing
 		ID: "message-1", Name: "SendMessage", Args: `{"to":"bryn","message":"continue"}`,
 	}, tool.Result{
 		ID: "message-1", Name: "SendMessage",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"accepted": true, "state": "running", "to": "bryn",
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil || event.Tool.Status != "completed" {
 		t.Fatalf("event = %#v, want completed delivery invocation", event)
@@ -2737,10 +2754,10 @@ func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
 		ID:       "command-cancel-1",
 		Name:     "RunCommand",
 		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state": "cancelled",
-		}))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		})}},
+	}, nil, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2763,11 +2780,11 @@ func TestToolResultEventPreservesCommandResultAsRawOutput(t *testing.T) {
 	}, tool.Result{
 		ID:   "command-status-1",
 		Name: "RunCommand",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
 			"exit_code": 0,
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2792,11 +2809,11 @@ func TestToolResultEventPreservesRawCommandOutputWhitespace(t *testing.T) {
 	}, tool.Result{
 		ID:   "command-output-1",
 		Name: "RunCommand",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    raw,
 			"exit_code": 0,
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2820,11 +2837,11 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 		ID:       "command-tidy-1",
 		Name:     "RunCommand",
 		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    "go: module internal registry: network unreachable\n",
 			"exit_code": 1,
-		}))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		})}},
+	}, nil, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2852,10 +2869,10 @@ func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 		ID:       "command-silent-failure-1",
 		Name:     "RunCommand",
 		Metadata: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}},
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"exit_code": 1,
-		}))},
-	}, nil, runtimeTaskResultSourceMeta(true))
+		})}},
+	}, nil, nil, runtimeTaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2881,11 +2898,11 @@ func TestToolResultEventOmitsContentForSuccessfulSilentCommand(t *testing.T) {
 	}, tool.Result{
 		ID:   "command-silent-success-1",
 		Name: "RunCommand",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state":     "completed",
 			"exit_code": 0,
-		}))},
-	}, nil)
+		})}},
+	}, nil, nil)
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2905,10 +2922,10 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	result := tool.Result{
 		ID:   "call-1",
 		Name: "RunCommand",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result":    large,
 			"exit_code": 1,
-		}))},
+		})}},
 	}
 	call := model.ToolCall{
 		ID:   "call-1",
@@ -2916,12 +2933,12 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		Args: `{"command":"find /tmp -delete"}`,
 	}
 	canonical, truncationMeta := canonicalToolResult(result, nil)
-	message := toolResultMessageFromCanonical(call, canonical)
+	message := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
 		Args: `{"command":"find /tmp -delete"}`,
-	}, canonical, &message, truncationMeta)
+	}, canonical, nil, &message, truncationMeta)
 
 	if event.Tool == nil {
 		t.Fatal("event.Tool = nil, want durable tool payload")
@@ -2993,15 +3010,15 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 	result := tool.Result{
 		ID:   "call-1",
 		Name: "RunCommand",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"result": large,
-		}))},
+		})}},
 	}
 	canonical, _ := canonicalToolResult(result, nil)
 	message := toolResultMessageFromCanonical(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
-	}, canonical)
+	}, canonical, nil)
 
 	results := message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
@@ -3156,7 +3173,9 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 
 	testModel := &toolLoopModel{}
 	release := make(chan struct{})
-	progressReported := make(chan struct{})
+	var releaseOnce sync.Once
+	finish := func() { releaseOnce.Do(func() { close(release) }) }
+	defer finish()
 	largeProgress := strings.Repeat("progress line\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	echoTool := tool.NamedTool{
 		Def: tool.Definition{
@@ -3165,10 +3184,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 			InputSchema: map[string]any{"type": "object"},
 		},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
-			if call.Observer == nil {
-				t.Fatal("tool observer missing from call")
-			}
-			call.Observer.ObserveToolResult(tool.Result{
+			toolbinding.ReportProgress(ctx, tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
 				Meta: map[string]any{
@@ -3176,19 +3192,18 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 					"state":   "running",
 					"running": true,
 				},
-				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 					"task_id": "task-1",
 					"state":   "running",
 					"running": true,
 					"result":  largeProgress,
-				}))},
+				})}},
 			})
-			close(progressReported)
 			<-release
 			return tool.Result{
 				ID:      call.ID,
 				Name:    call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"result":"done","state":"completed"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"done","state":"completed"}`)}},
 				Meta: map[string]any{
 					"result": "done",
 					"state":  "completed",
@@ -3232,7 +3247,6 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 		select {
 		case err := <-errCh:
 			t.Fatalf("Run() error before progress = %v", err)
-		case <-progressReported:
 		case event := <-eventsCh:
 			if event == nil {
 				t.Fatal("Run() ended before tool progress")
@@ -3268,11 +3282,21 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 		t.Fatalf("progress output still requires truncation: %#v", info)
 	}
 
-	close(release)
+	finish()
 	var finalText string
+	finalResults := 0
 	for event := range eventsCh {
-		if event != nil && event.Type == session.EventTypeAssistant {
+		if event == nil {
+			continue
+		}
+		if event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(event.Text)
+		}
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == progress.Tool.ID {
+			finalResults++
+			if session.IsUIOnly(event) || event.Message == nil || event.Tool.Output["result"] != "done" {
+				t.Fatalf("final tool result = %+v", event)
+			}
 		}
 	}
 	select {
@@ -3280,8 +3304,19 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	default:
 	}
-	if finalText != "pong" {
-		t.Fatalf("finalText = %q, want pong", finalText)
+	if finalResults != 1 || finalText != "pong" {
+		t.Fatalf("finalResults = %d, finalText = %q, want 1 and pong", finalResults, finalText)
+	}
+	var modelResults []model.ToolResultPart
+	for _, msg := range testModel.requests[1].Messages {
+		for _, part := range msg.Parts {
+			if part.ToolResult != nil && part.ToolResult.ToolUseID == progress.Tool.ID {
+				modelResults = append(modelResults, *part.ToolResult)
+			}
+		}
+	}
+	if len(modelResults) != 1 || len(modelResults[0].Content) != 1 || modelResults[0].Content[0].JSON == nil || !strings.Contains(string(modelResults[0].Content[0].JSON.Value), `"result":"done"`) {
+		t.Fatalf("next request tool results = %+v, want one final result only", modelResults)
 	}
 }
 
@@ -3445,8 +3480,8 @@ func TestChatAgentStopsItsOwnRepeatedRawModelToolLoop(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong"}`)},
 				},
 			}, nil
 		},
@@ -3516,7 +3551,7 @@ func TestChatAgentAllowsProgressingRawModelToolSteps(t *testing.T) {
 				Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 					return tool.Result{
 						ID: call.ID, Name: call.Name,
-						Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+						Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 					}, nil
 				},
 			}
@@ -3564,7 +3599,7 @@ func TestChatAgentGenerationWatchdogStateIsPerRun(t *testing.T) {
 			toolCalls++
 			return tool.Result{
 				ID: call.ID, Name: call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
 	}
@@ -3621,7 +3656,7 @@ func TestChatAgentGenerationWatchdogStateIsIsolatedAcrossConcurrentRuns(t *testi
 			toolCalls.Add(1)
 			return tool.Result{
 				ID: call.ID, Name: call.Name,
-				Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))},
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"pong"}`)}},
 			}, nil
 		},
 	}
@@ -3892,8 +3927,9 @@ func (m *invalidThenValidToolModel) Generate(_ context.Context, req *model.Reque
 }
 
 type contextStabilityModel struct {
-	requests  []model.Request
-	toolNames []string
+	serialTools bool
+	requests    []model.Request
+	toolNames   []string
 }
 
 type concurrentWebSearchModel struct {
@@ -3907,6 +3943,10 @@ type concurrentWebSearchModel struct {
 }
 
 func (m *concurrentWebSearchModel) Name() string { return "concurrent-web-search" }
+
+func (*concurrentWebSearchModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, ParallelToolCalls: true}
+}
 
 func (m *concurrentWebSearchModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.generateCalls++
@@ -3970,6 +4010,10 @@ func (m *concurrentWebSearchModel) SearchWeb(ctx context.Context, req model.WebS
 }
 
 func (m *contextStabilityModel) Name() string { return "context-stability" }
+
+func (m *contextStabilityModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, ParallelToolCalls: !m.serialTools}
+}
 
 func (m *contextStabilityModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	if req != nil {
@@ -4236,8 +4280,8 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"retry-pong"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"retry-pong"}`)},
 				},
 			}, nil
 		},

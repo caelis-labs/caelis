@@ -1,11 +1,13 @@
 package filesystem
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -22,7 +24,6 @@ const (
 )
 
 type fileMutationPlan struct {
-	tool      string
 	path      string
 	created   bool
 	before    string
@@ -46,11 +47,81 @@ type patchReplacement struct {
 	editIndex int
 }
 
-func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutationPlan, error) {
+// File tools can be bound by multiple runtimes in the same process. Hold the
+// target through planning and writing so a sibling sees the committed bytes.
+type activeMutation struct {
+	info os.FileInfo
+	done chan struct{}
+}
+
+var fileMutations = struct {
+	sync.Mutex
+	active map[string]activeMutation
+}{active: make(map[string]activeMutation)}
+
+func lockMutation(ctx context.Context, fsys sandbox.FileSystem, path string) (func(), error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		info, _ := fsys.Stat(path)
+		fileMutations.Lock()
+		active, busy := fileMutations.active[path]
+		if !busy && info != nil {
+			// Existing symlinks and hard links can name the same target.
+			for _, other := range fileMutations.active {
+				if other.info != nil && os.SameFile(info, other.info) {
+					active, busy = other, true
+					break
+				}
+			}
+		}
+		if !busy {
+			fileMutations.active[path] = activeMutation{info: info, done: make(chan struct{})}
+			fileMutations.Unlock()
+			return func() {
+				fileMutations.Lock()
+				close(fileMutations.active[path].done)
+				delete(fileMutations.active, path)
+				fileMutations.Unlock()
+			}, nil
+		}
+		fileMutations.Unlock()
+		select {
+		case <-active.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func applyFileMutation(ctx context.Context, fsys sandbox.FileSystem, args map[string]any, planMutation func(sandbox.FileSystem, string, map[string]any) (fileMutationPlan, error)) (fileMutationPlan, error) {
 	pathArg, err := argparse.String(args, "path", true)
 	if err != nil {
 		return fileMutationPlan{}, err
 	}
+	path, err := normalizePathWithFS(fsys, pathArg)
+	if err != nil {
+		return fileMutationPlan{}, err
+	}
+	unlock, err := lockMutation(ctx, fsys, path)
+	if err != nil {
+		return fileMutationPlan{}, err
+	}
+	defer unlock()
+	plan, err := planMutation(fsys, path, args)
+	if err != nil {
+		return fileMutationPlan{}, err
+	}
+	if plan.created {
+		if err := createWorkspaceParentDirs(fsys, path); err != nil {
+			return fileMutationPlan{}, err
+		}
+	}
+	return plan, fsys.WriteFile(path, []byte(plan.after), plan.mode)
+}
+
+func planWriteMutation(fsys sandbox.FileSystem, target string, args map[string]any) (fileMutationPlan, error) {
 	rawContent, exists := args["content"]
 	if !exists {
 		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q is required", "content"))
@@ -60,10 +131,6 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg %q must be string", "content"))
 	}
 	ifRevision, err := argparse.String(args, "if_revision", false)
-	if err != nil {
-		return fileMutationPlan{}, err
-	}
-	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
 		return fileMutationPlan{}, err
 	}
@@ -95,7 +162,6 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		return fileMutationPlan{}, staleRevisionError()
 	}
 	return fileMutationPlan{
-		tool:    WriteToolName,
 		path:    target,
 		created: created,
 		before:  before,
@@ -104,16 +170,8 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}, nil
 }
 
-func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutationPlan, error) {
-	pathArg, err := argparse.String(args, "path", true)
-	if err != nil {
-		return fileMutationPlan{}, err
-	}
+func planPatchMutation(fsys sandbox.FileSystem, target string, args map[string]any) (fileMutationPlan, error) {
 	edits, err := parsePatchEdits(args)
-	if err != nil {
-		return fileMutationPlan{}, err
-	}
-	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
 		return fileMutationPlan{}, err
 	}
@@ -153,7 +211,6 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		hunk = buildPatchHunk(lineStart, patchLineCount(content[only.start:only.end]), patchLineCount(only.new))
 	}
 	return fileMutationPlan{
-		tool:      PatchToolName,
 		path:      target,
 		before:    content,
 		after:     after,

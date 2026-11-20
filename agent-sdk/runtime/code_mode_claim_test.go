@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -79,9 +79,14 @@ func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
 		<-release
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
-	image := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}, "image/png", "fixture.png")
+	encoded := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := tool.Image{Data: data, MIMEType: "image/png", Name: "fixture.png"}
 	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{TurnComplete: true, Content: []model.Part{image}}, nil
+		return tool.Result{TurnComplete: true, Content: []tool.ContentBlock{image}}, nil
 	}}
 	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
@@ -108,7 +113,7 @@ func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
 				t.Fatalf("completion disposition lost: %+v", event.Tool)
 			}
 			for _, part := range event.Message.Parts[0].ToolResult.Content {
-				if part.Media != nil && part.Media.Source.Data == image.Media.Source.Data {
+				if part.Media != nil && part.Media.Source.Data == encoded {
 					emitted = true
 				}
 			}

@@ -19,11 +19,12 @@ func TestRunCommandSuccessfulDiagnosticTextIsOnlyOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := run.Call(t.Context(), tool.Call{Name: RunCommandToolName, Input: json.RawMessage(`{"command":"cat diagnostics.txt"}`)})
-	if err != nil || result.IsError {
+	if err != nil {
 		t.Fatalf("successful command result = %#v, error = %v", result, err)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	structured, _ := result.Structured()
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"error", "error_code", "system_hint"} {

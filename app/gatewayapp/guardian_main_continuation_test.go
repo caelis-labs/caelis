@@ -66,7 +66,7 @@ func TestGuardianUnavailableActionDoesNotStopMainSDKTurn(t *testing.T) {
 		}},
 		tool.NamedTool{Def: tool.Definition{Name: "IndependentWork"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 			continued = true
-			return tool.Result{Content: []model.Part{model.NewTextPart("independent work completed")}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.Text("independent work completed")}}, nil
 		}},
 	}
 	runtime, err := sdkruntime.New(sdkruntime.Config{Sessions: service, AgentFactory: chat.Factory{}})

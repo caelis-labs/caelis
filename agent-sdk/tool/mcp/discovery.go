@@ -1,8 +1,10 @@
-package tool
+package mcp
 
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 const MaxToolSearchResultPromptTokens = 8192
@@ -19,13 +21,11 @@ type ToolSearchResult struct {
 
 // ToolSearchDiscoveredTool identifies one deferred tool. The full accepted schema is returned in discovery results.
 type ToolSearchDiscoveredTool struct {
-	// ParallelSafe reports the owning tool's existing concurrency capability.
-	ParallelSafe bool                        `json:"parallel_safe"`
 	Description  string                      `json:"description,omitempty"`
 	InputSchema  map[string]any              `json:"input_schema,omitempty"`
 	OutputSchema map[string]any              `json:"output_schema,omitempty"`
 	Name         string                      `json:"name,omitempty"`
-	Binding      *Binding                    `json:"binding,omitempty"`
+	Binding      *tool.Binding               `json:"binding,omitempty"`
 	Function     *ToolSearchFunctionContract `json:"function,omitempty"`
 }
 
@@ -37,7 +37,7 @@ type ToolSearchFunctionContract struct {
 
 // NewToolSearchResult constructs one canonical tool_search result from deferred
 // tool definitions.
-func NewToolSearchResult(definitions []Definition) ToolSearchResult {
+func NewToolSearchResult(definitions []tool.Definition) ToolSearchResult {
 	result := ToolSearchResult{
 		Tools: make([]ToolSearchDiscoveredTool, 0, len(definitions)),
 	}
@@ -50,8 +50,8 @@ func NewToolSearchResult(definitions []Definition) ToolSearchResult {
 
 // NewToolSearchDiscoveredTool converts one deferred definition into the
 // tool_search result contract.
-func NewToolSearchDiscoveredTool(def Definition) ToolSearchDiscoveredTool {
-	entry := ToolSearchDiscoveredTool{ParallelSafe: def.Capabilities.ParallelSafe, Name: def.Name, Description: def.Description, InputSchema: CloneDefinition(def).InputSchema, OutputSchema: CloneDefinition(def).OutputSchema}
+func NewToolSearchDiscoveredTool(def tool.Definition) ToolSearchDiscoveredTool {
+	entry := ToolSearchDiscoveredTool{Name: def.Name, Description: def.Description, InputSchema: tool.CloneDefinition(def).InputSchema, OutputSchema: tool.CloneDefinition(def).OutputSchema}
 	if binding := BindingForDefinition(def); binding.Identity != "" {
 		entry.Binding = &binding
 	}
@@ -96,4 +96,24 @@ func (r ToolSearchResult) DiscoveredToolNames() []string {
 		}
 	}
 	return names
+}
+
+// EstimateToolSearchResultPromptTokens returns the approximate model-context
+// cost of the complete serialized ToolSearch result, including projected source
+// metadata. It deliberately uses serialized bytes so the admission budget is
+// no weaker than the shared tool-result truncation budget for non-ASCII text.
+func EstimateToolSearchResultPromptTokens(result ToolSearchResult) int {
+	const bytesPerSearchToken = 4
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return MaxToolSearchResultPromptTokens + 1
+	}
+	if len(raw) == 0 {
+		return 0
+	}
+	tokens := len(raw) / bytesPerSearchToken
+	if len(raw)%bytesPerSearchToken != 0 {
+		tokens++
+	}
+	return tokens
 }

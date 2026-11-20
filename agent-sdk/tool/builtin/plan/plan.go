@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
 const ToolName = "Plan"
@@ -67,7 +65,6 @@ func (Tool) Definition() tool.Definition {
 			"required":             []string{"entries"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(false, false, true, false),
 	}
 }
 
@@ -97,11 +94,10 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:                strings.TrimSpace(call.ID),
-		Name:              ToolName,
-		Content:           []model.Part{model.NewJSONPart(raw)},
-		StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0},
-		Metadata:          meta,
+		ID:       strings.TrimSpace(call.ID),
+		Name:     ToolName,
+		Content:  []tool.ContentBlock{tool.StructuredContent{Value: raw}},
+		Metadata: meta,
 	}, nil
 }
 

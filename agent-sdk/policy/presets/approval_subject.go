@@ -7,8 +7,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // The policy owner uses the same interpreted arguments and constraints it
@@ -97,21 +97,16 @@ func mcpApprovalSubject(input policy.ToolContext) *session.ApprovalSubject {
 		value, _ := input.Tool.Metadata[key].(string)
 		return strings.TrimSpace(value)
 	}
-	server, remote := metadata(tool.MetadataMCPServer), metadata(tool.MetadataMCPTool)
+	server, remote := metadata(mcp.MetadataServer), metadata(mcp.MetadataTool)
 	target := session.ApprovalField{State: session.ApprovalFieldUnavailable}
 	if server != "" && remote != "" {
-		target = session.KnownApprovalField(strings.Trim(strings.Join([]string{metadata(tool.MetadataPluginID), server, remote}, "/"), "/"))
-	}
-	effect := session.ApprovalField{State: session.ApprovalFieldUnavailable}
-	switch input.Tool.EffectClass {
-	case tool.EffectReadOnly, tool.EffectIdempotent, tool.EffectNonIdempotent:
-		effect = session.KnownApprovalField(string(input.Tool.EffectClass))
+		target = session.KnownApprovalField(strings.Trim(strings.Join([]string{metadata(mcp.MetadataPluginID), server, remote}, "/"), "/"))
 	}
 	return session.CloneApprovalSubject(&session.ApprovalSubject{
 		Kind: "app_access", Tool: session.KnownApprovalField(input.Tool.Name),
 		Operation: session.KnownApprovalField("call app tool"),
 		Targets:   []session.ApprovalField{target, session.KnownApprovalField(input.Session.CWD)},
-		Effect:    effect,
+		Effect:    session.ApprovalField{State: session.ApprovalFieldUnavailable},
 		Scope:     session.KnownApprovalField("this ready MCP tool, workspace and configuration"),
 		Grants: []session.ApprovalGrant{
 			{OptionID: "allow_once", Scope: session.KnownApprovalField("this invocation")},

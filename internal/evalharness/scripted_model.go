@@ -188,11 +188,9 @@ func EchoTool(name string) tool.Tool {
 				}
 			}
 			return tool.Result{
-				ID:   call.ID,
-				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart(MustJSON(payload)),
-				},
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: MustJSON(payload)}},
 			}, nil
 		},
 	}

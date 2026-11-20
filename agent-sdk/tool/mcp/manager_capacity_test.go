@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -45,7 +44,7 @@ func TestManagerMCPSourceFingerprintChangesWithConnectionAndSchema(t *testing.T)
 		if len(ready) != 1 {
 			t.Fatalf("ready tools = %d", len(ready))
 		}
-		source, _ := ready[0].Definition().Metadata[tool.MetadataMCPSourceFingerprint].(string)
+		source, _ := ready[0].Definition().Metadata[MetadataSourceFingerprint].(string)
 		if len(source) != 64 {
 			t.Fatalf("source fingerprint = %q", source)
 		}
@@ -53,11 +52,6 @@ func TestManagerMCPSourceFingerprintChangesWithConnectionAndSchema(t *testing.T)
 	}
 	base := ServerSpec{PluginID: "fixture", Name: "docs", Transport: TransportStreamableHTTP, URL: "https://mcp.test/v1"}
 	first := definition(base, map[string]any{"type": "object"})
-	trusted := base
-	trusted.IntegrationID = "host-selected-integration"
-	if first != definition(trusted, map[string]any{"type": "object"}) {
-		t.Fatal("Host approval policy changed remote source fingerprint")
-	}
 	for _, packaged := range []ServerSpec{
 		{PluginID: base.PluginID, Name: base.Name, Transport: base.Transport, URL: base.URL, PackageRoot: "/verified/package"},
 		{PluginID: base.PluginID, Name: base.Name, Transport: base.Transport, URL: base.URL, PackageVersion: "0.2.1"},

@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 type codeModeDiscoveryTool struct {
@@ -20,9 +20,9 @@ type codeModeDiscoveryTool struct {
 
 func (t codeModeDiscoveryTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        tool.ToolSearchToolName,
+		Name:        mcp.SearchToolName,
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}, "required": []string{"name"}},
-		Metadata:    map[string]any{tool.MetadataToolKind: tool.MetadataToolKindToolSearch},
+		Metadata:    map[string]any{mcp.MetadataKind: mcp.SearchToolName},
 	}
 }
 
@@ -39,15 +39,15 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.R
 		return tool.Result{}, tool.NewError(errorcode.NotFound, "tool not found")
 	}
 	def := one.Definition()
-	if def.Name != request.Name || !tool.IsMCPDefinition(def) || !def.AvailableForModel(call.RuntimeModel) {
+	if def.Name != request.Name || !mcp.IsDefinition(def) {
 		return tool.Result{}, tool.NewError(errorcode.NotFound, "tool not found")
 	}
-	selected := tool.NewToolSearchResult([]tool.Definition{def})
-	if tool.EstimateToolSearchResultPromptTokens(selected) > tool.MaxToolSearchResultPromptTokens {
+	selected := mcp.NewToolSearchResult([]tool.Definition{def})
+	if mcp.EstimateToolSearchResultPromptTokens(selected) > mcp.MaxToolSearchResultPromptTokens {
 		return tool.Result{}, tool.NewError(errorcode.ResourceExhausted, "complete schema exceeds budget")
 	}
 	raw, err := json.Marshal(selected)
-	return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, err
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, err
 }
 
 type codeModeSearchEntry struct {
@@ -104,27 +104,27 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		return reply, tool.NewError(errorcode.NotFound, "tool not found")
 	}
 	def := one.Definition()
-	if !h.eligibleTarget(def) || def.Name != name {
+	if !h.eligibleTarget(one, def) || def.Name != name {
 		return reply, tool.NewError(errorcode.NotFound, "tool not found")
 	}
-	if !tool.IsMCPDefinition(def) {
+	if !mcp.IsDefinition(def) {
 		if err := h.chargeDiscovery(); err != nil {
 			return reply, err
 		}
 		return h.discoveryReply("", codeModeSearchEntryFor(def))
 	}
 	raw, _ := json.Marshal(map[string]string{"name": name})
-	reply, err = h.call(ctx, tool.ToolSearchToolName, raw, true)
+	reply, err = h.call(ctx, mcp.SearchToolName, raw, true)
 	failureRecorded = err != nil || reply.IsError || reply.Outcome == codemode.OutcomeUnknown
 	if err != nil || reply.IsError {
 		return reply, err
 	}
-	var selected tool.ToolSearchResult
+	var selected mcp.ToolSearchResult
 	for _, part := range reply.Parts {
 		if part.Kind == "json" {
 			var value map[string]any
 			if json.Unmarshal(part.JSON, &value) == nil {
-				selected = tool.ParseToolSearchOutput(value)
+				selected = mcp.ParseToolSearchOutput(value)
 			}
 			break
 		}
@@ -141,7 +141,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
 	}
 	def = current.Definition()
-	if entry.Name != name || def.Name != name || *entry.Binding != tool.BindingForDefinition(def) || !h.eligibleTarget(def) {
+	if entry.Name != name || def.Name != name || *entry.Binding != mcp.BindingForDefinition(def) || !h.eligibleTarget(current, def) {
 		return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
 	}
 	h.mu.Lock()
@@ -180,7 +180,7 @@ func (h *codeModeHost) listTools(ctx context.Context, request codemode.SearchReq
 			continue
 		}
 		def := one.Definition()
-		if !tool.IsMCPDefinition(def) || !h.eligibleTarget(def) || def.Name <= request.After {
+		if !mcp.IsDefinition(def) || !h.eligibleTarget(one, def) || def.Name <= request.After {
 			continue
 		}
 		content := strings.ToLower(def.Name + " " + def.Description)

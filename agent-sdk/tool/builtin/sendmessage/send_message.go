@@ -52,7 +52,6 @@ func (Tool) Definition() tool.Definition {
 			"required":             []string{"to", "message"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}
 }
 

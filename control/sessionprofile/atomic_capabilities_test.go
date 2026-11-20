@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestAtomicCapabilitiesConfigurationAndCollision(t *testing.T) {
@@ -70,7 +70,7 @@ func TestAtomicCapabilitiesConfigurationAndCollision(t *testing.T) {
 		t.Fatal("creation binding mutated")
 	}
 
-	for _, name := range []string{"Skill", tool.ToolSearchToolName, tool.MCPCallToolName, "documents__lookup"} {
+	for _, name := range []string{"Skill", mcp.SearchToolName, mcp.CallToolName, "documents__lookup"} {
 		profile := enabled.Profile
 		profile.Tools = []ToolDefinition{{Name: name, InputSchema: map[string]any{"type": "object"}}}
 		if err := ValidateProfile(profile); !errors.Is(err, ErrInvalid) {

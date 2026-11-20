@@ -68,8 +68,6 @@ func (t *SearchTool) Definition() tool.Definition {
 			"required":             []string{"pattern"},
 			"additionalProperties": false,
 		},
-		Metadata:              toolutil.AnnotationMetadata(true, false, true, false),
-		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 

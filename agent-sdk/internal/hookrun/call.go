@@ -43,20 +43,17 @@ func wrap(phase, name string, err error) error {
 
 func cloneContext(in agent.HookContext) agent.HookContext {
 	in.InputSource = session.CloneActorRef(in.InputSource)
+	if in.ToolParent != nil {
+		parent := *in.ToolParent
+		in.ToolParent = &parent
+	}
 	if in.ToolDefinition != nil {
 		d := tool.CloneDefinition(*in.ToolDefinition)
 		in.ToolDefinition = &d
 	}
 	if in.Tool != nil {
 		c := tool.CloneCall(*in.Tool)
-		// These fields carry executable capabilities or a live owner barrier.
-		// Extensions receive occurrence data only.
-		c.RuntimeModel = nil
-		c.Observer = nil
 		c.Metadata = nil
-		if c.ModelStep != nil {
-			c.ModelStep = &tool.ModelStepRef{ID: c.ModelStep.ID, Index: c.ModelStep.Index, CallCount: c.ModelStep.CallCount}
-		}
 		in.Tool = &c
 	}
 	return in

@@ -109,7 +109,7 @@ func streamFinalFrameEvent(req taskFrameProjectionRequest, frame controltaskstre
 	env := streamToolUpdateEnvelope(req, frame, status, true, isErr, "", scriptCompletionFrameMeta(req, frame), true)
 	var receipt tool.Result
 	if json.Unmarshal([]byte(frame.Text), &receipt) == nil {
-		message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: req.CallID, Name: req.ToolName, Content: receipt.Content, IsError: receipt.IsError}})
+		message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: req.CallID, Name: req.ToolName, Content: tool.ModelParts(receipt.Content), IsError: isErr}})
 		projected, err := acpprojector.ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &message, Tool: &session.EventTool{ID: req.CallID, Name: req.ToolName, Status: status}})
 		if err == nil && len(projected) == 1 {
 			if selected, ok := projected[0].(eventstream.ToolCallUpdate); ok {
@@ -406,7 +406,7 @@ const (
 
 // scriptCompletionFrameMeta reads only the Code Mode producer's serialized
 // tool.Result (or the same durable fallback). It does not infer completion from
-// output text, cumulative IsError or Task state, and never changes lifecycle.
+// output text or Task state, and never changes lifecycle.
 func scriptCompletionFrameMeta(req taskFrameProjectionRequest, frame controltaskstream.Frame) map[string]any {
 	meta := streamFrameMeta("final")
 	if req.TaskKind != task.KindCodeMode {

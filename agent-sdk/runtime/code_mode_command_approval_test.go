@@ -54,7 +54,7 @@ func TestCodeModeCommandApprovalUsesOriginalOwner(t *testing.T) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
 			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-				if req.Tool.Name != "RunCommand" || req.Call.Parent == nil || req.Call.Parent.ID != "script" {
+				if req.Tool.Name != "RunCommand" || req.Parent == nil || req.Parent.ID != "script" {
 					t.Error("approval lost real command target/direct parent")
 				}
 				asked <- req.OperationTaskID

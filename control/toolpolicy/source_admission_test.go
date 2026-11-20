@@ -25,9 +25,9 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Actual HTTP MCP -> fixed search/mcp_call -> shared product Policy -> durable
-// approval -> dispatch, with a catalog change inside the approval callback.
-func TestProductPolicyPendingCapabilityChange(t *testing.T) {
+// An unrelated catalog change does not invalidate app approval, but the
+// pending Code Mode call must still use its own current MCP binding.
+func TestProductPolicyPendingCodeModeBindingChange(t *testing.T) {
 	for _, change := range []string{"unchanged", "same-tool-schema", "other-atomic-schema", "source-revoke"} {
 		t.Run(change, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
@@ -45,17 +45,20 @@ func TestProductPolicyPendingCapabilityChange(t *testing.T) {
 			}
 			ep := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil))
 			defer ep.Close()
-			mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "desktop-world", Name: "dtw", Transport: mcp.TransportStreamableHTTP, URL: ep.URL, IntegrationID: "desktop-world/atomic-v1"}}, nil)
+			mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "desktop-world", Name: "dtw", Transport: mcp.TransportStreamableHTTP, URL: ep.URL}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer mgr.Close()
 			<-mgr.Initialized()
-			old, found, err := mgr.Lookup(ctx, "dtw__look")
-			if err != nil || !found {
-				t.Fatalf("initial lookup: %v", err)
+			before := make(map[string]tool.Binding)
+			for _, name := range []string{"dtw__look", "dtw__click"} {
+				old, found, err := mgr.Lookup(ctx, name)
+				if err != nil || !found {
+					t.Fatalf("initial lookup of %s: found=%v err=%v", name, found, err)
+				}
+				before[name] = mcp.BindingForDefinition(old.Definition())
 			}
-			before := old.Definition()
 			store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 			active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "fixture", UserID: "owner", Workspace: session.WorkspaceRef{Key: "fixture", CWD: t.TempDir()}})
 			if err != nil {
@@ -90,17 +93,16 @@ func TestProductPolicyPendingCapabilityChange(t *testing.T) {
 					if err := mgr.RefreshTools(ctx, "desktop-world", "dtw"); err != nil {
 						return agent.ApprovalResponse{}, err
 					}
-				}
-				if change == "other-atomic-schema" {
-					current, _, err := mgr.Lookup(ctx, "dtw__look")
-					if err != nil {
-						return agent.ApprovalResponse{}, err
-					}
-					if before.Source.CapabilityRevision == current.Definition().Source.CapabilityRevision {
-						t.Error("fixture did not change group capability")
-					}
-					if tool.BindingForDefinition(before) != tool.BindingForDefinition(current.Definition()) {
-						t.Error("fixture unexpectedly changed current tool binding")
+					for name, old := range before {
+						current, found, err := mgr.Lookup(ctx, name)
+						if err != nil || !found {
+							t.Errorf("refreshed lookup of %s: found=%v err=%v", name, found, err)
+							continue
+						}
+						wantChanged := change == "same-tool-schema" && name == "dtw__look" || change == "other-atomic-schema" && name == "dtw__click"
+						if changed := mcp.BindingForDefinition(current.Definition()) != old; changed != wantChanged {
+							t.Errorf("binding for %s changed=%v, want %v", name, changed, wantChanged)
+						}
 					}
 				}
 				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
@@ -121,11 +123,11 @@ func TestProductPolicyPendingCapabilityChange(t *testing.T) {
 				t.Fatalf("expected actual approval, got %d", asks.Load())
 			}
 			want := int32(0)
-			if change == "unchanged" {
+			if change == "unchanged" || change == "other-atomic-schema" {
 				want = 1
 			}
 			if effects.Load() != want {
-				t.Fatalf("stale capability approval dispatched: got effects=%d want=%d", effects.Load(), want)
+				t.Fatalf("dispatch after %s: got effects=%d want=%d", change, effects.Load(), want)
 			}
 		})
 	}

@@ -20,6 +20,11 @@ import (
 // ToolKind identifies declarations that require Runtime Code Mode binding.
 const ToolKind = "code_mode"
 
+const metadataKind = "caelis.tool.kind"
+
+// IsDefinition recognizes a Code Mode declaration installed by the host.
+func IsDefinition(def tool.Definition) bool { return def.Metadata[metadataKind] == ToolKind }
+
 // ToolName is the fixed model-facing script entry.
 const ToolName = "js_exec"
 
@@ -208,8 +213,8 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 const MetadataCatalog = "code_mode_catalog_v11"
 
 // MetadataScriptCompletion records whether script execution returned normally.
-// Its "completed"/"failed" value is presentation-only, independent of cumulative
-// IsError, Task state, authorization and durable effect outcomes.
+// Its "completed"/"failed" value is presentation-only, independent of tool call
+// failures, Task state, authorization and durable effect outcomes.
 const MetadataScriptCompletion = "code_mode_script_completion"
 
 // Guidance supplies usage preferences; Tool.Definition owns the script API.
@@ -236,7 +241,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline source, file source and reset operations.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: description, InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, MayCompleteTurn: true, Metadata: map[string]any{metadataKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{
 			"code":          map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body."},

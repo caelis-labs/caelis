@@ -168,7 +168,7 @@ func TestApplicationNativeToolEffects(t *testing.T) {
 			if candidate.Definition().Name != name {
 				continue
 			}
-			result, err := candidate.Call(t.Context(), tool.Call{Name: name, Input: json.RawMessage(input), Execution: tool.InvocationContext{SessionID: binding.SessionID, TurnID: "turn", ItemID: name}})
+			result, err := candidate.Call(t.Context(), tool.Call{Name: name, Input: json.RawMessage(input)})
 			if err != nil {
 				t.Fatalf("%s: %v", name, err)
 			}

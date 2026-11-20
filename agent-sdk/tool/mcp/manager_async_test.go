@@ -8,7 +8,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -210,45 +209,10 @@ func TestManagerCollisionPriorityDoesNotFollowConnectionOrder(t *testing.T) {
 					want = "fallback"
 				}
 				ready := mgr.Tools()
-				if len(ready) != 1 || ready[0].Definition().Metadata[tool.MetadataPluginID] != want {
+				if len(ready) != 1 || ready[0].Definition().Metadata[MetadataPluginID] != want {
 					t.Fatalf("winner=%#v want %s", ready, want)
 				}
 			})
 		})
 	}
-}
-
-func TestManagerPublishedDefinitionsRemainImmutableAfterAliasMerge(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		gate := make(chan struct{})
-		specs := []ServerSpec{{PluginID: "preferred", Name: "docs"}, {PluginID: "fallback", Name: "docs"}}
-		mgr, err := newManager(t.Context(), specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-			if spec.PluginID == "fallback" {
-				return asyncTestClient(ctx, spec, gate)
-			}
-			return asyncTestClient(ctx, spec, nil)
-		}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer mgr.Close()
-		synctest.Wait()
-		first := mgr.Tools()[0]
-		firstAliases := first.Definition().Metadata[tool.MetadataReplayAliases]
-		close(gate)
-		<-mgr.Initialized()
-		ready := mgr.Tools()
-		if len(ready) != 1 || ready[0].Definition().Metadata[tool.MetadataPluginID] != "preferred" {
-			t.Fatalf("winner=%#v", ready)
-		}
-		if first.Definition().Metadata[tool.MetadataPluginID] != "preferred" {
-			t.Fatal("published callable mutated")
-		}
-		// Keep a reader's prior definition independent of later alias merges.
-		if a, ok := firstAliases.([]string); ok {
-			if !slices.Equal(a, first.Definition().Metadata[tool.MetadataReplayAliases].([]string)) {
-				t.Fatal("published aliases mutated")
-			}
-		}
-	})
 }

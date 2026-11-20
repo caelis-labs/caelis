@@ -282,7 +282,7 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	definitions := map[string]tool.Definition{}
 	for _, target := range manager.Tools() {
 		def := target.Definition()
-		if def.Metadata[tool.MetadataMCPTool] == "exec" {
+		if def.Metadata[mcp.MetadataTool] == "exec" {
 			t.Fatal("DTW exposed nested-script exec instead of atomic tools")
 		}
 		definitions[def.Name] = def
@@ -313,14 +313,14 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	executor := &gojaexec.Executor{Observe: func(m gojaexec.Metrics) { mu.Lock(); defer mu.Unlock(); metrics = append(metrics, m) }}
 	var approvals []map[string]any
 	requester := approvalRequesterFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		if r.Tool.Name != r.Call.Name || r.Tool.Metadata[tool.MetadataMCPServer] != "dtw" || r.Call.Parent == nil || r.Call.Parent.Kind != codemode.ToolKind || r.Call.TargetBinding == nil || r.Call.Execution.SessionID == "" || r.Call.Execution.TurnID == "" || r.Call.Execution.ItemID == "" {
+		if r.Tool.Name != r.Call.Name || r.Tool.Metadata[mcp.MetadataServer] != "dtw" || r.Parent == nil || r.Parent.Kind != codemode.ToolKind || mcp.BindingForDefinition(r.Tool).Identity == "" || r.Execution.SessionID == "" || r.Execution.TurnID == "" || r.Execution.ItemID == "" {
 			return agent.ApprovalResponse{}, fmt.Errorf("approval lost real MCP target: %s", r.Tool.Name)
 		}
 		var args map[string]any
 		if e := json.Unmarshal(r.Call.Input, &args); e != nil {
 			return agent.ApprovalResponse{}, e
 		}
-		remote, _ := r.Tool.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		if remote == "apps" {
 			if args["query"] != fixtureName || args["state"] != "running" {
 				return agent.ApprovalResponse{}, fmt.Errorf("unscoped discovery approval")
@@ -444,10 +444,10 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 		case session.ToolOutcomeSucceeded:
 			succeeded[r.Name]++
 			def, ok := definitions[r.Name]
-			if !ok || r.Binding == nil || *r.Binding != tool.BindingForDefinition(def) {
+			if !ok || r.Binding == nil || *r.Binding != mcp.BindingForDefinition(def) {
 				t.Fatal("nested dispatch lost its admitted target binding")
 			}
-			remoteCalls = append(remoteCalls, map[string]any{"canonical_target": r.Name, "remote": def.Metadata[tool.MetadataMCPTool], "arguments": r.Input, "receipt": r.Result, "binding": r.Binding, "parent": r.Parent})
+			remoteCalls = append(remoteCalls, map[string]any{"canonical_target": r.Name, "remote": def.Metadata[mcp.MetadataTool], "arguments": r.Input, "receipt": r.Result, "binding": r.Binding, "parent": r.Parent})
 			resultMedia = append(resultMedia, dtwAtomicResultPNGs(t, r.Result)...)
 		case session.ToolOutcomeFailed, session.ToolOutcomeUnknown:
 			t.Fatalf("nested call failed: %s %s", r.Name, r.Error)
@@ -456,7 +456,7 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	for remote, want := range map[string]int{"click": 2, "typeText": 1, "keypress": 1, "apps": 1, "capture": 4, "look": 3} {
 		canonical := ""
 		for name, def := range definitions {
-			if def.Metadata[tool.MetadataMCPTool] == remote {
+			if def.Metadata[mcp.MetadataTool] == remote {
 				canonical = name
 			}
 		}
@@ -654,11 +654,13 @@ func dtwAtomicResultPNGs(t *testing.T, result *tool.Result) [][]byte {
 	if result == nil {
 		t.Fatal("nested ToolResult is missing its complete result")
 	}
-	raw, err := json.Marshal(result)
-	if err != nil {
-		t.Fatal(err)
+	var images [][]byte
+	for _, block := range result.Content {
+		if image, ok := block.(tool.Image); ok && image.MIMEType == "image/png" {
+			images = append(images, image.Data)
+		}
 	}
-	return dtwAtomicPNGs(t, raw)
+	return images
 }
 
 // Decode only typed inline media sources; plain text containing base64 is not

@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // These counters observe existing source/selector interfaces. They do not
@@ -84,7 +85,7 @@ func (t h1Tool) Call(context.Context, tool.Call) (tool.Result, error) {
 	t.source.mu.Lock()
 	t.source.stats.Effects++
 	t.source.mu.Unlock()
-	return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"value":42}`))}}, nil
+	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":42}`)}}}, nil
 }
 func h1Directory(n int) *h1Source {
 	s := &h1Source{}
@@ -98,7 +99,7 @@ func h1Directory(n int) *h1Source {
 		}
 		def := fixtureMCPDefinition("h1-v1")
 		def.Name = name
-		def.Description = tool.ExternalCapabilityDescriptionPrefix + " " + strings.Repeat("Read a synthetic lookup value with an integer argument. ", 3)
+		def.Description = strings.Repeat("Read a synthetic lookup value with an integer argument. ", 3)
 		def.InputSchema = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": "integer"}}}
 		s.items = append(s.items, h1Tool{s, def})
 	}
@@ -200,7 +201,7 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 				s.mu.Lock()
 				item := s.items[0].(h1Tool)
 				item.def.InputSchema = map[string]any{"type": "object", "properties": map[string]any{"changed": map[string]any{"type": "string"}}}
-				item.def.Metadata[tool.MetadataMCPSourceFingerprint] = "h1-v2"
+				item.def.Metadata[mcp.MetadataSourceFingerprint] = "h1-v2"
 				s.items[0] = item
 				s.mu.Unlock()
 			}
@@ -242,7 +243,7 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 	}
 }
 
-func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
+func TestJSExecH1HintPreservesDescriptionsAndStoredSnapshots(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, Update: func(state map[string]any) (map[string]any, error) {
 		if state == nil {
@@ -265,7 +266,8 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := (&codemode.Tool{Name: codemode.ToolName}).Definition().Description
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || strings.Contains(text, "input_schema") || strings.Contains(text, "parallel_safe") {
+	if !strings.HasPrefix(text, codemode.Guidance+"\n\nPartial tool hint snapshot; use tools.search for other capabilities.\n") ||
+		!strings.Contains(text, "Read a synthetic lookup") || strings.Contains(text, "input_schema") || strings.Contains(text, "parallel_safe") {
 		t.Fatalf("H1 hint semantics lost or schemas leaked into guidance: %s", text)
 	}
 	if !strings.Contains(text, "Search for unknown tools or arguments") || strings.Contains(text, "tools.search(") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
@@ -294,7 +296,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	var names []string
 	for i, one := range many.items {
 		item := one.(h1Tool)
-		item.def.Description = tool.ExternalCapabilityDescriptionPrefix + " " + strings.Repeat("读取语义", 50)
+		item.def.Description = strings.Repeat("读取语义", 50)
 		many.items[i] = item
 		names = append(names, item.def.Name)
 	}

@@ -36,9 +36,9 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 		t.Fatal(err)
 	}
 	data := base64.StdEncoding.EncodeToString(pngData.Bytes())
-	content := []model.Part{model.NewTextPart("screenshot"), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: data}, "image/png", "screen")}
+	content := []tool.ContentBlock{tool.Text("screenshot"), tool.Image{Data: pngData.Bytes(), MIMEType: "image/png", Name: "screen"}}
 	calls := 0
-	screen := tool.NamedTool{Def: tool.Definition{Name: "ECHO", EffectClass: tool.EffectReadOnly}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+	screen := tool.NamedTool{Def: tool.Definition{Name: "ECHO"}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 		calls++
 		return tool.Result{ID: call.ID, Name: call.Name, Content: content}, nil
 	}}

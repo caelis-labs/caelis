@@ -9,6 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -20,15 +21,15 @@ func TestApprovalOriginBuiltinNoOptionsNormalizationAndReason(t *testing.T) {
 		captured = req
 		return agent.ApprovalResponse{OptionID: "reject_once", Outcome: "selected", Reason: "Destructive target is not authorized."}, nil
 	})}}
-	result, err := wrapped.requestApproval(t.Context(), tool.Call{ID: "call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "Probe"}}})
-	if err != nil {
-		t.Fatal(err)
+	result, err := wrapped.requestApproval(t.Context(), tool.Call{ID: "call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "Probe"}}}, toolbinding.Dispatch{})
+	if !tool.HasFailedReply(err) {
+		t.Fatalf("denial error = %v", err)
 	}
 	if invoked || captured.Origin == nil || captured.Origin.Role != agent.ApprovalRoleMain || captured.Origin.Endpoint != agent.ApprovalEndpointBuiltin || len(captured.Approval.Options) != 2 {
 		t.Fatalf("bad admission: %+v invoked=%v", captured, invoked)
 	}
 	encoded, _ := json.Marshal(result)
-	if !result.IsError || !strings.Contains(string(encoded), "Destructive target is not authorized.") {
+	if !strings.Contains(string(encoded), "Destructive target is not authorized.") {
 		t.Fatalf("denial reason did not reach tool result: %+v", result)
 	}
 }

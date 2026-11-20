@@ -29,15 +29,18 @@ func (t invocationTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 }
 
 func (t invocationTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if !toolbinding.IsPrepared(ctx, call) {
-		call = t.RuntimePrepareInvocation(toolbinding.Token{}, call)
-	}
-	return t.base.Call(ctx, call)
+	return t.RuntimeCall(toolbinding.Token{}, ctx, call, toolbinding.Dispatch{})
 }
 
-func (t invocationTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.Call {
-	call.Execution = tool.InvocationContext{SessionID: t.sessionID, TurnID: t.turnID, ItemID: fmt.Sprintf("tool-%d:%s", t.sequence.Add(1), strings.TrimSpace(call.ID))}
-	return call
+func (t invocationTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
+	if !toolbinding.IsPrepared(ctx, call) {
+		ctx = toolbinding.WithOccurrence(ctx, toolbinding.Allocate(t, call), nil, nil)
+	}
+	return toolbinding.Call(ctx, t.base, call, dispatch)
+}
+
+func (t invocationTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.InvocationContext {
+	return tool.InvocationContext{SessionID: t.sessionID, TurnID: t.turnID, ItemID: fmt.Sprintf("tool-%d:%s", t.sequence.Add(1), strings.TrimSpace(call.ID))}
 }
 
 func wrapToolsForInvocation(ref session.SessionRef, turnID string, sequence *atomic.Uint64, tools []tool.Tool) []tool.Tool {
@@ -55,9 +58,10 @@ func wrapToolsForInvocation(ref session.SessionRef, turnID string, sequence *ato
 
 // toolTaskOperationID binds a genuine Task submission to this admitted
 // occurrence. Direct legacy adapters leave identity to their existing owner.
-func toolTaskOperationID(call tool.Call) string {
-	if call.Execution.ItemID == "" {
+func toolTaskOperationID(ctx context.Context, call tool.Call) string {
+	execution := tool.InvocationFromContext(ctx)
+	if execution.ItemID == "" {
 		return ""
 	}
-	return "tool/" + call.Execution.TurnID + "/" + call.Execution.ItemID + "/" + call.Name
+	return "tool/" + execution.TurnID + "/" + execution.ItemID + "/" + call.Name
 }

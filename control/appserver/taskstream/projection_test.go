@@ -906,7 +906,7 @@ func TestChildTaskFramePreservesDirectScriptParent(t *testing.T) {
 func TestCodeModeTaskStreamProjectsIndependentScriptCompletion(t *testing.T) {
 	for _, kind := range []task.Kind{task.KindCodeMode, task.KindCommand} {
 		for _, completion := range []string{"completed", "failed"} {
-			raw, _ := json.Marshal(tool.Result{IsError: true, Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}})
+			raw, _ := json.Marshal(tool.Result{Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}})
 			events := commandTaskStreamFrameEvents(taskFrameProjectionRequest{TaskKind: kind, CallID: "script", ToolName: "js_exec"}, controltaskstream.Frame{Closed: true, State: "failed", Text: string(raw)})
 			update := events[0].Update.(eventstream.ToolCallUpdate)
 			value := update.Meta[codemode.MetadataScriptCompletion]

@@ -20,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestSourceReadAuthorizationDoesNotReplaceCommandClassification(t *testing.T) {
@@ -123,8 +124,8 @@ func TestDefaultRegistryDoesNotExposeDangerFullAccessMode(t *testing.T) {
 
 func TestWorkspaceWriteMCPGateIsRuntimeOwned(t *testing.T) {
 	input := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", Metadata: map[string]any{
-		tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture",
-		tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read",
+		mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "fixture",
+		mcp.MetadataServer: "docs", mcp.MetadataTool: "read",
 	}}, Call: tool.Call{ID: "call", Name: "docs__read", Input: []byte(`{"key":"fixture"}`)}}
 	decision, err := WorkspaceWriteMode().DecideTool(t.Context(), input)
 	if err != nil {
@@ -262,7 +263,7 @@ func TestDefaultModeAllowsExplicitNonMCPTools(t *testing.T) {
 		},
 		{
 			Tool: policyToolSearchDefinition(),
-			Call: policyToolCall(tool.ToolSearchToolName, map[string]any{"query": "calendar"}),
+			Call: policyToolCall(mcp.SearchToolName, map[string]any{"query": "calendar"}),
 		},
 		{
 			Tool: policyToolDefinition("WebSearch"),
@@ -1380,16 +1381,16 @@ func policyMCPToolDefinition(name string) tool.Definition {
 	return tool.Definition{
 		Name: name,
 		Metadata: map[string]any{
-			tool.MetadataToolKind: tool.MetadataToolKindMCP,
+			mcp.MetadataKind: mcp.KindTool,
 		},
 	}
 }
 
 func policyToolSearchDefinition() tool.Definition {
 	return tool.Definition{
-		Name: tool.ToolSearchToolName,
+		Name: mcp.SearchToolName,
 		Metadata: map[string]any{
-			tool.MetadataToolKind: tool.MetadataToolKindToolSearch,
+			mcp.MetadataKind: mcp.SearchToolName,
 		},
 	}
 }

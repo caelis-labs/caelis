@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -35,11 +34,12 @@ func TestReadToolDoesNotScanOversizedTailPastLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if len(result.Content) != 1 || result.Content[0].Kind != model.PartKindJSON {
+	structured, ok := result.Structured()
+	if len(result.Content) != 1 || !ok {
 		t.Fatalf("result.Content = %+v, want json", result.Content)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 	if got, _ := payload["content"].(string); got != "1: first" {
@@ -204,7 +204,8 @@ func TestReadToolByteBudgetPagesWholeNumberedLines(t *testing.T) {
 			HasMore    bool   `json:"has_more"`
 			Revision   string `json:"revision"`
 		}
-		if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
+		structured, _ := result.Structured()
+		if err := json.Unmarshal(structured, &payload); err != nil {
 			t.Fatal(err)
 		}
 		if len(payload.Content) > maxReadReturnedBytes || payload.StartLine != page.offset+1 || payload.EndLine != page.end || payload.NextOffset != page.end || payload.HasMore != page.more {

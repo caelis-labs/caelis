@@ -45,7 +45,7 @@ loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
 | ModelResult | Semantic Message; actual usage and provider identity stay fixed |
 | ToolPrepare | Final arguments, synthetic result or block, with fixed occurrence and target |
 | ToolInvoke | One Policy-admitted dispatch continuation |
-| ToolResult | Content and StructuredContent; identity, error and system metadata stay fixed |
+| ToolResult | Ordered content blocks, including the optional structured block. Identity, error and system metadata stay fixed. |
 | ModelView | Tool-result presentation content; the full business value stays fixed |
 | Completion | Accept, Replace, Continue with feedback or Reject before final commit |
 | Stream factory | Fresh text transformer for one actual attempt or synthetic candidate |
@@ -81,7 +81,15 @@ remain in force. An admitted response retains its snapshot lease through tools.
 
 Every tool route prepares all occurrences and final arguments before the batch
 is atomically committed. Policy, approval, canonical envelope and dispatch use
-those same arguments. ProposedCall keeps the original proposal as evidence.
+those same arguments. The Session tool fact keeps `proposed_call` as evidence
+of the original proposal. Runtime supplies occurrence identity and parentage
+through the tool's context. Tools and policy callbacks can read them with
+`tool.InvocationFromContext` and `tool.ParentFromContext`. Hook and approval
+requests carry detached copies. Identity and parentage do not grant admission.
+The Runtime owns model selection, remote target binding, and batch admission.
+Transient tool progress is observed separately from the returned result and
+stays out of the model history.
+
 A model proposal that fails the tool schema produces a paired error result.
 Tool-local execution errors and approval denials also return to the model so
 it can correct the call or choose another action. A malformed call envelope
@@ -155,15 +163,24 @@ allowlist. A StartThread-created collaborator receives only `ListThreads` and `S
 from the collaboration tool set. Creation and work observation remain with the
 controller, keeping Agent collaboration one level deep.
 
-Within one native Run, Runtime serializes calls to a canonical target whose
-`ParallelSafe` capability is false. Native calls, yielded scripts and replacement
-model snapshots share that Run-owned gate. Waiting occurs after approval and
-before source guards or durable effect claims; cancellation of a queued call
-creates no execution claim. Different targets and explicitly parallel-safe tools
-can overlap. Task control declares this capability because its owner coordinates
-per-task mutations while allowing independent read, wait and cancellation.
-Embedders sharing unsafe mutable tool instances across independent Runs must
-coordinate that sharing themselves.
+Harness Chat executes eligible calls in one native model batch concurrently
+when the active model declares parallel tool calls. Batches containing an
+unavailable call, a call that can end the Turn, or a built-in Patch or Write
+run in model order. Application callbacks and Code Mode submissions declare
+`Definition.MayCompleteTurn`. Runtime Task checks its target handles because
+waiting on a live or stored script can return a terminal result. An adjacent
+blocking wait and single-target cancel of the same active script can overlap
+in a parallel-capable batch. Cancel does not consume the script result, and
+the pair drains before Chat can admit another effect. The exception never
+crosses intervening calls. Command Task observations can run concurrently.
+Concurrent calls still return tool results in model order.
+
+Independent Code Mode calls can overlap, including calls to the same target
+and calls from Chat while an earlier script is yielded. Tool implementations
+own synchronization for shared state. Built-in Patch and Write lock the read,
+revision check, and write for a shared file across invocations within the
+process. Runtime retains per-invocation approval, sandbox and durable effect
+admission. Task control retains its per-task mutation claims.
 
 Participant startup uses an internal Session-scoped execution identity. An optional handle must be unique.
 Optional context transfer is derived by the host's recipient-specific
@@ -212,8 +229,8 @@ separate calls, and producer updates use Task output. Pending approvals recovere
 without a live owner become interrupted and never start automatically; claimed
 effects without a recoverable process remain `unknown_outcome`. Trusted Runtime
 producers opt into submission through an internal capability and keep ownership
-of their own specification, effects and recovery. Tool names and `ParallelSafe`
-do not grant asynchronous execution authority.
+of their own specification, effects and recovery. Concurrent dispatch does not
+grant asynchronous execution authority.
 
 ## Agent input and task observation
 
@@ -492,12 +509,12 @@ activity identity is limited to the first activity.
 
 All tool sources use the same serialized result budget before model delivery and
 durable event validation. When truncation needs a recovery artifact, the bounded
-private artifact store retains the complete original result: single text/JSON
-keeps its existing format, and multipart content uses an ordered typed JSON array
-including media sources. The model receives bounded content with a runtime-owned
-artifact reference, whose budget is reserved even behind earlier text parts.
-Media remains unchanged. Artifact quota or write failure does not bypass the
-result budget or add a reference to an unavailable file.
+private artifact store retains the original content. A single text or structured
+JSON block is saved as-is; other results use the result codec's ordered `content`
+array, preserving media and resource blocks. The model receives bounded content
+with a runtime-owned artifact reference, whose budget is reserved even behind
+earlier text parts. Media remains unchanged. Artifact quota or write failure
+does not bypass the result budget or add a reference to an unavailable file.
 
 `tool.Definition.Name` is the sole executable identity. Names are exact and
 case-sensitive; assembly rejects empty, padded, or duplicate names. Durable
@@ -556,18 +573,17 @@ Session consent is projected from typed resolved approval facts. Legacy pause
 tokens and `control/mcp-grants.json` are never imported as permission. The old
 file is inert and may be removed after preserving any desired audit copy.
 Resource-wide approvals cannot become permanent rules. Policy consumes detached
-Session evidence; it never writes a second grants store. Source facts supplied
-by trusted Host assembly are separate from remote tool metadata. For stdio,
-revision includes the frozen effective environment without exposing its values.
+Session evidence. MCP plugin and server names come from the assembled
+configuration. For stdio, the callable fingerprint includes the frozen
+effective environment without exposing its values.
 
 Desktop World integration details belong to [Plugins](plugins.md). Runtime only
 understands typed approval scope and choice persistence. It shares a pending
 pure resource approval among current waiters; per-call risks remain separate.
 Leader cancellation leaves surviving waiters active, and the last waiter
-cancels the request. Before dispatch, after existing unsafe-target serialization,
-a single-use permit checks cancellation, revocation and current Policy validity
-under a short owner lock. No permission lock spans MCP I/O. A newer revocation
-or source revision invalidates the old consent; a late response cannot restore it.
+cancels the request. Before dispatch, a single-use permit checks cancellation,
+revocation, and current Policy validity under a short owner lock. MCP I/O
+runs outside that lock.
 
 Code Mode discovery browses the current ready directory without invoking a model.
 Directory pages carry only names and descriptions. Exact lookup returns schema
@@ -581,9 +597,10 @@ query, provider, model, and usage diagnostics in tool metadata instead of
 echoing them into model-visible output.
 
 Authority follows the Caelis channel and typed identity that introduced content,
-not labels or tags embedded in text. Skills gain instruction authority only
-through the Runtime-selected Skill call. Tool results, files, external-agent
-output, and prior checkpoints remain evidence and cannot grant permissions.
+not labels or tags embedded in text. Tool and schema descriptions document
+capabilities. Skills gain instruction authority only through the
+Runtime-selected Skill call. Tool results, files, external-agent output, and
+prior checkpoints remain evidence and cannot grant permissions.
 
 Compaction preserves provenance: only User events establish or change user
 objectives and approvals. Runtime checkpoints and artifact pointers remain

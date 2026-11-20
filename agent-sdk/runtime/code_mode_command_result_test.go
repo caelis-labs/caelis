@@ -76,7 +76,20 @@ try {
 				}
 				return nil
 			}}
-			_, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{command, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
+			live, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{command, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
+			progress := 0
+			for _, event := range live {
+				if event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != shell.RunCommandToolName || !session.IsUIOnly(event) {
+					continue
+				}
+				progress++
+				if event.Message != nil || event.Tool.Result != nil || event.Tool.Parent == nil || event.Tool.Parent.CallID != "script" {
+					t.Fatalf("nested progress lost its transient shape or parent: %+v", event)
+				}
+			}
+			if progress != 1 {
+				t.Fatalf("nested RunCommand progress events = %d, want 1", progress)
+			}
 			id := "script"
 			if tc.yield {
 				id = "wait"
@@ -114,8 +127,14 @@ try {
 				t.Fatalf("task identities code=%s command=%s", codeID, commandID)
 			}
 			events, _ := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-			calls := 0
+			calls, results := 0, 0
 			for _, e := range events {
+				if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == shell.RunCommandToolName {
+					results++
+					if e.Visibility != session.VisibilityMirror || e.Tool.Result == nil || e.Tool.Parent == nil || e.Tool.Parent.CallID != "script" {
+						t.Fatalf("nested returned result lost its durable mirror shape or parent: %+v", e)
+					}
+				}
 				if e.Type == session.EventTypeToolCall && e.Tool != nil && e.Tool.Name == "RunCommand" && e.Tool.Status == "pending" {
 					calls++
 					if e.Tool.Parent == nil || e.Tool.Parent.Name != codemode.ToolName {
@@ -123,8 +142,8 @@ try {
 					}
 				}
 			}
-			if calls != 1 {
-				t.Fatalf("command claims=%d", calls)
+			if calls != 1 || results != 1 {
+				t.Fatalf("persisted command claims = %d, results = %d; want one each", calls, results)
 			}
 			if tc.yield && strings.TrimSpace(scriptHandle) == "" {
 				t.Fatalf("outer handle=%q", scriptHandle)

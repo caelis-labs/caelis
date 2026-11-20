@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -18,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 const (
@@ -59,6 +59,9 @@ func NewRegistry() (*policy.MemoryRegistry, error) {
 	)
 }
 
+// WorkspaceWriteMode applies the built-in tool rules and default workspace
+// sandbox constraints. Embedders exposing commands under other names must
+// apply command-specific restrictions in their policy.
 func WorkspaceWriteMode() policy.Mode {
 	return policy.NamedMode{
 		ID: ModeWorkspaceWrite,
@@ -98,9 +101,9 @@ func MCPApprovalDecision(input policy.ToolContext, constraints sandbox.Constrain
 		return policy.Decision{}, err
 	}
 	decision.Approval.ToolCall.Kind = "other" // ACP tool-call kind; MCP identity stays in trusted metadata.
-	plugin, _ := input.Tool.Metadata[tool.MetadataPluginID].(string)
-	server, _ := input.Tool.Metadata[tool.MetadataMCPServer].(string)
-	remote, _ := input.Tool.Metadata[tool.MetadataMCPTool].(string)
+	plugin, _ := input.Tool.Metadata[mcp.MetadataPluginID].(string)
+	server, _ := input.Tool.Metadata[mcp.MetadataServer].(string)
+	remote, _ := input.Tool.Metadata[mcp.MetadataTool].(string)
 	decision.Approval.ToolCall.Title = "MCP " + strings.TrimSpace(plugin+"/"+server+"/"+remote)
 	decision.Approval.Options = []session.ProtocolApprovalOption{
 		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
@@ -304,8 +307,8 @@ const (
 	builtinPolicyCommand
 )
 
-func builtinPolicyClassForName(name string) builtinPolicyClass {
-	switch name {
+func policyClass(input policy.ToolContext) builtinPolicyClass {
+	switch toolName(input) {
 	case filesystem.ReadToolName, filesystem.ViewImageToolName:
 		return builtinPolicyReadPath
 	case filesystem.SearchToolName:
@@ -319,14 +322,4 @@ func builtinPolicyClassForName(name string) builtinPolicyClass {
 	default:
 		return builtinPolicyUnknown
 	}
-}
-
-func policyClass(input policy.ToolContext) builtinPolicyClass {
-	if class := builtinPolicyClassForName(toolName(input)); class != builtinPolicyUnknown {
-		return class
-	}
-	if input.Tool.ExecutionRequirements != nil && input.Tool.ExecutionRequirements.Sandbox.CommandExec {
-		return builtinPolicyCommand
-	}
-	return builtinPolicyUnknown
 }

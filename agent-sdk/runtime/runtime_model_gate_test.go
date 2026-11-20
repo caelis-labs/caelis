@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
@@ -24,10 +25,9 @@ func TestAutoCompactModelWrapperPreservesWebSearcher(t *testing.T) {
 		t.Fatalf("wrapped model = %T, want WebSearcher capability", wrapped)
 	}
 
-	result, err := web.NewSearch().Call(context.Background(), tool.Call{
-		Input:        json.RawMessage(`{"query":"latest release","max_results":1}`),
-		RuntimeModel: wrapped,
-	})
+	result, err := toolbinding.Call(context.Background(), web.NewSearch(), tool.Call{
+		Input: json.RawMessage(`{"query":"latest release","max_results":1}`),
+	}, toolbinding.Dispatch{Model: wrapped})
 	if err != nil {
 		t.Fatalf("web_search Call() error = %v", err)
 	}
@@ -419,11 +419,12 @@ func (searchCapableGateModel) SearchWeb(_ context.Context, req model.WebSearchRe
 
 func webSearchResultPayloadForTest(t *testing.T, result tool.Result) map[string]any {
 	t.Helper()
-	if len(result.Content) != 1 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if len(result.Content) != 1 || !ok {
 		t.Fatalf("result content = %#v, want one JSON part", result.Content)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("decode result JSON: %v", err)
 	}
 	return payload

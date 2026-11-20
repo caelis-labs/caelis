@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
@@ -13,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
@@ -83,7 +83,7 @@ func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleCommandAction, result: projectedResultCommand, terminalKnown: true, terminalPanel: true}, true
 	case tasktool.ToolName:
 		return projectedToolProfile{kind: projectedToolKindOther, title: projectedTitleCommandAction, result: projectedResultTask, terminalKnown: true}, true
-	case plan.ToolName, tool.ToolSearchToolName:
+	case plan.ToolName, mcp.SearchToolName:
 		return projectedToolProfile{kind: projectedToolKindOther}, true
 	case skilltool.ToolName:
 		return projectedToolProfile{kind: projectedToolKindRead, title: projectedTitleSkill}, true

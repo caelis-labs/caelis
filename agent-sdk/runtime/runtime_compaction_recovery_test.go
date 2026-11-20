@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -169,8 +168,8 @@ func repeatedCompactionEchoTool() tool.Tool {
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
-				Content: []model.Part{
-					model.NewJSONPart([]byte(`{"value":"pong","detail":"repeated compaction tool result"}`)),
+				Content: []tool.ContentBlock{
+					tool.StructuredContent{Value: []byte(`{"value":"pong","detail":"repeated compaction tool result"}`)},
 				},
 			}, nil
 		},

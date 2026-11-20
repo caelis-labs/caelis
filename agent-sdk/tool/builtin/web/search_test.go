@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"iter"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,23 +12,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-type plainLLM struct{}
-
-func (plainLLM) Name() string { return "plain-model" }
-
-func (plainLLM) ProviderName() string { return "plain" }
-
-func (plainLLM) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	return func(func(*model.StreamEvent, error) bool) {}
-}
-
-type searchableLLM struct {
-	plainLLM
+type searchStub struct {
 	resp model.WebSearchResponse
 	err  error
 }
 
-func (s searchableLLM) SearchWeb(_ context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
+func (s searchStub) SearchWeb(_ context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
 	if s.err != nil {
 		return model.WebSearchResponse{}, s.err
 	}
@@ -38,30 +26,12 @@ func (s searchableLLM) SearchWeb(_ context.Context, req model.WebSearchRequest) 
 	return resp, nil
 }
 
-type unavailableReasonLLM struct {
-	plainLLM
-	reason string
-}
-
-func (u unavailableReasonLLM) WebSearchUnavailableReason() string {
-	return u.reason
-}
-
-func TestSearchToolIsParallelSafe(t *testing.T) {
-	t.Parallel()
-
-	if !NewSearch().Definition().Capabilities.ParallelSafe {
-		t.Fatal("WebSearch ParallelSafe = false, want concurrent same-step searches")
-	}
-}
-
 func TestSearchToolReturnsUnavailableFallbackForUnsupportedProvider(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewSearch().Call(context.Background(), tool.Call{
-		Input:        json.RawMessage(`{"query":"latest release"}`),
-		RuntimeModel: plainLLM{},
-	})
+	result, err := NewSearch().CallWithBackend(context.Background(), tool.Call{
+		Input: json.RawMessage(`{"query":"latest release"}`),
+	}, SearchBackend{Provider: "plain"})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -77,67 +47,26 @@ func TestSearchToolReturnsUnavailableFallbackForUnsupportedProvider(t *testing.T
 	}
 }
 
-func TestSearchToolReturnsUnavailableFallbackForRetryWrappedUnsupportedProvider(t *testing.T) {
-	t.Parallel()
-
-	result, err := NewSearch().Call(context.Background(), tool.Call{
-		Input:        json.RawMessage(`{"query":"latest release"}`),
-		RuntimeModel: model.WithRetry(plainLLM{}, model.RetryConfig{}),
-	})
-	if err != nil {
-		t.Fatalf("Call() error = %v", err)
-	}
-	if result.IsError {
-		t.Fatal("result.IsError = true, want unavailable fallback to be non-error")
-	}
-	payload := resultPayload(t, result)
-	if got := payload["status"]; got != "unavailable" {
-		t.Fatalf("status = %#v, want unavailable", got)
-	}
-}
-
 func TestSearchToolReturnsUnavailableFallbackForProviderReason(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewSearch().Call(context.Background(), tool.Call{
+	result, err := NewSearch().CallWithBackend(context.Background(), tool.Call{
 		Input: json.RawMessage(`{"query":"latest release"}`),
-		RuntimeModel: unavailableReasonLLM{
-			plainLLM: plainLLM{},
-			reason:   "Xiaomi Token Plan endpoints do not support provider-native web_search. Use a native Xiaomi MiMo API key, or use web_fetch with a known URL.",
+	}, SearchBackend{
+		Provider:          "plain",
+		UnavailableReason: "Xiaomi Token Plan endpoints do not support provider-native web_search. Use a native Xiaomi MiMo API key, or use web_fetch with a known URL.",
+		SearchWeb: func(context.Context, model.WebSearchRequest) (model.WebSearchResponse, error) {
+			t.Fatal("provider search ran despite the explicit availability reason")
+			return model.WebSearchResponse{}, nil
 		},
 	})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	if result.IsError {
-		t.Fatal("result.IsError = true, want unavailable fallback to be non-error")
-	}
 	payload := resultPayload(t, result)
 	if got := payload["status"]; got != "unavailable" {
 		t.Fatalf("status = %#v, want unavailable", got)
 	}
-	message, _ := payload["message"].(string)
-	for _, want := range []string{"Token Plan", "native Xiaomi MiMo API key", "web_fetch"} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("message = %q, want %q", message, want)
-		}
-	}
-}
-
-func TestSearchToolReturnsUnavailableFallbackForRetryWrappedProviderReason(t *testing.T) {
-	t.Parallel()
-
-	result, err := NewSearch().Call(context.Background(), tool.Call{
-		Input: json.RawMessage(`{"query":"latest release"}`),
-		RuntimeModel: model.WithRetry(unavailableReasonLLM{
-			plainLLM: plainLLM{},
-			reason:   "Xiaomi Token Plan endpoints do not support provider-native web_search. Use a native Xiaomi MiMo API key, or use web_fetch with a known URL.",
-		}, model.RetryConfig{}),
-	})
-	if err != nil {
-		t.Fatalf("Call() error = %v", err)
-	}
-	payload := resultPayload(t, result)
 	message, _ := payload["message"].(string)
 	for _, want := range []string{"Token Plan", "native Xiaomi MiMo API key", "web_fetch"} {
 		if !strings.Contains(message, want) {
@@ -149,7 +78,7 @@ func TestSearchToolReturnsUnavailableFallbackForRetryWrappedProviderReason(t *te
 func TestSearchToolReturnsProviderResults(t *testing.T) {
 	t.Parallel()
 
-	llm := searchableLLM{resp: model.WebSearchResponse{
+	backend := searchStub{resp: model.WebSearchResponse{
 		Provider: "gemini",
 		Model:    "gemini-2.5-flash",
 		Answer:   "answer",
@@ -160,10 +89,9 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 			Source: "example.com",
 		}},
 	}}
-	result, err := NewSearch().Call(context.Background(), tool.Call{
-		Input:        json.RawMessage(`{"query":"latest release","max_results":1}`),
-		RuntimeModel: llm,
-	})
+	result, err := NewSearch().CallWithBackend(context.Background(), tool.Call{
+		Input: json.RawMessage(`{"query":"latest release","max_results":1}`),
+	}, SearchBackend{SearchWeb: backend.SearchWeb})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -181,7 +109,7 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 		}
 	}
 	meta := result.Metadata["caelis"].(map[string]any)["runtime"].(map[string]any)["tool"].(map[string]any)
-	if meta["query"] != "latest release" || meta["model"] != llm.resp.Model || meta["usage"].(map[string]any)["total_tokens"] != 15 {
+	if meta["query"] != "latest release" || meta["model"] != backend.resp.Model || meta["usage"].(map[string]any)["total_tokens"] != 15 {
 		t.Fatalf("tool metadata lost diagnostics: %#v", meta)
 	}
 
@@ -190,33 +118,30 @@ func TestSearchToolReturnsProviderResults(t *testing.T) {
 func TestSearchToolReturnsErrorResultForProviderFailure(t *testing.T) {
 	t.Parallel()
 
-	llm := searchableLLM{err: errors.New("quota exhausted")}
-	result, err := NewSearch().Call(context.Background(), tool.Call{
-		Input:        json.RawMessage(`{"query":"latest release"}`),
-		RuntimeModel: llm,
-	})
-	if err != nil {
-		t.Fatalf("Call() error = %v", err)
-	}
-	if !result.IsError {
-		t.Fatal("result.IsError = false, want provider failure marked as tool error")
+	backend := searchStub{err: errors.New("quota exhausted")}
+	result, err := NewSearch().CallWithBackend(context.Background(), tool.Call{
+		Input: json.RawMessage(`{"query":"latest release"}`),
+	}, SearchBackend{SearchWeb: backend.SearchWeb})
+	if !tool.HasFailedReply(err) {
+		t.Fatalf("Call() error = %v, want failed reply", err)
 	}
 	payload := resultPayload(t, result)
 	if got := payload["status"]; got != "failed" {
 		t.Fatalf("status = %#v, want failed", got)
 	}
-	if message, _ := payload["message"].(string); !strings.Contains(message, "quota exhausted") {
-		t.Fatalf("message = %q, want provider error detail", message)
+	if message, _ := payload["message"].(string); !strings.Contains(message, "quota exhausted") || err.Error() != message {
+		t.Fatalf("message = %q, error = %v; want matching provider error detail", message, err)
 	}
 }
 
 func resultPayload(t *testing.T, result tool.Result) map[string]any {
 	t.Helper()
-	if len(result.Content) != 1 || result.Content[0].JSON == nil {
+	structured, ok := result.Structured()
+	if len(result.Content) != 1 || !ok {
 		t.Fatalf("result content = %#v, want one JSON part", result.Content)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(structured, &payload); err != nil {
 		t.Fatalf("decode result JSON: %v", err)
 	}
 	return payload
@@ -227,7 +152,7 @@ func TestSearchToolStoresSourcesOnceAndKeepsCitationOnlySources(t *testing.T) {
 	source := model.CitationSource{RefID: "ref-a", Title: "Primary", URL: "https://example.com/a", Snippet: "Evidence retained in full"}
 	other := model.CitationSource{RefID: "ref-a", URL: "https://example.com/other"}
 	noRef := model.CitationSource{URL: "https://example.com/no-ref"}
-	llm := searchableLLM{resp: model.WebSearchResponse{
+	backend := searchStub{resp: model.WebSearchResponse{
 		Answer:  "answer",
 		Results: []model.WebSearchResult{{}, {Title: " \t"}, model.WebSearchResult(source)},
 		Citations: []model.Citation{
@@ -235,7 +160,7 @@ func TestSearchToolStoresSourcesOnceAndKeepsCitationOnlySources(t *testing.T) {
 			{StartIndex: 3, EndIndex: 6, Sources: []model.CitationSource{source, noRef}},
 		},
 	}}
-	result, err := NewSearch().Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"evidence"}`), RuntimeModel: llm})
+	result, err := NewSearch().CallWithBackend(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"evidence"}`)}, SearchBackend{SearchWeb: backend.SearchWeb})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +176,8 @@ func TestSearchToolStoresSourcesOnceAndKeepsCitationOnlySources(t *testing.T) {
 			t.Fatalf("citation %d = %#v", i, citation)
 		}
 	}
-	raw := string(result.Content[0].JSON.Value)
+	structured, _ := result.Structured()
+	raw := string(structured)
 	if strings.Count(raw, source.Snippet) != 1 || !strings.Contains(raw, noRef.URL) || !strings.Contains(raw, other.URL) {
 		t.Fatalf("source content changed: %s", raw)
 	}
@@ -261,8 +187,8 @@ func TestSearchToolPreservesDuplicateResultPositions(t *testing.T) {
 	t.Parallel()
 	first := model.WebSearchResult{Title: "First", URL: "https://example.com/a"}
 	last := model.WebSearchResult{Title: "Last", URL: "https://example.com/b"}
-	llm := searchableLLM{resp: model.WebSearchResponse{Results: []model.WebSearchResult{first, first, last}}}
-	result, err := NewSearch().Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"test"}`), RuntimeModel: llm})
+	backend := searchStub{resp: model.WebSearchResponse{Results: []model.WebSearchResult{first, first, last}}}
+	result, err := NewSearch().CallWithBackend(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"test"}`)}, SearchBackend{SearchWeb: backend.SearchWeb})
 	if err != nil {
 		t.Fatal(err)
 	}

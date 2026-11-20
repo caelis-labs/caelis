@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
@@ -21,7 +20,7 @@ type codeModeFailure struct {
 	Reply   *codemode.Reply `json:"reply,omitempty"`
 }
 
-func (h *codeModeHost) failureParts(detailed bool) model.Part {
+func (h *codeModeHost) failurePayload(detailed bool) map[string]any {
 	failures := make([]codeModeFailure, len(h.failures))
 	for i, failure := range h.failures {
 		failures[i] = failure
@@ -39,8 +38,7 @@ func (h *codeModeHost) failureParts(detailed bool) model.Part {
 			payload["instruction"] = "Search the stale tool again before revising arguments."
 		}
 	}
-	raw, _ := json.Marshal(payload)
-	return model.NewJSONPart(raw)
+	return payload
 }
 
 // project runs under host.mu. Check sizes before copying JSON or serializing
@@ -51,38 +49,46 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	}
 	h.codeModeResults.mu.Lock()
 	defer h.codeModeResults.mu.Unlock()
-	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: result.IsError, TurnComplete: result.TurnComplete && !result.IsError}
-	succeeded := outcome == codemode.OutcomeSucceeded && !result.IsError
+	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: outcome != codemode.OutcomeSucceeded, TurnComplete: result.TurnComplete && outcome == codemode.OutcomeSucceeded}
+	succeeded := outcome == codemode.OutcomeSucceeded
 	retained, projected := 0, len(id)*6+128
 	textEntries := 0
 	if projected > h.limits.ReplyBytes {
 		return reply, fmt.Errorf("code mode reply identity exceeds transfer budget")
 	}
-	for _, part := range result.Content {
-		switch {
-		case part.Kind == model.PartKindText && part.Text != nil:
-			retained += len(part.Text.Text)
-			projected += len(part.Text.Text)*12 + 64
+	var structured json.RawMessage
+	for _, block := range result.Content {
+		switch part := block.(type) {
+		case tool.Text:
+			retained += len(part)
+			projected += len(part)*12 + 64
 			textEntries++
-		case part.Kind == model.PartKindJSON && part.JSON != nil:
-			retained += len(part.JSON.Value)
-			projected += len(part.JSON.Value)*6 + 64
+		case tool.StructuredContent:
+			if structured != nil || !json.Valid(part.Value) {
+				return reply, fmt.Errorf("invalid structured result: expected one valid JSON block")
+			}
+			structured = part.Value
+			retained += len(part.Value)
+			// JSON is projected both as a part and as Value on success, or
+			// in the diagnostic text on failure.
+			projected += len(part.Value)*12 + 64
 			if !succeeded {
-				// Failed replies also expose JSON in the diagnostic text.
-				projected += len(part.JSON.Value) * 6
 				textEntries++
 			}
-		case (part.Kind == model.PartKindMedia && part.Media != nil) || (part.Kind == model.PartKindFileRef && part.FileRef != nil):
-			retained += opaquePartBytes(part)
-			projected += 256
-			if part.Kind == model.PartKindMedia {
-				projected += len(part.Media.MimeType) * 6
+		case tool.Image:
+			retained += len(part.Data) + len(part.MIMEType) + len(part.Name)
+			projected += 256 + len(part.MIMEType)*6
+		case tool.Resource:
+			retained += len(part.URI) + len(part.Name) + len(part.MIMEType) + len(part.Title) + len(part.Description)
+			if part.Size != nil {
+				retained += 8
 			}
-			if part.Kind == model.PartKindFileRef {
-				projected += len(part.FileRef.MimeType) * 6
+			if part.Text != nil {
+				retained += len(*part.Text)
 			}
+			projected += 256 + len(part.MIMEType)*6
 		default:
-			return reply, fmt.Errorf("unsupported Code Mode result part %q", part.Kind)
+			return reply, fmt.Errorf("unsupported Code Mode result block %T", part)
 		}
 		if retained > h.limits.RetainedBytes-h.retained || projected > h.limits.ReplyBytes {
 			return reply, fmt.Errorf("code mode result exceeds projection/retention budget; full receipt retained")
@@ -92,40 +98,28 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	if projected > h.limits.ReplyBytes {
 		return reply, fmt.Errorf("code mode text exceeds projection budget")
 	}
-	if source := result.StructuredContent; source != nil {
-		if source.ContentIndex < 0 || source.ContentIndex >= len(result.Content) || !json.Valid(source.Value) || result.Content[source.ContentIndex].Kind != model.PartKindJSON || result.Content[source.ContentIndex].JSON == nil || string(result.Content[source.ContentIndex].JSON.Value) != string(source.Value) {
-			return reply, fmt.Errorf("invalid structured result provenance")
-		}
-		if succeeded {
-			if len(source.Value) > (h.limits.ReplyBytes-projected)/6 {
-				return reply, fmt.Errorf("structured result exceeds projection budget")
-			}
-			if def.OutputSchema != nil {
-				if err := tool.ValidateOutput(def.OutputSchema, source.Value); err != nil {
-					return reply, fmt.Errorf("structured result does not match output schema: %w", err)
-				}
-			}
-			reply.Value = append(json.RawMessage(nil), source.Value...)
+	if succeeded && structured != nil && def.OutputSchema != nil {
+		if err := tool.ValidateOutput(def.OutputSchema, structured); err != nil {
+			return reply, fmt.Errorf("structured result does not match output schema: %w", err)
 		}
 	}
 	// No fallible validation remains when invocation-owned state is committed.
-	for _, part := range result.Content {
-		value := codemode.Part{Kind: string(part.Kind)}
-		switch part.Kind {
-		case model.PartKindText:
-			value.Text = part.Text.Text
-		case model.PartKindJSON:
-			value.JSON = append(json.RawMessage(nil), part.JSON.Value...)
-		default:
-			value.Handle = uuid.NewString()
-			if part.Kind == model.PartKindMedia {
-				value.MimeType = part.Media.MimeType
-				h.handles[value.Handle] = model.Part{Kind: model.PartKindMedia, Media: part.Media}
+	for _, block := range result.Content {
+		var value codemode.Part
+		switch part := block.(type) {
+		case tool.Text:
+			value = codemode.Part{Kind: "text", Text: string(part)}
+		case tool.StructuredContent:
+			value = codemode.Part{Kind: "json", JSON: append(json.RawMessage(nil), part.Value...)}
+			if succeeded {
+				reply.Value = value.JSON
 			}
-			if part.Kind == model.PartKindFileRef {
-				value.MimeType = part.FileRef.MimeType
-				h.handles[value.Handle] = model.Part{Kind: model.PartKindFileRef, FileRef: part.FileRef}
-			}
+		case tool.Image:
+			value = codemode.Part{Kind: "media", Handle: uuid.NewString(), MimeType: part.MIMEType}
+			h.handles[value.Handle] = block
+		case tool.Resource:
+			value = codemode.Part{Kind: "file_ref", Handle: uuid.NewString(), MimeType: part.MIMEType}
+			h.handles[value.Handle] = block
 		}
 		reply.Parts = append(reply.Parts, value)
 	}
@@ -140,16 +134,6 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	h.replies[id] = codemode.Reply{Parts: reply.Parts}
 	h.retained += retained
 	return reply, nil
-}
-
-func opaquePartBytes(part model.Part) int {
-	if p := part.Media; p != nil {
-		return len(p.Source.Data) + len(p.Source.URI) + len(p.Source.FileID) + len(p.Source.LocalRef) + len(p.MimeType) + len(p.Name)
-	}
-	if p := part.FileRef; p != nil {
-		return len(p.URI) + len(p.FileID) + len(p.LocalRef) + len(p.MimeType) + len(p.Name)
-	}
-	return 0
 }
 
 // validCodeModeOutput bounds trusted adapter metadata separately from business
@@ -173,10 +157,10 @@ func validCodeModeOutput(output codemode.Output, budget int) bool {
 // returnedParts consumes only the adapter's separate origin metadata. Ordinary
 // JSON is never inspected for kind/parts/handle fields. Handle ownership remains
 // authoritative here, independently of the worker's object-identity tracking.
-func (h *codeModeHost) returnedParts(output codemode.Output) ([]model.Part, error) {
+func (h *codeModeHost) returnedParts(output codemode.Output) ([]tool.ContentBlock, error) {
 	h.codeModeResults.mu.Lock()
 	defer h.codeModeResults.mu.Unlock()
-	var parts []model.Part
+	var parts []tool.ContentBlock
 	if output.CallID != "" {
 		original, ok := h.replies[output.CallID]
 		if !ok || !output.Reply || len(output.Value) != 0 || len(output.Parts) != 0 {
@@ -190,22 +174,25 @@ func (h *codeModeHost) returnedParts(output codemode.Output) ([]model.Part, erro
 		// retaining raw tokens must not bypass attachment or output limits.
 	}
 	if !output.Reply {
-		parts = append(parts, model.NewJSONPart(output.Value))
+		parts = append(parts, tool.StructuredContent{Value: output.Value})
 	}
 	selected := map[string]bool{}
+	var structured bool
 	for _, part := range output.Parts {
 		switch part.Kind {
 		case "text":
-
-			parts = append(parts, model.NewTextPart(part.Text))
+			parts = append(parts, tool.Text(part.Text))
 		case "json":
-			if !output.Reply || !json.Valid(part.JSON) {
+			if !output.Reply || structured || !json.Valid(part.JSON) {
 				return nil, fmt.Errorf("invalid authenticated JSON part")
 			}
-			parts = append(parts, model.NewJSONPart(part.JSON))
-		case string(model.PartKindMedia), string(model.PartKindFileRef):
-			original, ok := h.handles[part.Handle]
-			if !ok || string(original.Kind) != part.Kind {
+			structured = true
+			parts = append(parts, tool.StructuredContent{Value: part.JSON})
+		case "media", "file_ref":
+			original := h.handles[part.Handle]
+			_, image := original.(tool.Image)
+			_, resource := original.(tool.Resource)
+			if (part.Kind == "media" && !image) || (part.Kind == "file_ref" && !resource) {
 				return nil, fmt.Errorf("returned media handle does not belong to this invocation")
 			}
 			if !selected[part.Handle] {

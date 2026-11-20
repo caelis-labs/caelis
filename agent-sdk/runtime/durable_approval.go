@@ -106,7 +106,7 @@ func (r *Runtime) requestDurableApproval(
 		Authorization: session.CloneApprovalAuthorization(req.Authorization),
 		Schema:        session.ApprovalSchemaVersion,
 		RequestID:     tokenID, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
-		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Call.Execution.ItemID, Revision: 1, Status: session.ApprovalRecordPending,
+		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Execution.ItemID, Revision: 1, Status: session.ApprovalRecordPending,
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 		Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req)),
 	})

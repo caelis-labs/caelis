@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -15,81 +14,68 @@ const (
 )
 
 // toolResultWithArtifactHint prefers a structured payload for the trusted
-// reference, otherwise a text suffix. It preserves part order and media.
-// Runtime metadata does not reuse or extend a tool-owned system_hint field.
+// reference, otherwise a text notice. It preserves original block order and
+// never reuses or extends a tool-owned system_hint field.
 func toolResultWithArtifactHint(result tool.Result, path string, collision bool) (tool.Result, map[string]any, bool) {
 	path = strings.TrimSpace(path)
 	if path == "" || len(result.Content) == 0 {
 		return tool.Result{}, nil, false
 	}
-	out, _ := tool.CloneResult(result, nil)
-	// CloneResult copies the part slice; hint injection also needs isolated part
-	// payload pointers so the pre-truncation result remains the artifact source.
-	out.Content = model.CloneParts(result.Content)
-	index := -1
-	for i, part := range out.Content {
-		if part.JSON != nil {
-			index = i
-			break
+	for index, content := range result.Content {
+		block, ok := content.(tool.StructuredContent)
+		if !ok {
+			continue
 		}
-		if index < 0 && part.Text != nil {
-			index = i
-		}
-	}
-	if index < 0 {
-		return tool.Result{}, nil, false
-	}
-	part := &out.Content[index]
-	switch {
-	case part.Text != nil:
-		if part.Text.Text != "" {
-			part.Text.Text += "\n\n"
-		}
-		part.Text.Text += toolResultArtifactHintPrefix + path + "\nModel-visible tool content was truncated."
-		return out, nil, true
-	case part.JSON != nil:
-		var payload any
-		if json.Unmarshal(part.JSON.Value, &payload) != nil {
+		if !json.Valid(block.Value) {
 			return tool.Result{}, nil, false
 		}
-		runtimeMetadata := toolResultRuntimeArtifactMetadata(path, collision)
-		protected := map[string]any{toolResultRuntimeNamespaceKey: runtimeMetadata}
-		if object, ok := payload.(map[string]any); ok {
-			object[toolResultRuntimeNamespaceKey] = runtimeMetadata
-			part.JSON.Value = mustJSON(object)
-			return out, protected, true
+		var payload map[string]json.RawMessage
+		if json.Unmarshal(block.Value, &payload) != nil || payload == nil {
+			payload = map[string]json.RawMessage{"result": block.Value}
 		}
-		part.JSON.Value = mustJSON(map[string]any{
-			"result":                      payload,
-			toolResultRuntimeNamespaceKey: runtimeMetadata,
-		})
-		return out, protected, true
-	default:
-		return tool.Result{}, nil, false
+		runtimeMetadata := toolResultRuntimeArtifactMetadata(path, collision)
+		payload[toolResultRuntimeNamespaceKey] = mustJSON(runtimeMetadata)
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return tool.Result{}, nil, false
+		}
+		out, _ := tool.CloneResult(result, nil)
+		out.Content[index] = tool.StructuredContent{Value: raw}
+		return out, map[string]any{toolResultRuntimeNamespaceKey: runtimeMetadata}, true
 	}
+	hint := tool.Text(toolResultArtifactHintPrefix + path + "\nModel-visible tool content was truncated.")
+	if len(result.Content) == 1 {
+		if text, ok := result.Content[0].(tool.Text); ok {
+			result.Content = []tool.ContentBlock{text + "\n\n" + hint}
+			return result, nil, true
+		}
+	}
+	// A large resource can consume the whole budget before a later text block.
+	result.Content = append([]tool.ContentBlock{hint}, result.Content...)
+	return result, nil, true
 }
 
 func toolResultWithoutReservedNamespace(result tool.Result) (tool.Result, bool) {
-	out, _ := tool.CloneResult(result, nil)
-	out.Content = model.CloneParts(result.Content)
-	collision := false
-	for index := range out.Content {
-		part := &out.Content[index]
-		if part.JSON == nil {
+	for index, block := range result.Content {
+		structured, ok := block.(tool.StructuredContent)
+		if !ok {
 			continue
 		}
-		var payload map[string]any
-		if json.Unmarshal(part.JSON.Value, &payload) != nil {
-			continue
+		var payload map[string]json.RawMessage
+		if json.Unmarshal(structured.Value, &payload) != nil {
+			return result, false
 		}
 		if _, exists := payload[toolResultRuntimeNamespaceKey]; !exists {
-			continue
+			return result, false
 		}
 		delete(payload, toolResultRuntimeNamespaceKey)
-		part.JSON.Value = mustJSON(payload)
-		collision = true
+		// All values were validated by Unmarshal above.
+		raw, _ := json.Marshal(payload)
+		out, _ := tool.CloneResult(result, nil)
+		out.Content[index] = tool.StructuredContent{Value: raw}
+		return out, true
 	}
-	return out, collision
+	return result, false
 }
 
 func toolResultRuntimeArtifactMetadata(path string, collision bool) map[string]any {

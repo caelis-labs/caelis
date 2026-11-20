@@ -89,7 +89,7 @@ func TestCodeModeResetDoesNotWaitForOldHostOrAdmitOldReply(t *testing.T) {
 	old := tool.NamedTool{Def: tool.Definition{Name: "Old", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		close(entered)
 		<-release
-		return tool.Result{Content: []model.Part{model.NewTextPart("old-generation-result")}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("old-generation-result")}}, nil
 	}}
 	var oldHandle string
 	driver := &mcpScriptModel{steps: func(i int, request *model.Request) []model.ToolCall {
@@ -147,7 +147,7 @@ func TestCodeModeRetentionBudgetAccumulatesAcrossScriptsAndReset(t *testing.T) {
 	limits := codemode.DefaultLimits()
 	limits.RetainedBytes = 6
 	h := &codeModeHost{limits: limits, codeModeResults: first.environment.results}
-	if _, err = h.project("one", tool.Result{Content: []model.Part{model.NewTextPart("1234")}}, codemode.OutcomeSucceeded, def); err != nil {
+	if _, err = h.project("one", tool.Result{Content: []tool.ContentBlock{tool.Text("1234")}}, codemode.OutcomeSucceeded, def); err != nil {
 		t.Fatal(err)
 	}
 	first.release()
@@ -156,10 +156,10 @@ func TestCodeModeRetentionBudgetAccumulatesAcrossScriptsAndReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	h = &codeModeHost{limits: limits, codeModeResults: second.environment.results}
-	if _, err = h.project("two", tool.Result{Content: []model.Part{model.NewTextPart("12")}}, codemode.OutcomeSucceeded, def); err != nil {
+	if _, err = h.project("two", tool.Result{Content: []tool.ContentBlock{tool.Text("12")}}, codemode.OutcomeSucceeded, def); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.project("overflow", tool.Result{Content: []model.Part{model.NewTextPart("1")}}, codemode.OutcomeSucceeded, def); err == nil {
+	if _, err = h.project("overflow", tool.Result{Content: []tool.ContentBlock{tool.Text("1")}}, codemode.OutcomeSucceeded, def); err == nil {
 		t.Fatal("cumulative budget bypassed")
 	}
 	second.release()
@@ -256,7 +256,7 @@ func TestCodeModeRealRetentionAcrossScriptsAndFailedProjections(t *testing.T) {
 		}
 		_ = json.Unmarshal(call.Input, &args)
 		calls++
-		return tool.Result{Content: []model.Part{model.NewTextPart(strings.Repeat("x", args.Size))}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text(strings.Repeat("x", args.Size))}}, nil
 	}}
 	sources := []string{`let firstBody=await Bytes({size:4});return firstBody.text;`, `return await Bytes({size:2});`, `let rejected=0;for(let i=0;i<5;i++){try{await Bytes({size:1})}catch(e){rejected++;}}return rejected;`, `return firstBody;`, "", `return await Bytes({size:6});`}
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {

@@ -33,6 +33,7 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -587,11 +588,11 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 		deny := func(reason string) (policy.Decision, error) {
 			return policy.Decision{Action: policy.ActionDeny, Reason: reason}, nil
 		}
-		if req := in.Tool.ExecutionRequirements; req != nil && req.Sandbox.CommandExec {
+		if in.Tool.Name == shell.RunCommandToolName {
 			return deny("frozen task prohibits shell/process")
 		}
-		if tool.IsMCPDefinition(in.Tool) {
-			remote, _ := in.Tool.Metadata[tool.MetadataMCPTool].(string)
+		if mcp.IsDefinition(in.Tool) {
+			remote, _ := in.Tool.Metadata[mcp.MetadataTool].(string)
 			if remote != "resolve-library-id" && remote != "query-docs" && remote != "get-library-docs" {
 				return deny("only read-only Context7 docs are in scope")
 			}
@@ -643,7 +644,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 		return err
 	}
 	approver := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		remote, _ := r.Tool.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		if remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs" {
 			for _, option := range r.Approval.Options {
 				if option.ID == "allow_session" {
@@ -748,7 +749,7 @@ func fairAssertions(raw []byte, readErr error, total int, receipts map[string]*s
 			}
 		}
 		def := defs[r.Name]
-		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
+		remote, _ := def.Metadata[mcp.MetadataTool].(string)
 		if remote == "query-docs" || remote == "get-library-docs" {
 			var input map[string]any
 			_ = json.Unmarshal(factJSON(r.Input), &input)

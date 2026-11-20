@@ -123,7 +123,6 @@ func selectDesktopToolset(out Contributions) Contributions {
 		if spec.PluginID != "desktop-world" {
 			continue
 		}
-		spec.IntegrationID = "desktop-world/atomic-v1"
 		args := append([]string(nil), spec.Args...)
 		if !slices.Contains(args, "--atomic") {
 			args = append(args, "--atomic")

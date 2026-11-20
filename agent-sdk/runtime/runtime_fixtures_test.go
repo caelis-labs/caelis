@@ -2215,7 +2215,7 @@ func mustRuntimeRunCommandTool(t *testing.T, runtime sandbox.Runtime) tool.Tool 
 	return targetTool
 }
 
-func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, args map[string]any) tool.Result {
+func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, args map[string]any, failed ...bool) tool.Result {
 	t.Helper()
 
 	raw, err := json.Marshal(args)
@@ -2227,7 +2227,7 @@ func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, 
 		Name:  shell.RunCommandToolName,
 		Input: raw,
 	})
-	if err != nil {
+	if (len(failed) > 0 && failed[0] && !tool.HasFailedReply(err)) || (len(failed) == 0 && err != nil) {
 		t.Fatalf("runCommandTool.Call() error = %v", err)
 	}
 	return result
@@ -2255,7 +2255,7 @@ func startProbeCommandTask(t *testing.T, activeSession session.Session, runtime 
 	return handle
 }
 
-func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string]any) tool.Result {
+func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string]any, failed ...bool) tool.Result {
 	t.Helper()
 
 	raw, err := json.Marshal(args)
@@ -2267,7 +2267,7 @@ func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string
 		Name:  tasktool.ToolName,
 		Input: raw,
 	})
-	if err != nil {
+	if (len(failed) > 0 && failed[0] && !tool.HasFailedReply(err)) || (len(failed) == 0 && err != nil) {
 		t.Fatalf("taskTool.Call() error = %v", err)
 	}
 	return result
@@ -2293,11 +2293,12 @@ func stringSliceFromAny(raw any) []string {
 
 func testToolResultPayload(t *testing.T, result tool.Result) map[string]any {
 	t.Helper()
-	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+	raw, ok := result.Structured()
+	if !ok {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
 	return payload
@@ -2317,17 +2318,7 @@ func testToolResultRuntimeMeta(t *testing.T, result tool.Result, section string)
 func assertRunningTaskSnapshot(t *testing.T, result tool.Result) {
 	t.Helper()
 
-	if len(result.Content) == 0 {
-		t.Fatal("result.Content = empty, want task snapshot payload")
-	}
-	part := result.Content[0]
-	if part.Kind != model.PartKindJSON || part.JSON == nil {
-		t.Fatalf("result.Content[0] = %#v, want json part", part)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(part.JSON.Value, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(snapshot) error = %v", err)
-	}
+	payload := testToolResultPayload(t, result)
 	if got, _ := payload["state"].(string); got != string(taskapi.StateRunning) {
 		t.Fatalf("snapshot state = %q, want %q", got, taskapi.StateRunning)
 	}

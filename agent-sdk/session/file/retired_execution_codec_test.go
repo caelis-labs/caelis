@@ -58,7 +58,8 @@ func TestRetiredCodecFileReaderRejectsFutureNestedSchema(t *testing.T) {
 }
 func TestRetiredCodecLegacyJournalOnlyMediaFileReopen(t *testing.T) {
 	s, active := newEventPageIndexFixture(t, 0)
-	full := tool.Result{Content: []model.Part{model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("YWJj", 4096)}, "image/png", "legacy-only"), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("YWJj", 4096)}, "image/png", "legacy-only"), model.NewJSONPart(json.RawMessage(`{"n":9007199254740993123456789}`))}, StructuredContent: &tool.StructuredContent{Value: json.RawMessage(`{"n":9007199254740993123456789}`), ContentIndex: 2}}
+	image := tool.Image{Data: []byte(strings.Repeat("abc", 4096)), MIMEType: "image/png", Name: "legacy-only"}
+	full := tool.Result{Content: []tool.ContentBlock{image, image, tool.StructuredContent{Value: json.RawMessage(`{"n":9007199254740993123456789}`)}}}
 	event, err := s.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Tool: &session.EventTool{ID: "legacy", Name: "Read", Result: &full}}})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +81,18 @@ func TestRetiredCodecLegacyJournalOnlyMediaFileReopen(t *testing.T) {
 	}
 	delete(object, "tool")
 	object["schema"] = json.RawMessage(`2`)
-	object["journal"], err = json.Marshal(map[string]any{"schema": 1, "kind": "tool_execution", "tool_execution": map[string]any{"schema": 1, "key": map[string]any{"tool_call_id": "legacy"}, "tool_name": "Read", "status": "succeeded", "result": typed["result"]}})
+	// Reconstruct the historical result wire shape inside the retired journal.
+	var result struct {
+		Content []struct {
+			MediaRef string `json:"media_ref"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(typed["result"], &result); err != nil {
+		t.Fatal(err)
+	}
+	const historicalImage = `{"kind":"media","media":{"modality":"image","source":{"kind":"event_media","data":%q},"mime_type":"image/png","name":"legacy-only"}}`
+	legacyResult := json.RawMessage(fmt.Sprintf(`{"content":[`+historicalImage+`,`+historicalImage+`,{"kind":"json","json":{"value":{"n":9007199254740993123456789}}}],"structured_content":{"value":{"n":9007199254740993123456789},"content_index":2}}`, result.Content[0].MediaRef, result.Content[1].MediaRef))
+	object["journal"], err = json.Marshal(map[string]any{"schema": 1, "kind": "tool_execution", "tool_execution": map[string]any{"schema": 1, "key": map[string]any{"tool_call_id": "legacy"}, "tool_name": "Read", "status": "succeeded", "result": legacyResult}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,11 +12,13 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -55,7 +57,7 @@ func (s *changingBindingSource) CheckToolBinding(ctx context.Context, binding to
 	if err != nil {
 		return err
 	}
-	if !found || tool.BindingForDefinition(one.Definition()) != binding {
+	if !found || mcp.BindingForDefinition(one.Definition()) != binding {
 		return tool.NewError(tool.ErrorCodeStaleRevision, "source replaced the binding")
 	}
 	return nil
@@ -77,12 +79,12 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 			var effectsV1, effectsV2 atomic.Int32
 			publish := func(version string, counter *atomic.Int32) {
 				def := fixtureMCPDefinition(version)
-				source.publish(tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+				source.publish(tool.NamedTool{Def: def, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 					counter.Add(1)
-					if call.Parent == nil || call.TargetBinding == nil || call.TargetBinding.Version != version {
+					if binding := toolbinding.Target(ctx); tool.ParentFromContext(ctx) == nil || binding == nil || binding.Version != version {
 						return tool.Result{}, fmt.Errorf("wrong canonical binding: %+v", call)
 					}
-					return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
+					return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"ok":true}`)}}}, nil
 				}})
 			}
 			publish("serial-v1", &effectsV1)
@@ -160,13 +162,13 @@ func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
 	publish := func(version string, count *atomic.Int32) {
 		source.publish(tool.NamedTool{Def: fixtureMCPDefinition(version), Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 			count.Add(1)
-			return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"complete":true,"value":9007199254740993123456789}`))}}, nil
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"complete":true,"value":9007199254740993123456789}`)}}}, nil
 		}})
 	}
 	publish("concurrent-v1", &oldEffects)
 	asked, release := make(chan struct{}), make(chan struct{})
 	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		if req.Call.TargetBinding != nil && req.Call.TargetBinding.Version == "concurrent-v1" {
+		if mcp.BindingForDefinition(req.Tool).Version == "concurrent-v1" {
 			close(asked)
 			<-release
 		}
@@ -237,16 +239,19 @@ func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := session.ContextWithRuntimeFence(t.Context(), fence)
-	old, current := tool.BindingForDefinition(fixtureMCPDefinition("v1")), tool.BindingForDefinition(fixtureMCPDefinition("v2"))
-	parent := &tool.ParentCall{ID: "script", Name: "js_exec", Kind: codemode.ToolKind, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "script"}}
+	old, current := mcp.BindingForDefinition(fixtureMCPDefinition("v1")), mcp.BindingForDefinition(fixtureMCPDefinition("v2"))
+	parent := &tool.ParentCall{ID: "script", Name: "js_exec", Kind: codemode.ToolKind, ItemID: "script"}
 	raw, _ := json.Marshal(map[string]any{"tools": []any{map[string]any{"name": current.Name, "binding": current, "input_schema": map[string]any{"type": "object"}}}})
-	search := tool.Call{ID: "search", Name: tool.ToolSearchToolName, Input: []byte(`{}`), Parent: parent, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "search"}}
-	result := tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}
-	if err := rt.appendToolFact(ctx, active.SessionRef, "turn", search, &result, nil); err != nil {
+	search := tool.Call{ID: "search", Name: mcp.SearchToolName, Input: []byte(`{}`)}
+	searchCtx := toolbinding.WithOccurrence(ctx, tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "search"}, parent, nil)
+	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}
+	if err := rt.appendToolFact(searchCtx, active.SessionRef, "turn", search, &result, nil); err != nil {
 		t.Fatal(err)
 	}
-	prepared := tool.Call{ID: "old-intent", Name: old.Name, Input: []byte(`{}`), Parent: parent, TargetBinding: &old, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "old"}}
-	if err := rt.appendToolFact(ctx, active.SessionRef, "turn", prepared, nil, nil); !errorcode.Is(err, tool.ErrorCodeStaleRevision) {
+	prepared := tool.Call{ID: "old-intent", Name: old.Name, Input: []byte(`{}`)}
+	preparedExecution := tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "old"}
+	preparedCtx := toolbinding.WithOccurrence(ctx, preparedExecution, parent, &old)
+	if err := rt.appendToolFact(preparedCtx, active.SessionRef, "turn", prepared, nil, nil); !errorcode.Is(err, tool.ErrorCodeStaleRevision) {
 		t.Fatalf("old intent accepted after new discovery: %v", err)
 	}
 	events, err := files.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
@@ -257,7 +262,7 @@ func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
 		t.Fatal("late intent rolled back discovery")
 	}
 	for _, event := range events {
-		if event.Tool != nil && event.Tool.Execution == prepared.Execution {
+		if event.Tool != nil && event.Tool.Execution == preparedExecution {
 			t.Fatal("rejected stale intent became binding authority")
 		}
 	}

@@ -1,15 +1,13 @@
 package tool
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 const approxBytesPerToken = 4
@@ -61,18 +59,12 @@ func truncateResultWithInfo(result Result, policy TruncationPolicy, protected ma
 		policy = DefaultTruncationPolicy()
 	}
 	out, _ := CloneResult(result, nil)
-	out.Content = model.CloneParts(result.Content)
-	out.Meta = jsonvalue.CloneMap(result.Meta)
 	if len(out.Content) == 0 {
-		payload := map[string]any{}
-		if result.IsError {
-			payload["error"] = "tool call failed"
-		}
-		out.Content = []model.Part{model.NewJSONPart(mustMarshalMap(payload))}
+		out.Content = []ContentBlock{StructuredContent{Value: json.RawMessage(`{}`)}}
 		return out, newTruncationInfo(policy)
 	}
 	var info TruncationInfo
-	out.Content, info = truncatePartsWithProtectedJSONFields(out.Content, policy, protected)
+	out.Content, info = truncateBlocksWithProtectedJSONFields(out.Content, policy, protected)
 	return out, info
 }
 
@@ -82,35 +74,37 @@ func ResultNeedsTruncation(result Result, policy TruncationPolicy) bool {
 	if policy.tokenBudget() <= 0 {
 		policy = DefaultTruncationPolicy()
 	}
-	return estimateTokensForParts(result.Content) > policy.tokenBudget()
+	return estimateTokensForBlocks(result.Content) > policy.tokenBudget()
 }
 
-func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationPolicy, protected map[string]any) ([]model.Part, TruncationInfo) {
+// parts is the detached content owned by the result being truncated.
+func truncateBlocksWithProtectedJSONFields(parts []ContentBlock, policy TruncationPolicy, protected map[string]any) ([]ContentBlock, TruncationInfo) {
 	info := newTruncationInfo(policy)
 	budgetTokens := policy.tokenBudget()
 	if budgetTokens <= 0 {
-		return model.CloneParts(parts), info
+		return parts, info
 	}
-	prepared, protectedPart := injectProtectedJSONFields(parts, protected)
-	totalTokens := estimateTokensForParts(prepared)
+	protectedPart := injectProtectedJSONFields(parts, protected)
+	totalTokens := estimateTokensForBlocks(parts)
 	info.EstimatedTokens = totalTokens
 	info.EstimatedBytes = totalTokens * approxBytesPerToken
 	if totalTokens <= budgetTokens {
-		return prepared, info
+		return parts, info
 	}
 
 	// The omission notice is model-visible content too. Reserve its serialized
 	// cost when later content parts may be omitted; media remains untouched.
-	omissionNotice := model.NewTextPart("[additional tool result content omitted]")
+	omissionNotice := Text("[additional tool result content omitted]")
 	remaining := budgetTokens
 	contentParts := 0
-	for _, part := range prepared {
-		if part.Text != nil || part.JSON != nil {
+	for _, part := range parts {
+		switch part.(type) {
+		case Text, StructuredContent, Resource:
 			contentParts++
 		}
 	}
 	if contentParts > 1 {
-		remaining = max(remaining-estimateTokensForParts([]model.Part{omissionNotice}), 0)
+		remaining = max(remaining-estimateTokensForBlocks([]ContentBlock{omissionNotice}), 0)
 	}
 	// A trusted reference may live after a large text part (as in ordinary
 	// multipart MCP results). Earlier content must leave room for that JSON.
@@ -121,21 +115,21 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 			protectedReserve = cost
 		}
 	}
-	out := make([]model.Part, 0, len(parts)+1)
+	out := make([]ContentBlock, 0, len(parts)+1)
 	omitted := 0
-	for index, part := range prepared {
+	for index, part := range parts {
 		available := remaining
 		if index < protectedPart {
 			available = max(remaining-protectedReserve, 0)
 		}
-		switch {
-		case part.JSON != nil:
+		switch block := part.(type) {
+		case StructuredContent:
 			if available <= 0 {
 				omitted++
 				continue
 			}
-			raw := part.JSON.Value
-			cost := estimateTokensForParts([]model.Part{part})
+			raw := block.Value
+			cost := estimateTokensForBlocks([]ContentBlock{part})
 			if cost <= available {
 				remaining -= cost
 				out = append(out, part)
@@ -146,16 +140,16 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 				protectedFields = protected
 			}
 			truncatedRaw, subInfo := truncateJSONWithProtectedFields(raw, TruncationPolicy{MaxTokens: available}, protectedFields)
-			part.JSON.Value = truncatedRaw
-			out = append(out, part)
+			block.Value = truncatedRaw
+			out = append(out, block)
 			remaining -= available
 			omitted += subInfo.OmittedItems
-		case part.Text != nil:
+		case Text, Resource:
 			if available <= 0 {
 				omitted++
 				continue
 			}
-			cost := estimateTokensForParts([]model.Part{part})
+			cost := estimateTokensForBlocks([]ContentBlock{part})
 			if cost <= available {
 				remaining -= cost
 				out = append(out, part)
@@ -163,10 +157,10 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 			}
 			// Text becomes {"result": text} in the canonical event. Budget that
 			// same JSON envelope, including quotes, escapes and joined-text space.
-			payload, subInfo := TruncateMap(map[string]any{"result": part.Text.Text}, TruncationPolicy{MaxTokens: available})
+			text, _ := blockText(part)
+			payload, subInfo := TruncateMap(map[string]any{"result": text}, TruncationPolicy{MaxTokens: available})
 			if text, ok := payload["result"].(string); ok {
-				part.Text.Text = text
-				out = append(out, part)
+				out = append(out, Text(text))
 			} else {
 				omitted++
 			}
@@ -176,7 +170,7 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 			out = append(out, part)
 		}
 	}
-	if omitted > 0 && estimateTokensForParts(out)+estimateTokensForParts([]model.Part{omissionNotice}) <= budgetTokens {
+	if omitted > 0 && estimateTokensForBlocks(out)+estimateTokensForBlocks([]ContentBlock{omissionNotice}) <= budgetTokens {
 		out = append(out, omissionNotice)
 	}
 	info.Truncated = true
@@ -186,18 +180,17 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 	return out, info
 }
 
-func injectProtectedJSONFields(parts []model.Part, protected map[string]any) ([]model.Part, int) {
-	out := model.CloneParts(parts)
+func injectProtectedJSONFields(parts []ContentBlock, protected map[string]any) int {
 	if len(protected) == 0 {
-		return out, -1
+		return -1
 	}
-	for index := range out {
-		part := &out[index]
-		if part.JSON == nil {
+	for index := range parts {
+		part, ok := parts[index].(StructuredContent)
+		if !ok {
 			continue
 		}
 		var payload map[string]any
-		if json.Unmarshal(part.JSON.Value, &payload) != nil {
+		if decodeTruncationJSON(part.Value, &payload) != nil || payload == nil {
 			continue
 		}
 		for key, value := range protected {
@@ -206,10 +199,11 @@ func injectProtectedJSONFields(parts []model.Part, protected map[string]any) ([]
 			}
 			payload[key] = cloneTruncationValue(value)
 		}
-		part.JSON.Value = mustMarshalMap(payload)
-		return out, index
+		part.Value = mustMarshalMap(payload)
+		parts[index] = part
+		return index
 	}
-	return out, -1
+	return -1
 }
 
 func truncateJSONWithProtectedFields(raw json.RawMessage, policy TruncationPolicy, protected map[string]any) (json.RawMessage, TruncationInfo) {
@@ -219,7 +213,7 @@ func truncateJSONWithProtectedFields(raw json.RawMessage, policy TruncationPolic
 		return append(json.RawMessage(nil), raw...), info
 	}
 	var parsed any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
+	if err := decodeTruncationJSON(raw, &parsed); err != nil {
 		text, removed := TruncateText(string(raw), policy)
 		if removed == 0 {
 			return append(json.RawMessage(nil), raw...), info
@@ -493,19 +487,34 @@ func truncationInfoForText(text string, policy TruncationPolicy) TruncationInfo 
 	return info
 }
 
-func estimateTokensForParts(parts []model.Part) int {
+func blockText(block ContentBlock) (string, bool) {
+	switch b := block.(type) {
+	case Text:
+		return string(b), true
+	case Resource:
+		return resourceText(b), true
+	default:
+		return "", false
+	}
+}
+
+func decodeTruncationJSON(raw []byte, value any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	return decoder.Decode(value)
+}
+
+func estimateTokensForBlocks(blocks []ContentBlock) int {
 	sum := 0
-	for _, part := range parts {
-		switch {
-		case part.Text != nil:
-			sum += estimateTokensForJSONValue(map[string]any{"result": part.Text.Text})
-		case part.JSON != nil:
-			// Canonical JSON serialization can expand HTML and control escapes;
-			// non-object JSON also gains the durable result envelope. Keep the
-			// raw cost too so pretty-printed model content remains bounded.
-			cost := estimateTextTokens(string(part.JSON.Value))
+	for _, block := range blocks {
+		if text, ok := blockText(block); ok {
+			sum += estimateTokensForJSONValue(map[string]any{"result": text})
+			continue
+		}
+		if data, ok := block.(StructuredContent); ok {
+			cost := estimateTextTokens(string(data.Value))
 			var decoded any
-			if json.Unmarshal(part.JSON.Value, &decoded) == nil {
+			if decodeTruncationJSON(data.Value, &decoded) == nil {
 				payload, ok := decoded.(map[string]any)
 				if !ok {
 					payload = map[string]any{"result": decoded}
@@ -513,8 +522,6 @@ func estimateTokensForParts(parts []model.Part) int {
 				cost = max(cost, estimateTokensForJSONValue(payload))
 			}
 			sum += cost
-		case part.ToolResult != nil:
-			sum += estimateTokensForParts(part.ToolResult.Content)
 		}
 	}
 	return sum

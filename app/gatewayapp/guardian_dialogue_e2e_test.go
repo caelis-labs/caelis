@@ -12,7 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -165,7 +165,7 @@ func runGuardianTaskWorkflow(t *testing.T, llm model.LLM, evaluator judgment.Eva
 	} {
 		t.Run(round.name, func(t *testing.T) {
 			appendGuardianFixtureDialogue(t, t.Context(), service, active, round.dialogue)
-			refs := tool.NewConcurrentModelStepRefs(round.name, len(round.actions))
+			refs := agent.NewConcurrentModelStepRefs(round.name, len(round.actions))
 			var screening atomic.Int32
 			allScreening := make(chan struct{})
 			var batch sync.WaitGroup
@@ -183,7 +183,7 @@ func runGuardianTaskWorkflow(t *testing.T, llm model.LLM, evaluator judgment.Eva
 					req.RuntimeRequest.Call.ID = req.ReviewID
 					req.RuntimeRequest.Origin = &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: active.SessionID}
 					if action.mcp {
-						req.RuntimeRequest.Tool.Metadata = map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "github-fixture", tool.MetadataMCPTool: action.tool}
+						req.RuntimeRequest.Tool.Metadata = map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataServer: "github-fixture", mcp.MetadataTool: action.tool}
 					}
 					var response judgment.Response
 					var providerErr error

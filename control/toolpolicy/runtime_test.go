@@ -2,6 +2,8 @@ package toolpolicy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"iter"
 	"os"
@@ -21,6 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestMain(m *testing.M) {
@@ -103,7 +106,7 @@ func policyEffectTools(t *testing.T, count *atomic.Int32) []tool.Tool {
 		def.InputSchema = map[string]any{"type": "object", "required": []string{"app"}, "properties": map[string]any{"app": map[string]any{"type": "string"}}}
 		targets = append(targets, tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 			count.Add(1)
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewTextPart("observed fixture")}}, nil
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []tool.ContentBlock{tool.Text("observed fixture")}}, nil
 		}})
 	}
 	return targets
@@ -118,10 +121,12 @@ func TestProductPolicyCodeModeSharesAPPAndRebuildsAfterStoreReopen(t *testing.T)
 	}
 	var effects, approvals atomic.Int32
 	targets := policyEffectTools(t, &effects)
-	requester := requesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := requesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		approvals.Add(1)
-		if req.Call.Parent == nil || req.Call.Execution.ItemID == "" || req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.A" {
+		if req.Parent == nil || req.Parent.ItemID == "" || req.Execution.ItemID == "" || req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.A" {
 			t.Error("approval lost actual child identity or APP")
+		} else {
+			assertCodeModeCallDigest(t, ctx, req)
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 	})
@@ -164,6 +169,43 @@ func TestProductPolicyCodeModeSharesAPPAndRebuildsAfterStoreReopen(t *testing.T)
 	runPolicyScript(t, reopened, other, code, targets, requester)
 	if effects.Load() != 6 || approvals.Load() != 2 {
 		t.Fatalf("another Session: effects=%d approvals=%d", effects.Load(), approvals.Load())
+	}
+}
+
+// Assert the pre-migration digest layout using a real Runtime-produced approval.
+func assertCodeModeCallDigest(t *testing.T, ctx context.Context, req agent.ApprovalRequest) {
+	t.Helper()
+	base, err := presets.WorkspaceWriteMode().DecideTool(ctx, policy.ToolContext{
+		Session: req.Session, Tool: req.Tool, Call: req.Call,
+		Options: policy.ModeOptions{WorkspaceRoot: req.Session.CWD, TempRoot: os.TempDir()},
+	})
+	if err != nil {
+		t.Errorf("base Policy constraints: %v", err)
+		return
+	}
+	parent := struct {
+		Kind      string                 `json:"kind,omitempty"`
+		ID        string                 `json:"id"`
+		Name      string                 `json:"name"`
+		Execution tool.InvocationContext `json:"execution"`
+	}{req.Parent.Kind, req.Parent.ID, req.Parent.Name, tool.InvocationContext{
+		SessionID: req.SessionRef.SessionID, TurnID: req.TurnID, ItemID: req.Parent.ItemID,
+	}}
+	material, err := json.Marshal(struct {
+		ID, Name    string
+		Input       json.RawMessage
+		Execution   tool.InvocationContext
+		Parent      any
+		Binding     tool.Binding
+		Constraints any
+	}{req.Call.ID, req.Call.Name, req.Call.Input, req.Execution, parent, mcp.BindingForDefinition(req.Tool), base.Constraints})
+	if err != nil {
+		t.Errorf("encode legacy call digest material: %v", err)
+		return
+	}
+	sum := sha256.Sum256(material)
+	if want := hex.EncodeToString(sum[:]); req.Authorization.CallDigest != want {
+		t.Errorf("approval digest = %s, want legacy digest %s", req.Authorization.CallDigest, want)
 	}
 }
 
@@ -214,7 +256,7 @@ func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
 				p.Input = json.RawMessage(`{"app":"com.example.B"}`)
 				if synthetic {
 					p.Kind = agent.ToolPrepareRespond
-					p.Result = &tool.Result{Content: []model.Part{model.NewTextPart("synthetic success")}}
+					p.Result = &tool.Result{Content: []tool.ContentBlock{tool.Text("synthetic success")}}
 				}
 				return p, nil
 			}}}}
@@ -234,7 +276,7 @@ func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
 				}
 				found := false
 				for _, e := range events {
-					found = found || e.Type == session.EventTypeToolCall && e.Tool != nil && e.Tool.Execution == req.Call.Execution && e.Tool.Input["app"] == "com.example.B"
+					found = found || e.Type == session.EventTypeToolCall && e.Tool != nil && e.Tool.Execution == req.Execution && e.Tool.Input["app"] == "com.example.B"
 				}
 				if !found {
 					t.Error("approval began before the effective child fact")

@@ -29,32 +29,27 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 			accepted := json.RawMessage("{\"value\":\"accepted\"}")
 			probe := tool.NamedTool{Def: tool.Definition{Name: "ReadFact", InputSchema: map[string]any{"type": "object"}, OutputSchema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []string{"value"}}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 				effects.Add(1)
-				return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0}}, nil
+				return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, nil
 			}}
 			hooks := agent.Hooks{
 				ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "redact-business", Apply: func(_ context.Context, e agent.HookContext, o agent.ToolOutcome) (tool.Result, error) {
 					if e.Tool.Name != "ReadFact" {
 						return o.Result, nil
 					}
-					if e.Tool.RuntimeModel != nil || e.Tool.Observer != nil || e.Tool.ModelStep != nil && e.Tool.ModelStep.AdmissionDone() != nil {
-						t.Error("extension received an executable owner capability")
-					}
 					fullCalls.Add(1)
-					if e.Tool.Parent == nil || e.Tool.Execution.ItemID == "" {
+					if e.ToolParent == nil || e.ToolExecution.ItemID == "" {
 						t.Error("nested identity absent")
 					}
 					if mode == "result-failure" {
 						return tool.Result{}, errors.New("fixture redaction failed")
 					}
-					o.Result.Content = []model.Part{model.NewJSONPart(accepted)}
-					o.Result.StructuredContent = &tool.StructuredContent{Value: accepted, ContentIndex: 0}
+					o.Result.Content = []tool.ContentBlock{tool.StructuredContent{Value: accepted}}
 					if mode == "invalid-output-schema" {
 						wrong := json.RawMessage(`{"value":42}`)
-						o.Result.Content = []model.Part{model.NewJSONPart(wrong)}
-						o.Result.StructuredContent = &tool.StructuredContent{Value: wrong, ContentIndex: 0}
+						o.Result.Content = []tool.ContentBlock{tool.StructuredContent{Value: wrong}}
 					}
 					if mode == "invalid-structured" {
-						o.Result.StructuredContent.ContentIndex = 4
+						o.Result.Content = append(o.Result.Content, tool.StructuredContent{Value: accepted})
 					}
 					if mode == "forged-completion" {
 						o.Result.TurnComplete = true
@@ -126,7 +121,8 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 				t.Fatalf("presentation failure changed known effect outcome: %+v", child.Tool)
 			}
 			if mode == "accepted" {
-				if string(child.Tool.Result.StructuredContent.Value) != string(accepted) || child.Message.ToolResults()[0].Content[0].Text.Text != "summary" || !strings.Contains(string(mustMarshalHook(t, outer.Tool.Result)), "accepted") {
+				structured, _ := child.Tool.Result.Structured()
+				if string(structured) != string(accepted) || child.Message.ToolResults()[0].Content[0].Text.Text != "summary" || !strings.Contains(string(mustMarshalHook(t, outer.Tool.Result)), "accepted") {
 					t.Fatal("JS Body, full result and model view conflated")
 				}
 			} else {

@@ -132,9 +132,23 @@ func assertWaitDeliveryContext(t *testing.T, request *model.Request, text, reaso
 	if got := strings.Count(string(raw), text); got != 1 {
 		t.Fatalf("input occurrences = %d, want 1: %s", got, raw)
 	}
-	if !strings.Contains(string(raw), `\"reason\":\"`+reason+`\"`) {
-		t.Fatalf("missing WaitThread reason %q: %s", reason, raw)
+	for _, message := range request.Messages {
+		for _, result := range message.ToolResults() {
+			if result.Name != "WaitThread" || len(result.Content) != 1 || result.Content[0].JSON == nil {
+				continue
+			}
+			var receipt struct {
+				Reason string `json:"reason"`
+			}
+			if err := json.Unmarshal(result.Content[0].JSON.Value, &receipt); err != nil {
+				t.Fatalf("invalid WaitThread receipt: %v", err)
+			}
+			if receipt.Reason == reason {
+				return
+			}
+		}
 	}
+	t.Fatalf("missing WaitThread reason %q: %s", reason, raw)
 }
 
 type waitDeliveryBackend struct {
