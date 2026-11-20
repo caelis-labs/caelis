@@ -146,7 +146,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	var discovery tool.Tool
 	for i, one := range spec.Tools {
 		if declaration, ok := one.(*codemode.Tool); ok {
-			discovery = codeModeDiscoveryTool{lookup: lookup}
+			discovery = codeModeDiscoveryTool{lookup: lookup, checkBinding: checkBinding}
 			available := func() []tool.Tool { return codeModeAvailableTools(allTools, spec.DeferredTools) }
 			spec.Tools[i] = runtimeCodeModeTool{runtime: r, tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, availableTools: available, lookup: lookup, validate: validate, checkBinding: checkBinding}
 		}

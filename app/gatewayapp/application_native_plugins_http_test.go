@@ -174,6 +174,10 @@ func settleNativeProfileHTTP(t *testing.T, ctx context.Context, client *httpclie
 }
 
 func settleNativeProfileHTTPBeforeApproval(t *testing.T, ctx context.Context, client *httpclient.Client, sid, operation, input string, before func()) int {
+	return settleNativeProfileHTTPExpect(t, ctx, client, sid, operation, input, "desktop_world__look", before)
+}
+
+func settleNativeProfileHTTPExpect(t *testing.T, ctx context.Context, client *httpclient.Client, sid, operation, input, target string, before func()) int {
 	t.Helper()
 	if input != "" {
 		if _, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: sid, OperationID: operation}, Input: input, SourceKind: "user"}); err != nil {
@@ -191,7 +195,7 @@ func settleNativeProfileHTTPBeforeApproval(t *testing.T, ctx context.Context, cl
 				before()
 				before = nil
 			}
-			if active.Permission == nil || active.Permission.ToolCall.Name != "desktop_world__look" || len(active.Permission.Options) != 2 {
+			if active.Permission == nil || active.Permission.ToolCall.Name != target || len(active.Permission.Options) != 2 {
 				t.Fatalf("native app approval lost its identity/scope: %+v", active)
 			}
 			approvals++

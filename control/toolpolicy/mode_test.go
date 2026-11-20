@@ -66,6 +66,40 @@ func TestDesktopPolicyMatchesOnlyHostAssignedPluginAndSupportedServers(t *testin
 	}
 }
 
+func TestDesktopScriptApprovalBindsAppAndCallableSource(t *testing.T) {
+	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"}
+	ctx := t.Context()
+	input := policyFixture(t, "exec")
+	outside, err := mode.DecideTool(ctx, input)
+	if err != nil || outside.Action != policy.ActionDeny {
+		t.Fatalf("unselected exec = %+v, %v", outside, err)
+	}
+	input.Tool.Metadata[mcp.MetadataModelFunction] = true
+	atomic, err := mode.DecideTool(ctx, policyFixture(t, "look"))
+	if err != nil || atomic.Authorization == nil {
+		t.Fatalf("atomic approval = %+v, %v", atomic, err)
+	}
+	input.Authorizations = func(context.Context) (session.AuthorizationEvidence, error) {
+		return session.AuthorizationEvidence{Consents: []session.AuthorizationScope{atomic.Authorization.Scope}}, nil
+	}
+	script, err := mode.DecideTool(ctx, input)
+	if err != nil || script.Action != policy.ActionAskApproval || script.Authorization == nil {
+		t.Fatalf("script inherited atomic approval: %+v, %v", script, err)
+	}
+	input.Authorizations = func(context.Context) (session.AuthorizationEvidence, error) {
+		return session.AuthorizationEvidence{Consents: []session.AuthorizationScope{script.Authorization.Scope}}, nil
+	}
+	approved, err := mode.DecideTool(ctx, input)
+	if err != nil || approved.Action != policy.ActionAllow {
+		t.Fatalf("matching script consent = %+v, %v", approved, err)
+	}
+	input.Tool.Metadata[mcp.MetadataSourceFingerprint] = "changed-source"
+	replaced, err := mode.DecideTool(ctx, input)
+	if err != nil || replaced.Action != policy.ActionAskApproval {
+		t.Fatalf("replacement inherited consent: %+v, %v", replaced, err)
+	}
+}
+
 func TestDesktopPolicySharesOnlyExactSessionApplicationScope(t *testing.T) {
 	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"}
 	input := policyFixture(t, "look")

@@ -330,7 +330,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	}
 	if h.calls >= h.limits.Calls {
 		h.mu.Unlock()
-		return codemode.Reply{}, fmt.Errorf("code mode call budget exceeded")
+		return codemode.Reply{}, tool.NewError(errorcode.ResourceExhausted, "code mode call budget exceeded")
 	}
 	// Count requests, including rejected names and malformed arguments, before
 	// schema compilation or other potentially expensive host work.

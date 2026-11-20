@@ -21,7 +21,10 @@ import (
 
 // Advance this revision when changing the product-owned app approval contract;
 // MCP catalog revisions do not change the scope of app consent.
-const desktopAtomicScopeRevision = "desktop-atomic-app-v2"
+const (
+	desktopAtomicScopeRevision = "desktop-atomic-app-v2"
+	desktopScriptScopeRevision = "desktop-script-app-v1"
+)
 
 // IsDesktopWorld identifies the product's desktop-world MCP tools by their
 // Host-assigned plugin ID and supported server names.
@@ -78,6 +81,7 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 	}
 	rawName, _ := input.Tool.Metadata[mcp.MetadataTool].(string)
 	desktop := IsDesktopWorld(input.Tool)
+	desktopScript := desktop && rawName == "exec" && mcp.IsModelFunction(input.Tool)
 	if desktop && rawName == "apps" {
 		return decision, nil
 	}
@@ -86,8 +90,9 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		SessionID: input.Session.SessionID, SessionIncarnation: input.Session.CreatedAt.UTC().Format(time.RFC3339Nano),
 		SourceID: pluginID + "/" + server,
 	}
+	desktopGrant := "this exact application and all 14 DTW atomic operations in this Session"
 	if desktop {
-		if !slices.Contains(AtomicOperations(), rawName) {
+		if !desktopScript && !slices.Contains(AtomicOperations(), rawName) {
 			return policy.Decision{Action: policy.ActionDeny, Reason: "tool is outside the DTW atomic operation contract"}, nil
 		}
 		var args map[string]json.RawMessage
@@ -98,9 +103,14 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		if err := json.Unmarshal(args["app"], &app); err != nil || !ValidApplicationIdentity(app) {
 			return policy.Decision{}, errors.New("invalid_app: app must be an exact application identifier from apps")
 		}
-		scope.SourceRevision = desktopAtomicScopeRevision
-		scope.PolicyRevision = desktopAtomicScopeRevision + "/" + m.Name()
 		scope.CapabilitySet, scope.CapabilityRevision = "desktop-world/atomic-app", desktopAtomicScopeRevision
+		scope.SourceRevision = desktopAtomicScopeRevision
+		if desktopScript {
+			scope.CapabilitySet, scope.CapabilityRevision = "desktop-world/script-app", desktopScriptScopeRevision
+			scope.SourceRevision, _ = input.Tool.Metadata[mcp.MetadataSourceFingerprint].(string)
+			desktopGrant = "DTW scripts in this exact application for this Session"
+		}
+		scope.PolicyRevision = scope.CapabilityRevision + "/" + m.Name()
 		scope.ResourceKind, scope.Resource = "application", app
 	} else {
 		// Ordinary source consent is deliberately exact to this tool definition.
@@ -175,8 +185,8 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		combined.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_session", Name: "Allow this app for this Session", Kind: "allow_once"}, {ID: "cancel", Name: "Cancel", Kind: "reject_once"}}
 		combined.Approval.ToolCall.Title += " · " + scope.Resource
 		combined.Approval.Subject.Targets = append(combined.Approval.Subject.Targets, session.KnownApprovalField(scope.Resource))
-		combined.Approval.Subject.Scope = session.KnownApprovalField("this exact application and all 14 DTW atomic operations in this Session")
-		combined.Approval.Subject.Grants = []session.ApprovalGrant{{OptionID: "allow_session", Scope: session.KnownApprovalField("this exact application and all 14 DTW atomic operations in this Session")}, {OptionID: "cancel", Scope: session.KnownApprovalField("no grant")}}
+		combined.Approval.Subject.Scope = session.KnownApprovalField(desktopGrant)
+		combined.Approval.Subject.Grants = []session.ApprovalGrant{{OptionID: "allow_session", Scope: session.KnownApprovalField(desktopGrant)}, {OptionID: "cancel", Scope: session.KnownApprovalField("no grant")}}
 		a.Choices = []session.AuthorizationChoice{{OptionID: "allow_session", Persistence: session.AuthorizationSession}}
 	} else {
 		a.Choices = []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}, {OptionID: "allow_session", Persistence: session.AuthorizationSession}, {OptionID: "allow_always", Persistence: session.AuthorizationPolicy}}

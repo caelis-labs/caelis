@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
@@ -16,7 +17,8 @@ import (
 )
 
 type codeModeDiscoveryTool struct {
-	lookup func(context.Context, string) (tool.Tool, bool, error)
+	lookup       func(context.Context, string) (tool.Tool, bool, error)
+	checkBinding func(context.Context, tool.Binding) error
 }
 
 func (t codeModeDiscoveryTool) Definition() tool.Definition {
@@ -43,6 +45,11 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.R
 	if def.Name != request.Name || !mcp.IsDefinition(def) {
 		return tool.Result{}, tool.NewError(errorcode.NotFound, "tool not found")
 	}
+	if mcp.IsModelFunction(def) && t.checkBinding != nil {
+		if err := t.checkBinding(ctx, mcp.BindingForDefinition(def)); err != nil {
+			return tool.Result{}, err
+		}
+	}
 	selected := mcp.NewToolSearchResult([]tool.Definition{def})
 	if mcp.EstimateToolSearchResultPromptTokens(selected) > mcp.MaxToolSearchResultPromptTokens {
 		return tool.Result{}, tool.NewError(errorcode.ResourceExhausted, "complete schema exceeds budget")
@@ -62,11 +69,15 @@ type codeModeSearchEntry struct {
 }
 
 func codeModeSearchEntryFor(def tool.Definition) codeModeSearchEntry {
-	name, _ := json.Marshal(def.Name)
 	return codeModeSearchEntry{
 		ToolRoute: codeModeToolRoute(def), Description: def.Description, InputSchema: def.InputSchema,
-		CallPath: "tools.call(" + string(name) + ", args)", OutputSchema: def.OutputSchema, OutputFormat: "body",
+		CallPath: codeModeCallPath(def.Name), OutputSchema: def.OutputSchema, OutputFormat: "body",
 	}
+}
+
+func codeModeCallPath(name string) string {
+	raw, _ := json.Marshal(name)
+	return "tools.call(" + string(raw) + ", args)"
 }
 
 func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchRequest) (reply codemode.Reply, discoveryErr error) {
@@ -95,29 +106,62 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 	if err := request.Validate(); err != nil {
 		return reply, err
 	}
+	if request.Names != nil {
+		return h.searchNames(ctx, request.Names)
+	}
 	if name == "" {
 		return h.listTools(ctx, request)
 	}
+	return h.searchName(ctx, name, h.discoveryValueBudget(), &failureRecorded)
+}
+
+func (h *codeModeHost) searchName(ctx context.Context, name string, budget int, failureRecorded *bool) (reply codemode.Reply, err error) {
 	one, found, err := h.owner.lookup(ctx, name)
-	if err != nil {
-		return reply, err
-	}
-	if !found || one == nil {
+	if err != nil || !found || one == nil {
+		if chargeErr := h.chargeDiscovery(); chargeErr != nil {
+			return reply, chargeErr
+		}
+		if err != nil {
+			return reply, err
+		}
 		return reply, tool.NewError(errorcode.NotFound, "tool not found")
 	}
 	def := one.Definition()
 	if !h.eligibleTarget(one, def) || def.Name != name {
-		return reply, tool.NewError(errorcode.NotFound, "tool not found")
-	}
-	if !mcp.IsDefinition(def) {
 		if err := h.chargeDiscovery(); err != nil {
 			return reply, err
 		}
-		return h.discoveryReply("", codeModeSearchEntryFor(def))
+		return reply, tool.NewError(errorcode.NotFound, "tool not found")
+	}
+	if mcp.IsModelFunction(def) && h.owner.checkBinding != nil {
+		if err := h.owner.checkBinding(ctx, mcp.BindingForDefinition(def)); err != nil {
+			if chargeErr := h.chargeDiscovery(); chargeErr != nil {
+				return reply, chargeErr
+			}
+			return reply, err
+		}
+	}
+	entryJSON, err := json.Marshal(codeModeSearchEntryFor(def))
+	if err != nil {
+		return reply, err
+	}
+	remote := mcp.IsDefinition(def)
+	overBudget := len(entryJSON) > budget || remote && failureRecorded == nil &&
+		mcp.EstimateToolSearchResultPromptTokens(mcp.NewToolSearchResult([]tool.Definition{def})) > mcp.MaxToolSearchResultPromptTokens
+	if overBudget || !remote {
+		if err := h.chargeDiscovery(); err != nil {
+			return reply, err
+		}
+		if overBudget {
+			return reply, tool.NewError(errorcode.ResourceExhausted, "complete schema exceeds search budget")
+		}
+		return h.discoveryReply("", json.RawMessage(entryJSON))
 	}
 	raw, _ := json.Marshal(map[string]string{"name": name})
 	reply, err = h.call(ctx, mcp.SearchToolName, raw, true)
-	failureRecorded = err != nil || reply.IsError || reply.Outcome == codemode.OutcomeUnknown
+	if failureRecorded != nil {
+		*failureRecorded = err != nil || reply.IsError || reply.Outcome == codemode.OutcomeUnknown
+	}
 	if err != nil || reply.IsError {
 		return reply, err
 	}
@@ -153,18 +197,73 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 	return h.discoveryReply(reply.CallID, codeModeSearchEntryFor(def))
 }
 
+type codeModeSearchItem struct {
+	Name  string          `json:"name"`
+	Entry json.RawMessage `json:"entry,omitempty"`
+	Error errorcode.Code  `json:"error_code,omitempty"`
+}
+
+func (h *codeModeHost) searchNames(ctx context.Context, names []string) (codemode.Reply, error) {
+	items := make([]codeModeSearchItem, len(names))
+	for i, name := range names {
+		items[i] = codeModeSearchItem{Name: name, Error: errorcode.ResourceExhausted}
+	}
+	page := map[string]any{"tools": items}
+	for i, name := range names {
+		h.mu.Lock()
+		exhausted := h.calls >= h.limits.Calls
+		h.mu.Unlock()
+		if exhausted {
+			break
+		}
+		initial, _ := json.Marshal(page)
+		budget := h.discoveryValueBudget() - len(initial)
+		if budget <= 0 {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return codemode.Reply{}, err
+		}
+		reply, err := h.searchName(ctx, name, budget, nil)
+		if err == nil && !reply.IsError {
+			if len(reply.Value) <= budget {
+				items[i].Entry, items[i].Error = reply.Value, ""
+			}
+			continue
+		}
+		if err == nil {
+			return codemode.Reply{}, tool.NewError(errorcode.FailedPrecondition, "tool discovery failed")
+		}
+		h.mu.Lock()
+		fatal := h.fatal
+		h.mu.Unlock()
+		if fatal != nil {
+			return codemode.Reply{}, fatal
+		}
+		switch code := errorcode.CodeOf(err); code {
+		case errorcode.NotFound, tool.ErrorCodeStaleRevision, errorcode.Unavailable, errorcode.PermissionDenied, errorcode.ResourceExhausted:
+			items[i].Error = code
+		default:
+			return codemode.Reply{}, err
+		}
+	}
+	return h.discoveryReply("", page)
+}
+
 type toolSummary struct {
-	Name        string `json:"name"`
+	codemode.ToolRoute
 	Description string `json:"description"`
+	CallPath    string `json:"call_path"`
+	score       int
 }
 
 func (h *codeModeHost) chargeDiscovery() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.calls++
-	if h.calls > h.limits.Calls {
+	if h.calls >= h.limits.Calls {
 		return tool.NewError(errorcode.ResourceExhausted, "search call budget exceeded")
 	}
+	h.calls++
 	return nil
 }
 func (h *codeModeHost) listTools(ctx context.Context, request codemode.SearchRequest) (codemode.Reply, error) {
@@ -172,7 +271,7 @@ func (h *codeModeHost) listTools(ctx context.Context, request codemode.SearchReq
 		return codemode.Reply{}, err
 	}
 
-	terms := strings.Fields(strings.ToLower(request.Query))
+	terms := searchWords(request.Query)
 	entries := []toolSummary{}
 	for _, one := range h.owner.availableTools() {
 		if err := ctx.Err(); err != nil {
@@ -182,14 +281,27 @@ func (h *codeModeHost) listTools(ctx context.Context, request codemode.SearchReq
 			continue
 		}
 		def := one.Definition()
-		if !mcp.IsDefinition(def) || !h.eligibleTarget(one, def) || def.Name <= request.After {
+		if !h.eligibleTarget(one, def) || (len(terms) == 0 && def.Name <= request.After) {
 			continue
 		}
-		content := strings.ToLower(def.Name + " " + def.Description)
-		if len(terms) > 0 && !slices.ContainsFunc(terms, func(term string) bool { return strings.Contains(content, term) }) {
+		if mcp.IsModelFunction(def) && h.owner.checkBinding != nil &&
+			h.owner.checkBinding(ctx, mcp.BindingForDefinition(def)) != nil {
 			continue
 		}
-		entries = append(entries, toolSummary{def.Name, def.Description})
+		route := codeModeToolRoute(def)
+		score, matched := searchToolScore(route, def.Description, terms)
+		if !matched {
+			continue
+		}
+		description := def.Description
+		if len(description) > 160 {
+			end := 160
+			for end > 0 && !utf8.RuneStart(description[end]) {
+				end--
+			}
+			description = description[:end] + "…"
+		}
+		entries = append(entries, toolSummary{ToolRoute: route, Description: description, CallPath: codeModeCallPath(def.Name), score: score})
 	}
 	if h.owner.validate != nil {
 		release, err := h.owner.validate(ctx)
@@ -200,25 +312,41 @@ func (h *codeModeHost) listTools(ctx context.Context, request codemode.SearchReq
 			return codemode.Reply{}, err
 		}
 	}
-	slices.SortFunc(entries, func(left, right toolSummary) int { return strings.Compare(left.Name, right.Name) })
-	var next *string
-	const pageSize = 16
-	if len(entries) > pageSize {
-		entries = entries[:pageSize]
-		next = &entries[pageSize-1].Name
+	slices.SortFunc(entries, func(left, right toolSummary) int {
+		if left.score != right.score {
+			return right.score - left.score
+		}
+		return strings.Compare(left.Name, right.Name)
+	})
+	if len(terms) != 0 && request.After != "" {
+		prior := slices.IndexFunc(entries, func(entry toolSummary) bool { return entry.Name == request.After })
+		if prior < 0 {
+			return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "search page changed; start again without after")
+		}
+		entries = entries[prior+1:]
 	}
-	return h.discoveryReply("", map[string]any{"tools": entries, "next": next})
+	const pageSize = 16
+	for size := min(pageSize, len(entries)); ; size-- {
+		var next *string
+		if size < len(entries) && size > 0 {
+			next = &entries[size-1].Name
+		}
+		reply, err := h.discoveryReply("", map[string]any{"tools": entries[:size], "next": next})
+		if err == nil || size <= 1 || !errorcode.Is(err, errorcode.ResourceExhausted) {
+			return reply, err
+		}
+	}
 }
+
+// Reserve fixed envelope overhead and the bridge's worst-case escaping factor.
+func (h *codeModeHost) discoveryValueBudget() int { return (h.limits.ReplyBytes - 256) / 6 }
+
 func (h *codeModeHost) discoveryReply(id string, value any) (codemode.Reply, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return codemode.Reply{}, fmt.Errorf("encode search result: %w", err)
 	}
-	// Reserve fixed envelope overhead, then bound the ID and value using the
-	// transport's conservative JSON escaping factor.
-	const envelopeBytes = 256
-	remaining := h.limits.ReplyBytes - envelopeBytes
-	if remaining < 0 || len(id) > remaining/6 || len(raw) > remaining/6-len(id) {
+	if len(id)+len(raw) > h.discoveryValueBudget() {
 		return codemode.Reply{}, tool.NewError(errorcode.ResourceExhausted, "complete search schemas exceed reply budget; narrow the query")
 	}
 	return codemode.Reply{CallID: id, Outcome: codemode.OutcomeSucceeded, Value: raw}, nil

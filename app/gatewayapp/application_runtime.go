@@ -297,6 +297,9 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessi
 			tools = append(tools, t)
 		}
 	}
+	if source, ok := capabilities.source.(applicationMCPSource); ok {
+		tools = append(tools, source.PrefixTools()...)
+	}
 	return tools, nil
 }
 

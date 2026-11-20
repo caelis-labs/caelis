@@ -158,33 +158,28 @@ Mutation failures also include the Host `receipt` when available. Check its
 observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
-The embedded package declares the `dtw` service with Skill
-`desktop-world:dtw`. Host selection launches the unchanged signed package with
-`dtw mcp --atomic`: `dtw__apps`, `dtw__look`, `dtw__capture`,
-`dtw__readtext`, `dtw__wait`, `dtw__waitfornewwindow`, `dtw__click`,
-`dtw__setvalue`, `dtw__move`, `dtw__drag`, `dtw__typetext`, `dtw__keypress`,
-`dtw__scroll`, `dtw__focus`, and `dtw__quit`. There is no `exec` tool in
-that catalog. The paired Skill documents both upstream modes; discover the
-actual selected catalog before choosing an operation.
+On embedded targets, Core selects standard MCP mode for the paired package.
+The embedded `dtw` service publishes `dtw__apps` and `dtw__exec` with Skill
+`desktop-world:dtw`. Both tools appear directly in the model request when ready
+and support the same arguments through `js_exec`. Core selects these methods
+from that package's actual connection. Other MCP methods remain deferred.
+Unsupported targets keep the atomic launch mode for an explicitly installed
+Desktop World package.
 
-`apps` discovers application identities. Other operations require an exact
-`app` argument and share one Session approval for that APP and the complete
-atomic operation set. Reads may start or activate the application, so approval
-also covers reads. The product supports Session and Cancel for this scope;
-This approval covers the exact app, Session incarnation, configured plugin and
-server names, and Policy revision. Concurrent operations on the same app can
-share approval. Per-call Policy restrictions still apply.
-
-The existing package selection chooses the effective version before atomic
-launch assembly. Host-level older overrides lose to a newer embedded release.
-The installed package, manifest, signatures and original Skill bytes remain
-unchanged. See [Policy admission](agent-sdk-boundary.md) for the common contract.
+`apps` discovers application identities. `exec` takes an exact `app` and
+the DTW script's `source`. Reads can start or activate the application, so
+Desktop World scripts require approval for their app even when read-only.
+The approval covers the exact app, Session incarnation, configured plugin and
+server names, and Policy revision. Native and Code Mode calls share this
+Session approval. The script approval has its own capability revision.
+Per-call Policy restrictions still apply.
+See [Policy admission](agent-sdk-boundary.md) for the common contract.
 
 The TUI limits MCP output previews by rendered rows, including long single-line
 JSON. Disclosure shows the original output and complete invocation parameters.
-Consecutive DTW calls share a compact `Using Computer` group, with each call
-initially collapsed inside it. Reasoning stays available when the group expands;
-ordinary messages, other tools and reviewed calls keep their separate rows.
+DTW calls show compact action summaries both directly and inside a `js_exec`
+group. The summaries use DTW's dispatch counts and available acknowledgements.
+Disclosure retains the original invocation, including script source.
 
 Control applies the app policy to the configured plugin ID `desktop-world`
 with either server name `dtw` or `desktop-world`. `apps` uses the ordinary

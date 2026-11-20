@@ -135,5 +135,6 @@ func scriptPTYStages() [][]*session.Event {
 		{tool("s3", "js_exec", "", "failed", "", "probe.js:3: TypeError: missing value\n at probe.js:3:7")},
 		{tool("s4", "js_exec", "", "started", "", "")},
 		{tool("s4", "js_exec", "", "completed", "", "42")},
+		desktopTraceEvents(),
 	}
 }

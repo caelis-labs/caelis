@@ -102,6 +102,7 @@ type ToolRoute struct {
 	Server string `json:"server,omitempty"`
 	Tool   string `json:"tool,omitempty"`
 	Plugin string `json:"plugin,omitempty"`
+	Prefix bool   `json:"prefix,omitempty"`
 }
 
 // ExecutionState identifies the current disposable environment and execution.
@@ -120,12 +121,16 @@ type NamedHost interface {
 	ToolNames(context.Context) ([]ToolRoute, error)
 }
 
-// SearchRequest selects one exact schema or a filtered directory page.
+// SearchRequest selects exact schemas or a filtered directory page.
 type SearchRequest struct {
-	Name  string `json:"name,omitempty"`
-	Query string `json:"query,omitempty"`
-	After string `json:"after,omitempty"`
+	Name  string   `json:"name,omitempty"`
+	Names []string `json:"names,omitempty"`
+	Query string   `json:"query,omitempty"`
+	After string   `json:"after,omitempty"`
 }
+
+// MaxSearchNames bounds the work within a single batched bridge request.
+const MaxSearchNames = 16
 
 // Validate checks the mutually exclusive search selectors at the Host boundary.
 func (r SearchRequest) Validate() error {
@@ -134,8 +139,18 @@ func (r SearchRequest) Validate() error {
 			return tool.NewError(tool.ErrorCodeInvalidInput, "search fields must be at most 1024 bytes")
 		}
 	}
-	if r.Name != "" && (r.Query != "" || r.After != "") {
-		return tool.NewError(tool.ErrorCodeInvalidInput, "name requires exact lookup")
+	if r.Names != nil {
+		if len(r.Names) == 0 || len(r.Names) > MaxSearchNames {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "names requires 1 to 16 tool names")
+		}
+		for _, name := range r.Names {
+			if len(name) == 0 || len(name) > 1024 {
+				return tool.NewError(tool.ErrorCodeInvalidInput, "each name must be 1 to 1024 bytes")
+			}
+		}
+	}
+	if r.Name != "" && r.Names != nil || (r.Name != "" || r.Names != nil) && (r.Query != "" || r.After != "") {
+		return tool.NewError(tool.ErrorCodeInvalidInput, "use name or names for exact lookup")
 	}
 	return nil
 }
@@ -220,12 +235,12 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 // Runtime appends partial catalog hints separately.
 const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
-const description = `Set one of code, file or reset:true. Top-level await works. Use return to select output (omitted: null). Example: return (await Read(args)).data.content. Also await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args).
+const description = `Set one of code, file or reset:true. Top-level await works. Use return to select output (omitted: null). Reuse declared tool schemas: return (await Read(args)).data.content. Use tools.call(name,args) if the direct syntax is unavailable.
 Use block-local let/const for temporaries. Top-level bindings usually persist but may clear. Use let for reassignment. Redeclare only var/functions.
 
 Success returns a Body. result.data is explicit structured output, checked against any output schema. Missing data is undefined. JSON null stays null. result.text joins only text blocks with newlines. Return the original Body to preserve raw JSON, or select fields and original result.media references. Copies cannot attach media. Numbers may round. Omit undefined and stringify BigInt.
 
-await tools.search({query?,after?}) returns a plain page {tools:[{name,description}],next:string|null}. Use tools.search() to browse or query to match any keyword. Pass next as after with the same query. await tools.search({name}) returns the exact entry and binds it: {name,description,input_schema,output_format:"body",output_schema?,call_path,server?,tool?,plugin?}. output_schema describes .data.
+await tools.search({query?,after?}) returns a plain page {tools,next:string|null} of summaries. Use tools.search() to browse or query with service and method keywords. Pass next as after with the same query. await tools.search({name}) returns the exact entry and binds it: {name,description,input_schema,output_format:"body",output_schema?,call_path,server?,tool?,plugin?}. output_schema describes .data. tools.search({names}) looks up 1–16 exact names and returns {tools:[{name,entry} or {name,error_code}]} in input order.
 
 Inspect error.message, error.code and error.result when present (reply alias). error.result.text() joins text and raw JSON. error.result.json() parses that string. Return error.result whole or select its media references. On stale_revision, search again and rebuild args. Check child outcomes before retrying. Never replay unknown outcomes. runtime.state() reports generation/execution.`
 

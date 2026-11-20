@@ -291,6 +291,10 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 // Lookup returns the current canonical candidate only while its source is
 // dispatchable. It never promotes a colliding source or admits an invocation.
 func (m *Manager) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
+	return m.lookup(ctx, name, nil)
+}
+
+func (m *Manager) lookup(ctx context.Context, name string, selected map[*managedServer]bool) (tool.Tool, bool, error) {
 	if m == nil {
 		return nil, false, nil
 	}
@@ -303,7 +307,7 @@ func (m *Manager) Lookup(ctx context.Context, name string) (tool.Tool, bool, err
 		return nil, false, tool.NewError(errorcode.Unavailable, "MCP source is closed")
 	}
 	current := m.toolsByName[name]
-	if current == nil {
+	if current == nil || selected != nil && !selected[current.server] {
 		return nil, false, nil
 	}
 	if err := m.checkCatalogReadyLocked(ctx, current.server); err != nil {

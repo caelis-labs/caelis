@@ -117,8 +117,16 @@ func (a *Agent) boundTool(call model.ToolCall, visibility *toolVisibility) (tool
 	if !ok {
 		return nil, call, nil, tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", call.Name))
 	}
-	if mcp.IsCallDefinition(one.Definition()) {
+	def := one.Definition()
+	if mcp.IsCallDefinition(def) {
 		return nil, call, nil, tool.NewError(tool.ErrorCodeInvalidInput, "MCP call is not bound to a model response")
+	}
+	if mcp.IsModelFunction(def) {
+		binding := mcp.BindingForDefinition(def)
+		if binding.Identity == "" {
+			return nil, call, nil, tool.NewError(tool.ErrorCodeStaleRevision, "MCP source identity is incomplete")
+		}
+		return one, call, &binding, nil
 	}
 	return one, call, nil, nil
 }

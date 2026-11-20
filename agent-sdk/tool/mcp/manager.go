@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -157,6 +158,7 @@ func (m *Manager) reconcile(specs []ServerSpec, initial *sync.WaitGroup) error {
 	for _, spec := range specs {
 		spec.Args = append([]string(nil), spec.Args...)
 		spec.ReplaySourceIDs = append([]string(nil), spec.ReplaySourceIDs...)
+		spec.PrefixTools = append([]string(nil), spec.PrefixTools...)
 		spec.Env = maps.Clone(spec.Env)
 		spec.Headers = maps.Clone(spec.Headers)
 		key := spec.PluginID + "/" + spec.Name
@@ -406,6 +408,9 @@ func (mgr *Manager) rebuildToolsLocked() {
 					MetadataSourceFingerprint: hex.EncodeToString(sourceHash[:]),
 				},
 			}
+			if slices.Contains(spec.PrefixTools, info.Name) {
+				def.Metadata[MetadataModelFunction] = true
+			}
 			if info.OutputSchema != nil {
 				def.OutputSchema, err = normalizeMCPInputSchema(info.OutputSchema)
 				if err != nil {
@@ -562,6 +567,28 @@ func (m *Manager) Tools() []tool.Tool {
 		ready = append(ready, candidate)
 	}
 	return ready
+}
+
+// PrefixTools returns ready callables selected by their own connection spec.
+func (m *Manager) PrefixTools() []tool.Tool {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var selected []tool.Tool
+	for _, server := range m.servers {
+		if len(server.spec.PrefixTools) == 0 || server.client == nil || m.checkCatalogReadyLocked(context.Background(), server) != nil {
+			continue
+		}
+		for _, method := range server.spec.PrefixTools {
+			if candidate := m.toolsByName[formatToolName(server.spec.Name, method)]; candidate != nil &&
+				candidate.server == server && candidate.origName == method {
+				selected = append(selected, candidate)
+			}
+		}
+	}
+	return selected
 }
 
 // Close cancels pending startup and waits for its producers before closing

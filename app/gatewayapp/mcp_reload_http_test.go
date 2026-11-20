@@ -85,6 +85,25 @@ func TestNativeMCPAutoReloadIsolatesBrokenFilesAndServersHTTP(t *testing.T) {
 	}
 	promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-before", "BASIC")
 	waitAtomicApplicationMCPRunning(t, ctx, host.host, created.SessionID, "documents")
+	if builtinComputerUseSupported() {
+		for {
+			status, err := host.host.SessionMCPStatus(ctx, created.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.ContainsFunc(status.Servers, func(server sessionprofile.MCPServerStatus) bool {
+				return server.PluginID == "desktop-world" && server.Ready
+			}) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(15 * time.Millisecond):
+			}
+		}
+		promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-baseline", "BASIC")
+	}
 	beforeTools := provider.lastTools()
 	beforeAudit := atomicAudit(audit)
 	systemPrompt := func() string {

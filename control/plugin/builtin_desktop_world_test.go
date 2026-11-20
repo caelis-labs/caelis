@@ -46,7 +46,8 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) {
 		t.Fatal("package sharing crossed Session data or approval boundaries")
 	}
-	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || len(a.Args) != 2 || a.Args[0] != "mcp" || a.Args[1] != "--atomic" {
+	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || !slices.Equal(a.Args, []string{"mcp"}) ||
+		!slices.Equal(a.PrefixTools, []string{"apps", "exec"}) {
 		t.Fatal("fixed package did not use its standard stdio executable")
 	}
 }
@@ -92,20 +93,17 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	var names []string
-	for _, candidate := range manager.Tools() {
+	for _, candidate := range manager.PrefixTools() {
 		definition := candidate.Definition()
 		name, _ := definition.Metadata[mcp.MetadataTool].(string)
 		names = append(names, name)
 		if name == "exec" {
-			t.Fatal("atomic catalog contains exec")
-		}
-		if name != "apps" {
 			raw, _ := json.Marshal(definition.InputSchema)
 			var schema struct {
 				Required []string `json:"required"`
 			}
-			if err := json.Unmarshal(raw, &schema); err != nil || !slices.Contains(schema.Required, "app") {
-				t.Fatalf("atomic %s does not require app: %s", name, raw)
+			if err := json.Unmarshal(raw, &schema); err != nil || !slices.Equal(schema.Required, []string{"app", "source"}) {
+				t.Fatalf("exec does not require the app and script source: %s", raw)
 			}
 		}
 		if definition.Metadata[mcp.MetadataPluginID] != spec.PluginID || definition.Metadata[mcp.MetadataServer] != spec.Name {
@@ -113,8 +111,7 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		}
 
 	}
-	slices.Sort(names)
-	if !slices.Equal(names, []string{"apps", "capture", "click", "drag", "focus", "keypress", "look", "move", "quit", "readText", "scroll", "setValue", "typeText", "wait", "waitForNewWindow"}) {
+	if !slices.Equal(names, []string{"apps", "exec"}) || len(manager.Tools()) != 2 {
 		t.Fatalf("builtin tools = %v", names)
 	}
 	if runtime.GOOS == "windows" {

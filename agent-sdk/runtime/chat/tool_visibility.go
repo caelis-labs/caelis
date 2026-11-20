@@ -7,7 +7,7 @@ import (
 )
 
 // toolVisibility keeps model declarations and direct lookup on the same fixed
-// tool set. MCP capabilities stay behind the mcp_call declaration.
+// tool set. Direct MCP functions require explicit embedder selection.
 type toolVisibility struct {
 	tools  []tool.Tool
 	byName map[string]tool.Tool
@@ -20,7 +20,7 @@ func newToolVisibility(tools []tool.Tool) toolVisibility {
 			continue
 		}
 		def := one.Definition()
-		if def.Name == "" || mcp.IsSearchDefinition(def) || mcp.IsDefinition(def) {
+		if def.Name == "" || mcp.IsSearchDefinition(def) || (mcp.IsDefinition(def) && !mcp.IsModelFunction(def)) {
 			continue
 		}
 		v.tools = append(v.tools, one)

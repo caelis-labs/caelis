@@ -46,7 +46,7 @@ func TestCodeModeServiceFiltersCurrentRuntimeSourceBeforeLimit(t *testing.T) {
 	source.items = source.items[16:]
 	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`const s=await tools.search();if(s.tools.length!==4||s.truncated||s.next)throw Error("source scope applied after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
+			return h1Script(`const s=await tools.search();if(s.tools.filter(t=>t.server).length!==4||s.truncated||s.next)throw Error("source scope applied after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
 		}
 		return nil
 	}}

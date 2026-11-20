@@ -438,7 +438,7 @@ func toolCallFromEventToolPayload(tool *session.EventTool) eventstream.ToolCall 
 		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    tool.ID,
 		Name:          stringPtr(tool.Name),
-		Title:         projectedToolLifecycleTitle(tool.Name, rawInput, tool.Status, tool.Title),
+		Title:         firstNonEmpty(desktopWorldTitle(tool), projectedToolLifecycleTitle(tool.Name, rawInput, tool.Status, tool.Title)),
 		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)),
 		Status:        firstNonEmpty(acpToolStatus(tool.Status), eventstream.ToolStatusPending),
 		RawInput:      cloneAnyMapPayload(rawInput),
@@ -545,7 +545,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	if len(out.Content) == 0 && !emptyOrchestratedToolResult(tool) && !taskBackedRunningCommandUpdate(tool.Name, tool.Status, meta) {
 		out.Content = projectedToolResultContent(tool.ID, tool.Name, tool.Input, tool.Output, meta, tool.Status)
 	}
-	if title := projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title); title != "" {
+	if title := firstNonEmpty(desktopWorldTitle(tool), projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title)); title != "" {
 		out.Title = stringPtr(title)
 	}
 	if kind := firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)); kind != "" {

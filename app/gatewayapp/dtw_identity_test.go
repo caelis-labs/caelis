@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -62,7 +63,12 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 			}
 			assertPair(selected)
 			spec := selected.MCPServerSpecs[0]
-			if spec.Command != "verified-host-proxy" || !reflect.DeepEqual(spec.Args, []string{"generation", "--atomic"}) || spec.WorkDir != root || !spec.CleanEnvironment || spec.DataDir != "" || len(spec.Env) != 0 {
+			args := []string{"generation", "--atomic"}
+			var prefix []string
+			if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" || runtime.GOOS == "windows" && runtime.GOARCH == "amd64" {
+				args, prefix = []string{"generation"}, []string{"apps", "exec"}
+			}
+			if spec.Command != "verified-host-proxy" || !reflect.DeepEqual(spec.Args, args) || !reflect.DeepEqual(spec.PrefixTools, prefix) || spec.WorkDir != root || !spec.CleanEnvironment || spec.DataDir != "" || len(spec.Env) != 0 {
 				t.Fatalf("Host proxy launch was not isolated: %+v", spec)
 			}
 			for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
