@@ -20,7 +20,6 @@ type EventMetadata struct {
 type EventMetadataPage struct {
 	Events  []EventMetadata
 	NextSeq uint64
-	HasMore bool
 }
 
 // EventMetadataReader optionally accelerates structural history indexing.

@@ -68,21 +68,18 @@ func (s *Store) EventMetadataPage(ctx context.Context, req session.EventPageRequ
 				visible = true
 			}
 			if visible && len(out.Events) >= req.Limit {
-				out.HasMore = true
-				break
+				return nil
 			}
 			out.NextSeq = record.Seq
 			if visible {
 				out.Events = append(out.Events, record.EventMetadata)
 			}
 		}
-		if !out.HasMore {
-			through := index.Tail.Seq
-			if req.ThroughSeq > 0 {
-				through = min(through, req.ThroughSeq)
-			}
-			out.NextSeq = max(out.NextSeq, through)
+		through := index.Tail.Seq
+		if req.ThroughSeq > 0 {
+			through = min(through, req.ThroughSeq)
 		}
+		out.NextSeq = max(out.NextSeq, through)
 		return nil
 	})
 	return out, err
