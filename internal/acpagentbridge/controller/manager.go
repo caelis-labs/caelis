@@ -1287,7 +1287,7 @@ func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.Con
 	})
 	currentRaw, _ := json.Marshal(client.TextContent{
 		Type: "text",
-		Text: contextprompt.CurrentRequestMarker(),
+		Text: contextprompt.CurrentRequestMarker,
 	})
 	out := make([]json.RawMessage, 0, len(prompt)+2)
 	out = append(out, backgroundRaw, currentRaw)
