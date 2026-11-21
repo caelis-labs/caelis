@@ -313,7 +313,7 @@ func TestStartCommandSynchronousOutputBeforeFirstObservationResumesFromDurableSt
 		Text:   early,
 		Cursor: int64(len([]byte(early))),
 	}}
-	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, parentCall)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestCommandTaskWaitJoinsCommandStartAfterDurableIntent(t *testing.T) {
 	commandSession := newConcurrentCommandWaitSession()
 	backend := newCommandStartProbe(commandSession, nil)
 	const parentCall = "wait-during-intent-handoff"
-	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, parentCall)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestCommandTaskWaitIntentClaimTimeoutReturnsDurablePreparedState(t *testing
 	commandSession := newConcurrentCommandWaitSession()
 	backend := newCommandStartProbe(commandSession, nil)
 	const parentCall = "wait-intent-timeout"
-	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, parentCall)
 	if err != nil {
 		t.Fatal(err)
 	}

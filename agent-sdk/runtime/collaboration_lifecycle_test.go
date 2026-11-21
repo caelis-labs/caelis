@@ -52,7 +52,7 @@ func TestSubagentWaitObservesFollowupAfterReadingFirstResult(t *testing.T) {
 		}
 		done := make(chan error, 1)
 		go func() {
-			_, err := r.WaitSubagentTask(t.Context(), child.sessionRef, child.ref.TaskID, time.Second)
+			_, err := r.tasks.Wait(t.Context(), child.sessionRef, task.ControlRequest{TaskID: child.ref.TaskID, Principal: session.ActorKindUser, Source: "user", Yield: time.Second})
 			done <- err
 		}()
 		synctest.Wait()

@@ -105,7 +105,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	if runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent execution is required")
 	}
-	taskID, err := subagentSpawnTaskID(ref, req.SpawnID)
+	taskID, err := taskIDForOperation(ref, req.SpawnID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}

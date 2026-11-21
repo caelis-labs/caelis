@@ -405,7 +405,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		requestedHandle = handle
 	}
 	requested, _ := stringArg(args, "agent")
-	requested, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, requested)
+	requested, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), requested)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -483,14 +483,14 @@ func hideSpawnIncludeContext(def *tool.Definition) {
 	delete(props, "include_context")
 }
 
-func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Session, requested string) (string, error) {
+func resolveRuntimeSpawnToolAgent(def tool.Definition, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	enum := spawnAgentEnum(def)
 	if len(enum) == 0 {
 		if requested != "" && !strings.EqualFold(requested, "self") {
 			return "", fmt.Errorf("Spawn agent %q is not available", requested)
 		}
-		return resolveSpawnAgent(activeSession, requested)
+		return normalizeSpawnAgent(requested), nil
 	}
 	if requested == "" {
 		for _, allowed := range enum {

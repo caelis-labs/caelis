@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,15 @@ func randomTaskID() (string, error) {
 		return "", fmt.Errorf("generate Task identity: %w", err)
 	}
 	return hex.EncodeToString(raw[:]), nil
+}
+
+func taskIDForOperation(ref session.SessionRef, originalID string) (string, error) {
+	originalID = strings.TrimSpace(originalID)
+	if originalID == "" {
+		return randomTaskID()
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(ref.SessionID) + "\x00" + originalID))
+	return hex.EncodeToString(sum[:taskIDRandomBytes]), nil
 }
 
 type taskToolObserver struct {

@@ -65,7 +65,7 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 		}
 	}
 
-	snapshot, err := runtime.StartSubagent(ctx, activeSession.SessionRef, "helper", "review", "slash_helper")
+	snapshot, err := runtime.StartSubagentWithOptions(ctx, activeSession.SessionRef, "helper", "review", "slash_helper", StartSubagentOptions{})
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
@@ -299,7 +299,7 @@ func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	taskID, err := subagentSpawnTaskID(activeSession.SessionRef, req.SpawnID)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, req.SpawnID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
-	snapshot, err := runtime.StartSubagent(ctx, activeSession.SessionRef, "helper", "review", "slash_helper")
+	snapshot, err := runtime.StartSubagentWithOptions(ctx, activeSession.SessionRef, "helper", "review", "slash_helper", StartSubagentOptions{})
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
@@ -404,7 +404,7 @@ func TestSlashSideSubagentDoesNotPromoteStreamTraceToCanonicalDialogue(t *testin
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
-	snapshot, err := runtime.StartSubagent(ctx, activeSession.SessionRef, "helper", "review", "slash_helper")
+	snapshot, err := runtime.StartSubagentWithOptions(ctx, activeSession.SessionRef, "helper", "review", "slash_helper", StartSubagentOptions{})
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}

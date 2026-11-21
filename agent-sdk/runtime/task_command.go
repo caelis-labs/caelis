@@ -43,15 +43,6 @@ func isCommandToolError(err error) bool {
 	return ok
 }
 
-func commandTaskID(ref session.SessionRef, parentCall string) (string, error) {
-	parentCall = strings.TrimSpace(parentCall)
-	if parentCall == "" {
-		return randomTaskID()
-	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(ref.SessionID) + "\x00" + parentCall))
-	return hex.EncodeToString(sum[:taskIDRandomBytes]), nil
-}
-
 func commandRequestDigest(req taskapi.CommandStartRequest) (string, error) {
 	payload := struct {
 		Command     string              `json:"command"`
@@ -93,7 +84,7 @@ func (tm *taskRuntime) StartCommand(
 			}
 		},
 	}
-	taskID, err := commandTaskID(ref, firstNonEmpty(req.OperationID, req.ParentCall))
+	taskID, err := taskIDForOperation(ref, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}

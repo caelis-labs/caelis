@@ -38,7 +38,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		approval.started = time.Now()
 	}
 	deadline := approval.started.Add(req.Yield)
-	taskID, err := commandTaskID(t.sessionRef, firstNonEmpty(req.OperationID, req.ParentCall))
+	taskID, err := taskIDForOperation(t.sessionRef, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {
 		return tool.Result{}, err
 	}

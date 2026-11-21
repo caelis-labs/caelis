@@ -306,7 +306,7 @@ func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 
 func mustCommandTaskID(t *testing.T, ref session.SessionRef, callID string) string {
 	t.Helper()
-	id, err := commandTaskID(ref, callID)
+	id, err := taskIDForOperation(ref, callID)
 	if err != nil {
 		t.Fatal(err)
 	}

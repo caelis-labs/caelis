@@ -106,7 +106,7 @@ func TestCodeModeGojaUsesFrozenOccurrence(t *testing.T) {
 					t.Fatal("persisted approval changed frozen occurrence")
 				}
 			}
-			expectedTask, err := commandTaskID(active.SessionRef, "code-mode/"+outer.Tool.Execution.TurnID+"/"+outer.Tool.Execution.ItemID+"/"+outer.Tool.ID)
+			expectedTask, err := taskIDForOperation(active.SessionRef, "code-mode/"+outer.Tool.Execution.TurnID+"/"+outer.Tool.Execution.ItemID+"/"+outer.Tool.ID)
 			if err != nil {
 				t.Fatal(err)
 			}

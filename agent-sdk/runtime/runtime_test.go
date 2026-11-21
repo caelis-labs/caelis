@@ -5136,15 +5136,10 @@ func TestRuntimeRunCommandToolDoesNotFetchResultWhileStillRunning(t *testing.T) 
 	assertRunningTaskSnapshot(t, result)
 }
 
-func TestResolveSpawnAgentAllowsRegisteredAgentNameWithoutSessionParticipant(t *testing.T) {
-	activeSession := session.Session{}
-	if got, err := resolveSpawnAgent(activeSession, ""); err != nil || got != "self" {
-		t.Fatalf("resolveSpawnAgent(empty) = %q, %v; want self", got, err)
-	}
-	if got, err := resolveSpawnAgent(activeSession, "self"); err != nil || got != "self" {
-		t.Fatalf("resolveSpawnAgent(self) = %q, %v; want self", got, err)
-	}
-	if got, err := resolveSpawnAgent(activeSession, "codex"); err != nil || got != "codex" {
-		t.Fatalf("resolveSpawnAgent(codex) = %q, %v; want codex", got, err)
+func TestNormalizeSpawnAgent(t *testing.T) {
+	for input, want := range map[string]string{"": "self", "  SELF ": "self", " codex ": "codex"} {
+		if got := normalizeSpawnAgent(input); got != want {
+			t.Errorf("normalizeSpawnAgent(%q) = %q, want %q", input, got, want)
+		}
 	}
 }

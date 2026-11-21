@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,21 +21,12 @@ const (
 	subagentActivityGenerationMeta = "child_activity_generation"
 )
 
-func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
-	spawnID = strings.TrimSpace(spawnID)
-	if spawnID == "" {
-		return randomTaskID()
-	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(ref.SessionID) + "\x00" + spawnID))
-	return hex.EncodeToString(sum[:taskIDRandomBytes]), nil
-}
-
-func resolveSpawnAgent(session session.Session, requested string) (string, error) {
+func normalizeSpawnAgent(requested string) string {
 	requested = strings.TrimSpace(requested)
 	if requested == "" || strings.EqualFold(requested, "self") {
-		return "self", nil
+		return "self"
 	}
-	return requested, nil
+	return requested
 }
 
 func isSideSubagentTask(task *subagentTask) bool {
@@ -83,16 +72,8 @@ func (tm *taskRuntime) authorizeSubagentControl(task *subagentTask, principal se
 	return nil
 }
 
-func (r *Runtime) StartSubagent(
-	ctx context.Context,
-	ref session.SessionRef,
-	agent string,
-	prompt string,
-	source string,
-) (taskapi.Snapshot, error) {
-	return r.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
-}
-
+// StartSubagentWithOptions admits a sidecar under the Session's current
+// controller and returns the original Task snapshot.
 func (r *Runtime) StartSubagentWithOptions(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -116,10 +97,7 @@ func (r *Runtime) StartSubagentWithOptions(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	agent, err = resolveSpawnAgent(activeSession, agent)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
+	agent = normalizeSpawnAgent(agent)
 	if strings.TrimSpace(prompt) == "" && len(opts.ContentParts) == 0 {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent prompt is required")
 	}
@@ -160,27 +138,6 @@ func (r *Runtime) StartSubagentWithOptions(
 		Yield:     2 * time.Second,
 		Principal: session.ActorKindController,
 		Source:    "runtime",
-	})
-}
-
-func (r *Runtime) WaitSubagentTask(
-	ctx context.Context,
-	ref session.SessionRef,
-	taskID string,
-	yield time.Duration,
-) (taskapi.Snapshot, error) {
-	if r == nil || r.tasks == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("subagent Runtime is unavailable")
-	}
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return taskapi.Snapshot{}, fmt.Errorf("subagent Task identity is required")
-	}
-	return r.tasks.Wait(ctx, session.NormalizeSessionRef(ref), taskapi.ControlRequest{
-		TaskID:    taskID,
-		Yield:     yield,
-		Principal: session.ActorKindUser,
-		Source:    "user",
 	})
 }
 
@@ -644,7 +601,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.metadata["state"] = string(t.state)
 	if taskOutputHasNonBlankLine(result.OutputPreview) {
 		t.result["output_preview"] = result.OutputPreview
-	} else if t.result != nil {
+	} else {
 		delete(t.result, "output_preview")
 	}
 	if taskOutputHasNonBlankLine(result.Result) {
@@ -652,10 +609,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 		if !t.running {
 			t.result["final_message"] = result.Result
 		}
-	} else if !t.running {
-		delete(t.result, "result")
-		delete(t.result, "final_message")
-	} else if t.result != nil {
+	} else {
 		delete(t.result, "result")
 		delete(t.result, "final_message")
 	}

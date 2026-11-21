@@ -56,7 +56,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		yield = time.Duration(*args.Yield) * time.Millisecond
 	}
 	execution := tool.InvocationFromContext(ctx)
-	taskID, err := commandTaskID(owner.ref, "code-mode/"+execution.TurnID+"/"+execution.ItemID+"/"+call.ID)
+	taskID, err := taskIDForOperation(owner.ref, "code-mode/"+execution.TurnID+"/"+execution.ItemID+"/"+call.ID)
 	if err != nil {
 		return tool.Result{}, err
 	}

@@ -649,7 +649,7 @@ func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *
 		t.Fatal(err)
 	}
 	const spawnID = "persistent-participant-conflict"
-	taskID, err := subagentSpawnTaskID(active.SessionRef, spawnID)
+	taskID, err := taskIDForOperation(active.SessionRef, spawnID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -819,7 +819,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				t.Fatalf("participants = %#v, want durable attachment for roll-forward", loaded.Participants)
 			}
 			if test.wantStatus != "" {
-				taskID, _ := subagentSpawnTaskID(active.SessionRef, "spawn-fault")
+				taskID, _ := taskIDForOperation(active.SessionRef, "spawn-fault")
 				entry, getErr := store.Get(context.Background(), taskID)
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != test.wantStatus {
 					t.Fatalf("durable spawn status = entry %#v error %v, want %q", entry, getErr, test.wantStatus)
@@ -861,7 +861,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				if runner.spawnCalls != 1 || runner.cancelCalls != 0 {
 					t.Fatalf("roll-forward spawn/cancel calls = %d/%d, want 1/0", runner.spawnCalls, runner.cancelCalls)
 				}
-				taskID, _ := subagentSpawnTaskID(active.SessionRef, "spawn-fault")
+				taskID, _ := taskIDForOperation(active.SessionRef, "spawn-fault")
 				entry, getErr := store.Get(context.Background(), taskID)
 				if getErr != nil || taskStringValue(entry.Metadata["spawn_status"]) != string(spawnPhaseCommitted) {
 					t.Fatalf("rolled-forward entry = %#v, %v", entry, getErr)
@@ -915,7 +915,7 @@ func TestSubagentSpawnRejectsAgentIDCollisionWithoutReplacingOriginalParticipant
 	if !ok || binding.DelegationID != first.Ref.TaskID {
 		t.Fatalf("participant after collision = %#v, want original delegation %q", binding, first.Ref.TaskID)
 	}
-	collidingTaskID, err := subagentSpawnTaskID(active.SessionRef, "collision-two")
+	collidingTaskID, err := taskIDForOperation(active.SessionRef, "collision-two")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -959,7 +959,7 @@ func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 	}
 
 	unknownStore := newSagaTaskStore()
-	taskID, _ := subagentSpawnTaskID(active.SessionRef, "restart-spawn")
+	taskID, _ := taskIDForOperation(active.SessionRef, "restart-spawn")
 	restartReq := taskapi.SubagentStartRequest{SpawnID: "restart-spawn", Agent: "helper", Prompt: "review"}
 	restartDigest, err := subagentSpawnRequestDigest(restartReq, runtime.defaultPolicyMode, session.ParticipantRoleDelegated)
 	if err != nil {
@@ -997,7 +997,7 @@ func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 	}
 
 	spawnedStore := newSagaTaskStore()
-	spawnedTaskID, _ := subagentSpawnTaskID(active.SessionRef, "spawned-restart")
+	spawnedTaskID, _ := taskIDForOperation(active.SessionRef, "spawned-restart")
 	spawnedReq := taskapi.SubagentStartRequest{
 		SpawnID: "spawned-restart", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar,
 	}
@@ -1050,7 +1050,7 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 	store := newSagaTaskStore()
 	runner := &sagaRunner{}
 	req := taskapi.SubagentStartRequest{SpawnID: "detach-recovery", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar}
-	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	taskID, err := taskIDForOperation(active.SessionRef, req.SpawnID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1174,7 +1174,7 @@ func TestSubagentSpawnCancelSuccessCannotRollForwardAfterTerminalWriteFailure(t 
 	if _, err := restarted.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
 		t.Fatal("retry error = nil, want compensated outcome rather than roll-forward")
 	}
-	taskID, _ := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	taskID, _ := taskIDForOperation(active.SessionRef, req.SpawnID)
 	entry, err := store.Get(context.Background(), taskID)
 	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != string(spawnPhaseCompensated) {
 		t.Fatalf("retry entry = %#v, %v, want compensated", entry, err)
@@ -1254,7 +1254,7 @@ func TestSubagentSpawnReleasesHandleWhenRunnerProvesNoChildWasCreated(t *testing
 	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
 		t.Fatal("StartSubagent() error = nil, want runner setup failure")
 	}
-	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	taskID, err := taskIDForOperation(active.SessionRef, req.SpawnID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1305,7 +1305,7 @@ func TestSubagentSpawnRetainsHandleWhenRunnerOutcomeIsUnknown(t *testing.T) {
 	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("StartSubagent() error = %v, want unknown outcome", err)
 	}
-	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	taskID, err := taskIDForOperation(active.SessionRef, req.SpawnID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1425,7 +1425,7 @@ func TestSubagentSpawnRejectsEmptyParticipantAnchorAndCompensates(t *testing.T) 
 	if len(loaded.Participants) != 0 || runner.cancelCalls != 1 {
 		t.Fatalf("participants=%#v cancel calls=%d, want compensated invalid child", loaded.Participants, runner.cancelCalls)
 	}
-	taskID, _ := subagentSpawnTaskID(active.SessionRef, "invalid-anchor")
+	taskID, _ := taskIDForOperation(active.SessionRef, "invalid-anchor")
 	entry, err := store.Get(context.Background(), taskID)
 	if err != nil {
 		t.Fatal(err)

@@ -172,7 +172,7 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := r.StartSubagent(t.Context(), active.SessionRef, "helper", "inspect", "test")
+	started, err := r.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "inspect", "test", StartSubagentOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestChildSpawnPersistsSynchronousACPUsageGauge(t *testing.T) {
 	}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	const spawnID = "synchronous-terminal-usage"
-	taskID, err := subagentSpawnTaskID(active.SessionRef, spawnID)
+	taskID, err := taskIDForOperation(active.SessionRef, spawnID)
 	if err != nil {
 		t.Fatal(err)
 	}
