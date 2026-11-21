@@ -16,7 +16,7 @@ type ApprovalRecoveryStore interface {
 	ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error)
 	Session(context.Context, session.SessionRef) (session.Session, error)
 	EventsPage(context.Context, session.EventPageRequest) (session.EventPage, error)
-	SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) (session.SettlePendingApprovalResult, error)
+	session.ApprovalRecoverySettler
 }
 
 // SweepAbandonedApprovals interrupts durable approval mirrors left without a
@@ -246,7 +246,7 @@ func settleAbandonedApproval(
 	expectedRevision := approval.Revision
 	guard := session.ControlMutationGuard(session.ControlMutationPurposeLifecycle)
 	for range 8 {
-		_, err := store.SettlePendingApproval(ctx, abandonedApprovalSettlementRequest(approval, &expectedRevision, event, guard))
+		err := store.SettlePendingApproval(ctx, abandonedApprovalSettlementRequest(approval, &expectedRevision, event, guard))
 		if err == nil {
 			return time.Time{}, nil
 		}
@@ -257,7 +257,7 @@ func settleAbandonedApproval(
 		}
 		if session.IsCommitted(err) {
 			// Re-enter the same conditional operation. A recovered commit reports
-			// Settled=false because the request is no longer pending.
+			// a successful no-op because the request is no longer pending.
 			continue
 		}
 		if !errors.Is(err, session.ErrFenceConflict) {

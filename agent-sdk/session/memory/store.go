@@ -232,9 +232,9 @@ func (s *Store) AppendEventWithOutcome(
 func (s *Store) SettlePendingApproval(
 	_ context.Context,
 	req session.SettlePendingApprovalRequest,
-) (session.SettlePendingApprovalResult, error) {
+) error {
 	if err := session.ValidateSettlePendingApprovalRequest(req); err != nil {
-		return session.SettlePendingApprovalResult{}, err
+		return err
 	}
 
 	s.mu.Lock()
@@ -242,18 +242,17 @@ func (s *Store) SettlePendingApproval(
 
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return session.SettlePendingApprovalResult{}, session.ErrSessionNotFound
+		return session.ErrSessionNotFound
 	}
-	result := session.SettlePendingApprovalResult{}
 	current := pendingApprovalForEvents(record.events, req.ApprovalRequestID)
 	if !session.PendingApprovalMatches(current, req) {
-		return result, nil
+		return nil
 	}
 	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return result, err
+		return err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
-		return result, err
+		return err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
 		record,
@@ -265,14 +264,10 @@ func (s *Store) SettlePendingApproval(
 		"",
 	)
 	if err != nil {
-		return result, err
+		return err
 	}
 	s.applyAppendTransactionToRecord(record, tx)
-	result.Settled = tx.Changed
-	if len(tx.Prepared.Events) > 0 {
-		result.Event = session.CloneEvent(tx.Prepared.Events[0])
-	}
-	return result, nil
+	return nil
 }
 
 func pendingApprovalForEvents(events []*session.Event, approvalRequestID string) *session.Event {

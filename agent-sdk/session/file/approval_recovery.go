@@ -116,22 +116,21 @@ func (s *Store) pendingApprovalsForSession(ctx context.Context, ref session.Sess
 func (s *Store) SettlePendingApproval(
 	ctx context.Context,
 	req session.SettlePendingApprovalRequest,
-) (session.SettlePendingApprovalResult, error) {
+) error {
 	if err := session.ValidateSettlePendingApprovalRequest(req); err != nil {
-		return session.SettlePendingApprovalResult{}, err
+		return err
 	}
 	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
 	if err != nil {
-		return session.SettlePendingApprovalResult{}, err
+		return err
 	}
 	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
-		return session.SettlePendingApprovalResult{}, err
+		return err
 	}
 	defer s.mu.Unlock()
 
-	var out session.SettlePendingApprovalResult
-	err = s.withRootLockContext(ctx, func() error {
+	return s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -169,16 +168,11 @@ func (s *Store) SettlePendingApproval(
 		if err != nil {
 			return err
 		}
-		out.Settled = tx.Changed
-		if len(tx.Prepared.Events) > 0 {
-			out.Event = session.CloneEvent(tx.Prepared.Events[0])
-		}
 		if !tx.Changed {
 			return nil
 		}
 		return s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm)
 	})
-	return out, err
 }
 
 func pendingApprovalsFromEvents(events []*session.Event) map[string]*session.Event {

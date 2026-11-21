@@ -31,14 +31,6 @@ type SettlePendingApprovalRequest struct {
 	Settlement             *Event
 }
 
-// SettlePendingApprovalResult reports the outcome of one conditional approval
-// settlement. Settled is false, without a mutation, when the expected request
-// has already been settled or replaced.
-type SettlePendingApprovalResult struct {
-	Settled bool
-	Event   *Event
-}
-
 // ApprovalRecoveryReader scans Store-maintained pending-approval indexes.
 // Implementations may page the Session namespace and rebuild a legacy missing
 // index from canonical events in per-Session transactions before returning.
@@ -50,9 +42,9 @@ type ApprovalRecoveryReader interface {
 // candidate. Implementations return ErrRevisionConflict when the same request
 // remains pending at a different Session revision; callers may retry with the
 // Actual revision carried by RevisionConflictError. A stale request identity is
-// an idempotent no-op reported through Settled=false.
+// an idempotent no-op and returns nil.
 type ApprovalRecoverySettler interface {
-	SettlePendingApproval(context.Context, SettlePendingApprovalRequest) (SettlePendingApprovalResult, error)
+	SettlePendingApproval(context.Context, SettlePendingApprovalRequest) error
 }
 
 // ApprovalRecoveryService combines pending approval discovery with atomic
