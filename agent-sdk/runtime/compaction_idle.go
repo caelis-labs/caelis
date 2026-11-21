@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -31,7 +32,6 @@ type IdleCompactionJob struct {
 	startedAt, preparedAt time.Time
 	turnID, sourceStamp   string
 	attempts              []idleCompactionAttempt
-	accountingErr         error
 	uncertainBegin        *session.BeginCompactionAttemptRequest
 }
 
@@ -137,7 +137,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	if final.Type != session.EventTypeAssistant || final.Message == nil || final.Scope == nil || final.Scope.TurnID != snapshot.turnID || !reflect.DeepEqual(*final.Message, snapshot.final) {
 		return nil, nil
 	}
-	if !asyncToolPairsComplete(mainInvocationEvents(loaded.Events)) {
+	if !asyncToolPairsComplete(events) {
 		return nil, nil
 	}
 	tasks, err := r.tasks.activeSubagentSessionEntries(ctx, ref)
@@ -248,19 +248,19 @@ func (j *IdleCompactionJob) Fresh() bool {
 // Run performs one generation (at most two actual attempts), then one adoption.
 // It returns only after the provider is drained. Accounting remains independent
 // of candidate success, cancellation and foreground revocation.
-func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompactionWindow) (bool, error) {
+func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompactionWindow) error {
 	if !j.Fresh() {
-		return false, nil
+		return nil
 	}
 	if j.authority.validate == nil {
-		return false, nil
+		return nil
 	}
 	release, err := j.authority.validate(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if release == nil {
-		return false, agent.ErrModelRequestSnapshotStale
+		return agent.ErrModelRequestSnapshotStale
 	}
 	release()
 	store := j.runtime.sessions.(session.CompactionReceiptStore)
@@ -277,7 +277,7 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	}
 	generation = model.WithInvocationAdmission(generation, func(ctx context.Context, _ *model.Request) error {
 		if len(j.attempts) >= 2 {
-			return &idleCompactionAttemptLimit{}
+			return errors.New("runtime: idle compaction attempt limit reached")
 		}
 		if !j.Fresh() {
 			return session.ErrIdleCompactionRevoked
@@ -299,9 +299,8 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 		request := session.BeginCompactionAttemptRequest{Window: window, Invocation: in}
 		ticket, err := store.BeginCompactionAttempt(ctx, request)
 		if err != nil && !session.IsCommitted(err) {
-			j.accountingErr = err
 			j.uncertainBegin = &request
-			return &idleCompactionAccountingError{err}
+			return fmt.Errorf("runtime: idle compaction accounting: %w", err)
 		}
 		j.attempts = append(j.attempts, idleCompactionAttempt{ticket: ticket, invocation: in})
 		return nil
@@ -320,14 +319,14 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	accountingErr := j.FlushAccounting(cleanup)
 	cancelCleanup()
 	if accountingErr != nil {
-		return false, accountingErr
+		return accountingErr
 	}
 	if c.err != nil {
-		return false, c.err
+		return c.err
 	}
 	if ctx.Err() != nil {
 		j.keepReadyCandidate()
-		return false, ctx.Err()
+		return ctx.Err()
 	}
 	idleStore := j.runtime.sessions.(session.IdleCompactionStore)
 	var grant *session.IdleCompactionGrant
@@ -346,23 +345,8 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	if !adopted && (errors.Is(err, session.ErrIdleCompactionRevoked) || errors.Is(err, context.Canceled) || errors.Is(err, errSessionWriteBusy)) {
 		j.keepReadyCandidate()
 	}
-	return adopted, err
+	return err
 }
-
-type idleCompactionAttemptLimit struct{}
-
-func (*idleCompactionAttemptLimit) Error() string {
-	return "runtime: idle compaction attempt limit reached"
-}
-func (*idleCompactionAttemptLimit) Retryable() bool { return false }
-
-type idleCompactionAccountingError struct{ cause error }
-
-func (e *idleCompactionAccountingError) Error() string {
-	return "runtime: idle compaction accounting: " + e.cause.Error()
-}
-func (e *idleCompactionAccountingError) Unwrap() error { return e.cause }
-func (*idleCompactionAccountingError) Retryable() bool { return false }
 
 // FlushAccounting retries only original sealed invocation identities. Successful
 // staging is durable, but an unconfirmed terminal payload retains this job.
@@ -373,10 +357,6 @@ func (j *IdleCompactionJob) FlushAccounting(ctx context.Context) error {
 			return err
 		}
 		j.uncertainBegin = nil
-		j.accountingErr = nil
-	}
-	if j.accountingErr != nil {
-		return j.accountingErr
 	}
 	for i := range j.attempts {
 		attempt := &j.attempts[i]
