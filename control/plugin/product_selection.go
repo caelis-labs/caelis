@@ -95,10 +95,7 @@ func validateProductPair(out Contributions) error {
 		}
 		service = spec.Name
 	}
-	metas, err := fs.DiscoverPluginBundleMeta(out.SkillBundles)
-	if err != nil {
-		return err
-	}
+	metas := fs.DiscoverPluginBundleMeta(out.SkillBundles)
 	var skill string
 	for _, meta := range metas {
 		if meta.PluginID != "desktop-world" || (meta.LocalName != "dtw" && meta.LocalName != "desktop-world") {

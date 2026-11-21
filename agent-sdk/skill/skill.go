@@ -231,10 +231,6 @@ func skillNameKey(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-type Discovery interface {
-	Discover(context.Context, DiscoverRequest) ([]Meta, error)
-}
-
 type Loader interface {
 	Load(context.Context, Ref) (Bundle, error)
 }

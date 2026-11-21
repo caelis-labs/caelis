@@ -10,15 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
 
-type Discovery struct{}
-
-func (Discovery) Discover(ctx context.Context, req skill.DiscoverRequest) ([]skill.Meta, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return DiscoverMetaRequest(req)
-}
-
 type Loader struct{}
 
 func (Loader) Load(ctx context.Context, ref skill.Ref) (skill.Bundle, error) {
@@ -99,5 +90,4 @@ func resolveSkillRef(ref skill.Ref) (string, string, error) {
 	return filepath.Clean(root), filepath.Clean(skillPath), nil
 }
 
-var _ skill.Discovery = Discovery{}
 var _ skill.Loader = Loader{}

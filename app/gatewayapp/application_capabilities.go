@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
@@ -205,12 +206,9 @@ func (s *runtimeComposition) applicationSkills(profile sessionprofile.Profile, b
 		return catalog, statuses, err
 	}
 	workspace := s.workspace.CWD
-	metas, err := DiscoverSkillMetaRequest(skill.DiscoverRequest{
+	metas := skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{
 		Dirs: stackSkillDiscoveryDirs(workspace, s.runtimeProcessSnapshot().runtime.SkillDirs), WorkspaceDir: workspace, PluginBundles: bundles,
 	})
-	if err != nil {
-		return skill.Catalog{}, nil, err
-	}
 	combined := catalog.Metas()
 	for _, meta := range metas {
 		if _, status := catalog.Resolve(meta.Name); meta.Source == skill.SourcePlugin || status != skill.ResolveNotFound {

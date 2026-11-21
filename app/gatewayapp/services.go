@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
@@ -219,14 +220,14 @@ func (s AgentService) List() []ACPAgentInfo {
 	return s.composition.ListACPAgents()
 }
 
-func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillMeta, error) {
+func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]skill.Meta, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 	}
 	if s.composition == nil {
-		return DiscoverSkillMeta(nil, workspaceDir)
+		return skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{WorkspaceDir: workspaceDir}), nil
 	}
 	processRuntime := s.composition.runtimeProcessSnapshot().runtime
 	s.composition.mu.RLock()
@@ -236,11 +237,11 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 	if strings.TrimSpace(workspaceDir) == "" {
 		workspaceDir = defaultWorkspace
 	}
-	return DiscoverSkillMetaRequest(skill.DiscoverRequest{
+	return skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{
 		Dirs:          stackSkillDiscoveryDirs(workspaceDir, processRuntime.SkillDirs),
 		WorkspaceDir:  workspaceDir,
 		PluginBundles: pluginSkills,
-	})
+	}), nil
 }
 
 // Snapshot returns the ordinary Runtime's pinned Skill catalog or an

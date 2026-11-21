@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 )
 
 // CurrentSkillCatalog discovers the configured skills for a future Session
@@ -38,14 +39,11 @@ func (s WorkspaceReadService) CurrentSkillCatalog(ctx context.Context, workspace
 	if err != nil {
 		return skill.Catalog{}, err
 	}
-	metas, err := DiscoverSkillMetaRequest(skill.DiscoverRequest{
+	metas := skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{
 		Dirs:          skillDirs,
 		WorkspaceDir:  workspaceDir,
 		PluginBundles: skill.ClonePluginBundles(contributions.SkillBundles),
 	})
-	if err != nil {
-		return skill.Catalog{}, err
-	}
 	if err := ctx.Err(); err != nil {
 		return skill.Catalog{}, err
 	}
