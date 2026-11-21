@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -51,7 +52,12 @@ func NewToolSearchResult(definitions []tool.Definition) ToolSearchResult {
 // NewToolSearchDiscoveredTool converts one deferred definition into the
 // tool_search result contract.
 func NewToolSearchDiscoveredTool(def tool.Definition) ToolSearchDiscoveredTool {
-	entry := ToolSearchDiscoveredTool{Name: def.Name, Description: def.Description, InputSchema: tool.CloneDefinition(def).InputSchema, OutputSchema: tool.CloneDefinition(def).OutputSchema}
+	entry := ToolSearchDiscoveredTool{
+		Name:         def.Name,
+		Description:  def.Description,
+		InputSchema:  jsonvalue.CloneMap(def.InputSchema),
+		OutputSchema: jsonvalue.CloneMap(def.OutputSchema),
+	}
 	if binding := BindingForDefinition(def); binding.Identity != "" {
 		entry.Binding = &binding
 	}
