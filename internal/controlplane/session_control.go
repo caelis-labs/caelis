@@ -5,8 +5,29 @@ import (
 	"fmt"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+// HandoffControllerRequest switches the active controller for one Session.
+type HandoffControllerRequest struct {
+	SessionRef              session.SessionRef
+	ExpectedRevision        *uint64
+	ExpectedControllerEpoch string
+	Kind                    session.ControllerKind
+	Agent                   string
+	Placement               placement.Placement
+	Source                  string
+	Reason                  string
+	StateUpdate             session.AppendStateUpdate
+}
+
+// SessionControlPlane is the host-facing composition of neutral participant
+// execution and the Control-owned controller handoff operation.
+type SessionControlPlane interface {
+	agent.ParticipantControlPlane
+	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
+}
 
 // SessionControl composes Control-owned handoff with neutral participant
 // execution after both have been assembled by the product host.
@@ -38,7 +59,7 @@ func NewSessionControl(cfg SessionControlConfig) (*SessionControl, error) {
 	}, nil
 }
 
-func (c *SessionControl) HandoffController(ctx context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
+func (c *SessionControl) HandoffController(ctx context.Context, req HandoffControllerRequest) (session.Session, error) {
 	return c.controllers.HandoffController(ctx, req)
 }
 

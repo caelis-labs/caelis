@@ -1196,10 +1196,6 @@ func (r *promptRouterRuntime) DetachParticipant(context.Context, agent.DetachPar
 	return session.Session{}, nil
 }
 
-func (r *promptRouterRuntime) HandoffController(context.Context, agent.HandoffControllerRequest) (session.Session, error) {
-	return session.Session{}, errors.New("handoff not implemented")
-}
-
 type promptRouterRun struct {
 	event    *session.Event
 	observer agent.SourceEventObserver

@@ -18,7 +18,7 @@ import (
 )
 
 var _ controller.RecoveryCoordinator = (*Coordinator)(nil)
-var _ agent.SessionControlPlane = (*SessionControl)(nil)
+var _ SessionControlPlane = (*SessionControl)(nil)
 
 func TestDefaultControllerEpochIdentitySurvivesCoordinatorRestart(t *testing.T) {
 	t.Parallel()
@@ -322,7 +322,7 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
-	updated, err := coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	updated, err := coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex", Source: "user", Reason: "delegate",
 	})
 	if err != nil {
@@ -393,7 +393,7 @@ func TestCoordinatorHandoffDoesNotBypassActiveTurnFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	_, err = coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "claude",
 	})
 	if !errors.Is(err, session.ErrFenceConflict) {
@@ -463,7 +463,7 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	_, err = coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex",
 	})
 	if !errors.Is(err, commitErr) {
@@ -504,7 +504,7 @@ func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	updated, err := coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex",
 	})
 	if err != nil {

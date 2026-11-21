@@ -148,7 +148,7 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 
 // HandoffController authorizes no transition by itself; it executes a handoff
 // already selected by the calling user or Control policy.
-func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
+func (c *Coordinator) HandoffController(ctx context.Context, req HandoffControllerRequest) (session.Session, error) {
 	var result session.Session
 	event := agent.LifecycleEvent{
 		Operation:  agent.LifecycleHandoff,
@@ -174,7 +174,7 @@ func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffCo
 	return result, err
 }
 
-func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
+func (c *Coordinator) handoffController(ctx context.Context, req HandoffControllerRequest) (session.Session, error) {
 	if c == nil || c.sessions == nil {
 		return session.Session{}, fmt.Errorf("controlplane: coordinator is unavailable")
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 )
 
 type mockRuntime struct{}
@@ -432,7 +433,7 @@ func (r *cancellableRuntime) RunState(context.Context, session.SessionRef) (agen
 type controlPlaneRuntime struct {
 	session     session.Session
 	runState    agent.RunState
-	handoffReq  agent.HandoffControllerRequest
+	handoffReq  controlplane.HandoffControllerRequest
 	handoffResp session.Session
 	attachReq   agent.AttachParticipantRequest
 	attachResp  session.Session
@@ -495,7 +496,7 @@ func (r *controlPlaneRuntime) RunState(context.Context, session.SessionRef) (age
 	return r.runState, nil
 }
 
-func (r *controlPlaneRuntime) HandoffController(_ context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
+func (r *controlPlaneRuntime) HandoffController(_ context.Context, req controlplane.HandoffControllerRequest) (session.Session, error) {
 	r.handoffReq = req
 	return r.handoffResp, nil
 }
