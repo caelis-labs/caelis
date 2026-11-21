@@ -216,7 +216,7 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	var reviewMetrics []guardianReviewMetrics
 	reviewer.observeReview = func(metrics guardianReviewMetrics) { reviewMetrics = append(reviewMetrics, metrics) }
 	reviewer.queryNetwork = sandbox.NetworkEnabled
-	var review approval.Decision
+	var review approval.ReviewResult
 	var reviewErr error
 	var reviews int
 	requester := guardianCommandRequester(func(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
@@ -229,7 +229,7 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 		}
 		reviews++
 		payload := approval.PayloadFromRuntimeRequest(request)
-		review, reviewErr = reviewer.Decide(ctx, approval.Request{SessionRef: request.SessionRef, RunID: request.RunID, TurnID: request.TurnID, ReviewID: request.Call.ID, Mode: approval.ModeAutoReview, Model: guardian, Approval: payload, RuntimeRequest: request})
+		review, reviewErr = reviewer.Decide(ctx, approval.ReviewRequest{SessionRef: request.SessionRef, RunID: request.RunID, TurnID: request.TurnID, ReviewID: request.Call.ID, Mode: approval.ModeAutoReview, Model: guardian, Approval: payload, RuntimeRequest: request})
 		if reviewErr != nil {
 			return agent.ApprovalResponse{}, reviewErr
 		}

@@ -119,11 +119,11 @@ func RunLiveControllerCollaborationTest(t *testing.T, assemble func(*Stack) (app
 			}
 		}
 		return nil
-	}, ResolveApproval: func(_ context.Context, req headless.ApprovalRequest) (approval.Decision, error) {
+	}, ResolveApproval: func(_ context.Context, req headless.ApprovalRequest) (approval.ReviewResult, error) {
 		if req.Payload != nil && (req.Payload.RawInput["mcp_server"] == "caelis-collaboration" || req.Payload.ToolName == "StartThread") {
-			return approval.Decision{Approved: true, OptionID: "allow_once"}, nil
+			return approval.ReviewResult{Approved: true, OptionID: "allow_once"}, nil
 		}
-		return approval.Decision{Approved: false}, nil
+		return approval.ReviewResult{Approved: false}, nil
 	}})
 	if err != nil {
 		for _, update := range append(toolUpdates, permissionUpdates...) {

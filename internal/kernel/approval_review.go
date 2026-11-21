@@ -46,8 +46,8 @@ const (
 
 type ApprovalPayload = approval.Payload
 
-type ApprovalReviewRequest = approval.Request
-type ApprovalReviewResult = approval.Decision
+type ApprovalReviewRequest = approval.ReviewRequest
+type ApprovalReviewResult = approval.ReviewResult
 type ApprovalReviewer = approval.Reviewer
 type ApprovalApprover = approval.Approver
 

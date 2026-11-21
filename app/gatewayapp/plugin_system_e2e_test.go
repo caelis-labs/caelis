@@ -110,11 +110,11 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 
 	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{
-		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.Decision, error) {
+		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.ReviewResult, error) {
 			if request.Payload == nil || request.Payload.ToolName != pluginE2EToolName {
 				t.Fatalf("unexpected E2E approval request: %+v", request.Payload)
 			}
-			return approval.Decision{OptionID: "allow_once"}, nil
+			return approval.ReviewResult{OptionID: "allow_once"}, nil
 		},
 	})
 	if err != nil {
