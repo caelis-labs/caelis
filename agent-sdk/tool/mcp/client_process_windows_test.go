@@ -62,7 +62,7 @@ func TestMCPStdioWindowsNoConsole(t *testing.T) {
 	}
 	for _, name := range []string{"legacy-control", "first-start", "restart-and-cancel"} {
 		t.Run(name, func(t *testing.T) {
-			transport, _, err := transportForSpecWithHTTPClient(ServerSpec{
+			transport, _, _, err := transportForSpecWithIdentity(ServerSpec{
 				PluginID: "fixture", Name: "stdio", Command: os.Args[0], WorkDir: t.TempDir(),
 				Args: []string{"-test.run=^TestMCPStdioWindowsServerHelper$"},
 				Env:  map[string]string{"CAELIS_MCP_WINDOWS_PROCESS": "server"}, CleanEnvironment: true,
