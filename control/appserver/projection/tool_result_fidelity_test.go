@@ -12,3 +12,21 @@ func TestProjectedSpawnResultPreservesStructuredMarkdown(t *testing.T) {
 		t.Fatalf("projectedSpawnResultText() = %q, want exact Markdown %q", got, want)
 	}
 }
+
+func TestProjectedSpawnFinalMessageKeepsJSONAndMarkdownIndentation(t *testing.T) {
+	t.Parallel()
+
+	// The child can legitimately begin an answer with JSON that looks like
+	// the historical Spawn result wrapper.
+	raw := "    {\"agent\":\"reviewer\"}\r\n\r\n    code\r\n"
+	want := "    {\"agent\":\"reviewer\"}\n\n    code\n"
+	output := map[string]any{"final_message": raw, "result": "older result"}
+	if got := projectedSpawnResultText(output, "completed", false); got != want {
+		t.Fatalf("canonical final = %q, want %q", got, want)
+	}
+
+	legacy := map[string]any{"finalMessage": "{\"agent\":\"reviewer\"}\r\n\r\nlegacy answer"}
+	if got := projectedSpawnResultText(legacy, "completed", false); got != "legacy answer" {
+		t.Fatalf("legacy result = %q, want the answer after the wrapper", got)
+	}
+}

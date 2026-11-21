@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
@@ -139,7 +140,7 @@ func (m *Model) observeTaskPanelStreamOwner(env eventstream.Envelope) {
 	case eventstream.ToolCallUpdate:
 		meta = update.Meta
 	}
-	handle := display.ToolTaskHandle(input, output, meta)
+	handle := projection.ToolTaskHandle(input, output, meta)
 	if display.MetaString(meta, "caelis", "runtime", "task", "kind") == "code_mode" {
 		handle = display.MetaString(meta, "caelis", "runtime", "task", "handle")
 	}

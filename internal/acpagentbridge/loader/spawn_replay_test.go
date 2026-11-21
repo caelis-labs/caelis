@@ -40,8 +40,7 @@ func TestSpawnReplayNormalizesCanonicalTerminalStatus(t *testing.T) {
 			},
 		},
 	}
-	replay := newSpawnReplayProjector([]*session.Event{event})
-	notification := replay.normalize(event, eventstream.SessionNotification{
+	notification := normalizeSpawnReplay(event, eventstream.SessionNotification{
 		SessionID: "session-1",
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-alpha", Status: &interrupted,

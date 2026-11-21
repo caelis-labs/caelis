@@ -122,15 +122,3 @@ func IsSpawnDisplayJSONObject(decoded map[string]any) bool {
 	}
 	return false
 }
-
-func SpawnDisplayTextCandidate(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	decoded, remainder, ok := SplitLeadingJSONObject(text)
-	if !ok || !IsSpawnDisplayJSONObject(decoded) {
-		return text
-	}
-	return strings.TrimSpace(remainder)
-}
