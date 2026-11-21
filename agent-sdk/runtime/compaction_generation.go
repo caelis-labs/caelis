@@ -73,7 +73,7 @@ func (c *codexStyleCompactor) generateCompactMarkdown(
 	if err == nil {
 		return text, nil
 	}
-	if isCompactionOverflowError(err) {
+	if model.IsContextOverflow(err) {
 		return c.generateCompactMarkdownSegmented(ctx, llm, baseText, events, serviceTier, 0)
 	}
 	return "", err
@@ -108,7 +108,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 		}
 		update, err := modelCompactMarkdown(ctx, llm, current, segment, serviceTier)
 		if err != nil {
-			if isCompactionOverflowError(err) {
+			if model.IsContextOverflow(err) {
 				update, err = c.generateCompactMarkdownSegmented(ctx, llm, current, segment, serviceTier, depth+1)
 			}
 			if err != nil {

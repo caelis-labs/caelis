@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -48,7 +49,7 @@ func compactionRecoveryFromError(err error) (compactionRecovery, bool) {
 		}
 		return compactionRecovery{kind: kind, decision: decision, cause: err}, true
 	}
-	if isCompactionOverflowError(err) {
+	if model.IsContextOverflow(err) {
 		return compactionRecovery{kind: compactionRecoveryKindOverflow, cause: err}, true
 	}
 	return compactionRecovery{}, false

@@ -583,7 +583,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 	if usage.TotalTokens != want {
 		t.Fatalf("usage total = %d, want provider total plus prefix delta %d", usage.TotalTokens, want)
 	}
-	if requestTokens < estimatedImageMediaTokens {
+	if requestTokens < prefixusage.EstimatedImageMediaTokens {
 		t.Fatalf("request estimate = %d, want bounded attachment budget retained for estimated-only paths", requestTokens)
 	}
 }
@@ -658,7 +658,7 @@ func TestEstimateModelRequestTokensBoundsInlineMediaPayload(t *testing.T) {
 	if large != small {
 		t.Fatalf("large inline media estimate = %d, want bounded estimate %d independent of base64 length", large, small)
 	}
-	wantAtLeast := estimatedImageMediaTokens +
+	wantAtLeast := prefixusage.EstimatedImageMediaTokens +
 		estimateTextTokens(string(jsonPayload)) +
 		estimateTextTokens("report.pdf") +
 		estimateTextTokens("https://example.com/report.pdf") +
@@ -687,11 +687,11 @@ func TestEstimateModelRequestTokensChargesEachInlineImage(t *testing.T) {
 		),
 	}})
 
-	if one < estimatedImageMediaTokens {
-		t.Fatalf("one image estimate = %d, want at least %d", one, estimatedImageMediaTokens)
+	if one < prefixusage.EstimatedImageMediaTokens {
+		t.Fatalf("one image estimate = %d, want at least %d", one, prefixusage.EstimatedImageMediaTokens)
 	}
-	if three < estimatedImageMediaTokens*3 {
-		t.Fatalf("three image estimate = %d, want at least %d", three, estimatedImageMediaTokens*3)
+	if three < prefixusage.EstimatedImageMediaTokens*3 {
+		t.Fatalf("three image estimate = %d, want at least %d", three, prefixusage.EstimatedImageMediaTokens*3)
 	}
 	if three >= 50000 {
 		t.Fatalf("three image estimate = %d, want bounded attachment estimate below 50000", three)
