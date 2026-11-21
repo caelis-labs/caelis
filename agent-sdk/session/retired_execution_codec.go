@@ -182,9 +182,6 @@ func migrateSchemaFieldV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
 	if version == 1 {
 		return append(json.RawMessage(nil), raw...), nil
 	}
-	if object == nil {
-		return nil, fmt.Errorf("retired record must be a JSON object")
-	}
 	object["schema"] = json.RawMessage(`1`)
 	return json.Marshal(object)
 }

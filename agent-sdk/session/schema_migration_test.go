@@ -53,6 +53,16 @@ func TestMigrationRegistryRejectsGapsDuplicatesAndFutureSchemas(t *testing.T) {
 	}
 }
 
+func TestMigrateEventJSONRejectsNullRecord(t *testing.T) {
+	t.Parallel()
+
+	_, err := session.MigrateEventJSON(json.RawMessage("null"))
+	var versionErr *session.SchemaVersionError
+	if !errors.As(err, &versionErr) || versionErr.Kind != session.SchemaKindEvent {
+		t.Fatalf("MigrateEventJSON(null) = %v, want event schema error", err)
+	}
+}
+
 func TestMigrateEventJSONPreservesUnknownFieldCorpusAtEveryJournalLevel(t *testing.T) {
 	t.Parallel()
 
