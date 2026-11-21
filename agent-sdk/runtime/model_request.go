@@ -112,8 +112,8 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model, authority)
 	spec.Tools = r.wrapToolsForRuntime(active, ref, *spec, runtimeToolContext{
 		mode: modeName, approvalMode: string(r.currentApprovalMode(state)),
-		approvalRequester: req.ApprovalRequester, runID: runID, turnID: turnID,
-		inputSender: agent.AgentInputSenderFromContext(ctx),
+		approvalRequester: req.ApprovalRequester,
+		inputSender:       agent.AgentInputSenderFromContext(ctx),
 	})
 	wrappingSpec := *spec
 	wrap := func(tools []tool.Tool) []tool.Tool {

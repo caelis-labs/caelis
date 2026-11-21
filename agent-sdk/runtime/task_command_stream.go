@@ -151,7 +151,6 @@ func (t *commandTask) appendOutputLocked(text string) {
 		}
 	}
 	t.output = string(raw)
-	t.outputState.live = true
 	if t.outputObserver != nil {
 		_ = t.outputObserver.ObserveTaskOutput(context.Background(), output.Event{
 			OccurredAt: time.Now(), Text: text, Running: t.running,

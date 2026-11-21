@@ -28,7 +28,6 @@ type codeModeEnvironment struct {
 	engine     codemode.Environment
 	results    *codeModeResults
 	busy       bool
-	execution  string
 	cancel     context.CancelFunc
 }
 
@@ -74,7 +73,6 @@ func (r *Runtime) acquireCodeMode(ctx context.Context, ref session.SessionRef, e
 	work, cancel := context.WithCancel(ctx)
 	execution := uuid.NewString()
 	env.busy = true
-	env.execution = execution
 	env.cancel = cancel
 	return work, &codeModeExecution{runtime: r, environment: env, state: codemode.ExecutionState{Generation: env.generation, Execution: execution}}, nil
 }
