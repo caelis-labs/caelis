@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestTextAndStructuredReceiptProjectAsSeparateOrderedContent(t *testing.T) {
@@ -56,21 +55,71 @@ func TestContentV1CallbackResultPreservesDisplayBoundary(t *testing.T) {
 			message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{
 				ToolUseID: "call-1", Name: "ApplicationLookup", Content: tool.ModelParts(result.Content),
 			}})
-			updates, err := ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &message, Tool: &session.EventTool{
-				ID: "call-1", Name: "ApplicationLookup", Status: "completed", ResultFormat: sessionprofile.ResultFormatContentV1, Result: &result,
-			}})
-			if err != nil || len(updates) != 1 {
-				t.Fatalf("updates = %#v, err = %v", updates, err)
-			}
-			update := updates[0].(eventstream.ToolCallUpdate)
-			if len(update.Content) != len(tc.want) {
-				t.Fatalf("displayed %d blocks, want %d: %+v", len(update.Content), len(tc.want), update.Content)
-			}
-			for i, want := range tc.want {
-				text, ok := update.Content[i].Content.(eventstream.TextContent)
-				if !ok || text.Text != want {
-					t.Fatalf("display block %d = %+v, want text %q", i, update.Content[i], want)
+			event := &session.Event{Type: session.EventTypeToolResult, Message: &message, Tool: &session.EventTool{
+				ID: "call-1", Name: "ApplicationLookup", Status: "completed", ResultIncludesReceipt: true, Result: &result,
+			}}
+			assertProjection := func(event *session.Event) {
+				t.Helper()
+				updates, err := ProjectEvent(event)
+				if err != nil || len(updates) != 1 {
+					t.Fatalf("updates = %#v, err = %v", updates, err)
 				}
+				update := updates[0].(eventstream.ToolCallUpdate)
+				if len(update.Content) != len(tc.want) {
+					t.Fatalf("displayed %d blocks, want %d: %+v", len(update.Content), len(tc.want), update.Content)
+				}
+				for i, want := range tc.want {
+					text, ok := update.Content[i].Content.(eventstream.TextContent)
+					if !ok || text.Text != want {
+						t.Fatalf("display block %d = %+v, want text %q", i, update.Content[i], want)
+					}
+				}
+			}
+			assertProjection(event)
+
+			raw, err := json.Marshal(session.CloneEvent(event))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var replayed session.Event
+			if err := json.Unmarshal(raw, &replayed); err != nil {
+				t.Fatal(err)
+			}
+			assertProjection(&replayed)
+
+			for _, nested := range []bool{false, true} {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &fields); err != nil {
+					t.Fatal(err)
+				}
+				format := json.RawMessage(`"content-v1"`)
+				legacy := map[string]any{"id": "call-1", "name": "ApplicationLookup", "status": "completed", "result": result}
+				if nested {
+					content, err := json.Marshal(result)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var stored map[string]json.RawMessage
+					if err := json.Unmarshal(content, &stored); err != nil {
+						t.Fatal(err)
+					}
+					stored["metadata"] = json.RawMessage(`{"application_call":{"result_format":"content-v1"}}`)
+					legacy["result"] = stored
+				} else {
+					legacy["result_format"] = format
+				}
+				fields["tool"], err = json.Marshal(legacy)
+				if err != nil {
+					t.Fatal(err)
+				}
+				old, err := json.Marshal(fields)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(old, &replayed); err != nil {
+					t.Fatal(err)
+				}
+				assertProjection(&replayed)
 			}
 		})
 	}

@@ -264,7 +264,7 @@ func CloneEventScope(in EventScope) EventScope {
 func CloneEventTool(in EventTool) EventTool {
 	out := EventTool{
 		Execution: in.Execution, BatchID: in.BatchID, Outcome: in.Outcome, ErrorCode: in.ErrorCode, Error: in.Error,
-		Discovery: in.Discovery, ResultFormat: in.ResultFormat,
+		Discovery: in.Discovery, ResultIncludesReceipt: in.ResultIncludesReceipt,
 		ID:     in.ID,
 		Name:   strings.TrimSpace(in.Name),
 		Kind:   strings.TrimSpace(in.Kind),

@@ -6,7 +6,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // Project selected js_exec results and mixed canonical tool content from their
@@ -31,10 +30,10 @@ func projectedMultimodalToolResultContent(message *model.Message, fact *session.
 		}
 	}
 	showParts := results[0].Name == "js_exec" || hasImage || len(results[0].Content) > 1 && hasJSON
-	if fact != nil && fact.Result != nil && fact.ResultFormat == sessionprofile.ResultFormatContentV1 {
+	if fact != nil && fact.Result != nil && fact.ResultIncludesReceipt {
 		result := fact.Result
-		// Only callback results with actual content were previously shown:
-		// the old single receipt block contained both bookkeeping and data.
+		// A receipt-only result keeps the status fallback. Use the complete
+		// result for the body count and the checked model parts for display.
 		receiptBlocks := 1
 		if _, hasData := result.Structured(); hasData {
 			receiptBlocks++

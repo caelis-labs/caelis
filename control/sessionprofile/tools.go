@@ -61,8 +61,8 @@ func (s *Store) ToolsForConfiguration(ctx context.Context, binding Binding, conf
 			InputSchema: def.InputSchema,
 			Metadata: map[string]any{
 				callbackPolicyMetadataKey: callbackPolicyMetadata{approvalPolicy: def.ApprovalPolicy},
-				tool.MetadataResultFormat: def.ResultFormat,
 			},
+			ResultIncludesReceipt: def.ResultFormat == ResultFormatContentV1,
 		}
 		out = append(out, callbackTool{store: s, binding: stored, configuration: pinned, source: source, resultFormat: def.ResultFormat, definition: definition})
 	}
