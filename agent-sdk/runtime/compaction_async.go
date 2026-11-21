@@ -247,7 +247,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 			})
 		}
 		job.result, job.err = r.compactor.(compact.ForceEngine).Force(generationCtx, compact.Request{
-			Session: loaded.Session, SessionRef: l.sessionRef, Events: session.CloneEvents(job.source.Events),
+			Session: loaded.Session, Events: session.CloneEvents(job.source.Events),
 			Model: l.inner, ServiceTier: job.frozen.ServiceTier,
 			InContextRequest: job.frozen, Coverage: &job.coverage, RequireInContext: true,
 		}, "async_candidate")

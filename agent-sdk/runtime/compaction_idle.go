@@ -315,7 +315,7 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 		}
 	})
 	c := j.candidate
-	c.result, c.err = j.runtime.compactor.(compact.ForceEngine).Force(generation, compact.Request{Session: c.source.Session, SessionRef: c.source.Session.SessionRef, Events: session.CloneEvents(c.source.Events), Model: c.llm, ServiceTier: c.frozen.ServiceTier, InContextRequest: c.frozen, Coverage: &c.coverage, RequireInContext: true}, "idle_candidate")
+	c.result, c.err = j.runtime.compactor.(compact.ForceEngine).Force(generation, compact.Request{Session: c.source.Session, Events: session.CloneEvents(c.source.Events), Model: c.llm, ServiceTier: c.frozen.ServiceTier, InContextRequest: c.frozen, Coverage: &c.coverage, RequireInContext: true}, "idle_candidate")
 	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	accountingErr := j.FlushAccounting(cleanup)
 	cancelCleanup()

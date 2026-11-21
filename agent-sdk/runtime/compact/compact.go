@@ -37,7 +37,6 @@ type UsageSnapshot struct {
 
 type Request struct {
 	Session       session.Session
-	SessionRef    session.SessionRef
 	Events        []*session.Event
 	PendingEvents []*session.Event
 	Model         model.LLM
