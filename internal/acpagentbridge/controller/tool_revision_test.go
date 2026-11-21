@@ -111,7 +111,7 @@ func TestDraftControllerResumedToolsPreserveCurrentTurnOwnership(t *testing.T) {
 					t.Fatal(err)
 				}
 				observed := false
-				turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "current-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "input"}}, Stream: true, Observer: agent.SourceEventObserverFunc(func(ctx context.Context, event agent.SourceEvent) error {
+				turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "current-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "input"}}, Observer: agent.SourceEventObserverFunc(func(ctx context.Context, event agent.SourceEvent) error {
 					update := session.ProtocolUpdateOf(event.Canonical)
 					if update != nil && update.ToolCallID == test.tool && update.PreviouslyObserved == test.previous {
 						if test.name == "old terminal update" {
@@ -126,7 +126,7 @@ func TestDraftControllerResumedToolsPreserveCurrentTurnOwnership(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := turn.Handle.WaitCompletion(ctx); err != nil {
+				if err := turn.WaitCompletion(ctx); err != nil {
 					t.Fatal(err)
 				}
 				if err := forwarding.Complete(ctx); err != nil {

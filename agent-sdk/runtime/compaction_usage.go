@@ -123,10 +123,10 @@ func latestProviderTokenSnapshotUsing(
 ) (providerTokenSnapshot, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		meta := eventUsageMetadata(event)
-		if event == nil || len(meta) == 0 {
+		if event == nil || len(event.Meta) == 0 {
 			continue
 		}
+		meta := event.Meta
 		baseline, includeSnapshotGroup, ok := providerPromptBaselineTokens(meta)
 		if !ok || baseline <= 0 {
 			continue
@@ -294,10 +294,10 @@ func providerSnapshotGroupStart(events []*session.Event, end int) int {
 }
 
 func providerSnapshotSignature(event *session.Event) string {
-	meta := eventUsageMetadata(event)
-	if event == nil || len(meta) == 0 {
+	if event == nil || len(event.Meta) == 0 {
 		return ""
 	}
+	meta := event.Meta
 	prompt, _ := intFromAny(meta["prompt_tokens"])
 	cached, _ := intFromAny(meta["cached_input_tokens"])
 	completion, _ := intFromAny(meta["completion_tokens"])
@@ -326,13 +326,6 @@ func providerSnapshotSignature(event *session.Event) string {
 		return ""
 	}
 	return fmt.Sprintf("%s|%s|%d|%d|%d|%d", provider, model, prompt, cached, completion, total)
-}
-
-func eventUsageMetadata(event *session.Event) map[string]any {
-	if event == nil {
-		return nil
-	}
-	return event.Meta
 }
 
 func nestedMap(values map[string]any, path ...string) map[string]any {
@@ -415,7 +408,7 @@ func resolveContextWindowTokens(llm model.LLM, fallback int) int {
 
 func resolveReserveOutputTokens(window int, configured int) int {
 	if configured <= 0 {
-		configured = defaultReserveOutputTokens(window)
+		configured = policyForContextWindow(window).reserveOutputTokens
 	}
 	if window <= 0 {
 		return configured
@@ -427,13 +420,9 @@ func resolveReserveOutputTokens(window int, configured int) int {
 	return configured
 }
 
-func defaultReserveOutputTokens(window int) int {
-	return policyForContextWindow(window).reserveOutputTokens
-}
-
 func resolveSafetyMarginTokens(window int, configured int) int {
 	if configured <= 0 {
-		configured = defaultSafetyMarginTokens(window)
+		configured = policyForContextWindow(window).safetyMarginTokens
 	}
 	if window <= 0 {
 		return configured
@@ -443,10 +432,6 @@ func resolveSafetyMarginTokens(window int, configured int) int {
 		return maxSafety
 	}
 	return configured
-}
-
-func defaultSafetyMarginTokens(window int) int {
-	return policyForContextWindow(window).safetyMarginTokens
 }
 
 func resolveEffectiveInputBudget(window, reserve, safety int) int {
@@ -701,11 +686,6 @@ func estimatePartTokens(part model.Part) int {
 	return estimateTextTokens(string(raw))
 }
 
-const (
-	estimatedImageMediaTokens = prefixusage.EstimatedImageMediaTokens
-	estimatedOtherMediaTokens = prefixusage.EstimatedOtherMediaTokens
-)
-
 func estimateMediaPartTokens(media *model.MediaPart) int {
 	if media == nil {
 		return 0
@@ -718,9 +698,9 @@ func estimateMediaPartTokens(media *model.MediaPart) int {
 		estimateTextTokens(media.Source.LocalRef)
 	switch media.Modality {
 	case model.MediaModalityImage:
-		total += estimatedImageMediaTokens
+		total += prefixusage.EstimatedImageMediaTokens
 	default:
-		total += estimatedOtherMediaTokens
+		total += prefixusage.EstimatedOtherMediaTokens
 	}
 	return total
 }
@@ -853,8 +833,4 @@ func intFromAny(value any) (int, bool) {
 		}
 	}
 	return 0, false
-}
-
-func isCompactionOverflowError(err error) bool {
-	return model.IsContextOverflow(err)
 }

@@ -92,7 +92,7 @@ func TestReconnectPermissionEntryUsesBoundChildSession(t *testing.T) {
 	run.state = delegation.StateFailed
 	run.running = false
 	run.mu.Unlock()
-	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "resume prompt",
@@ -100,7 +100,7 @@ func TestReconnectPermissionEntryUsesBoundChildSession(t *testing.T) {
 	if err != nil || !result.StartedActivity {
 		t.Fatalf("SubmitChildInput() after reconnect = (%#v, %v)", result, err)
 	}
-	terminal := waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("reconnected terminal = %#v", terminal)
 	}

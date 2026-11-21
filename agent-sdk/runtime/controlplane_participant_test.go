@@ -506,16 +506,16 @@ func TestRuntimeParticipantPromptSingleFlightRejectsBeforeUserEventPersistence(t
 	thirdPromptStarted := make(chan struct{})
 	promptCalls := 0
 	backend := stubACPController{
-		promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			promptCalls++
 			if promptCalls == 1 {
 				close(firstPromptStarted)
-				return controller.TurnResult{Handle: firstHandle}, nil
+				return firstHandle, nil
 			}
 			handle := newTestControllerTurnHandle(nil)
 			handle.finish()
 			close(thirdPromptStarted)
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend}))
@@ -594,10 +594,10 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	var steerRequests []controller.ParticipantSteerRequest
 	backend := steeringACPController{
 		stubACPController: stubACPController{
-			promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+			promptParticipant: func(context.Context, controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 				close(promptStarted)
 				<-releasePrompt
-				return controller.TurnResult{Handle: controllerHandle}, nil
+				return controllerHandle, nil
 			},
 		},
 		steerParticipant: func(_ context.Context, req controller.ParticipantSteerRequest) error {

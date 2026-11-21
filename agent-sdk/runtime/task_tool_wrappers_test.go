@@ -51,7 +51,7 @@ func (r *runtimeChildInputRunner) SubmitChildInput(_ context.Context, req agent.
 	r.mu.Lock()
 	r.request = agent.CloneChildInputRequest(req)
 	r.mu.Unlock()
-	return agent.ChildInputResult{ActivityID: req.ActivityID, StartedActivity: true}, nil
+	return agent.ChildInputResult{StartedActivity: true}, nil
 }
 
 type preRuntimeToolWrapper struct {

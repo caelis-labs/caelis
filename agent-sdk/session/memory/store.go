@@ -30,8 +30,7 @@ type Store struct {
 }
 
 var (
-	_ session.ApprovalRecoveryService             = (*Store)(nil)
-	_ session.ConditionalEventAppenderWithOutcome = (*Store)(nil)
+	_ session.ApprovalRecoveryService = (*Store)(nil)
 )
 
 // NewStore constructs one new in-memory session store.
@@ -216,47 +215,6 @@ func (s *Store) AppendEventWithOutcome(
 	}
 	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.AppendEventResult{}, err
-	}
-
-	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")
-	if err != nil {
-		return session.AppendEventResult{}, err
-	}
-	normalized := tx.Prepared.Events[0]
-	s.applyAppendTransactionToRecord(record, tx)
-	return session.AppendEventResult{Event: session.CloneEvent(normalized), Appended: tx.Changed}, nil
-}
-
-// AppendEventWithOutcomeConditional atomically checks related Session
-// revisions and appends the target event under the store-wide write lock.
-func (s *Store) AppendEventWithOutcomeConditional(
-	_ context.Context,
-	req session.ConditionalAppendEventRequest,
-) (session.AppendEventResult, error) {
-	event := req.Event
-	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.lookupLocked(req.SessionRef)
-	if !ok {
-		return session.AppendEventResult{}, session.ErrSessionNotFound
-	}
-	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return session.AppendEventResult{}, err
-	}
-	for _, precondition := range req.RelatedRevisions {
-		related, ok := s.lookupLocked(precondition.SessionRef)
-		if !ok {
-			return session.AppendEventResult{}, session.ErrSessionNotFound
-		}
-		expected := precondition.ExpectedRevision
-		if err := session.CheckExpectedRevision(related.session, &expected); err != nil {
-			return session.AppendEventResult{}, err
-		}
 	}
 
 	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")

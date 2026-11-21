@@ -104,7 +104,7 @@ func (c *codexStyleCompactor) CompactOnOverflow(ctx context.Context, req compact
 			Usage:        c.snapshotUsage(req, promptEventsWithPending(promptEvents, req.PendingEvents)),
 		}, cause
 	}
-	if !isCompactionOverflowError(cause) {
+	if !model.IsContextOverflow(cause) {
 		return compact.Result{}, cause
 	}
 	return c.compact(ctx, req, "overflow_recovery")
@@ -213,7 +213,7 @@ func classifyCompactionFailure(err error) string {
 	switch {
 	case err == nil:
 		return "unknown"
-	case isCompactionOverflowError(err):
+	case model.IsContextOverflow(err):
 		return "context_overflow"
 	case errors.Is(err, errCompactionToolRequest):
 		return "tool_request"

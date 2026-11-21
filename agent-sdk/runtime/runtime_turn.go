@@ -26,11 +26,11 @@ func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.R
 	state := agent.RunState{Status: agent.RunLifecycleStatusRunning, ActiveRunID: active.handle.RunID()}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for id, waiter := range r.approvalWaiters {
+	for _, waiter := range r.approvalWaiters {
 		if waiter.blockingRunID != "" && waiter.blockingRunID == state.ActiveRunID && waiter.owner.Err() == nil {
 			state.WaitingApproval = true
-			state.ApprovalRequestID = id
 			state.Status = agent.RunLifecycleStatusWaitingApproval
+			break
 		}
 	}
 	return state, nil

@@ -33,13 +33,13 @@ func testControllerSpawn(t *testing.T, recoverController bool) {
 	remote := newTestControllerTurnHandle(nil)
 	started := make(chan struct{})
 	calls := 0
-	backend := stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+	backend := stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 		calls++
 		if recoverController && calls == 1 {
-			return controller.TurnResult{}, controller.ErrNotActive
+			return nil, controller.ErrNotActive
 		}
 		close(started)
-		return controller.TurnResult{Handle: remote}, nil
+		return remote, nil
 	}}
 	epoch := "epoch"
 	if recoverController {

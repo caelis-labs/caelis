@@ -85,6 +85,22 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	assertChildActivityEntry(t, r, task, 0, 2, req.ActivityID, false)
 }
 
+func TestChildCompletionKickKeepsApplyingTask(t *testing.T) {
+	const taskID = "child"
+	claimedTask := &subagentTask{turnSeq: 1}
+	completion := &subagentCompletion{task: claimedTask}
+	tm := &taskRuntime{
+		subagents:          map[string]*subagentTask{taskID: {turnSeq: 2}},
+		completions:        map[string]*subagentCompletion{taskID: completion},
+		completionApplying: map[string]struct{}{taskID: {}},
+	}
+
+	tm.kickSubagentCompletion(taskID)
+	if completion.task != claimedTask {
+		t.Fatal("completion kick changed the Task already owned by the applying producer")
+	}
+}
+
 func TestChildActivityCompletionAdvancesWithoutOutput(t *testing.T) {
 	r, task, _ := newIdleChildActivityTask(t)
 	id, _, completion, err := r.prepareChildTaskOutput(t.Context(), task)

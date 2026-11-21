@@ -41,10 +41,10 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 	releaseRunTurn := make(chan struct{})
 	steerStarted := make(chan controller.ControllerSteerRequest, 1)
 	backend := steeringACPController{
-		stubACPController: stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			close(runTurnStarted)
 			<-releaseRunTurn
-			return controller.TurnResult{Handle: controllerHandle}, nil
+			return controllerHandle, nil
 		}},
 		steerController: func(_ context.Context, req controller.ControllerSteerRequest) error {
 			steerStarted <- req
@@ -194,9 +194,9 @@ func TestRuntimeACPControllerInitialAgentCommunicationCarriesIdentity(t *testing
 	}
 	controllerHandle := newTestControllerTurnHandle(nil)
 	turns := make(chan controller.TurnRequest, 1)
-	backend := stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+	backend := stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 		turns <- req
-		return controller.TurnResult{Handle: controllerHandle}, nil
+		return controllerHandle, nil
 	}}
 	runtime, err := New(testConfigWithACPForwarder(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
@@ -271,13 +271,13 @@ func TestRuntimeMainControllerSteeringUsesReattachedBinding(t *testing.T) {
 	steered := make(chan controller.ControllerSteerRequest, 1)
 	runCalls := 0
 	backend := steeringACPController{
-		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			runCalls++
 			if runCalls == 1 {
-				return controller.TurnResult{}, controller.ErrNotActive
+				return nil, controller.ErrNotActive
 			}
 			secondRun <- req
-			return controller.TurnResult{Handle: controllerHandle}, nil
+			return controllerHandle, nil
 		}},
 		steerController: func(_ context.Context, req controller.ControllerSteerRequest) error {
 			steered <- req

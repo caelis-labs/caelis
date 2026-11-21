@@ -109,8 +109,6 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 	}
 	route, err := c.context.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef:    ref,
-		Session:       activeSession,
-		Controller:    binding,
 		SinceSeq:      binding.ContextSyncSeq,
 		ExcludeTurnID: strings.TrimSpace(req.ExcludeTurnID),
 	})
@@ -123,7 +121,6 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 		Agent:          agentName,
 		Placement:      binding.Placement,
 		Source:         "controller_rehydrate",
-		Reason:         "controller process rehydrate",
 		Context:        route.Context,
 		FreshContext:   route.FreshContext,
 		ContextSyncSeq: route.SyncSeq,
@@ -219,8 +216,6 @@ func (c *Coordinator) handoffController(ctx context.Context, req HandoffControll
 		}
 		route, routeErr := c.context.ControllerContext(ctx, controller.ControllerContextRequest{
 			SessionRef: ref,
-			Session:    activeSession,
-			Controller: from,
 			SinceSeq:   sinceSeq,
 		})
 		if routeErr != nil {
@@ -232,7 +227,6 @@ func (c *Coordinator) handoffController(ctx context.Context, req HandoffControll
 			Agent:          strings.TrimSpace(req.Agent),
 			Placement:      req.Placement,
 			Source:         strings.TrimSpace(req.Source),
-			Reason:         strings.TrimSpace(req.Reason),
 			Context:        route.Context,
 			FreshContext:   route.FreshContext,
 			ContextSyncSeq: route.SyncSeq,
@@ -303,8 +297,6 @@ func (c *Coordinator) reactivatePreviousController(ctx context.Context, ref sess
 	}
 	route, err := c.context.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef: ref,
-		Session:    activeSession,
-		Controller: from,
 		SinceSeq:   from.ContextSyncSeq,
 	})
 	if err != nil {
@@ -316,7 +308,6 @@ func (c *Coordinator) reactivatePreviousController(ctx context.Context, ref sess
 		Agent:          agentName,
 		Placement:      from.Placement,
 		Source:         "handoff_rollback",
-		Reason:         "durable handoff commit failed",
 		Context:        route.Context,
 		FreshContext:   route.FreshContext,
 		ContextSyncSeq: route.SyncSeq,

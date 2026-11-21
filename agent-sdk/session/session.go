@@ -443,21 +443,6 @@ type AppendEventResult struct {
 	Appended bool
 }
 
-// SessionRevisionPrecondition requires one related Session to remain at the
-// exact revision observed while a cross-Session authority was resolved.
-type SessionRevisionPrecondition struct {
-	SessionRef       SessionRef
-	ExpectedRevision uint64
-}
-
-// ConditionalAppendEventRequest appends one target event only while every
-// related Session revision still matches. Stores check all preconditions and
-// commit the target append in one serialization boundary.
-type ConditionalAppendEventRequest struct {
-	AppendEventRequest
-	RelatedRevisions []SessionRevisionPrecondition
-}
-
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {
@@ -718,12 +703,6 @@ type Reader interface {
 // EventAppender appends canonical events with optional revision CAS.
 type EventAppender interface {
 	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
-}
-
-// ConditionalEventAppenderWithOutcome is the precise append contract for an
-// event whose authority depends on durable facts in other Sessions.
-type ConditionalEventAppenderWithOutcome interface {
-	AppendEventWithOutcomeConditional(context.Context, ConditionalAppendEventRequest) (AppendEventResult, error)
 }
 
 // ControllerBindingStore mutates the durable active-controller binding.

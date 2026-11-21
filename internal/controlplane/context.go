@@ -52,16 +52,16 @@ func (r *ContextRouter) ControllerContext(ctx context.Context, req controller.Co
 
 // ParticipantContext returns the public context offset that one participant
 // has not received.
-func (r *ContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (controller.ContextRoute, error) {
+func (r *ContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (agent.ContextTransfer, error) {
 	if r == nil || r.sessions == nil {
-		return controller.ContextRoute{}, fmt.Errorf("controlplane: context router is unavailable")
+		return agent.ContextTransfer{}, fmt.Errorf("controlplane: context router is unavailable")
 	}
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: session.NormalizeSessionRef(req.SessionRef)})
 	if err != nil {
-		return controller.ContextRoute{}, err
+		return agent.ContextTransfer{}, err
 	}
-	shared := sharedContextOffsetFromEvents(events, req.Binding.ContextSyncSeq, "")
-	return controller.ContextRoute{Context: shared.Transfer, SyncSeq: shared.Checkpoint}, nil
+	shared := sharedContextOffsetFromEvents(events, req.SinceSeq, "")
+	return shared.Transfer, nil
 }
 
 // Checkpoint returns the latest complete public-dialogue boundary routed by

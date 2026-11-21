@@ -34,8 +34,8 @@ import (
 type stubACPController struct {
 	attach            func(context.Context, controller.AttachRequest) (session.ParticipantBinding, error)
 	detach            func(context.Context, controller.DetachRequest) error
-	runTurn           func(context.Context, controller.TurnRequest) (controller.TurnResult, error)
-	promptParticipant func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error)
+	runTurn           func(context.Context, controller.TurnRequest) (controller.TurnHandle, error)
+	promptParticipant func(context.Context, controller.ParticipantPromptRequest) (controller.TurnHandle, error)
 }
 
 type steeringACPController struct {
@@ -75,10 +75,10 @@ func (stubACPController) Deactivate(context.Context, session.SessionRef) error {
 	return nil
 }
 
-func (s stubACPController) RunTurn(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+func (s stubACPController) RunTurn(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 	if s.runTurn != nil {
 		result, err := s.runTurn(ctx, req)
-		if handle, ok := result.Handle.(*testControllerTurnHandle); ok {
+		if handle, ok := result.(*testControllerTurnHandle); ok {
 			handle.setObserver(req.Observer)
 		}
 		return result, err
@@ -86,7 +86,7 @@ func (s stubACPController) RunTurn(ctx context.Context, req controller.TurnReque
 	handle := newTestControllerTurnHandle(nil)
 	handle.setObserver(req.Observer)
 	handle.finish()
-	return controller.TurnResult{Handle: handle}, nil
+	return handle, nil
 }
 
 func (s stubACPController) Attach(ctx context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {
@@ -96,10 +96,10 @@ func (s stubACPController) Attach(ctx context.Context, req controller.AttachRequ
 	return session.CloneParticipantBinding(req.Binding), nil
 }
 
-func (s stubACPController) PromptParticipant(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+func (s stubACPController) PromptParticipant(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 	if s.promptParticipant != nil {
 		result, err := s.promptParticipant(ctx, req)
-		if handle, ok := result.Handle.(*testControllerTurnHandle); ok {
+		if handle, ok := result.(*testControllerTurnHandle); ok {
 			handle.setObserver(req.Observer)
 		}
 		return result, err
@@ -107,7 +107,7 @@ func (s stubACPController) PromptParticipant(ctx context.Context, req controller
 	handle := newTestControllerTurnHandle(nil)
 	handle.setObserver(req.Observer)
 	handle.finish()
-	return controller.TurnResult{Handle: handle}, nil
+	return handle, nil
 }
 
 func (s stubACPController) Detach(ctx context.Context, req controller.DetachRequest) error {
@@ -593,12 +593,9 @@ func (r testContextRouter) ControllerContext(ctx context.Context, req controller
 	return controller.ContextRoute{Context: contextTransfer, FreshContext: freshContext, SyncSeq: checkpoint}, nil
 }
 
-func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (controller.ContextRoute, error) {
-	contextTransfer, checkpoint, err := r.contextTransfer(ctx, req.SessionRef, req.Binding.ContextSyncSeq, "")
-	if err != nil {
-		return controller.ContextRoute{}, err
-	}
-	return controller.ContextRoute{Context: contextTransfer, SyncSeq: checkpoint}, nil
+func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (agent.ContextTransfer, error) {
+	transfer, _, err := r.contextTransfer(ctx, req.SessionRef, req.SinceSeq, "")
+	return transfer, err
 }
 
 func (r testContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (uint64, error) {

@@ -6,7 +6,6 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
 )
 
@@ -25,9 +24,9 @@ func (r *controllerRun) draftPermissionHandler(ctx context.Context, req v2.Reque
 		return v2.RequestPermissionResponse{}, errACPPermissionSessionMismatchEndpoint
 	}
 	r.mu.Lock()
-	remote, active, mode, requester, agent := r.remoteSessionID, session.CloneSession(r.turnSession), r.turnMode, r.approvalRequester, r.agent
+	remote, mode, requester, agent := r.remoteSessionID, r.turnMode, r.approvalRequester, r.agent
 	r.mu.Unlock()
-	return dispatchBoundDraftPermission(ctx, remote, active, agent, mode, requester, req)
+	return dispatchBoundDraftPermission(ctx, remote, agent, mode, requester, req)
 }
 
 func (r *participantRun) draftPermissionHandler(ctx context.Context, req v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
@@ -35,12 +34,12 @@ func (r *participantRun) draftPermissionHandler(ctx context.Context, req v2.Requ
 		return v2.RequestPermissionResponse{}, errACPPermissionSessionMismatchEndpoint
 	}
 	r.mu.Lock()
-	remote, active, mode, requester, agent := r.remoteSessionID, session.CloneSession(r.turnSession), r.turnMode, r.approvalRequester, r.agent
+	remote, mode, requester, agent := r.remoteSessionID, r.turnMode, r.approvalRequester, r.agent
 	r.mu.Unlock()
-	return dispatchBoundDraftPermission(ctx, remote, active, agent, mode, requester, req)
+	return dispatchBoundDraftPermission(ctx, remote, agent, mode, requester, req)
 }
 
-func dispatchBoundDraftPermission(ctx context.Context, boundID string, active session.Session, agent, mode string, requester controller.ApprovalRequester, req v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
+func dispatchBoundDraftPermission(ctx context.Context, boundID string, agent, mode string, requester controller.ApprovalRequester, req v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
 	if boundID == "" || boundID != string(req.SessionId) {
 		return v2.RequestPermissionResponse{}, errACPPermissionSessionMismatchEndpoint
 	}
@@ -52,7 +51,7 @@ func dispatchBoundDraftPermission(ctx context.Context, boundID string, active se
 	if err != nil {
 		return v2.RequestPermissionResponse{}, err
 	}
-	response, err := requester.RequestControllerApproval(ctx, controller.ApprovalRequest{EndpointSessionID: boundID, SessionRef: active.SessionRef, Session: active, Agent: agent, Mode: mode, Approval: permission})
+	response, err := requester.RequestControllerApproval(ctx, controller.ApprovalRequest{EndpointSessionID: boundID, Agent: agent, Mode: mode, Approval: permission})
 	if err != nil {
 		return v2.RequestPermissionResponse{}, err
 	}
