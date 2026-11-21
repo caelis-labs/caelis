@@ -50,19 +50,15 @@ func TestVisibilityRules(t *testing.T) {
 		}
 	}
 	tests := []struct {
-		name             string
-		event            *Event
-		wantTransient    bool
-		wantPersist      bool
-		wantModelVisible bool
-		wantSharedLedger bool
+		name          string
+		event         *Event
+		wantTransient bool
+		wantPersist   bool
 	}{
 		{
-			name:             "canonical",
-			event:            assistant("canonical"),
-			wantPersist:      true,
-			wantModelVisible: true,
-			wantSharedLedger: true,
+			name:        "canonical",
+			event:       assistant("canonical"),
+			wantPersist: true,
 		},
 		{
 			name:        "mirror",
@@ -94,11 +90,8 @@ func TestVisibilityRules(t *testing.T) {
 			if got := IsCanonicalHistoryEvent(tt.event); got != tt.wantPersist {
 				t.Fatalf("IsCanonicalHistoryEvent() = %v, want %v", got, tt.wantPersist)
 			}
-			if got := IsInvocationVisibleEvent(tt.event); got != tt.wantModelVisible {
-				t.Fatalf("IsInvocationVisibleEvent() = %v, want %v", got, tt.wantModelVisible)
-			}
-			if got := IsSharedDialogueEvent(tt.event); got != tt.wantSharedLedger {
-				t.Fatalf("IsSharedDialogueEvent() = %v, want %v", got, tt.wantSharedLedger)
+			if got := IsMainInvocationVisibleEvent(tt.event); got != tt.wantPersist {
+				t.Fatalf("IsMainInvocationVisibleEvent() = %v, want %v", got, tt.wantPersist)
 			}
 		})
 	}
@@ -211,8 +204,8 @@ func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *test
 			},
 		},
 	}
-	if !IsInvocationVisibleEvent(sideAssistant) {
-		t.Fatal("side assistant event should remain invocation-visible for non-main consumers")
+	if !IsCanonicalHistoryEvent(sideAssistant) {
+		t.Fatal("side assistant event should remain canonical for non-main consumers")
 	}
 	if !IsMainInvocationVisibleEvent(sideAssistant) {
 		t.Fatal("side assistant final event should be visible to the main invocation")

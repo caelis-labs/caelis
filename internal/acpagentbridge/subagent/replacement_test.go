@@ -378,7 +378,7 @@ func TestChildParentCommunicationPreservesObservedMessagePatch(t *testing.T) {
 				t.Fatalf("observed source or message patch lost: %#v", event)
 			}
 			communication := session.ProtocolAgentCommunicationOf(event)
-			if communication == nil || communication.Text != "" || session.IsInvocationVisibleEvent(event) {
+			if communication == nil || communication.Text != "" || session.IsCanonicalHistoryEvent(event) {
 				t.Fatalf("empty observed mail lost or became model input: %#v", event)
 			}
 		}
@@ -410,7 +410,7 @@ func TestChildTrustedCommunicationReplacementKeepsDisplayBody(t *testing.T) {
 		if index == 1 {
 			want = ""
 		}
-		if communication == nil || communication.Text != want || frame.Event.Actor != source || !frame.Event.Protocol.Update.Replacement || session.IsInvocationVisibleEvent(frame.Event) {
+		if communication == nil || communication.Text != want || frame.Event.Actor != source || !frame.Event.Protocol.Update.Replacement || session.IsCanonicalHistoryEvent(frame.Event) {
 			t.Fatalf("trusted communication display body lost: communication=%#v event=%#v", communication, frame.Event)
 		}
 	}

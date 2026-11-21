@@ -176,7 +176,7 @@ func LatestCompactEvent(events []*session.Event) (*session.Event, session.Checkp
 func filterPromptVisibleEvents(events []*session.Event) []*session.Event {
 	out := make([]*session.Event, 0, len(events))
 	for _, event := range events {
-		if !session.IsInvocationVisibleEvent(event) {
+		if !session.IsCanonicalHistoryEvent(event) {
 			continue
 		}
 		out = append(out, session.CloneEvent(event))
