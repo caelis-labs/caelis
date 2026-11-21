@@ -112,7 +112,7 @@ func (s *Store) prewarmEventAppendIndexContext(
 	// Path discovery runs before the Store mutex and root write lock so a cold
 	// index scan cannot monopolize unrelated Session interactions. The cache avoids a
 	// namespace walk on every append; the locked transaction verifies the path.
-	pathKey := pathCacheKey(ref.SessionID, ref.WorkspaceKey)
+	pathKey := sanitizeSessionID(ref.SessionID)
 	cachedPath, _ := s.eventAppendPaths.Load(pathKey)
 	documentPath, _ := cachedPath.(string)
 	if strings.TrimSpace(documentPath) == "" {
@@ -156,7 +156,7 @@ func (s *Store) eventAppendPreparationContext(
 	if err != nil {
 		return eventAppendPreparation{}, err
 	}
-	s.eventAppendPaths.Store(pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey), filepath.Clean(documentPath))
+	s.eventAppendPaths.Store(sanitizeSessionID(doc.Session.SessionID), filepath.Clean(documentPath))
 	logInfo, statErr := os.Stat(eventLogPath(documentPath))
 	if statErr == nil && logInfo.Size() <= s.eventLogCacheLimitBytes() {
 		existingEvents, err := s.readCachedEventLogContext(ctx, documentPath)

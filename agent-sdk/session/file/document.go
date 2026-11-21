@@ -200,7 +200,7 @@ func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument
 	if err := s.durability.SyncDirectory(dir); err != nil {
 		return committedDocumentWrite(err)
 	}
-	s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
+	s.pathCache[sanitizeSessionID(doc.Session.SessionID)] = path
 	if updateIndex {
 		if err := s.upsertSessionIndex(doc.Session, path); err != nil {
 			return committedDocumentWrite(err)

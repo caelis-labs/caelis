@@ -123,7 +123,9 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 	for name, operation := range operations {
 		operation := operation
 		t.Run(name, func(t *testing.T) {
-			store.mu.Lock()
+			if err := store.mu.LockContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 			callCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 			result := make(chan error, 1)

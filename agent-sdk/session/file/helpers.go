@@ -118,10 +118,6 @@ func workspaceDirName(workspaceKey string) string {
 	return sanitizeSessionID(workspaceKey)
 }
 
-func pathCacheKey(sessionID string, workspaceKey string) string {
-	return sanitizeSessionID(sessionID)
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -144,10 +140,6 @@ func persistedEvents(events []*session.Event) []*session.Event {
 		out = append(out, session.CloneEvent(event))
 	}
 	return out
-}
-
-func cloneMap(in map[string]any) map[string]any {
-	return cloneState(in)
 }
 
 func cloneState(in map[string]any) map[string]any {

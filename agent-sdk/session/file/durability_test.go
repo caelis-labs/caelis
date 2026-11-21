@@ -216,7 +216,7 @@ func durabilityTestDocument(store *Store, sessionID string) (persistedDocument, 
 		UpdatedAt: at,
 	}}
 	path := store.newDocumentPath(doc.Session)
-	store.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
+	store.pathCache[sanitizeSessionID(doc.Session.SessionID)] = path
 	return doc, path
 }
 

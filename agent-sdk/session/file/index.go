@@ -89,7 +89,7 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 			return session.SessionList{}, err
 		}
 		if path := s.indexEntryPath(entry); path != "" {
-			s.pathCache[pathCacheKey(entry.Session.SessionID, entry.Session.WorkspaceKey)] = path
+			s.pathCache[sanitizeSessionID(entry.Session.SessionID)] = path
 		}
 		summaries = append(summaries, entry.Session)
 	}
