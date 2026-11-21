@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -115,14 +116,14 @@ func TestAnthropicCacheUsageSparseDeltaPresence(t *testing.T) {
 }
 
 func TestAnthropicFactoryCachePolicy(t *testing.T) {
-	for _, api := range []APIType{APIAnthropic, APIAnthropicCompatible} {
+	for _, api := range []model.APIType{model.APIAnthropic, model.APIAnthropicCompatible} {
 		t.Run(string(api), func(t *testing.T) {
 			var body []byte
 			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				body, _ = io.ReadAll(req.Body)
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}`)), Request: req}, nil
 			})
-			llm, err := New(Config{API: api, Provider: string(api), Model: "claude-sonnet-4-6", Auth: AuthConfig{Type: AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}})
+			llm, err := New(Config{API: api, Provider: string(api), Model: "claude-sonnet-4-6", Auth: AuthConfig{Type: model.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -131,7 +132,7 @@ func TestAnthropicFactoryCachePolicy(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if got := bytes.Contains(body, []byte(`"cache_control"`)); got != (api == APIAnthropic) {
+			if got := bytes.Contains(body, []byte(`"cache_control"`)); got != (api == model.APIAnthropic) {
 				t.Fatalf("API %s cache markers=%v", api, got)
 			}
 		})

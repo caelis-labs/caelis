@@ -174,8 +174,8 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		setUserAgent(httpReq, l.userAgent)
-		if l.auth.Type != "" && l.auth.Type != AuthNone {
-			applyDefaultAuthHeader(httpReq, Config{API: APIOllama, Auth: l.auth}, l.token, false)
+		if l.auth.Type != "" && l.auth.Type != model.AuthNone {
+			applyDefaultAuthHeader(httpReq, Config{API: model.APIOllama, Auth: l.auth}, l.token, false)
 		}
 		applyConfiguredHeaders(httpReq, l.headers)
 

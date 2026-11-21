@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -98,7 +98,7 @@ func TestRetiredMemoryToolRequestsReturnUnavailableResults(t *testing.T) {
 		_, _ = fmt.Fprint(recorder, "data: [DONE]\n\n")
 		return recorder.Result(), nil
 	})}
-	stack, err := newGatewayAppTestStack(t, Config{AppName: "caelis", UserID: "retired-tools", StoreDir: t.TempDir(), WorkspaceCWD: t.TempDir(), WorkspaceKey: "workspace", SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}, Model: ModelConfig{Provider: "openai-compatible", API: providers.APIOpenAICompatible, Model: "fixture", BaseURL: "http://retired-tools.test", HTTPClient: client, Token: "fixture-token", AuthType: providers.AuthBearerToken, ContextWindowTokens: 128000, MaxOutputTok: 4096}})
+	stack, err := newGatewayAppTestStack(t, Config{AppName: "caelis", UserID: "retired-tools", StoreDir: t.TempDir(), WorkspaceCWD: t.TempDir(), WorkspaceKey: "workspace", SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}, Model: ModelConfig{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "fixture", BaseURL: "http://retired-tools.test", HTTPClient: client, Token: "fixture-token", AuthType: model.AuthBearerToken, ContextWindowTokens: 128000, MaxOutputTok: 4096}})
 	if err != nil {
 		t.Fatal(err)
 	}

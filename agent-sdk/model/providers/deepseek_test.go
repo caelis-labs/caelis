@@ -12,7 +12,7 @@ func TestDeepSeekCustomNonAnthropicEndpointUsesOpenAICompatFallback(t *testing.T
 		Model:    "deepseek-v4-pro",
 		BaseURL:  "https://proxy.example.com/v1",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -45,7 +45,7 @@ func TestDeepSeekCustomAnthropicEndpointUsesAnthropicSDK(t *testing.T) {
 		Model:    "deepseek-v4-pro",
 		BaseURL:  "https://proxy.example.com/anthropic",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -61,7 +61,7 @@ func TestDeepSeekCustomAnthropicV1EndpointUsesAnthropicSDK(t *testing.T) {
 		Model:    "deepseek-v4-pro",
 		BaseURL:  "https://proxy.example.com/anthropic/v1",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")

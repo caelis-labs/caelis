@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
@@ -124,7 +124,7 @@ func newExperimentalHTTPStack(t *testing.T) (*Stack, *httpclient.Client) {
 	t.Helper()
 	provider := newGatewayAppCompactionOllamaServer(t)
 	stack, err := newGatewayAppTestStack(t, Config{StoreDir: t.TempDir(), WorkspaceKey: "workspace", WorkspaceCWD: t.TempDir(), SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
-		Model: ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()}})
+		Model: ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()}})
 	if err != nil {
 		t.Fatal(err)
 	}

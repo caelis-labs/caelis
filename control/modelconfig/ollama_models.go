@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 )
 
@@ -21,11 +22,11 @@ var ErrOllamaAPINotFound = errorcode.New(errorcode.NotFound, "Ollama model API n
 func selectableOllamaModels(ctx context.Context, baseURL string, client *http.Client, clientVersion string) ([]SelectableModel, error) {
 	remote, err := providers.DiscoverModels(ctx, providers.Config{
 		Provider:   "ollama",
-		API:        providers.APIOllama,
+		API:        model.APIOllama,
 		BaseURL:    baseURL,
 		HTTPClient: client,
 		UserAgent:  providerUserAgent(clientVersion),
-		Auth:       providers.AuthConfig{Type: providers.AuthNone},
+		Auth:       providers.AuthConfig{Type: model.AuthNone},
 	})
 	if err != nil {
 		var dial *net.OpError

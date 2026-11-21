@@ -24,8 +24,8 @@ func newDeepSeek(cfg Config, token string) model.LLM {
 		return newOpenAICompatWithProfile(cfg, token, deepSeekCompatProfile)
 	}
 	cfg.BaseURL = deepSeekAnthropicBaseURL(cfg.BaseURL)
-	if cfg.Auth.HeaderKey == "" && cfg.Auth.Type == AuthAPIKey {
-		cfg.Auth.Type = AuthBearerToken
+	if cfg.Auth.HeaderKey == "" && cfg.Auth.Type == model.AuthAPIKey {
+		cfg.Auth.Type = model.AuthBearerToken
 	}
 	return newAnthropicWithDefaults(cfg, token, anthropicProviderDefaults{
 		provider:     "deepseek",

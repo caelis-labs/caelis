@@ -10,10 +10,9 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/control/appserver"
@@ -115,7 +114,7 @@ func TestNativeSkillInstructionsReloadOnFirstRequestUsingCompact(t *testing.T) {
 	stack, err := newGatewayAppTestStack(t, Config{
 		AppName: "caelis", UserID: "owner", StoreDir: t.TempDir(), WorkspaceCWD: workspace,
 		SkillDirs: []string{skillDir}, ContextWindow: 65536,
-		Model: ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()},
+		Model: ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()},
 	})
 	if err != nil {
 		t.Fatal(err)

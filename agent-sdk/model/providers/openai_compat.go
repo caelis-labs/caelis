@@ -17,7 +17,7 @@ import (
 )
 
 type openAICompatLLM struct {
-	api                 APIType
+	api                 model.APIType
 	name                string
 	provider            string
 	baseURL             string
@@ -71,7 +71,7 @@ const (
 
 func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 	llm := &openAICompatLLM{
-		api:                 APIOpenAICompatible,
+		api:                 model.APIOpenAICompatible,
 		name:                cfg.Model,
 		provider:            cfg.Provider,
 		baseURL:             strings.TrimRight(cfg.BaseURL, "/"),
@@ -346,7 +346,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 }
 
 func (l *openAICompatLLM) requestModel() string {
-	if l != nil && l.api == APIOpenRouter {
+	if l != nil && l.api == model.APIOpenRouter {
 		return normalizeOpenRouterModelID(l.name)
 	}
 	return l.name

@@ -7,39 +7,39 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-var supportedAPITypes = map[APIType]struct{}{
-	APIOpenAI:              {},
-	APIOpenAIResponses:     {},
-	APIOpenAICodex:         {},
-	APIOpenAICompatible:    {},
-	APIOpenRouter:          {},
-	APIGemini:              {},
-	APIAnthropic:           {},
-	APIAnthropicCompatible: {},
-	APIDeepSeek:            {},
-	APIMiniMax:             {},
-	APIMimo:                {},
-	APIVolcengine:          {},
-	APIVolcengineCoding:    {},
-	APIXAIResponses:        {},
-	APIOllama:              {},
+var supportedAPITypes = map[model.APIType]struct{}{
+	model.APIOpenAI:              {},
+	model.APIOpenAIResponses:     {},
+	model.APIOpenAICodex:         {},
+	model.APIOpenAICompatible:    {},
+	model.APIOpenRouter:          {},
+	model.APIGemini:              {},
+	model.APIAnthropic:           {},
+	model.APIAnthropicCompatible: {},
+	model.APIDeepSeek:            {},
+	model.APIMiniMax:             {},
+	model.APIMimo:                {},
+	model.APIVolcengine:          {},
+	model.APIVolcengineCoding:    {},
+	model.APIXAIResponses:        {},
+	model.APIOllama:              {},
 }
 
-func isSupportedAPIType(api APIType) bool {
+func isSupportedAPIType(api model.APIType) bool {
 	_, ok := supportedAPITypes[api]
 	return ok
 }
 
-func defaultAuthType(api APIType) AuthType {
+func defaultAuthType(api model.APIType) model.AuthType {
 	switch api {
-	case APIOllama:
-		return AuthNone
-	case APIOpenAICodex, APIXAIResponses:
-		return AuthOAuthToken
-	case APIDeepSeek, APIMiniMax:
-		return AuthBearerToken
+	case model.APIOllama:
+		return model.AuthNone
+	case model.APIOpenAICodex, model.APIXAIResponses:
+		return model.AuthOAuthToken
+	case model.APIDeepSeek, model.APIMiniMax:
+		return model.AuthBearerToken
 	default:
-		return AuthAPIKey
+		return model.AuthAPIKey
 	}
 }
 
@@ -52,20 +52,20 @@ func New(cfg Config) (model.LLM, error) {
 	switch cfg.Auth.Type {
 	case "":
 		cfg.Auth.Type = defaultAuthType(cfg.API)
-	case AuthAPIKey, AuthBearerToken, AuthOAuthToken, AuthNone:
+	case model.AuthAPIKey, model.AuthBearerToken, model.AuthOAuthToken, model.AuthNone:
 	default:
 		if strings.TrimSpace(string(cfg.Auth.Type)) != "" {
 			return nil, fmt.Errorf("providers: unsupported auth type %q", cfg.Auth.Type)
 		}
 	}
-	if cfg.API == APIOpenAICodex || cfg.API == APIXAIResponses {
-		if cfg.Auth.Type != AuthOAuthToken {
+	if cfg.API == model.APIOpenAICodex || cfg.API == model.APIXAIResponses {
+		if cfg.Auth.Type != model.AuthOAuthToken {
 			return nil, fmt.Errorf("providers: %s requires oauth authentication", cfg.API)
 		}
 		if cfg.HTTPClient == nil {
 			return nil, fmt.Errorf("providers: %s requires an authenticated http client", cfg.API)
 		}
-		if cfg.API == APIXAIResponses {
+		if cfg.API == model.APIXAIResponses {
 			return model.WithRetry(newXAIResponses(cfg), cfg.Retry), nil
 		}
 		return model.WithRetry(newOpenAICodex(cfg), cfg.Retry), nil
@@ -78,29 +78,29 @@ func New(cfg Config) (model.LLM, error) {
 
 	var llm model.LLM
 	switch cfg.API {
-	case APIDeepSeek:
+	case model.APIDeepSeek:
 		llm = newDeepSeek(cfg, token)
-	case APIMiniMax:
+	case model.APIMiniMax:
 		llm = newMiniMax(cfg, token)
-	case APIMimo:
+	case model.APIMimo:
 		llm = newMimo(cfg, token)
-	case APIVolcengine:
+	case model.APIVolcengine:
 		llm = newVolcengine(cfg, token)
-	case APIVolcengineCoding:
+	case model.APIVolcengineCoding:
 		llm = newVolcengineCodingPlan(cfg, token)
-	case APIOpenAICompatible:
+	case model.APIOpenAICompatible:
 		llm = newOpenAICompat(cfg, token)
-	case APIOpenRouter:
+	case model.APIOpenRouter:
 		llm = newOpenRouter(cfg, token)
-	case APIOpenAI, APIOpenAIResponses:
+	case model.APIOpenAI, model.APIOpenAIResponses:
 		llm = newOpenAIResponses(cfg, token)
-	case APIAnthropic:
+	case model.APIAnthropic:
 		llm = newAnthropic(cfg, token)
-	case APIAnthropicCompatible:
+	case model.APIAnthropicCompatible:
 		llm = newAnthropicWithDefaults(cfg, token, anthropicProviderDefaults{baseURL: defaultAnthropicBaseURL})
-	case APIGemini:
+	case model.APIGemini:
 		llm = newGemini(cfg, token)
-	case APIOllama:
+	case model.APIOllama:
 		llm = newOllama(cfg, token)
 	default:
 		return nil, fmt.Errorf("providers: unsupported api type %q", cfg.API)
@@ -109,7 +109,7 @@ func New(cfg Config) (model.LLM, error) {
 }
 
 func resolveToken(cfg AuthConfig) (string, error) {
-	if cfg.Type == AuthNone {
+	if cfg.Type == model.AuthNone {
 		return strings.TrimSpace(cfg.Token), nil
 	}
 	token := strings.TrimSpace(cfg.Token)

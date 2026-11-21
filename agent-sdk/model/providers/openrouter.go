@@ -8,7 +8,7 @@ import (
 
 func newOpenRouter(cfg Config, token string) *openAICompatLLM {
 	llm := newOpenAICompat(cfg, token)
-	llm.api = APIOpenRouter
+	llm.api = model.APIOpenRouter
 	llm.options.StrictFunctionTools = true
 	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
 		len(cfg.ReasoningLevels) == 0 {

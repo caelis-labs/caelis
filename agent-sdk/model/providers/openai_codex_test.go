@@ -92,12 +92,12 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	client.Transport = openAICodexTestAuthTransport{base: client.Transport}
 	llm, err := New(Config{
 		Provider:   "openai-codex",
-		API:        APIOpenAICodex,
+		API:        model.APIOpenAICodex,
 		Model:      "gpt-5.4",
 		BaseURL:    server.URL,
 		HTTPClient: client,
 		Headers:    map[string]string{"originator": "test-product"},
-		Auth:       AuthConfig{Type: AuthOAuthToken},
+		Auth:       AuthConfig{Type: model.AuthOAuthToken},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -418,7 +418,7 @@ func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
 			llm, err := New(Config{
 
 				Provider:   "openai-codex",
-				API:        APIOpenAICodex,
+				API:        model.APIOpenAICodex,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
@@ -498,7 +498,7 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 			llm, err := New(Config{
 
 				Provider:   "openai-codex",
-				API:        APIOpenAICodex,
+				API:        model.APIOpenAICodex,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
@@ -532,7 +532,7 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {
 	t.Parallel()
 
-	if _, err := New(Config{API: APIOpenAICodex, Model: "gpt-test"}); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
+	if _, err := New(Config{API: model.APIOpenAICodex, Model: "gpt-test"}); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
 		t.Fatalf("New() error = %v", err)
 	}
 }

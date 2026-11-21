@@ -7,42 +7,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-// APIType defines protocol dialect used by a model provider.
-type APIType = model.APIType
-
-const (
-	APIOpenAI              = model.APIOpenAI
-	APIOpenAIResponses     = model.APIOpenAIResponses
-	APIOpenAICompatible    = model.APIOpenAICompatible
-	APIOpenRouter          = model.APIOpenRouter
-	APIGemini              = model.APIGemini
-	APIAnthropic           = model.APIAnthropic
-	APIAnthropicCompatible = model.APIAnthropicCompatible
-	APIDeepSeek            = model.APIDeepSeek
-	APIMiniMax             = model.APIMiniMax
-	APIVolcengine          = model.APIVolcengine
-	APIMimo                = model.APIMimo
-	APIVolcengineCoding    = model.APIVolcengineCoding
-	APIXAIResponses        = model.APIXAIResponses
-	APIOllama              = model.APIOllama
-)
-
-// APIOpenAICodex selects the ChatGPT Codex Responses wire adapter.
-const APIOpenAICodex = model.APIOpenAICodex
-
-// AuthType defines model provider authentication strategy.
-type AuthType = model.AuthType
-
-const (
-	AuthAPIKey      = model.AuthAPIKey
-	AuthBearerToken = model.AuthBearerToken
-	AuthOAuthToken  = model.AuthOAuthToken
-	AuthNone        = model.AuthNone
-)
-
 // AuthConfig is provider-agnostic auth configuration.
 type AuthConfig struct {
-	Type      AuthType
+	Type      model.AuthType
 	Token     string
 	HeaderKey string
 	Prefix    string
@@ -51,7 +18,7 @@ type AuthConfig struct {
 // Config defines the resolved endpoint and model settings for one provider.
 type Config struct {
 	Provider   string
-	API        APIType
+	API        model.APIType
 	Model      string
 	BaseURL    string
 	Headers    map[string]string

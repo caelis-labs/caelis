@@ -72,7 +72,7 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			build: func(server *providerTestServer) model.LLM {
 				return newOpenRouter(Config{
 					Provider:   "openrouter",
-					API:        APIOpenRouter,
+					API:        model.APIOpenRouter,
 					Model:      "openrouter/openai/test-model",
 					BaseURL:    server.URL,
 					HTTPClient: server.Client(),
@@ -151,13 +151,13 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			build: func(server *providerTestServer) model.LLM {
 				return newAnthropic(Config{
 					Provider:   "anthropic",
-					API:        APIAnthropic,
+					API:        model.APIAnthropic,
 					Model:      "claude-test",
 					BaseURL:    server.URL,
 					HTTPClient: server.Client(),
 					Timeout:    2 * time.Second,
 					Auth: AuthConfig{
-						Type:  AuthAPIKey,
+						Type:  model.AuthAPIKey,
 						Token: "sk-anthropic",
 					},
 				}, "sk-anthropic")

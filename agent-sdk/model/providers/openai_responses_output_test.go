@@ -29,7 +29,7 @@ func TestOpenAIResponsesOfficialStrictFunctionSchemas(t *testing.T) {
 
 	llm := newOpenAIResponses(Config{
 		Provider:   "openai",
-		API:        APIOpenAI,
+		API:        model.APIOpenAI,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
@@ -171,7 +171,7 @@ func TestOpenAIResponsesOfficialPriorityServiceTier(t *testing.T) {
 
 			llm := newOpenAIResponses(Config{
 				Provider:   "openai",
-				API:        APIOpenAI,
+				API:        model.APIOpenAI,
 				Model:      "gpt-5.4",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),

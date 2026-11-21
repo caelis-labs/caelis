@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -172,7 +172,7 @@ func TestDoctorReportFindsAPIKeyThroughCredentialReferenceAfterReload(t *testing
 	}
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider: "minimax",
-		API:      providers.APIAnthropicCompatible,
+		API:      model.APIAnthropicCompatible,
 		Model:    "MiniMax-M1",
 		Token:    "super-secret-token",
 	})
@@ -287,7 +287,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			name: "managed credential",
 			cfg: ModelConfig{
 				Provider:      "openai-codex",
-				API:           providers.APIOpenAICodex,
+				API:           model.APIOpenAICodex,
 				Model:         "gpt-5.4",
 				CredentialRef: "codex-oauth",
 			},
@@ -298,7 +298,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			name: "memory token",
 			cfg: ModelConfig{
 				Provider: "deepseek",
-				API:      providers.APIDeepSeek,
+				API:      model.APIDeepSeek,
 				Model:    "deepseek-v4-pro",
 				Token:    "memory-secret",
 			},
@@ -309,7 +309,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			name: "missing token",
 			cfg: ModelConfig{
 				Provider: "deepseek",
-				API:      providers.APIDeepSeek,
+				API:      model.APIDeepSeek,
 				Model:    "deepseek-v4-pro",
 			},
 			wantSource: "",

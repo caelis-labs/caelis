@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
@@ -18,12 +19,12 @@ func selectableMagpieModels(ctx context.Context, template ProviderTemplate, base
 	if judgmentOnly || includeJudgments {
 		headers["X-Magpie-Deciders"] = "1"
 	}
-	auth := providers.AuthConfig{Type: providers.AuthNone}
+	auth := providers.AuthConfig{Type: model.AuthNone}
 	if token != "" {
-		auth = providers.AuthConfig{Type: providers.AuthAPIKey, Token: token}
+		auth = providers.AuthConfig{Type: model.AuthAPIKey, Token: token}
 	}
 	remote, err := providers.DiscoverModels(ctx, providers.Config{
-		Provider: "magpie", API: providers.APIOpenAIResponses, BaseURL: baseURL,
+		Provider: "magpie", API: model.APIOpenAIResponses, BaseURL: baseURL,
 		HTTPClient: client, Auth: auth, Headers: headers, UserAgent: providerUserAgent(clientVersion),
 	})
 	if err != nil {

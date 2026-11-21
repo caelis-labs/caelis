@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestSessionModelPinRegistryRejectsStaleCredentialGeneration(t *testing.T) {
@@ -16,7 +16,7 @@ func TestSessionModelPinRegistryRejectsStaleCredentialGeneration(t *testing.T) {
 	}
 	oldConfig := normalizeModelConfig(ModelConfig{
 		Provider:      "openai",
-		API:           providers.APIOpenAI,
+		API:           model.APIOpenAI,
 		Model:         "credential-generation-model",
 		BaseURL:       "https://api.openai.com/v1",
 		CredentialRef: "apikey:openai@default",

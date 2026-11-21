@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -47,7 +47,7 @@ func TestBrokenBuiltinPluginDoesNotBlockHostOrHTTPPrompt(t *testing.T) {
 			stack, err := newGatewayAppTestStack(t, Config{
 				StoreDir: store, WorkspaceKey: workspace, WorkspaceCWD: workspace,
 				Sandbox: SandboxConfig{RequestedType: "host"},
-				Model:   ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "test", HTTPClient: modelClient},
+				Model:   ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "test", HTTPClient: modelClient},
 			})
 			if err != nil {
 				t.Fatalf("plugin blocked Host startup: %v", err)

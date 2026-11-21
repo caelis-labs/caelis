@@ -501,7 +501,7 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/healer-alpha",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
@@ -557,7 +557,7 @@ func TestOpenRouterRequest_DoesNotForceStrictForOptionalStructuredOutput(t *test
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
@@ -605,7 +605,7 @@ func TestOpenRouterRequest_UsesStrictFunctionToolsFromRuntimeToolSpecs(t *testin
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
@@ -666,7 +666,7 @@ func TestOpenRouterStream_PropagatesTerminalFinishReason(t *testing.T) {
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),

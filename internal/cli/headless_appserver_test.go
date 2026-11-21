@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -118,7 +117,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	t.Cleanup(func() { _ = host.Close() })
 	if _, err := gatewayapptest.ConnectModel(context.Background(), host, gatewayapp.ModelConfig{
 		Provider:   "custom-chat",
-		API:        providers.APIOpenAICompatible,
+		API:        model.APIOpenAICompatible,
 		Model:      "headless-test",
 		BaseURL:    provider.URL,
 		HTTPClient: provider.Client(),

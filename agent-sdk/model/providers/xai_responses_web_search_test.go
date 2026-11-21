@@ -98,9 +98,9 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
 	llm, err := New(Config{
-		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5", UserAgent: "test-product/1",
+		Provider: "xai", API: model.APIXAIResponses, Model: "grok-4.5", UserAgent: "test-product/1",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768,
-		Auth: AuthConfig{Type: AuthOAuthToken},
+		Auth: AuthConfig{Type: model.AuthOAuthToken},
 	})
 	if err != nil {
 		t.Fatal(err)

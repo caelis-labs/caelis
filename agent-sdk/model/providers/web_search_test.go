@@ -202,7 +202,7 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -266,7 +266,7 @@ func TestDeepSeekNormalRequestDoesNotIncludeServerSideWebSearch(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")

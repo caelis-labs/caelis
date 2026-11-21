@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -239,7 +239,7 @@ func (s *controlCommandBackend) bindReusableAPIKeyCredential(ctx context.Context
 	for index := range bound {
 		configured := modelconfig.NormalizeConfig(bound[index])
 		if strings.TrimSpace(configured.Token) != "" || strings.TrimSpace(configured.CredentialRef) != "" ||
-			configured.AuthType == providers.AuthNone {
+			configured.AuthType == model.AuthNone {
 			continue
 		}
 		ref := strings.ToLower(strings.TrimSpace(reusableRef))

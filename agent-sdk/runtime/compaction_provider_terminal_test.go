@@ -23,10 +23,10 @@ func (f compactionTerminalTransport) RoundTrip(req *http.Request) (*http.Respons
 }
 
 func TestCompactionProviderTerminalNeverRetriesOrFallsBack(t *testing.T) {
-	for _, api := range []providers.APIType{providers.APIOllama, providers.APIGemini} {
+	for _, api := range []model.APIType{model.APIOllama, model.APIGemini} {
 		for _, stream := range []bool{false, true} {
 			for _, reason := range []string{"length", "unknown", "filtered", "unspecified"} {
-				if api == providers.APIOllama && (reason == "filtered" || reason == "unspecified") {
+				if api == model.APIOllama && (reason == "filtered" || reason == "unspecified") {
 					continue
 				}
 				t.Run(fmt.Sprintf("%s/stream=%v/%s", api, stream, reason), func(t *testing.T) {
@@ -38,7 +38,7 @@ func TestCompactionProviderTerminalNeverRetriesOrFallsBack(t *testing.T) {
 							return nil, err
 						}
 						wire := ""
-						if api == providers.APIOllama {
+						if api == model.APIOllama {
 							wire = fmt.Sprintf(`{"model":"fixture","message":{"role":"assistant","content":"partial summary with enough text to look useful"},"done":true,"done_reason":%q,"prompt_eval_count":11,"eval_count":7}`, reason)
 						} else {
 							rawReason := map[string]string{"length": "MAX_TOKENS", "unknown": "FUTURE_REASON", "filtered": "SAFETY", "unspecified": "FINISH_REASON_UNSPECIFIED"}[reason]
@@ -49,7 +49,7 @@ func TestCompactionProviderTerminalNeverRetriesOrFallsBack(t *testing.T) {
 						}
 						return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
 					})
-					llm, err := providers.New(providers.Config{API: api, Provider: string(api), Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
+					llm, err := providers.New(providers.Config{API: api, Provider: string(api), Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: model.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
 					if err != nil {
 						t.Fatal(err)
 					}

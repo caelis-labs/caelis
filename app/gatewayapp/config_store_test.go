@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -48,13 +48,13 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 		t.Fatal(err)
 	}
 	if _, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "default-model",
+		Provider: "ollama", API: model.APIOllama, Model: "default-model",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:               "deepseek",
-		API:                    providers.APIDeepSeek,
+		API:                    model.APIDeepSeek,
 		Model:                  "reasoner",
 		Token:                  secret,
 		ReasoningLevels:        []string{"none", "high"},
@@ -177,7 +177,7 @@ func TestNewLocalStackRejectsRuntimeModelOverrideBeforeStateMutation(t *testing.
 	_, err := NewLocalStack(Config{
 		StoreDir: root, WorkspaceKey: "rejected-runtime-model", WorkspaceCWD: t.TempDir(),
 		Model: ModelConfig{
-			Provider: "deepseek", API: providers.APIDeepSeek, Model: "deepseek-v4-pro", Token: "must-not-write",
+			Provider: "deepseek", API: model.APIDeepSeek, Model: "deepseek-v4-pro", Token: "must-not-write",
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "runtime model overrides are unsupported") {

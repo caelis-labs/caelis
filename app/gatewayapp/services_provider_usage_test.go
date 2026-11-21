@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	model "github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 )
