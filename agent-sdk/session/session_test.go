@@ -687,9 +687,9 @@ func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 		},
 	})
 
-	update := ProtocolUpdateOfProtocol(&protocol)
+	update := ProtocolUpdateOf(&Event{Protocol: &protocol})
 	if update == nil {
-		t.Fatal("ProtocolUpdateOfProtocol() = nil")
+		t.Fatal("ProtocolUpdateOf() = nil")
 		return
 	}
 	if update.ToolCallID != "call-1" || update.Kind != "execute" || update.Title != "RUN_COMMAND echo hi" {
@@ -824,8 +824,8 @@ func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	if decoded.Method != ProtocolMethodParticipantUpdate {
 		t.Fatalf("decoded.Method = %q, want %q", decoded.Method, ProtocolMethodParticipantUpdate)
 	}
-	if got := ProtocolSessionUpdateTypeOfProtocol(&decoded); got != "attached" {
-		t.Fatalf("ProtocolSessionUpdateTypeOfProtocol() = %q, want attached", got)
+	if got := ProtocolSessionUpdateType(&Event{Protocol: &decoded}); got != "attached" {
+		t.Fatalf("ProtocolSessionUpdateType() = %q, want attached", got)
 	}
 }
 
@@ -855,8 +855,8 @@ func TestEventProtocolRoundTripPreservesHandoffPayload(t *testing.T) {
 	if decoded.Method != ProtocolMethodControllerHandoff {
 		t.Fatalf("decoded.Method = %q, want %q", decoded.Method, ProtocolMethodControllerHandoff)
 	}
-	if got := ProtocolSessionUpdateTypeOfProtocol(&decoded); got != "activation" {
-		t.Fatalf("ProtocolSessionUpdateTypeOfProtocol() = %q, want activation", got)
+	if got := ProtocolSessionUpdateType(&Event{Protocol: &decoded}); got != "activation" {
+		t.Fatalf("ProtocolSessionUpdateType() = %q, want activation", got)
 	}
 }
 

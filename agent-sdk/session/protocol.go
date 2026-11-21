@@ -19,7 +19,6 @@ const (
 	ProtocolUpdateTypeToolCall     ProtocolUpdateType = "tool_call"
 	ProtocolUpdateTypeToolUpdate   ProtocolUpdateType = "tool_call_update"
 	ProtocolUpdateTypePlan         ProtocolUpdateType = "plan"
-	ProtocolUpdateTypePermission   ProtocolUpdateType = "request_permission"
 )
 
 const (
@@ -123,11 +122,6 @@ func ProtocolToolCallContentOf(update *ProtocolUpdate) []ProtocolToolCallContent
 	return protocolToolCallContentFromAny(update.Content)
 }
 
-// CloneProtocolToolCallContent returns a deep copy of ACP tool-call content.
-func CloneProtocolToolCallContent(in []ProtocolToolCallContent) []ProtocolToolCallContent {
-	return cloneProtocolToolCallContents(in)
-}
-
 // ProtocolPlanEntry is one ACP-compatible plan row.
 type ProtocolPlanEntry struct {
 	Content  string `json:"content,omitempty"`
@@ -217,12 +211,7 @@ type EventProtocol struct {
 }
 
 func (p EventProtocol) MarshalJSON() ([]byte, error) {
-	type protocolJSON struct {
-		Method             string                      `json:"method,omitempty"`
-		Update             *ProtocolUpdate             `json:"update,omitempty"`
-		Permission         *ProtocolApproval           `json:"permission,omitempty"`
-		AgentCommunication *ProtocolAgentCommunication `json:"agent_communication,omitempty"`
-	}
+	type protocolJSON EventProtocol
 	normalized := CloneEventProtocol(p)
 	return json.Marshal(protocolJSON(normalized))
 }
@@ -274,51 +263,29 @@ func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 // ProtocolUpdateOf returns the normalized ACP session/update payload for one
 // event.
 func ProtocolUpdateOf(event *Event) *ProtocolUpdate {
-	if event == nil || event.Protocol == nil {
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
 		return nil
 	}
-	return ProtocolUpdateOfProtocol(event.Protocol)
-}
-
-// ProtocolUpdateOfProtocol returns the normalized ACP session/update payload
-// for one protocol payload.
-func ProtocolUpdateOfProtocol(protocol *EventProtocol) *ProtocolUpdate {
-	if protocol == nil {
-		return nil
-	}
-	normalized := CloneEventProtocol(*protocol)
-	return normalized.Update
+	update := cloneProtocolUpdate(*event.Protocol.Update)
+	return &update
 }
 
 // ProtocolSessionUpdateType returns the normalized ACP session/update type for
 // one event.
 func ProtocolSessionUpdateType(event *Event) string {
-	if update := ProtocolUpdateOf(event); update != nil {
-		return strings.TrimSpace(update.SessionUpdate)
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
+		return ""
 	}
-	return ""
-}
-
-// ProtocolSessionUpdateTypeOfProtocol returns the normalized ACP session/update
-// type for one protocol payload.
-func ProtocolSessionUpdateTypeOfProtocol(protocol *EventProtocol) string {
-	if update := ProtocolUpdateOfProtocol(protocol); update != nil {
-		return strings.TrimSpace(update.SessionUpdate)
-	}
-	return ""
+	return strings.TrimSpace(event.Protocol.Update.SessionUpdate)
 }
 
 // ProtocolPermissionOf returns the normalized ACP permission payload for one
 // event.
 func ProtocolPermissionOf(event *Event) *ProtocolApproval {
-	if event == nil || event.Protocol == nil {
+	if event == nil || event.Protocol == nil || event.Protocol.Permission == nil {
 		return nil
 	}
-	normalized := CloneEventProtocol(*event.Protocol)
-	if normalized.Permission == nil {
-		return nil
-	}
-	out := cloneProtocolApproval(*normalized.Permission)
+	out := CloneProtocolApproval(*event.Protocol.Permission)
 	return &out
 }
 
@@ -512,14 +479,14 @@ func protocolToolCallContentFromAny(content any) []ProtocolToolCallContent {
 	case nil:
 		return nil
 	case []ProtocolToolCallContent:
-		return cloneProtocolToolCallContents(typed)
+		return CloneProtocolToolCallContent(typed)
 	case json.RawMessage:
 		if len(typed) == 0 {
 			return nil
 		}
 		var decoded []ProtocolToolCallContent
 		if err := json.Unmarshal(typed, &decoded); err == nil {
-			return cloneProtocolToolCallContents(decoded)
+			return CloneProtocolToolCallContent(decoded)
 		}
 		var generic any
 		if err := json.Unmarshal(typed, &generic); err != nil {
@@ -543,7 +510,7 @@ func protocolToolCallContentFromAny(content any) []ProtocolToolCallContent {
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			return nil
 		}
-		return cloneProtocolToolCallContents(decoded)
+		return CloneProtocolToolCallContent(decoded)
 	}
 }
 
@@ -552,7 +519,7 @@ func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool
 	case nil:
 		return ProtocolToolCallContent{}, false
 	case ProtocolToolCallContent:
-		cloned := cloneProtocolToolCallContents([]ProtocolToolCallContent{typed})
+		cloned := CloneProtocolToolCallContent([]ProtocolToolCallContent{typed})
 		return cloned[0], true
 	case map[string]any:
 		out := ProtocolToolCallContent{
@@ -576,9 +543,9 @@ func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool
 		if out.NewText == "" {
 			out.NewText, _ = protocolRawString(typed["new_text"])
 		}
-		if oldText, ok := protocolOptionalString(typed["oldText"]); ok {
+		if oldText, ok := protocolRawString(typed["oldText"]); ok {
 			out.OldText = &oldText
-		} else if oldText, ok := protocolOptionalString(typed["old_text"]); ok {
+		} else if oldText, ok := protocolRawString(typed["old_text"]); ok {
 			out.OldText = &oldText
 		}
 		return out, out.Type != "" || out.Content != nil || out.TerminalID != "" || out.Path != "" || out.OldText != nil || out.NewText != ""
@@ -591,7 +558,7 @@ func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			return ProtocolToolCallContent{}, false
 		}
-		cloned := cloneProtocolToolCallContents([]ProtocolToolCallContent{decoded})
+		cloned := CloneProtocolToolCallContent([]ProtocolToolCallContent{decoded})
 		return cloned[0], cloned[0].Type != "" || cloned[0].Content != nil || cloned[0].TerminalID != "" || cloned[0].Path != "" || cloned[0].OldText != nil || cloned[0].NewText != ""
 	}
 }
@@ -606,10 +573,6 @@ func protocolRawString(value any) (string, bool) {
 	return text, ok
 }
 
-func protocolOptionalString(value any) (string, bool) {
-	return protocolRawString(value)
-}
-
 // CloneEventProtocol returns one normalized event protocol payload copy.
 func CloneEventProtocol(in EventProtocol) EventProtocol {
 	out := EventProtocol{
@@ -620,7 +583,7 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 		out.Update = &update
 	}
 	if in.Permission != nil {
-		approval := cloneProtocolApproval(*in.Permission)
+		approval := CloneProtocolApproval(*in.Permission)
 		out.Permission = &approval
 	}
 	if in.AgentCommunication != nil {
@@ -655,7 +618,7 @@ func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 		Status:             strings.TrimSpace(in.Status),
 		RawInput:           jsonvalue.CloneMap(in.RawInput),
 		RawOutput:          jsonvalue.CloneMap(in.RawOutput),
-		Meta:               cloneProtocolAnyMap(in.Meta),
+		Meta:               CloneState(in.Meta),
 	}
 	if in.Name != nil {
 		name := *in.Name
@@ -688,7 +651,8 @@ func cloneProtocolPlanEntries(in []ProtocolPlanEntry) []ProtocolPlanEntry {
 	return out
 }
 
-func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolCallContent {
+// CloneProtocolToolCallContent returns a deep copy of ACP tool-call content.
+func CloneProtocolToolCallContent(in []ProtocolToolCallContent) []ProtocolToolCallContent {
 	if in == nil {
 		return nil
 	}
@@ -714,7 +678,8 @@ func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolC
 	return out
 }
 
-func cloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
+// CloneProtocolApproval returns one recursively isolated approval payload.
+func CloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
 	out := ProtocolApproval{
 		ToolCall: cloneProtocolToolCall(in.ToolCall),
 		Subject:  CloneApprovalSubject(in.Subject),
@@ -746,9 +711,9 @@ func cloneProtocolAny(in any) any {
 	case json.RawMessage:
 		return slices.Clone(typed)
 	case map[string]any:
-		return cloneProtocolAnyMap(typed)
+		return CloneState(typed)
 	case []ProtocolToolCallContent:
-		return cloneProtocolToolCallContents(typed)
+		return CloneProtocolToolCallContent(typed)
 	case []any:
 		out := make([]any, 0, len(typed))
 		for _, item := range typed {
@@ -758,19 +723,6 @@ func cloneProtocolAny(in any) any {
 	default:
 		return jsonvalue.Clone(typed)
 	}
-}
-
-func cloneProtocolAnyMap(in map[string]any) map[string]any {
-	return jsonvalue.CloneMap(in)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {
@@ -787,11 +739,6 @@ func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {
 	call.Status = strings.TrimSpace(call.Status)
 	call.RawInput = jsonvalue.CloneMap(call.RawInput)
 	call.RawOutput = jsonvalue.CloneMap(call.RawOutput)
-	call.Content = cloneProtocolToolCallContents(call.Content)
+	call.Content = CloneProtocolToolCallContent(call.Content)
 	return call
-}
-
-// CloneProtocolApproval returns one recursively isolated approval payload.
-func CloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
-	return cloneProtocolApproval(in)
 }
