@@ -49,7 +49,8 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[{"delta":{"role":"assistant","reasoning_content":"think "},"finish_reason":null}]}`+"\n\n")
+				// A compatible endpoint's echo cannot change the selected model.
+				_, _ = fmt.Fprint(w, `data: {"model":123,"choices":[{"delta":{"role":"assistant","reasoning_content":"think "},"finish_reason":null}]}`+"\n\n")
 				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`+"\n\n")
 				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
 				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"completion_tokens_details":{"reasoning_tokens":3}}}`+"\n\n")

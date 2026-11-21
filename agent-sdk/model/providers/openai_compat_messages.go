@@ -65,7 +65,6 @@ type openAICompatResponse struct {
 }
 
 type openAICompatStreamChunk struct {
-	Model   string `json:"model"`
 	Choices []struct {
 		Delta        openAICompatMsg `json:"delta"`
 		FinishReason string          `json:"finish_reason"`

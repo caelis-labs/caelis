@@ -240,7 +240,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		rawFinishReason := ""
 		done := false
 		stopped := false
-		if err := readSSEWithFirstEventTimeoutOnDone(resp.Body, l.firstEventTimeout, func(data []byte) error {
+		if err := readSSEWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(data []byte) error {
 			var chunk openAICompatStreamChunk
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				return err

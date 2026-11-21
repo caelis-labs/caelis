@@ -106,13 +106,9 @@ func newStreamIdleTimeoutError(timeout time.Duration) error {
 
 // readSSEWithFirstEventTimeout only bounds the initial wait for a model-visible
 // data event. Once a stream starts, caller cancellation owns the lifetime.
-func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onData func([]byte) error) error {
-	return readSSEWithFirstEventTimeoutOnDone(reader, timeout, onData, nil)
-}
-
-// readSSEWithFirstEventTimeoutOnDone lets protocols that use [DONE] as a
+// The optional onDone callback lets protocols that use [DONE] as a
 // completion marker distinguish it from a transport EOF after partial output.
-func readSSEWithFirstEventTimeoutOnDone(reader io.Reader, timeout time.Duration, onData func([]byte) error, onDone func()) error {
+func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onData func([]byte) error, onDone func()) error {
 	if timeout <= 0 {
 		return readSSEWithDone(reader, onData, onDone)
 	}
