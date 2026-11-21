@@ -164,9 +164,10 @@ func (r *commandStartProbeRuntime) startCalls() int {
 
 type commandTerminateProbeSession struct {
 	*yieldProbeSandboxSession
-	mu    sync.Mutex
-	calls int
-	err   error
+	mu           sync.Mutex
+	calls        int
+	err          error
+	leaveRunning bool
 }
 
 func (s *commandTerminateProbeSession) Terminate(context.Context) error {
@@ -174,7 +175,7 @@ func (s *commandTerminateProbeSession) Terminate(context.Context) error {
 	s.calls++
 	err := s.err
 	s.mu.Unlock()
-	if err == nil && s.statusRunning != nil {
+	if err == nil && s.statusRunning != nil && !s.leaveRunning {
 		*s.statusRunning = false
 	}
 	return err
@@ -763,6 +764,41 @@ func TestStartCommandCleansUpLiveSessionReturnedWithError(t *testing.T) {
 	}
 	if entry.State != taskapi.StateFailed || entry.Running {
 		t.Fatalf("live-error cleanup entry = %#v", entry)
+	}
+}
+
+func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
+	for _, failure := range []string{"start", "persistence"} {
+		t.Run(failure, func(t *testing.T) {
+			_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
+			store := newSagaTaskStore()
+			runtime.tasks.store = store
+			var startErr error
+			if failure == "persistence" {
+				store.failOnPut = 3
+			} else {
+				startErr = errors.New("backend returned an error with a live command")
+			}
+			running := true
+			handle := &commandTerminateProbeSession{
+				yieldProbeSandboxSession: &yieldProbeSandboxSession{statusRunning: &running},
+				leaveRunning:             true,
+			}
+			backend := newCommandStartProbe(handle, startErr)
+			req := taskapi.CommandStartRequest{Command: "probe", ParentCall: "cleanup-exit"}
+			got, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if err == nil || got.Ref.TaskID == "" || got.State != taskapi.StateUnknownOutcome {
+				t.Fatalf("StartCommand() = %+v, %v; want original Task with unknown exit", got, err)
+			}
+			entry, err := store.Get(t.Context(), got.Ref.TaskID)
+			if err != nil || entry.State != taskapi.StateUnknownOutcome || entry.Terminal.SessionID != handle.Ref().SessionID {
+				t.Fatalf("persisted cleanup = %+v, %v; want original command identity and unknown exit", entry, err)
+			}
+			again, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if err != nil || again.Ref.TaskID != got.Ref.TaskID || backend.startCalls() != 1 || handle.terminateCalls() != 1 {
+				t.Fatalf("retry = %+v, %v, starts=%d, terminates=%d", again, err, backend.startCalls(), handle.terminateCalls())
+			}
+		})
 	}
 }
 
