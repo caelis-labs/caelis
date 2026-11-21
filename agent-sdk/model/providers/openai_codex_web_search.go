@@ -41,7 +41,6 @@ type openAICodexSearchResponse struct {
 }
 
 type openAICodexSearchResult struct {
-	Type        string `json:"type"`
 	RefID       string `json:"ref_id"`
 	URL         string `json:"url"`
 	Link        string `json:"link"`

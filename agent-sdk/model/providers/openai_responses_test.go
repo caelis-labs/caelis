@@ -1002,6 +1002,9 @@ func TestOpenAIResponsesSessionFileStoreRebuildsModelContext(t *testing.T) {
 		mu.Unlock()
 		if requestCount.Add(1) == 1 {
 			writeOpenAIResponsesJSON(t, w, map[string]any{
+				// The conversation uses output item and call IDs. The remote
+				// response ID is neither stored nor sent on the next request.
+				"id":     123,
 				"model":  "gpt-test",
 				"status": "completed",
 				"output": []any{

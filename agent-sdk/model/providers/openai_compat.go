@@ -31,7 +31,6 @@ type openAICompatLLM struct {
 	contextWindowTokens int
 	imageInput          bool
 	options             openAICompatOptions
-	openRouter          OpenRouterConfig
 }
 
 type openAICompatOptions struct {
@@ -153,13 +152,6 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		}
 		if req.DisableTools {
 			payload.ToolChoice = "none"
-		}
-		if l.api == APIOpenRouter {
-			payload.Models = normalizeOpenRouterModelIDs(l.openRouter.Models)
-			payload.Route = strings.TrimSpace(l.openRouter.Route)
-			payload.Transforms = cloneStringSlice(l.openRouter.Transforms)
-			payload.Provider = cloneAnyMap(l.openRouter.Provider)
-			payload.Plugins = cloneMapSlice(l.openRouter.Plugins)
 		}
 		applyOpenAICompatOutput(&payload, req.Output, l.options.StructuredOutput)
 		if req.Stream {
@@ -381,25 +373,17 @@ func cloneHeaders(in map[string]string) map[string]string {
 
 type openAICompatRequest struct {
 	Model           string                     `json:"model,omitempty"`
-	Models          []string                   `json:"models,omitempty"`
-	Route           string                     `json:"route,omitempty"`
-	ModelName       string                     `json:"modelName,omitempty"`
 	Messages        []openAICompatReqMsg       `json:"messages"`
 	Tools           []openAICompatTool         `json:"tools,omitempty"`
 	ToolChoice      string                     `json:"tool_choice,omitempty"`
 	Stream          bool                       `json:"stream"`
 	StreamOptions   *openAICompatStreamOptions `json:"stream_options,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
-	Temperature     *float64                   `json:"temperature,omitempty"`
-	TopP            *float64                   `json:"top_p,omitempty"`
 	ResponseFormat  *openAIResponseFormat      `json:"response_format,omitempty"`
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 	Reasoning       *openAIReasoning           `json:"reasoning,omitempty"`
 	Thinking        *openAIThinking            `json:"thinking,omitempty"`
 	ServiceTier     model.ServiceTier          `json:"service_tier,omitempty"`
-	Transforms      []string                   `json:"transforms,omitempty"`
-	Provider        map[string]any             `json:"provider,omitempty"`
-	Plugins         []map[string]any           `json:"plugins,omitempty"`
 }
 
 type openAIResponseFormat struct {

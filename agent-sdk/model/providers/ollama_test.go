@@ -319,8 +319,9 @@ func TestDiscoverOllamaModels(t *testing.T) {
 					"name":  "qwen2.5:7b",
 					"model": "qwen2.5:7b",
 					"details": map[string]any{
-						"family":         "qwen2",
-						"parameter_size": "7.6B",
+						"family":             "qwen2",
+						"parameter_size":     "7.6B",
+						"quantization_level": 4,
 					},
 				},
 				{

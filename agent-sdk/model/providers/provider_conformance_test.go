@@ -77,22 +77,10 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 					BaseURL:    server.URL,
 					HTTPClient: server.Client(),
 					Timeout:    2 * time.Second,
-					OpenRouter: OpenRouterConfig{
-						Models:     []string{"openrouter/anthropic/fallback-model"},
-						Route:      "fallback",
-						Transforms: []string{"middle-out"},
-						Provider:   map[string]any{"allow_fallbacks": true},
-						Plugins:    []map[string]any{{"id": "web"}},
-					},
 				}, "token")
 			},
 			requestOK: func(raw string) bool {
 				return strings.Contains(raw, `"model":"openai/test-model"`) &&
-					strings.Contains(raw, `"models":["anthropic/fallback-model"]`) &&
-					strings.Contains(raw, `"route":"fallback"`) &&
-					strings.Contains(raw, `"transforms":["middle-out"]`) &&
-					strings.Contains(raw, `"allow_fallbacks":true`) &&
-					strings.Contains(raw, `"plugins":[{"id":"web"}]`) &&
 					strings.Contains(raw, `"response_format"`) &&
 					strings.Contains(raw, `"lookup"`) &&
 					strings.Contains(raw, `data:image/png;base64,aW1n`)

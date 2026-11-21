@@ -33,8 +33,8 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 		Role:    "assistant",
 		Content: "cited answer",
 		Annotations: []openAICompatAnnotation{
-			{Type: "url_citation", URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
-			{Type: "url_citation", URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
+			{URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
+			{URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
 		},
 	})
 	if err != nil {
@@ -55,7 +55,6 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 		Role:    "assistant",
 		Content: "answer",
 		Annotations: []openAICompatAnnotation{{
-			Type:        "url_citation",
 			URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"},
 		}},
 	})
@@ -583,10 +582,9 @@ func TestFromToOpenAIMessage(t *testing.T) {
 		t.Fatalf("did not expect reasoning_content in generic openai-compatible request")
 	}
 	back, err := toKernelMessage(openAICompatMsg{
-		Role:       raw.Role,
-		Content:    raw.Content,
-		ToolCallID: raw.ToolCallID,
-		ToolCalls:  raw.ToolCalls,
+		Role:      raw.Role,
+		Content:   raw.Content,
+		ToolCalls: raw.ToolCalls,
 		ReasoningContent: func() string {
 			if raw.ReasoningContent == nil {
 				return ""

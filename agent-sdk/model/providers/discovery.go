@@ -88,8 +88,7 @@ func discoverOpenAIModels(ctx context.Context, client *http.Client, cfg Config, 
 				Effort string `json:"effort"`
 			} `json:"supported_reasoning_levels"`
 			Modalities struct {
-				Input  []string `json:"input"`
-				Output []string `json:"output"`
+				Input []string `json:"input"`
 			} `json:"modalities"`
 			ContextWindow       any `json:"context_window"`
 			MaxOutputTokens     any `json:"max_output_tokens"`
@@ -311,10 +310,8 @@ func discoverOllamaModels(ctx context.Context, client *http.Client, cfg Config) 
 			Name    string `json:"name"`
 			Model   string `json:"model"`
 			Details struct {
-				Family          string   `json:"family"`
-				Families        []string `json:"families"`
-				ParameterSize   string   `json:"parameter_size"`
-				QuantizationLvl string   `json:"quantization_level"`
+				Family        string `json:"family"`
+				ParameterSize string `json:"parameter_size"`
 			} `json:"details"`
 		} `json:"models"`
 	}

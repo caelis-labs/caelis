@@ -432,7 +432,6 @@ type openAICodexErrorPayload struct {
 	Type    string `json:"type"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
-	Param   string `json:"param"`
 }
 
 type openAICodexIncompleteDetails struct {
@@ -466,7 +465,6 @@ type openAICodexOutputItem struct {
 }
 
 type openAICodexResponseWire struct {
-	ID                string                        `json:"id"`
 	Model             string                        `json:"model"`
 	Status            string                        `json:"status"`
 	Output            []openAICodexOutputItem       `json:"output"`
@@ -487,7 +485,6 @@ type openAICodexStreamWire struct {
 	Error        *openAICodexErrorPayload `json:"error"`
 	Code         string                   `json:"code"`
 	Message      string                   `json:"message"`
-	Param        string                   `json:"param"`
 }
 
 type openAICodexOutputSlot struct {

@@ -48,16 +48,6 @@ type AuthConfig struct {
 	Prefix    string
 }
 
-// OpenRouterConfig carries OpenRouter-native request options.
-// Zero values mean "use OpenRouter defaults".
-type OpenRouterConfig struct {
-	Models     []string
-	Route      string
-	Provider   map[string]any
-	Transforms []string
-	Plugins    []map[string]any
-}
-
 // Config defines the resolved endpoint and model settings for one provider.
 type Config struct {
 	Provider   string
@@ -83,7 +73,6 @@ type Config struct {
 	ReasoningLevels     []string
 	ReasoningMode       string
 
-	OpenRouter OpenRouterConfig
-	Auth       AuthConfig
-	Retry      model.RetryConfig
+	Auth  AuthConfig
+	Retry model.RetryConfig
 }
