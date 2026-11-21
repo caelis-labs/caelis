@@ -326,11 +326,6 @@ type CommandRequest struct {
 	UnsetEnv []string          `json:"unset_env,omitempty"`
 	Stdin    []byte            `json:"stdin,omitempty"`
 
-	// Legacy compatibility fields. New callers should prefer Constraints.
-	Permission Permission `json:"permission,omitempty"`
-	RouteHint  Route      `json:"route_hint,omitempty"`
-	Backend    Backend    `json:"backend,omitempty"`
-
 	Constraints Constraints       `json:"constraints,omitempty"`
 	OnOutput    func(OutputChunk) `json:"-"`
 }
@@ -554,7 +549,6 @@ func CloneRequest(in CommandRequest) CommandRequest {
 	out.Env = maps.Clone(in.Env)
 	out.UnsetEnv = slices.Clone(in.UnsetEnv)
 	out.Stdin = append([]byte(nil), in.Stdin...)
-	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
 	out.Constraints = NormalizeConstraints(in.Constraints)
 	return out
 }
@@ -748,21 +742,5 @@ func CloneDescriptor(in Descriptor) Descriptor {
 	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
 	out.Isolation = Isolation(strings.TrimSpace(string(in.Isolation)))
 	out.DefaultConstraints = NormalizeConstraints(in.DefaultConstraints)
-	return out
-}
-
-// EffectiveConstraints merges legacy request fields into the normalized
-// backend-neutral constraints contract.
-func EffectiveConstraints(req CommandRequest) Constraints {
-	out := NormalizeConstraints(req.Constraints)
-	if out.Route == "" {
-		out.Route = Route(strings.TrimSpace(string(req.RouteHint)))
-	}
-	if out.Backend == "" {
-		out.Backend = Backend(strings.TrimSpace(string(req.Backend)))
-	}
-	if out.Permission == "" {
-		out.Permission = Permission(strings.TrimSpace(string(req.Permission)))
-	}
 	return out
 }

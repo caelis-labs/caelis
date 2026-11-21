@@ -23,9 +23,11 @@ func TestCloneRequestIsolatesMutableFields(t *testing.T) {
 		Env: map[string]string{
 			"FOO": "bar",
 		},
-		Stdin:      []byte("hello"),
-		Permission: PermissionWorkspaceWrite,
-		RouteHint:  RouteSandbox,
+		Stdin: []byte("hello"),
+		Constraints: Constraints{
+			Permission: PermissionWorkspaceWrite,
+			Route:      RouteSandbox,
+		},
 	}
 
 	cloned := CloneRequest(req)
@@ -257,39 +259,6 @@ func TestOutputReadWindowDetectsRetainedGap(t *testing.T) {
 	start, gap = OutputReadWindow(26, []byte("tail"), 30)
 	if start != 26 || gap {
 		t.Fatalf("OutputReadWindow(contiguous) = %d/%v, want 26/false", start, gap)
-	}
-}
-
-func TestEffectiveConstraintsMergesLegacyFields(t *testing.T) {
-	t.Parallel()
-
-	req := CommandRequest{
-		Permission: PermissionWorkspaceWrite,
-		RouteHint:  RouteSandbox,
-		Backend:    BackendSeatbelt,
-		Constraints: Constraints{
-			Network: NetworkDisabled,
-			PathRules: []PathRule{
-				{Path: " /workspace ", Access: PathAccessReadWrite},
-			},
-		},
-	}
-
-	got := EffectiveConstraints(req)
-	if got.Permission != PermissionWorkspaceWrite {
-		t.Fatalf("Permission = %q, want %q", got.Permission, PermissionWorkspaceWrite)
-	}
-	if got.Route != RouteSandbox {
-		t.Fatalf("Route = %q, want %q", got.Route, RouteSandbox)
-	}
-	if got.Backend != BackendSeatbelt {
-		t.Fatalf("Backend = %q, want %q", got.Backend, BackendSeatbelt)
-	}
-	if got.Network != NetworkDisabled {
-		t.Fatalf("Network = %q, want %q", got.Network, NetworkDisabled)
-	}
-	if len(got.PathRules) != 1 || got.PathRules[0].Path != "/workspace" {
-		t.Fatalf("PathRules = %+v, want normalized workspace rule", got.PathRules)
 	}
 }
 

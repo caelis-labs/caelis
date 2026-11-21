@@ -266,7 +266,7 @@ func translateRequest(req sandbox.CommandRequest) Request {
 		EnvOverrides: req.Env,
 		UnsetEnv:     req.UnsetEnv,
 		Stdin:        append([]byte(nil), req.Stdin...),
-		Constraints:  sandbox.EffectiveConstraints(req),
+		Constraints:  req.Constraints,
 		OnOutput: func(chunk OutputChunk) {
 			if req.OnOutput == nil {
 				return

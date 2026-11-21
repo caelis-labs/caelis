@@ -601,7 +601,7 @@ func (r *runtime) derivePolicyForRequest(req sandbox.CommandRequest) (workspaceP
 }
 
 func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindingMode capabilityBindingMode, mode ensureMode) (workspacePolicy, error) {
-	constraints := sandbox.EffectiveConstraints(req)
+	constraints := sandbox.NormalizeConstraints(req.Constraints)
 	if r.cfg.ResourceLimits != nil {
 		constraints.Permission = sandbox.PermissionWorkspaceWrite
 		constraints.PathRules = nil

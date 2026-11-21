@@ -84,9 +84,6 @@ func (tm *taskRuntime) StartCommand(
 		TTY:         req.TTY,
 		Timeout:     req.Timeout,
 		Constraints: req.Constraints,
-		RouteHint:   req.Constraints.Route,
-		Backend:     req.Constraints.Backend,
-		Permission:  req.Constraints.Permission,
 		OnOutput: func(chunk sandbox.OutputChunk) {
 			if chunk.Text == "" {
 				return
