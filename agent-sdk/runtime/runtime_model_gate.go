@@ -111,12 +111,8 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			yield(nil, errors.New("model: llm is nil"))
 			return
 		}
-		request := *l
-		request.requestAuthority = l.runtime.captureRequestAuthority(l.requestAuthority)
-		l := &request
-		if l.requestAuthority != nil {
-			defer l.requestAuthority.drop()
-		}
+		release := l.requestAuthority.retain()
+		defer release()
 		if adopted, err := l.adoptReadyIdleCandidate(ctx, req); err != nil {
 			yield(nil, err)
 			return
@@ -130,7 +126,7 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			return
 		}
 		hard := strings.TrimSpace(decision.Reason) != ""
-		if adopted, asyncErr := l.asyncCompactBeforeRequest(ctx, req, hard); asyncErr != nil {
+		if adopted, asyncErr := l.asyncCompactionBoundary(ctx, req, hard, false); asyncErr != nil {
 			yield(nil, asyncErr)
 			return
 		} else if adopted {

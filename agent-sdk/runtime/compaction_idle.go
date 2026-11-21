@@ -46,7 +46,7 @@ type idleCompactionCandidate struct {
 }
 
 func (r *Runtime) bindIdleCompactionAttempt(ref session.SessionRef, in model.Invocation, authority *modelRequestAuthority, turnID string) {
-	if !r.compaction.Idle.Enabled || authority == nil || !authority.canSpeculate || turnID == "" {
+	if !r.compaction.Idle.Enabled || authority == nil || authority.validate == nil || turnID == "" {
 		return
 	}
 	release := authority.retain()
@@ -214,7 +214,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 		return nil, nil
 	}
 	release()
-	authority := &modelRequestAuthority{epoch: fresh.Revision, admit: fresh.Admit, validate: fresh.Validate, deferredTools: fresh.DeferredTools, canSpeculate: true, refs: 1, release: fresh.Release}
+	authority := &modelRequestAuthority{epoch: fresh.Revision, admit: fresh.Admit, validate: fresh.Validate, deferredTools: fresh.DeferredTools, refs: 1, release: fresh.Release}
 	release = authority.drop
 	snapshot.model = fresh.Model
 	snapshot.authority = authority

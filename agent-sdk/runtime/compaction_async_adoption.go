@@ -58,7 +58,7 @@ func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGa
 		return false, nil
 	}
 	if a := l.requestAuthority; a != nil {
-		if !a.canSpeculate || a.validate == nil {
+		if a.validate == nil {
 			return false, nil
 		}
 		ctx = context.WithValue(ctx, checkpointValidationKey{}, a.validate)
