@@ -27,6 +27,7 @@ type taskControlAccess uint8
 
 const (
 	taskControlObserve taskControlAccess = iota
+	taskControlWait
 	taskControlExclusive
 	taskControlCancel
 )
@@ -49,13 +50,22 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 		}
 		return fn(target, req)
 	}
+	// Command waits take short claims only for applying observations. Holding a
+	// claim during the wait would prevent other callers from controlling it.
+	if access == taskControlWait && identity.kind == taskapi.KindCommand {
+		task, err := tm.lookupCommand(ctx, ref, identity.taskID)
+		if err != nil {
+			return taskapi.Snapshot{}, err
+		}
+		return fn(commandControlTarget{runtime: tm, task: task}, req)
+	}
 	if access == taskControlCancel && identity.kind == taskapi.KindSubagent {
 		return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command or script tasks")
 	}
 	// Subagent read/wait are observations, not lifecycle operations. They must
 	// not contend with SendMessage or producer completion for the mutation
 	// claim. Result application is fenced by the observed child Turn instead.
-	if access == taskControlObserve && identity.kind == taskapi.KindSubagent {
+	if (access == taskControlObserve || access == taskControlWait) && identity.kind == taskapi.KindSubagent {
 		task, err := tm.lookupSubagent(ctx, ref, identity.taskID)
 		if err != nil {
 			return taskapi.Snapshot{}, err
@@ -231,7 +241,7 @@ type commandControlTarget struct {
 }
 
 func (t commandControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return t.runtime.waitCommandCompletion(ctx, t.task, req.Yield)
+	return t.runtime.waitCommandTask(ctx, t.task.sessionRef, t.task, req)
 }
 
 func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
@@ -241,7 +251,7 @@ func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequ
 	if t.task.commandOutcomeUnattached() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
-	baseline, _, err := t.runtime.syncCommandStream(ctx, t.task)
+	baseline, err := t.runtime.syncCommandStream(ctx, t.task)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -266,7 +276,7 @@ func (t commandControlTarget) Read(ctx context.Context, req taskapi.ControlReque
 	if t.task.commandOutcomeUnattached() || t.task.approvalWithoutSession() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
-	_, _, err := t.runtime.syncCommandStream(ctx, t.task)
+	_, err := t.runtime.syncCommandStream(ctx, t.task)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}

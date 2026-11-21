@@ -192,7 +192,7 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
 	r.tasks.taskCommitted = cfg.TaskCommitted
-	r.terminals = newTerminalService(r.tasks)
+	r.terminals = &terminalService{tasks: r.tasks}
 	return r, nil
 }
 

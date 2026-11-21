@@ -342,22 +342,22 @@ func (tm *taskRuntime) snapshotObservedCommand(ctx context.Context, task *comman
 	return tm.reconcileCommandStatus(ctx, task, status)
 }
 
-func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask) (int64, bool, error) {
-	if task == nil || task.session == nil {
-		return 0, false, fmt.Errorf("command Task has no observable sandbox Session")
+func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask) (int64, error) {
+	commandSession := task.observableCommandSession()
+	if commandSession == nil {
+		return 0, fmt.Errorf("command Task has no observable sandbox Session")
 	}
-	status, err := task.session.Status(ctx)
+	status, err := commandSession.Status(ctx)
 	if err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	if err := tm.syncCommandOutput(ctx, task, status); err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	task.mu.Lock()
 	cursor := task.outputCursorLocked()
-	unread := task.outputState.frontier.model < cursor
 	task.mu.Unlock()
-	return cursor, unread, nil
+	return cursor, nil
 }
 
 // reconcileCommandStatus dispatches a sandbox status to one of the two
