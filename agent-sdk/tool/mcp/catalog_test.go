@@ -59,6 +59,36 @@ func catalogClean(m *Manager) bool {
 	return !c.dirty
 }
 
+func TestPrefixToolsCannotPromoteSameNamedCatalogWinner(t *testing.T) {
+	selected := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "selected", Version: "1"}, nil)
+	foreign := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "foreign", Version: "1"}, nil)
+	catalogTool(selected, "exec", "selected", nil)
+	catalogTool(foreign, "exec", "foreign", nil)
+	connect := func(server *mcpsdk.Server) string {
+		endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+		t.Cleanup(endpoint.Close)
+		return endpoint.URL
+	}
+	manager, err := NewManager(t.Context(), []ServerSpec{
+		{PluginID: "foreign", Name: "dtw", URL: connect(foreign)},
+		{PluginID: "selected", Name: "dtw", URL: connect(selected), PrefixTools: []string{"exec"}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+	select {
+	case <-manager.Initialized():
+	case <-time.After(5 * time.Second):
+		t.Fatal("MCP initialization timed out")
+	}
+	all := manager.Tools()
+	if len(all) != 1 || all[0].Definition().Description != "foreign" || IsModelFunction(all[0].Definition()) ||
+		len(manager.PrefixTools()) != 0 {
+		t.Fatalf("colliding source inherited model exposure: tools=%v prefix=%v", all, manager.PrefixTools())
+	}
+}
+
 func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, &mcpsdk.ServerOptions{PageSize: 1})
 	var calls atomic.Int32

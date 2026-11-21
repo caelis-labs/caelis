@@ -121,11 +121,11 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		bound.Tools = tools
 		return r.wrapTurnTools(ctx, active, ref, state, bound, req.ApprovalRequester, runID, turnID, sequence)
 	}
-	// Bind the concrete declaration only after native tools have received their
-	// Runtime injection, and look up targets through the ordinary wrapper chain.
-	var allTools []tool.Tool
+	// The model keeps its request's declarations. Code Mode resolves live MCP
+	// entries through the same wrapped source, not through those frozen schemas.
+	var localTools []tool.Tool
 	lookup := func(ctx context.Context, name string) (tool.Tool, bool, error) {
-		for _, one := range allTools {
+		for _, one := range localTools {
 			if one != nil && one.Definition().Name == name {
 				return one, true, nil
 			}
@@ -146,8 +146,8 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	var discovery tool.Tool
 	for i, one := range spec.Tools {
 		if declaration, ok := one.(*codemode.Tool); ok {
-			discovery = codeModeDiscoveryTool{lookup: lookup}
-			available := func() []tool.Tool { return codeModeAvailableTools(allTools, spec.DeferredTools) }
+			discovery = codeModeDiscoveryTool{lookup: lookup, checkBinding: checkBinding}
+			available := func() []tool.Tool { return codeModeAvailableTools(localTools, spec.DeferredTools) }
 			spec.Tools[i] = runtimeCodeModeTool{runtime: r, tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, availableTools: available, lookup: lookup, validate: validate, checkBinding: checkBinding}
 		}
 	}
@@ -161,12 +161,17 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		spec.Tools = visible
 	}
 	spec.Tools = wrap(spec.Tools)
-	allTools = spec.Tools
-	if discovery != nil {
-		allTools = append(allTools, wrap([]tool.Tool{discovery})...)
-	}
 	if spec.DeferredTools != nil {
 		spec.DeferredTools = &deferredToolSource{source: spec.DeferredTools, wrap: wrap}
+	}
+	if discovery != nil {
+		localTools = make([]tool.Tool, 0, len(spec.Tools)+1)
+		for _, one := range spec.Tools {
+			if spec.DeferredTools == nil || !mcp.IsModelFunction(one.Definition()) {
+				localTools = append(localTools, one)
+			}
+		}
+		localTools = append(localTools, wrap([]tool.Tool{discovery})...)
 	}
 	return nil
 }

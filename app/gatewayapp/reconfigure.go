@@ -485,7 +485,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				metadata["system_prompt"] = systemPrompt
 			}
 			return kernelimpl.ToolAugmentation{
-				Tools:                      augmentedTools,
+				Tools:                      append(augmentedTools, mcpMgr.PrefixTools()...),
 				DeferredTools:              mcpMgr,
 				Metadata:                   metadata,
 				ResolveSessionInstructions: sessionSkillInstructions(s.sessions, req.SessionRef, resolveSkills),

@@ -278,11 +278,22 @@ is created. Package assembly status is distinct from MCP connection readiness.
 
 ## MCP discovery and upgrades
 
-Product model declarations use the fixed `js_exec` entry. Code Mode can call a
-currently available Session tool by its original name when its schema is known;
-`tools.search({name})` returns the complete schema and refreshes a stale binding.
-Discovering or refreshing MCP does not add tools to the model
-declaration. Surfaces present the actual target name and arguments.
+Code Mode uses the same argument schema as each tool in the model request.
+Call a declared tool by its original name in JavaScript where that name is
+available as a direct binding. Use `tools.call(name, args)` for any available
+Session tool whose schema is known. Returning the original Body preserves the
+tool's content and media.
+
+`tools.search()` lists lightweight entries for declared and deferred tools.
+Queries match all words and rank exact service and method matches first. Pass
+`next` as `after` with the same query. Entries recommend the available
+JavaScript call syntax. `tools.search({name})` returns the complete schema and
+refreshes a stale binding. `tools.search({names})` returns up to 16 individual
+schema entries or error codes in the requested order, within the existing call
+and reply budgets. Deferred tools stay behind Code Mode discovery and calls.
+Supported embedded Desktop World builds declare the selected package's
+`apps` and `exec` as model tools once their MCP directory is ready. See
+[built-in computer use](plugins.md#built-in-computer-use).
 
 An explicit Session configuration commit applies MCP changes automatically.
 A configuration write can prepare an observed Session before its first prompt.

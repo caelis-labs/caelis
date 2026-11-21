@@ -30,6 +30,9 @@ type ServerSpec struct {
 	// CleanEnvironment keeps plugin subprocesses from inheriting host-private
 	// credentials while preserving only platform process essentials.
 	CleanEnvironment bool
+	// PrefixTools lists remote methods the embedder explicitly exposes as
+	// model functions. This placement choice is independent of source identity.
+	PrefixTools []string `json:"-"`
 }
 
 // ValidateServerIdentity checks one server before Manager admission. It does

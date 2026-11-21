@@ -95,9 +95,9 @@ func (h *codeModeHost) ToolNames(ctx context.Context) ([]codemode.ToolRoute, err
 	defer h.mu.Unlock()
 	routes := make([]codemode.ToolRoute, 0, len(h.targets))
 	for _, target := range h.targets {
-		def := target.definition
-
-		routes = append(routes, codeModeToolRoute(def))
+		route := codeModeToolRoute(target.definition)
+		route.Prefix = mcp.IsModelFunction(target.definition)
+		routes = append(routes, route)
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Name < routes[j].Name })
 	return routes, nil

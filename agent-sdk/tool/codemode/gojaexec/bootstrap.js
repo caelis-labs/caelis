@@ -3,7 +3,7 @@
   "use strict";
   const globals=globalThis, SyntaxErrorType=SyntaxError,ReferenceErrorType=ReferenceError,TypeErrorType=TypeError;
   const parse=JSON.parse, stringify=JSON.stringify, keys=Object.keys, isArray=Array.isArray;
-  const finite=Number.isFinite, freeze=Object.freeze, define=Object.defineProperty;
+  const finite=Number.isFinite, integer=Number.isInteger, freeze=Object.freeze, define=Object.defineProperty;
   const descriptor=Object.getOwnPropertyDescriptor, assign=Object.assign;
   const create=Object.create, ErrorType=Error, SetType=Set, WeakMapType=WeakMap;
   const weakGet=Function.prototype.call.bind(WeakMap.prototype.get);
@@ -12,11 +12,14 @@
   const charCode=Function.prototype.call.bind(String.prototype.charCodeAt);
   const slice=Function.prototype.call.bind(String.prototype.slice);
   const then=Function.prototype.call.bind(Promise.prototype.then);
+  const test=Function.prototype.call.bind(RegExp.prototype.test);
+  const identifier=/^[A-Za-z_$][A-Za-z0-9_$]*$/;
   const has=Function.prototype.call.bind(Set.prototype.has);
   const add=Function.prototype.call.bind(Set.prototype.add);
   const del=Function.prototype.call.bind(Set.prototype.delete);
+  const forEach=Function.prototype.call.bind(Set.prototype.forEach);
   const origins=new WeakMapType(), replies=new WeakMapType(), toolGlobals=new SetType();
-  let limits, state;
+  let limits, state, preferredPaths;
   function ownReply(reply, diagnostic = false) {
     const media=[];
     for(let i=0;i<(reply.parts||[]).length;i++) {
@@ -148,6 +151,19 @@
     }
     if(search) {
       if(!own(reply,"value")) throw new ErrorType("search result is missing its value");
+      const value=reply.value;
+      function prefer(entry) {
+        const route=preferredPaths[entry.name];
+        const current=route && descriptor(globals,route.root);
+        if(current && own(current,"value") && current.value===route.target) entry.call_path=route.expression;
+      }
+      if(own(value,"tools")) {
+        for(let i=0;i<value.tools.length;i++) {
+          const item=value.tools[i];
+          if(own(item,"entry")) prefer(item.entry);
+          else if(!own(item,"error_code")) prefer(item);
+        }
+      } else prefer(value);
       return reply.value;
     }
     return ownReply(reply);
@@ -163,16 +179,30 @@
       const names=keys(query), request={};
       for(let i=0;i<names.length;i++){
         const key=names[i], value=query[key];
+        if(key==="names") {
+          const count=isArray(value)?value.length:0, list=[];
+          if(!integer(count)||count<1||count>16)throw new ErrorType("expected 1 to 16 tool names");
+          for(let j=0;j<count;j++) {
+            const name=value[j];
+            if(typeof name!=="string"||!name.length||name.length>1024)throw new ErrorType("expected non-empty tool name");
+            define(list,j,{value:name,enumerable:true});
+          }
+          request.names=list;
+          continue;
+        }
         if(key!=="name"&&key!=="query"&&key!=="after")throw new ErrorType("unsupported tools.search field: "+key);
         if(typeof value!=="string"||!value.length||value.length>1024)throw new ErrorType("expected non-empty search field");
         request[key]=value;
       }
-      if(own(request,"name")&&names.length!==1)throw new ErrorType("name requires exact lookup");
+      if((own(request,"name")||own(request,"names"))&&names.length!==1)throw new ErrorType("use name or names for exact lookup");
       return then(rpc("search","",encode(request)),raw=>decode(raw,true));
     }
   });
   // All entry points delegate to the same validation, RPC, decode and identity
   // path. Null prototypes preserve exact names, including __proto__.
+  function property(name) {
+    return test(identifier,name) ? "."+name : "["+stringify(name)+"]";
+  }
   function install(names) {
   const tools=assign(create(null),api);
   const native=create(null), mcp=create(null), plugins=create(null), shortcuts=create(null);
@@ -195,19 +225,22 @@
       };
     }
     define(parent,key,{value:invoke,enumerable:true,configurable:true});
+    return invoke;
   }
   function shortcut(name,value) {
     if(own(shortcuts,name)) shortcuts[name]=null;
     else define(shortcuts,name,{value,writable:true,enumerable:true});
   }
-  const entries=names||[];
+  const entries=names||[], methods=create(null);
   for(let i=0;i<entries.length;i++) {
     const entry=entries[i];
     if(!entry.server) {
       route(native,entry.name,entry.name,"tools.native["+entry.name+"]");
       shortcut(entry.name,native[entry.name]);
     } else {
-      route(table(mcp,entry.server),entry.tool,entry.name,"tools.mcp["+entry.server+"]["+entry.tool+"]");
+      const invoke=route(table(mcp,entry.server),entry.tool,entry.name,"tools.mcp["+entry.server+"]["+entry.tool+"]");
+      methods[entry.name]=invoke;
+      if(entry.prefix) shortcut(entry.name,invoke);
       if(entry.plugin) route(table(table(plugins,entry.plugin),entry.server),entry.tool,entry.name,
         "tools.plugins["+entry.plugin+"]["+entry.server+"]["+entry.tool+"]");
     }
@@ -224,11 +257,27 @@
   }
   tools.native=freeze(native);tools.mcp=freeze(mcp);tools.plugins=freeze(plugins);
   freeze(tools);
+  forEach(toolGlobals,name=>{
+    const prior=descriptor(globals,name);
+    if(prior && prior.configurable) delete globals[name];
+    del(toolGlobals,name);
+  });
   const shortcutNames=keys(shortcuts);
   for(let i=0;i<shortcutNames.length;i++) {
     const name=shortcutNames[i];
-    if(name!=="tools"&&name!=="runtime"&&(!own(globals,name)||has(toolGlobals,name))&&shortcuts[name]!==null) {
+    if(name!=="tools"&&name!=="runtime"&&!own(globals,name)&&shortcuts[name]!==null) {
       define(globals,name,{value:shortcuts[name],enumerable:true,configurable:true});add(toolGlobals,name);
+    }
+  }
+  preferredPaths=create(null);
+  for(let i=0;i<entries.length;i++) {
+    const entry=entries[i], name=entry.name;
+    // Qualify installed shortcuts so a caller's local binding cannot shadow them.
+    if((!entry.server||entry.prefix) && has(toolGlobals,name) && shortcuts[name]!==null) {
+      preferredPaths[name]={root:name,target:shortcuts[name],expression:"globalThis"+property(name)+"(args)"};
+    } else if(entry.server && has(toolGlobals,entry.server) && shortcuts[entry.server]===mcp[entry.server] &&
+      mcp[entry.server][entry.tool]===methods[name]) {
+      preferredPaths[name]={root:entry.server,target:mcp[entry.server],expression:"globalThis"+property(entry.server)+property(entry.tool)+"(args)"};
     }
   }
   define(globals,"tools",{value:tools,configurable:true});

@@ -116,7 +116,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 	if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" {
 		p.Plugins = []sessionprofile.Plugin{{Root: root}}
 	}
-	p.Instructions = "你是 Caelis Agent。用 Skill、tool_search、mcp_call 完成用户的本机桌面验收；Read 仅可读取该 dtw Skill 目录内的随包参考文档。先自主读取 dtw Skill，然后自主发现真实工具。只操作本任务标题的 Chrome 页面，不操作其他标签页、用户文件或外部服务。不要用文件读取/终端/HTTP接口绕过桌面读取验收数据。未知作用不重放，使用只读观察核对已发生的效果。"
+	p.Instructions = "你是 Caelis Agent。先读取 desktop-world:dtw Skill，再通过顶层 dtw__apps 和 dtw__exec 完成本机桌面验收。Read 仅可读取该 Skill 的随包参考文档。只操作本任务标题的 Chrome 页面，不操作其他标签页、用户文件或外部服务。不要用文件读取、终端或 HTTP 接口绕过桌面读取验收数据。未知作用不重放，使用只读观察核对已发生的效果。"
 	creation := appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "live-task-create"}, Profile: &p}
 	if os.Getenv("CAELIS_DTW_LIVE_SESSION") == "ordinary" {
 		creation.Profile = nil
@@ -159,7 +159,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 		}
 		if active := state.Approval.Active; active != nil {
 			selected, err := host.host.SessionMCPStatus(ctx, created.SessionID)
-			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != expectedVersion || len(selected.Servers) != 1 || !slices.Contains(selected.Servers[0].Tools, "look") || slices.Contains(selected.Servers[0].Tools, "exec") || len(selected.Skills) != 1 {
+			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != expectedVersion || len(selected.Servers) != 1 || !slices.Contains(selected.Servers[0].Tools, "apps") || !slices.Contains(selected.Servers[0].Tools, "exec") || len(selected.Skills) != 1 {
 				t.Fatalf("live source does not contain one paired %s MCP/Skill package", expectedVersion)
 			}
 			if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" && selected.Plugins[0].Root != root {
@@ -169,7 +169,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 			selectedRoot = selected.Plugins[0].Root
 			writeLiveJSON(t, filepath.Join(artifacts, fmt.Sprintf("approval-%d.json", approvals)), active)
 			encoded, _ := json.Marshal(active.Permission)
-			if active.Permission == nil || !strings.HasPrefix(active.Permission.ToolCall.Name, "dtw__") || active.Permission.ToolCall.RawInput["app"] != "com.google.Chrome" || !bytes.Contains(encoded, []byte("com.google.Chrome")) {
+			if active.Permission == nil || active.Permission.ToolCall.Name != "dtw__exec" || active.Permission.ToolCall.RawInput["app"] != "com.google.Chrome" || !bytes.Contains(encoded, []byte("com.google.Chrome")) {
 				t.Fatal("refusing non-target app or non-DTW approval")
 			}
 			pending, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}})
@@ -179,11 +179,11 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 			matched := false
 			for _, event := range pending.Events {
 				if event.Type == session.EventTypeToolCall && event.Tool != nil && event.Tool.ID == active.Permission.ToolCall.ID {
-					matched = event.Tool.Name == active.Permission.ToolCall.Name && event.Tool.Input["app"] == active.Permission.ToolCall.RawInput["app"] && event.Tool.ModelCall != nil && event.Tool.ModelCall.ID == event.Tool.ID
+					matched = event.Tool.Name == active.Permission.ToolCall.Name && event.Tool.Input["app"] == active.Permission.ToolCall.RawInput["app"] && event.Tool.Binding != nil && event.Tool.ProposedCall != nil && event.Tool.ProposedCall.ID == event.Tool.ID
 				}
 			}
 			if !matched {
-				t.Fatal("approval does not match the original canonical call and model envelope")
+				t.Fatal("approval does not match the original bound model call")
 			}
 			approvals++
 			if _, err := host.host.ResolveApproval(ctx, appserver.ResolveApprovalRequest{WriteBase: appserver.WriteBase{SessionID: created.SessionID, OperationID: fmt.Sprintf("live-approve-%d", approvals)}, Target: active.Target, ApprovalRequestID: string(active.RequestID), Outcome: "selected", OptionID: "allow_session", Approved: true}); err != nil {
@@ -219,11 +219,11 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 				path, _ := e.Tool.Input["path"].(string)
 				skillReference = filepath.IsAbs(path) && plugin.PathWithinRoot(filepath.Join(selectedRoot, "skills", "dtw"), path)
 			}
-			if e.Tool.Name != "Skill" && e.Tool.Name != "tool_search" && !strings.HasPrefix(e.Tool.Name, "dtw__") && !skillReference {
+			if e.Tool.Name != "Skill" && e.Tool.Name != "dtw__apps" && e.Tool.Name != "dtw__exec" && !skillReference {
 				t.Fatal("Agent bypassed the authorized desktop-only task path")
 			}
-			if strings.HasPrefix(e.Tool.Name, "dtw__") && (e.Tool.ModelCall == nil || e.Tool.ModelCall.Name != "mcp_call" || e.Tool.ModelCall.ID != e.Tool.ID) {
-				t.Fatal("real MCP result lost its original model envelope")
+			if strings.HasPrefix(e.Tool.Name, "dtw__") && (e.Tool.Binding == nil || e.Tool.Parent != nil || e.Tool.ProposedCall == nil || e.Tool.ProposedCall.ID != e.Tool.ID || e.Tool.ProposedCall.Name != e.Tool.Name) {
+				t.Fatal("real MCP result lost its original binding or model call")
 			}
 		}
 	}
@@ -232,13 +232,8 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 	models := wire.base.models
 	wire.base.mu.Unlock()
 	writeLiveJSON(t, filepath.Join(artifacts, "summary.json"), map[string]any{"model": cfg.Model, "session_id": created.SessionID, "app_approvals": approvals, "tool_results": counts, "tools_hashes": hashes, "wire_models": models, "task_receipt_matches": values.Get("answer") == challenge, "page_submissions": submitted, "session_kind": os.Getenv("CAELIS_DTW_LIVE_SESSION"), "plugin_override": os.Getenv("CAELIS_DTW_LIVE_PLUGIN"), "page_title": title})
-	if approvals != 1 || submitted != 1 || values.Get("answer") != challenge || counts["Skill"] == 0 || counts["dtw__apps"] == 0 || counts["dtw__look"] == 0 || counts["dtw__exec"] != 0 {
+	if approvals != 1 || submitted != 1 || values.Get("answer") != challenge || counts["Skill"] == 0 || counts["dtw__apps"] == 0 || counts["dtw__exec"] == 0 || len(hashes) == 0 {
 		t.Fatal("real Agent task acceptance incomplete; inspect private original evidence")
-	}
-	for _, h := range hashes {
-		if h != hashes[0] {
-			t.Fatal("main model tools prefix changed during discovery")
-		}
 	}
 	t.Logf("real model=%s target_app=com.google.Chrome approvals=%d independent_task_receipt=verified tool_result_counts=%v main_requests=%d", cfg.Model, approvals, counts, len(hashes))
 }

@@ -36,6 +36,16 @@ func (s Selection) SearchTools() []tool.Tool {
 	return s.filter(s.manager.SearchTools())
 }
 
+// PrefixTools returns explicitly selected model functions in this selection.
+func (s Selection) PrefixTools() []tool.Tool {
+	return s.filter(s.manager.PrefixTools())
+}
+
+// Lookup returns the dispatchable candidate from the selected server instances.
+func (s Selection) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
+	return s.manager.lookup(ctx, name, s.servers)
+}
+
 func (s Selection) filter(candidates []tool.Tool) []tool.Tool {
 	return slices.DeleteFunc(candidates, func(candidate tool.Tool) bool {
 		remote, ok := candidate.(*MCPTool)

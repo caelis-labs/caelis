@@ -293,8 +293,21 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessi
 		seen[t.Definition().Name] = true
 	}
 	for _, t := range children {
-		if !seen[t.Definition().Name] {
+		name := t.Definition().Name
+		if !seen[name] {
 			tools = append(tools, t)
+			seen[name] = true
+		}
+	}
+	if mcpSource, ok := capabilities.source.(applicationMCPSource); ok {
+		// Explicit callbacks keep their names when the MCP catalog becomes ready.
+		// Code Mode likewise resolves registered tools before the deferred source.
+		for _, t := range mcpSource.PrefixTools() {
+			name := t.Definition().Name
+			if !seen[name] {
+				tools = append(tools, t)
+				seen[name] = true
+			}
 		}
 	}
 	return tools, nil

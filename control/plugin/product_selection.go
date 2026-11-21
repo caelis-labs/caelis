@@ -123,11 +123,12 @@ func selectDesktopToolset(out Contributions) Contributions {
 		if spec.PluginID != "desktop-world" {
 			continue
 		}
-		args := append([]string(nil), spec.Args...)
-		if !slices.Contains(args, "--atomic") {
-			args = append(args, "--atomic")
+		if builtinDesktopWorldTarget != "" {
+			spec.PrefixTools = []string{"apps", "exec"}
+			spec.Args = slices.DeleteFunc(slices.Clone(spec.Args), func(arg string) bool { return arg == "--atomic" })
+		} else if !slices.Contains(spec.Args, "--atomic") {
+			spec.Args = append(slices.Clone(spec.Args), "--atomic")
 		}
-		spec.Args = args
 	}
 	return out
 }

@@ -42,6 +42,18 @@ func (s applicationMCPSource) Tools() []tool.Tool {
 	return s.leaseTools(s.selection.Tools())
 }
 
+func (s applicationMCPSource) PrefixTools() []tool.Tool {
+	return s.leaseTools(s.selection.PrefixTools())
+}
+
+func (s applicationMCPSource) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
+	one, found, err := s.selection.Lookup(ctx, name)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	return applicationMCPTool{Tool: one, source: s}, true, nil
+}
+
 func (s applicationMCPSource) leaseTools(ready []tool.Tool) []tool.Tool {
 	for i, item := range ready {
 		ready[i] = applicationMCPTool{Tool: item, source: s}

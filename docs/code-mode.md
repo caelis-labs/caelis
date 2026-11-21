@@ -40,19 +40,25 @@ await dtw.apps(args);
 await context7['query-docs'](args);
 ```
 
-`await tools.search()` returns a plain directory page. Each page contains
-`{tools:[{name,description}],next:string|null}`. Pass `{query}` to match any
-whitespace-separated keyword in a name or description (case-insensitive).
-Pass `{query,after:next}` to continue the same filter in name order. Pages show
-ready deferred tools, not tools already exposed directly. An empty page does
-not establish that a connecting service has no tools.
+`await tools.search()` returns a directory page `{tools,next}` of eligible
+registered and ready deferred tools. Summaries include the name, a short
+description, applicable MCP service and method metadata, and `call_path`, but
+not schemas. A `query` matches all its terms, case-insensitively, and ranks
+exact name, service and method matches ahead of weaker matches. Without a
+query, entries are in name order. Pass a non-null `next` as `after` with the
+same query. An empty page does not establish that a connecting service has
+no tools.
 
 `await tools.search({name})` returns one plain object with the complete input
 schema, optional `output_schema`, original service metadata and `call_path`.
 Exact lookup records the current tool binding. The entry's `output_format: "body"`
 describes calls to that tool, not the search result. When declared,
 `output_schema` describes the tool call's `.data`. Unknown names fail without
-falling back to a keyword query.
+falling back to a keyword query. `tools.search({names})` performs up to 16 exact
+lookups and returns `{tools:[{name,entry} or {name,error_code}]}` in input order,
+within the call and reply budgets. `call_path` qualifies installed shortcuts
+with `globalThis` so a local variable with the tool or service name cannot
+shadow them. Otherwise it uses `tools.call(name, args)`.
 
 Successful tool calls return a Body, through direct functions and `tools.call`
 alike:
@@ -147,8 +153,10 @@ executing old arguments. Use `tools.search({name})` to get the complete schema a
 explicitly refresh the binding, then make a later call under the refreshed binding.
 Each VM snapshots current Session names; a later VM sees newly ready tools, and a
 search result's `call_path` can resolve a name that became ready during the current
-execution. Search does not rewrite existing prompt slices or model tool arrays.
-Outside Code Mode, `mcp_call` still requires prior discovery.
+execution. Explicit search can refresh a tool already declared to the model by
+reading the current directory of the same request's MCP source. It does not
+rewrite existing prompt slices or model tool arrays. Outside Code Mode,
+`mcp_call` still requires prior discovery.
 
 Tool-specific error codes and effect details stay in the reply's original content.
 Catching does not erase failed records. An uncaught script exception produces
