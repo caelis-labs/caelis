@@ -128,10 +128,7 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	} else {
 		reply.BodyText = reply.Text()
 	}
-	if h.replies == nil {
-		h.replies = map[string]codemode.Reply{}
-	}
-	h.replies[id] = codemode.Reply{Parts: reply.Parts}
+	h.replyParts[id] = reply.Parts
 	h.retained += retained
 	return reply, nil
 }
@@ -162,11 +159,11 @@ func (h *codeModeHost) returnedParts(output codemode.Output) ([]tool.ContentBloc
 	defer h.codeModeResults.mu.Unlock()
 	var parts []tool.ContentBlock
 	if output.CallID != "" {
-		original, ok := h.replies[output.CallID]
+		original, ok := h.replyParts[output.CallID]
 		if !ok || !output.Reply || len(output.Value) != 0 || len(output.Parts) != 0 {
 			return nil, fmt.Errorf("returned reply does not belong to this invocation")
 		}
-		output = codemode.Output{Reply: true, Parts: original.Parts}
+		output = codemode.Output{Reply: true, Parts: original}
 		if !validCodeModeOutput(output, h.limits.OutputBytes) {
 			return nil, fmt.Errorf("complete original result exceeds output budget")
 		}
