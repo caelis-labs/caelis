@@ -53,7 +53,6 @@ func commandTaskID(ref session.SessionRef, parentCall string) (string, error) {
 }
 
 func commandRequestDigest(req taskapi.CommandStartRequest) (string, error) {
-	constraints, _ := req.Constraints.(sandbox.Constraints)
 	payload := struct {
 		Command     string              `json:"command"`
 		Workdir     string              `json:"workdir"`
@@ -62,7 +61,7 @@ func commandRequestDigest(req taskapi.CommandStartRequest) (string, error) {
 		ParentCall  string              `json:"parent_call"`
 		Constraints sandbox.Constraints `json:"constraints"`
 		OperationID string              `json:"operation_id,omitempty"`
-	}{strings.TrimSpace(req.Command), strings.TrimSpace(req.Workdir), req.TTY, req.Timeout, strings.TrimSpace(req.ParentCall), constraints, strings.TrimSpace(req.OperationID)}
+	}{strings.TrimSpace(req.Command), strings.TrimSpace(req.Workdir), req.TTY, req.Timeout, strings.TrimSpace(req.ParentCall), req.Constraints, strings.TrimSpace(req.OperationID)}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -80,10 +79,14 @@ func (tm *taskRuntime) StartCommand(
 ) (taskapi.Snapshot, error) {
 	var outputTask *commandTask
 	sandboxReq := sandbox.CommandRequest{
-		Command: strings.TrimSpace(req.Command),
-		Dir:     strings.TrimSpace(req.Workdir),
-		TTY:     req.TTY,
-		Timeout: req.Timeout,
+		Command:     strings.TrimSpace(req.Command),
+		Dir:         strings.TrimSpace(req.Workdir),
+		TTY:         req.TTY,
+		Timeout:     req.Timeout,
+		Constraints: req.Constraints,
+		RouteHint:   req.Constraints.Route,
+		Backend:     req.Constraints.Backend,
+		Permission:  req.Constraints.Permission,
 		OnOutput: func(chunk sandbox.OutputChunk) {
 			if chunk.Text == "" {
 				return
@@ -92,12 +95,6 @@ func (tm *taskRuntime) StartCommand(
 				outputTask.appendSandboxOutput(chunk)
 			}
 		},
-	}
-	if constraints, ok := req.Constraints.(sandbox.Constraints); ok {
-		sandboxReq.Constraints = constraints
-		sandboxReq.RouteHint = constraints.Route
-		sandboxReq.Backend = constraints.Backend
-		sandboxReq.Permission = constraints.Permission
 	}
 	taskID, err := commandTaskID(ref, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {

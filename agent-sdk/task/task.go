@@ -106,16 +106,15 @@ type CommandStartRequest struct {
 	// tool producers derive it from the admitted occurrence, not the protocol ID.
 	// Empty retains ParentCall identity for legacy direct Task callers; remove
 	// that fallback when the direct Command API requires OperationID.
-	OperationID string        `json:"operation_id,omitempty"`
-	Command     string        `json:"command,omitempty"`
-	Workdir     string        `json:"workdir,omitempty"`
-	TTY         bool          `json:"tty,omitempty"`
-	Yield       time.Duration `json:"yield,omitempty"`
-	Timeout     time.Duration `json:"timeout,omitempty"`
-	ParentCall  string        `json:"parent_call,omitempty"`
-	ParentTool  string        `json:"parent_tool,omitempty"`
-	Constraints any           `json:"-"`
-	Observer    Observer      `json:"-"`
+	OperationID string              `json:"operation_id,omitempty"`
+	Command     string              `json:"command,omitempty"`
+	Workdir     string              `json:"workdir,omitempty"`
+	TTY         bool                `json:"tty,omitempty"`
+	Yield       time.Duration       `json:"yield,omitempty"`
+	Timeout     time.Duration       `json:"timeout,omitempty"`
+	ParentCall  string              `json:"parent_call,omitempty"`
+	Constraints sandbox.Constraints `json:"-"`
+	Observer    Observer            `json:"-"`
 }
 
 // SubagentStartRequest defines one yielded SPAWN launch request. SpawnID is the
@@ -380,14 +379,6 @@ func SanitizeEntryForPersistence(entry *Entry, mode ResultPersistenceMode) *Entr
 	}
 	out.Result = SanitizeResultForPersistence(out.Result, mode)
 	return out
-}
-
-// Manager is the runtime-owned task control surface used by yielded tools.
-type Manager interface {
-	StartCommand(context.Context, CommandStartRequest) (Snapshot, error)
-	Wait(context.Context, ControlRequest) (Snapshot, error)
-	Write(context.Context, ControlRequest) (Snapshot, error)
-	Cancel(context.Context, ControlRequest) (Snapshot, error)
 }
 
 // CloneRef returns one normalized task ref copy.

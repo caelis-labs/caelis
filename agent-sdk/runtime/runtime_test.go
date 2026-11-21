@@ -2198,7 +2198,6 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 		Workdir:    workdir,
 		Yield:      5 * time.Millisecond,
 		ParentCall: "command-1",
-		ParentTool: shell.RunCommandToolName,
 	})
 	if err != nil {
 		t.Fatalf("StartCommand() error = %v", err)

@@ -320,7 +320,6 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 		Timeout:     commandTimeoutFromTool(t.base),
 		Yield:       time.Duration(yieldMS) * time.Millisecond,
 		ParentCall:  strings.TrimSpace(call.ID),
-		ParentTool:  strings.TrimSpace(call.Name),
 		Constraints: constraints,
 		Observer:    taskToolObserver{ctx: ctx},
 	}
