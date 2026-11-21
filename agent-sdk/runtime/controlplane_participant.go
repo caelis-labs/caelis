@@ -496,7 +496,7 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishError(err)
 		return
 	}
-	turnResult, err := r.controllers.PromptParticipant(ctx, controller.ParticipantPromptRequest{
+	turnHandle, err := r.controllers.PromptParticipant(ctx, controller.ParticipantPromptRequest{
 		SessionRef:    ref,
 		Session:       activeSession,
 		TurnID:        turnID,
@@ -526,19 +526,19 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishError(err)
 		return
 	}
-	if turnResult.Handle == nil {
+	if turnHandle == nil {
 		err := fmt.Errorf("agent-sdk/runtime: participant controller returned no Turn handle")
 		admission.resolve(err)
 		handle.publishError(err)
 		return
 	}
 	handle.setCancelHook(func() error {
-		return turnResult.Handle.Cancel().Err
+		return turnHandle.Cancel().Err
 	})
-	defer turnResult.Handle.Close()
+	defer turnHandle.Close()
 	admission.resolve(nil)
 	admitted = true
-	err = turnResult.Handle.WaitCompletion(ctx)
+	err = turnHandle.WaitCompletion(ctx)
 	if err == nil {
 		err = forwarding.Complete(ctx)
 	}

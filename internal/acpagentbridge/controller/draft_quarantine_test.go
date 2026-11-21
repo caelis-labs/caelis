@@ -92,7 +92,7 @@ func TestDraftControllerSteeringReceiptWithoutEchoDoesNotCommitOrReleaseOutput(t
 	if commits.Load() != 0 {
 		t.Fatal("unproven steering committed canonical input")
 	}
-	if err := turn.Handle.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
+	if err := turn.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("original turn falsely completed: %v", err)
 	}
 	manager.mu.RLock()
@@ -171,7 +171,7 @@ func TestDraftControllerAcceptedReceiptFailurePreservesUnknownAndApprovalOwner(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := turn.Handle.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
+			if err := turn.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
 				t.Fatalf("accepted receipt failure = %v, want unknown outcome", err)
 			}
 			var approval sdkcontroller.ApprovalRequest

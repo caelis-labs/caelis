@@ -115,7 +115,7 @@ func TestDraftControllerPreviousTurnRevisionKeepsCanonicalResult(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := turn.Handle.WaitCompletion(ctx); err != nil {
+				if err := turn.WaitCompletion(ctx); err != nil {
 					t.Fatal(err)
 				}
 				if err := forwarding.Complete(ctx); err != nil {

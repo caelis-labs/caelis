@@ -208,9 +208,9 @@ type spawnDrainController struct {
 	done    chan struct{}
 }
 
-func (b *spawnDrainController) RunTurn(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+func (b *spawnDrainController) RunTurn(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 	close(b.started)
-	return controller.TurnResult{Handle: b}, nil
+	return b, nil
 }
 
 func (b *spawnDrainController) WaitCompletion(ctx context.Context) error {

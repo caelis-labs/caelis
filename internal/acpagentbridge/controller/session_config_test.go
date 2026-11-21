@@ -53,7 +53,7 @@ func TestControlPreparationPreservesExternalACPDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			parent := session.Session{SessionRef: session.SessionRef{SessionID: "parent"}, CWD: t.TempDir()}
-			var turn controller.TurnResult
+			var turn controller.TurnHandle
 			if role == "main" {
 				parent.Controller, err = manager.Activate(ctx, controller.HandoffRequest{Session: parent, Agent: "helper", Placement: frozen})
 				if err == nil {
@@ -73,13 +73,13 @@ func TestControlPreparationPreservesExternalACPDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !prepared || turn.Handle == nil {
+			if !prepared || turn == nil {
 				t.Fatalf("prepared=%v, turn=%#v", prepared, turn)
 			}
-			if err := turn.Handle.WaitCompletion(ctx); err != nil {
+			if err := turn.WaitCompletion(ctx); err != nil {
 				t.Fatal(err)
 			}
-			_ = turn.Handle.Close()
+			_ = turn.Close()
 		})
 	}
 }

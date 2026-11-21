@@ -1110,7 +1110,7 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	releaseFinal := make(chan struct{})
 	streamSeen := make(chan bool, 1)
 	testController := stubACPController{
-		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			streamSeen <- req.Stream
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
@@ -1129,7 +1129,7 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 				handle.publishEvent(event)
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1292,7 +1292,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 
 	turnReqCh := make(chan controller.TurnRequest, 1)
 	testController := stubACPController{
-		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			turnReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
@@ -1303,7 +1303,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 				handle.publishEvent(event)
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1385,7 +1385,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 	turnCtx := session.ContextWithRuntimeFence(context.Background(), fence)
 	turnReqCh := make(chan controller.ParticipantPromptRequest, 1)
 	testController := stubACPController{
-		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			turnReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
@@ -1446,7 +1446,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 					},
 				})
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1559,12 +1559,12 @@ func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 			binding.ContextSyncSeq = 0
 			return binding, nil
 		},
-		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			_ = ctx
 			promptReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1666,10 +1666,10 @@ func TestRuntimePromptParticipantCancelCancelsControllerTurn(t *testing.T) {
 	})
 	turnReqCh := make(chan controller.ParticipantPromptRequest, 1)
 	testController := stubACPController{
-		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			_ = ctx
 			turnReqCh <- req
-			return controller.TurnResult{Handle: controllerHandle}, nil
+			return controllerHandle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1744,7 +1744,7 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 
 	testController := stubACPController{
-		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(acpControllerChunk("hel"))
@@ -1767,7 +1767,7 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 				handle.publishEvent(acpControllerChunk("hello"))
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1878,11 +1878,11 @@ func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
 			}
 			streamSeen := make(chan bool, 1)
 			testController := stubACPController{
-				runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+				runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 					streamSeen <- req.Stream
 					handle := newTestControllerTurnHandle(nil)
 					handle.finish()
-					return controller.TurnResult{Handle: handle}, nil
+					return handle, nil
 				},
 			}
 			runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1937,14 +1937,14 @@ func TestRuntimeACPControllerInterruptedTurnDoesNotPersistLocalReplaySnapshot(t 
 		t.Fatalf("BindController() error = %v", err)
 	}
 	testController := stubACPController{
-		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(acpControllerChunk("partial answer"))
 				handle.publishError(errors.New("remote stream interrupted"))
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1999,14 +1999,14 @@ func TestRuntimeACPControllerUnknownOutcomePersistsJournalAndAllowsNextTurn(t *t
 	}
 	calls := 0
 	testController := stubACPController{
-		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			calls++
 			handle := newTestControllerTurnHandle(nil)
 			if calls == 1 {
 				handle.publishError(errorcode.New(errorcode.UnknownOutcome, "remote prompt outcome cannot be proven"))
 			}
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{

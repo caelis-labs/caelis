@@ -107,25 +107,25 @@ func TestRuntimeCommitBindingPublishesReplacementRemoteBeforePrompt(t *testing.T
 	turnRequests := make(chan controller.TurnRequest, 1)
 	backend := bindingAwareACPController{
 		binding: live,
-		stubACPController: stubACPController{runTurn: func(runCtx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(runCtx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			if req.CommitBinding == nil {
-				return controller.TurnResult{}, errors.New("controller TurnRequest is missing the CommitBinding callback")
+				return nil, errors.New("controller TurnRequest is missing the CommitBinding callback")
 			}
 			if err := req.CommitBinding(runCtx); err != nil {
-				return controller.TurnResult{}, fmt.Errorf("CommitBinding() error = %w", err)
+				return nil, fmt.Errorf("CommitBinding() error = %w", err)
 			}
 			// The replacement identity must be durable while the remote turn is
 			// still live, before any completion or delivery acknowledgement.
 			duringTurn, err := store.Session(runCtx, ref)
 			if err != nil {
-				return controller.TurnResult{}, err
+				return nil, err
 			}
 			committed <- session.CloneControllerBinding(duringTurn.Controller)
 			turnRequests <- req
 			handle := newTestControllerTurnHandle(nil)
 			handle.publishEvent(assistantEvent("fresh answer"))
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		}},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -180,13 +180,13 @@ func TestRuntimeCommitBindingFailureKeepsDeliveredCheckpoint(t *testing.T) {
 	committedSeq := make(chan uint64, 1)
 	backend := bindingAwareACPController{
 		binding: live,
-		stubACPController: stubACPController{runTurn: func(runCtx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(runCtx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			if err := req.CommitBinding(runCtx); err != nil {
-				return controller.TurnResult{}, fmt.Errorf("CommitBinding() error = %w", err)
+				return nil, fmt.Errorf("CommitBinding() error = %w", err)
 			}
 			duringTurn, err := store.Session(runCtx, ref)
 			if err != nil {
-				return controller.TurnResult{}, err
+				return nil, err
 			}
 			committedSeq <- duringTurn.Controller.ContextSyncSeq
 			// The prompt that follows the pre-prompt commit fails before any
@@ -194,7 +194,7 @@ func TestRuntimeCommitBindingFailureKeepsDeliveredCheckpoint(t *testing.T) {
 			handle := newTestControllerTurnHandle(nil)
 			handle.publishError(errors.New("remote prompt rejected"))
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		}},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -230,11 +230,11 @@ func TestRuntimeCommitBindingFailureKeepsDeliveredCheckpoint(t *testing.T) {
 	rebuiltRequests := make(chan controller.TurnRequest, 1)
 	rebuiltBackend := bindingAwareACPController{
 		binding: live,
-		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			rebuiltRequests <- req
 			handle := newTestControllerTurnHandle(nil)
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		}},
 	}
 	rebuilt, err := New(testConfigWithACPForwarder(Config{
@@ -323,21 +323,21 @@ func TestRuntimeCommitBindingAbsentLeavesDurableController(t *testing.T) {
 	duringTurn := make(chan session.ControllerBinding, 1)
 	backend := bindingAwareACPController{
 		binding: live,
-		stubACPController: stubACPController{runTurn: func(runCtx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(runCtx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			if req.CommitBinding == nil {
-				return controller.TurnResult{}, errors.New("controller TurnRequest is missing the CommitBinding callback")
+				return nil, errors.New("controller TurnRequest is missing the CommitBinding callback")
 			}
 			// The backend deliberately ignores the callback: Runtime must not
 			// publish provider state the backend never committed.
 			current, err := store.Session(runCtx, ref)
 			if err != nil {
-				return controller.TurnResult{}, err
+				return nil, err
 			}
 			duringTurn <- session.CloneControllerBinding(current.Controller)
 			handle := newTestControllerTurnHandle(nil)
 			handle.publishError(errors.New("remote prompt rejected"))
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		}},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{

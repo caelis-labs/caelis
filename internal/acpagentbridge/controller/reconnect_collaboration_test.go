@@ -196,7 +196,7 @@ func TestControllerReconnectPublishesBindingBeforeCollaboration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := turn.Handle.WaitCompletion(ctx); !errors.Is(err, commitErr) {
+				if err := turn.WaitCompletion(ctx); !errors.Is(err, commitErr) {
 					t.Fatalf("commit failure = %v", err)
 				}
 				select {
@@ -235,7 +235,7 @@ func TestControllerReconnectPublishesBindingBeforeCollaboration(t *testing.T) {
 				t.Fatal(ctx.Err())
 			}
 			finishPrompt <- struct{}{}
-			if err := turn.Handle.WaitCompletion(ctx); err != nil {
+			if err := turn.WaitCompletion(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if starts != 2 {

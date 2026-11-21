@@ -218,7 +218,7 @@ func (r *Runtime) executeACPControllerTurn(
 			IsUserEcho: isACPControllerUserEcho,
 		})
 	}
-	var turnResult controller.TurnResult
+	var turnHandle controller.TurnHandle
 	var forwarding agent.ControllerEventSession
 	err = r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
 		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "acp", ""), func(turnCtx context.Context) error {
@@ -228,7 +228,7 @@ func (r *Runtime) executeACPControllerTurn(
 				return turnErr
 			}
 			turnReq.Observer = forwarding
-			turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+			turnHandle, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
 			if turnErr != nil && isMissingACPControllerRun(turnErr) {
 				if r.controllerRecovery == nil {
 					return fmt.Errorf("agent-sdk/runtime: controller recovery coordinator is unavailable")
@@ -251,7 +251,7 @@ func (r *Runtime) executeACPControllerTurn(
 						forwarding, turnErr = newForwarding(turnCtx)
 						if turnErr == nil {
 							turnReq.Observer = forwarding
-							turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+							turnHandle, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
 						}
 					}
 				}
@@ -264,14 +264,14 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(err)
 		return
 	}
-	if turnResult.Handle != nil {
+	if turnHandle != nil {
 		handle.setCancelHook(func() error {
-			return turnResult.Handle.Cancel().Err
+			return turnHandle.Cancel().Err
 		})
-		defer turnResult.Handle.Close()
+		defer turnHandle.Close()
 		admission.resolve(nil)
 		admitted = true
-		err = turnResult.Handle.WaitCompletion(ctx)
+		err = turnHandle.WaitCompletion(ctx)
 		handle.controllerCalls.closeAndWait()
 		if err == nil && forwarding != nil {
 			err = forwarding.Complete(ctx)

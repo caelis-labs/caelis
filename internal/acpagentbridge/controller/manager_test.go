@@ -1001,10 +1001,10 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTurn(empty) error = %v", err)
 	}
-	if turn.Handle == nil {
+	if turn == nil {
 		t.Fatal("RunTurn(empty) handle = nil")
 	}
-	if err := turn.Handle.WaitCompletion(context.Background()); err != nil {
+	if err := turn.WaitCompletion(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
@@ -1296,7 +1296,7 @@ func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNex
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	turnErr := turn.Handle.WaitCompletion(context.Background())
+	turnErr := turn.WaitCompletion(context.Background())
 	if turnErr == nil {
 		t.Fatal("turn error = nil, want ambiguous submitted prompt failure")
 	}
@@ -1316,7 +1316,7 @@ func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNex
 	if err != nil {
 		t.Fatalf("RunTurn(recovery) error = %v", err)
 	}
-	if eventErr := recovery.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := recovery.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("recovery turn event error = %v", eventErr)
 	}
 	if starts != 2 {
@@ -1410,10 +1410,10 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	case <-time.After(time.Second):
 		t.Fatal("first prompt was not submitted")
 	}
-	if got := first.Handle.Cancel().Status; got != controller.CancelStatusCancelled {
+	if got := first.Cancel().Status; got != controller.CancelStatusCancelled {
 		t.Fatalf("Cancel() status = %q, want %q", got, controller.CancelStatusCancelled)
 	}
-	firstErr := first.Handle.WaitCompletion(context.Background())
+	firstErr := first.WaitCompletion(context.Background())
 	if !errorcode.Is(firstErr, errorcode.UnknownOutcome) {
 		t.Fatalf("first Turn error = %v, want unknown_outcome", firstErr)
 	}
@@ -1430,7 +1430,7 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	if err != nil {
 		t.Fatalf("RunTurn(second) error = %v", err)
 	}
-	if eventErr := second.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := second.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("second Turn event error = %v", eventErr)
 	}
 	if got := promptCalls.Load(); got != 2 {
@@ -1484,7 +1484,7 @@ func TestManagerActivateKeepsControllerProcessAfterHandoffContextCancel(t *testi
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
@@ -1563,7 +1563,7 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if starts != 2 {
@@ -1679,7 +1679,7 @@ func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatal(eventErr)
 	}
 	var prompt client.PromptRequest
@@ -1774,7 +1774,7 @@ func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if starts != 2 {

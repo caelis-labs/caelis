@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"strings"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -222,16 +221,11 @@ const (
 
 type CancelResult = agent.CancelResult
 
+// TurnHandle controls the live turn and observes its terminal result.
 type TurnHandle interface {
 	Cancel() CancelResult
 	WaitCompletion(context.Context) error
 	Close() error
-}
-
-// TurnResult is one normalized ACP-controller turn result.
-type TurnResult struct {
-	Handle    TurnHandle `json:"-"`
-	UpdatedAt time.Time  `json:"updated_at,omitempty"`
 }
 
 // Backend is the runtime-facing control-plane contract for ACP-backed main
@@ -239,9 +233,9 @@ type TurnResult struct {
 type Backend interface {
 	Activate(context.Context, HandoffRequest) (session.ControllerBinding, error)
 	Deactivate(context.Context, session.SessionRef) error
-	RunTurn(context.Context, TurnRequest) (TurnResult, error)
+	RunTurn(context.Context, TurnRequest) (TurnHandle, error)
 	Attach(context.Context, AttachRequest) (session.ParticipantBinding, error)
-	PromptParticipant(context.Context, ParticipantPromptRequest) (TurnResult, error)
+	PromptParticipant(context.Context, ParticipantPromptRequest) (TurnHandle, error)
 	Detach(context.Context, DetachRequest) error
 }
 

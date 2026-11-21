@@ -605,16 +605,16 @@ func (b *recordingControllerBackend) Deactivate(context.Context, session.Session
 	return nil
 }
 
-func (*recordingControllerBackend) RunTurn(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
-	return controller.TurnResult{}, nil
+func (*recordingControllerBackend) RunTurn(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
+	return nil, nil
 }
 
 func (*recordingControllerBackend) Attach(context.Context, controller.AttachRequest) (session.ParticipantBinding, error) {
 	return session.ParticipantBinding{}, nil
 }
 
-func (*recordingControllerBackend) PromptParticipant(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
-	return controller.TurnResult{}, nil
+func (*recordingControllerBackend) PromptParticipant(context.Context, controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
+	return nil, nil
 }
 
 func (*recordingControllerBackend) Detach(context.Context, controller.DetachRequest) error {

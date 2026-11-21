@@ -205,7 +205,7 @@ func TestManagerDeactivateCancelsInFlightControllerTurn(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- turn.Handle.WaitCompletion(context.Background())
+		done <- turn.WaitCompletion(context.Background())
 	}()
 	select {
 	case <-started:
@@ -216,7 +216,7 @@ func TestManagerDeactivateCancelsInFlightControllerTurn(t *testing.T) {
 	if err := manager.Deactivate(ctx, parentSession.SessionRef); err != nil {
 		t.Fatalf("Deactivate() error = %v", err)
 	}
-	if got := turn.Handle.Cancel().Status; got != controller.CancelStatusAlreadyCancelled {
+	if got := turn.Cancel().Status; got != controller.CancelStatusAlreadyCancelled {
 		t.Fatalf("Cancel() after Deactivate status = %q, want %q", got, controller.CancelStatusAlreadyCancelled)
 	}
 	rejected := newTestTurnHandle(nil)
