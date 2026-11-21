@@ -68,7 +68,7 @@ func (r *sessionCancelRunner) Wait(context.Context, delegation.Anchor, int) (del
 
 func startSessionCancelChild(t *testing.T, r *Runtime, active session.Session, runner subagent.Runner, spawnID string) taskapi.Snapshot {
 	t.Helper()
-	active, err := r.ensureSessionController(t.Context(), active)
+	active, err := r.ensureSessionController(t.Context(), active, session.RuntimeMutationGuard(t.Context()))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -112,7 +112,7 @@ func (r *Runtime) StartSubagentWithOptions(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	activeSession, err = r.ensureSessionController(ctx, activeSession)
+	activeSession, err = r.ensureSessionController(ctx, activeSession, session.RuntimeMutationGuard(ctx))
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}

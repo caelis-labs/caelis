@@ -13,11 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (r *Runtime) ensureSessionController(ctx context.Context, activeSession session.Session) (session.Session, error) {
-	return r.ensureSessionControllerWithGuard(ctx, activeSession, session.RuntimeMutationGuard(ctx))
-}
-
-func (r *Runtime) ensureSessionControllerWithGuard(
+func (r *Runtime) ensureSessionController(
 	ctx context.Context,
 	activeSession session.Session,
 	mutationGuard session.MutationGuard,
@@ -31,11 +27,11 @@ func (r *Runtime) ensureSessionControllerWithGuard(
 	return r.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef:    activeSession.SessionRef,
 		MutationGuard: mutationGuard,
-		Binding:       r.kernelControllerBinding("runtime"),
+		Binding:       r.kernelControllerBinding(),
 	})
 }
 
-func (r *Runtime) kernelControllerBinding(source string) session.ControllerBinding {
+func (r *Runtime) kernelControllerBinding() session.ControllerBinding {
 	return session.ControllerBinding{
 		Kind:         session.ControllerKindKernel,
 		ControllerID: "sdk-kernel",
@@ -43,7 +39,7 @@ func (r *Runtime) kernelControllerBinding(source string) session.ControllerBindi
 		Label:        "SDK Kernel",
 		EpochID:      r.nextID("kernel", nil),
 		AttachedAt:   r.now(),
-		Source:       firstNonEmpty(strings.TrimSpace(source), "runtime"),
+		Source:       "runtime",
 	}
 }
 
@@ -229,7 +225,7 @@ func (r *Runtime) executeACPControllerTurn(
 			}
 			turnReq.Observer = forwarding
 			turnHandle, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
-			if turnErr != nil && isMissingACPControllerRun(turnErr) {
+			if errors.Is(turnErr, controller.ErrNotActive) {
 				if r.controllerRecovery == nil {
 					return fmt.Errorf("agent-sdk/runtime: controller recovery coordinator is unavailable")
 				}

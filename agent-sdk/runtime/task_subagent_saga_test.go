@@ -1075,7 +1075,7 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 		},
 		Event: &session.Event{
 			Type: session.EventTypeParticipant, Visibility: session.VisibilityMirror, Time: time.Now(),
-			Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
+			Protocol: new(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
 			Scope:    &session.EventScope{Participant: session.ParticipantRef{ID: "child-agent-saga", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleSidecar, DelegationID: taskID}},
 		},
 	}); err != nil {

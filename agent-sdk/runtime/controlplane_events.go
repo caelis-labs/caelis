@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 
@@ -26,10 +25,6 @@ func participantBinding(activeSession session.Session, participantID string) (se
 	return session.ParticipantBinding{}, false
 }
 
-func participantBindingLabel(binding session.ParticipantBinding) string {
-	return firstNonEmpty(strings.TrimSpace(binding.Label), strings.TrimSpace(binding.AgentName), strings.TrimSpace(binding.ID))
-}
-
 func participantLifecycleEvent(activeSession session.Session, binding session.ParticipantBinding, action string, now time.Time) *session.Event {
 	text := strings.TrimSpace(action + " participant " + firstNonEmpty(binding.Label, binding.ID))
 	return &session.Event{
@@ -39,7 +34,7 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 		Time:           now,
 		Actor:          session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Text:           text,
-		Protocol:       ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
+		Protocol:       new(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
 		Scope: &session.EventScope{
 			Source: "control_plane",
 			Controller: session.ControllerRef{
@@ -82,15 +77,6 @@ func participantLifecycleIdempotencyKey(activeSession session.Session, binding s
 	}, "\x00")
 	sum := sha256.Sum256([]byte(raw))
 	return "participant-lifecycle-" + hex.EncodeToString(sum[:12])
-}
-
-func ptrEventProtocol(protocol session.EventProtocol) *session.EventProtocol {
-	out := session.CloneEventProtocol(protocol)
-	return &out
-}
-
-func isMissingACPControllerRun(err error) bool {
-	return errors.Is(err, controller.ErrNotActive)
 }
 
 type controllerApprovalRequester struct {

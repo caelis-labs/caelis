@@ -69,7 +69,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 			IdempotencyKey: "subagent-participant:" + task.ref.TaskID + ":attached",
 			Type:           session.EventTypeParticipant, Visibility: session.VisibilityMirror, Time: tm.runtime.now(),
 			Actor:    session.ActorRef{Kind: session.ActorKindSystem, ID: "spawn", Name: "spawn"},
-			Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
+			Protocol: new(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
 			Scope: &session.EventScope{Participant: session.ParticipantRef{
 				ID: strings.TrimSpace(task.anchor.AgentID), Kind: session.ParticipantKindSubagent,
 				Role: role, DelegationID: strings.TrimSpace(task.ref.TaskID),
@@ -118,7 +118,7 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 			ID:   "spawn",
 			Name: "spawn",
 		},
-		Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
+		Protocol: new(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
 		Scope: &session.EventScope{
 			Participant: session.ParticipantRef{
 				ID:           strings.TrimSpace(task.anchor.AgentID),

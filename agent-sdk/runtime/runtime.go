@@ -244,7 +244,7 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	activeSession, err = r.ensureSessionController(ctx, activeSession)
+	activeSession, err = r.ensureSessionController(ctx, activeSession, session.RuntimeMutationGuard(ctx))
 	if err != nil {
 		return agent.RunResult{}, err
 	}
