@@ -230,7 +230,7 @@ func (s *Store) validateCallResult(ctx context.Context, call Call, result CallRe
 		return err
 	}
 	// Count both projected blocks with the original combined receipt budget.
-	envelope := resultReceipt(call.CallContext, result.Outcome, references)
+	envelope := resultReceipt(call.ID, result.Outcome, references)
 	if result.StructuredContent != nil {
 		envelope["structuredContent"] = result.StructuredContent
 	}

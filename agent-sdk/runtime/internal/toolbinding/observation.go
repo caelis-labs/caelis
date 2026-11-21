@@ -36,10 +36,10 @@ func Observed(ctx context.Context) *Observation {
 	return new(Observation)
 }
 
-// Apply records the catalog format and the admitted discovery marker on the Session fact.
+// Apply records the declared result layout and admitted discovery on the Session fact.
 func (o *Observation) Apply(fact *session.EventTool, def tool.Definition, success bool) {
 	fact.Discovery = o.Discovery && success
-	fact.ResultFormat, _ = def.Metadata[tool.MetadataResultFormat].(string)
+	fact.ResultIncludesReceipt = def.ResultIncludesReceipt
 }
 
 // EventMeta builds the presentation data attached to the Session event.

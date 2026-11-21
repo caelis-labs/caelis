@@ -19,7 +19,7 @@ func TestManagerPublishesAllReadyToolsAcrossServersAndDiscovery(t *testing.T) {
 			}
 		}
 		mgr.servers = append(mgr.servers, &managedServer{
-			spec: ServerSpec{PluginID: "fixture", Name: serverName}, client: &Client{}, listed: listed,
+			spec: ServerSpec{PluginID: "fixture", Name: serverName}, client: &Client{catalog: &clientCatalog{}}, catalogReady: true, listed: listed,
 		})
 	}
 	mgr.rebuildToolsLocked()
@@ -38,7 +38,7 @@ func TestManagerPublishesAllReadyToolsAcrossServersAndDiscovery(t *testing.T) {
 
 func TestManagerMCPSourceFingerprintChangesWithConnectionAndSchema(t *testing.T) {
 	definition := func(spec ServerSpec, schema map[string]any) string {
-		mgr := &Manager{warnings: map[string][]string{}, servers: []*managedServer{{spec: spec, client: &Client{}, listed: []*mcpsdk.Tool{{Name: "read", InputSchema: schema}}}}}
+		mgr := &Manager{warnings: map[string][]string{}, servers: []*managedServer{{spec: spec, client: &Client{catalog: &clientCatalog{}}, catalogReady: true, listed: []*mcpsdk.Tool{{Name: "read", InputSchema: schema}}}}}
 		mgr.rebuildToolsLocked()
 		ready := mgr.Tools()
 		if len(ready) != 1 {

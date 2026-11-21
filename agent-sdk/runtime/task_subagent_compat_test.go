@@ -15,13 +15,18 @@ func TestSubagentLegacySpawnResultFileRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		turn       int64
+		metaTurn   int64
 		result     map[string]any
 		wantFinal  string
 		wantResult string
 	}{
 		{name: "first activity missing result", turn: 1, wantFinal: "legacy final", wantResult: "legacy result"},
+		{name: "legacy record with no sequence defaults to first", wantFinal: "legacy final", wantResult: "legacy result"},
 		{name: "first activity preserves canonical fields", turn: 1, result: map[string]any{"final_message": "canonical final"}, wantFinal: "canonical final", wantResult: "legacy result"},
 		{name: "later activity ignores first result", turn: 2},
+		{name: "later spec activity beats first legacy activity", turn: 2, metaTurn: 1},
+		{name: "legacy later activity ignores first result", metaTurn: 2},
+		{name: "spec activity takes precedence over legacy activity", turn: 1, metaTurn: 2, wantFinal: "legacy final", wantResult: "legacy result"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
@@ -50,8 +55,15 @@ func TestSubagentLegacySpawnResultFileRoundTrip(t *testing.T) {
 				t.Fatal("current producer persists a duplicate spawn result")
 			}
 			entry.Spec["spawn_result"] = map[string]any{"final_message": "legacy final", "result": "legacy result"}
-			entry.Spec["turn_seq"] = tc.turn
-			entry.Spec["turn_id"] = subagentTurnID(entry.TaskID, tc.turn)
+			delete(entry.Spec, "turn_seq")
+			delete(entry.Spec, "turn_id")
+			if tc.turn > 0 {
+				entry.Spec["turn_seq"] = tc.turn
+				entry.Spec["turn_id"] = subagentTurnID(entry.TaskID, tc.turn)
+			}
+			if tc.metaTurn > 0 {
+				entry.Metadata["turn_seq"] = tc.metaTurn
+			}
 			entry.Result = session.CloneState(tc.result)
 			if _, err := rt.tasks.store.(taskapi.CASStore).Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: entry.Revision}); err != nil {
 				t.Fatal(err)

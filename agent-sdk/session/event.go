@@ -77,16 +77,16 @@ type EventTool struct {
 	ID           string          `json:"id,omitempty"`
 	// Discovery marks a successful Runtime directory lookup for restoring MCP bindings.
 	Discovery bool `json:"discovery,omitempty"`
-	// ResultFormat is the presentation format declared by the bound tool.
-	ResultFormat string              `json:"result_format,omitempty"`
-	Name         string              `json:"name,omitempty"`
-	Kind         string              `json:"kind,omitempty"`
-	Title        string              `json:"title,omitempty"`
-	Status       string              `json:"status,omitempty"`
-	Input        map[string]any      `json:"input,omitempty"`
-	Output       map[string]any      `json:"output,omitempty"`
-	Content      []EventToolContent  `json:"content,omitempty"`
-	Locations    []EventToolLocation `json:"locations,omitempty"`
+	// ResultIncludesReceipt records the bound tool's layout for replay.
+	ResultIncludesReceipt bool                `json:"result_includes_receipt,omitempty"`
+	Name                  string              `json:"name,omitempty"`
+	Kind                  string              `json:"kind,omitempty"`
+	Title                 string              `json:"title,omitempty"`
+	Status                string              `json:"status,omitempty"`
+	Input                 map[string]any      `json:"input,omitempty"`
+	Output                map[string]any      `json:"output,omitempty"`
+	Content               []EventToolContent  `json:"content,omitempty"`
+	Locations             []EventToolLocation `json:"locations,omitempty"`
 }
 
 // UnmarshalJSON preserves numeric tokens only in the observed tool input. The
@@ -98,8 +98,9 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 	// float64 (which can reject a valid JSON number such as 1e1000).
 	fields := struct {
 		*toolAlias
-		Input  json.RawMessage `json:"input"`
-		Result json.RawMessage `json:"result"`
+		Input              json.RawMessage `json:"input"`
+		Result             json.RawMessage `json:"result"`
+		LegacyResultFormat string          `json:"result_format"`
 	}{toolAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -136,13 +137,18 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 			}
 			_ = json.Unmarshal(previous.Metadata, &meta)
 			decoded.Discovery = decoded.Discovery || meta.Discovery
-			if decoded.ResultFormat == "" {
-				decoded.ResultFormat = meta.Callback.Format
+			if fields.LegacyResultFormat == "" {
+				fields.LegacyResultFormat = meta.Callback.Format
 			}
 		}
 		if decoded.Outcome == "" && previous.IsError {
 			decoded.Outcome = ToolOutcomeFailed
 		}
+	}
+	// Existing logs can carry the former layout marker on the fact or within
+	// result.metadata. Normalize both encodings when reading Session history.
+	if fields.LegacyResultFormat == "content-v1" {
+		decoded.ResultIncludesReceipt = true
 	}
 	*t = EventTool(decoded)
 	return nil

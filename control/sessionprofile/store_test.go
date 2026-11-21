@@ -89,7 +89,7 @@ func TestApplicationReceiptPersistsOnOriginalCall(t *testing.T) {
 	if err != nil || call.State != "completed" || call.Result == nil || string(call.Result.Content) != string(result.Content) || call.ID != id {
 		t.Fatalf("recovered original call = %+v, %v", call, err)
 	}
-	projected, err := reopened.projectResult(t.Context(), provenance, "", *call.Result)
+	projected, err := reopened.projectResult(t.Context(), provenance, call.ID, "", *call.Result)
 	if err != nil || len(projected.Content) != 1 {
 		t.Fatalf("projected callback content = %+v, %v", projected, err)
 	}
@@ -179,11 +179,11 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	// Retrying exact completed intent returns its result without granting another claim.
-	result, err := s.Invoke(ctx, call.CallContext, call.Name, call.Arguments)
-	if err != nil || !reflect.DeepEqual(result, testResult()) {
+	result, receiptID, err := s.invoke(ctx, call.CallContext, call.Name, call.Arguments)
+	if err != nil || receiptID != call.ID || !reflect.DeepEqual(result, testResult()) {
 		t.Fatalf("requery = %+v %v", result, err)
 	}
-	_, err = s.Invoke(ctx, call.CallContext, call.Name, json.RawMessage(`{"note":"different"}`))
+	_, _, err = s.invoke(ctx, call.CallContext, call.Name, json.RawMessage(`{"note":"different"}`))
 	assertError(t, err, ErrConflict)
 	changed := call.CallContext
 	changed.TurnID = "other-turn"
@@ -378,7 +378,7 @@ func TestA06InvalidAdmissionPersistsNoIntent(t *testing.T) {
 			if tc.change != nil {
 				tc.change(&cc)
 			}
-			_, err := s.Invoke(t.Context(), cc, tc.tool, json.RawMessage(tc.args))
+			_, _, err := s.invoke(t.Context(), cc, tc.tool, json.RawMessage(tc.args))
 			assertError(t, err, tc.want)
 		})
 	}

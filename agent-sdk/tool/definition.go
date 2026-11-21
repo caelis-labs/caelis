@@ -6,9 +6,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
 
-// MetadataResultFormat is an optional declared display format retained on Session tool facts.
-const MetadataResultFormat = "caelis.result_format"
-
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {
@@ -19,6 +16,9 @@ type Definition struct {
 	// of ordered text and media content. It is not a provider input declaration.
 	OutputSchema map[string]any `json:"output_schema,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
+	// ResultIncludesReceipt declares a result layout in which the tool appends
+	// a text receipt to its content, followed by optional structured data.
+	ResultIncludesReceipt bool `json:"-"`
 }
 
 // CloneDefinition returns one deep copy of one definition.
