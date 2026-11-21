@@ -43,7 +43,7 @@ func TestApplicationCompactUsesProfileModelAndSharedCheckpointReplay(t *testing.
 		t.Fatal(err)
 	}
 	event, present := latestGatewayAppCompactEvent(loaded.Events)
-	data, valid := compact.CompactEventDataFromEvent(event)
+	data, valid := session.CheckpointDataFromEvent(event)
 	if !present || !valid || data.Trigger != "manual" || data.SourceEventCount == 0 {
 		t.Fatalf("native checkpoint metadata: %+v", event)
 	}

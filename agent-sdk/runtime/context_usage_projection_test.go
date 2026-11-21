@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -22,8 +21,8 @@ func TestContextUsageProjectionMatchesFullHistoryAtEveryCut(t *testing.T) {
 		{ID: "result", Type: session.EventTypeToolResult, Message: message(model.RoleTool, model.NewToolResultJSONPart("call", "read", map[string]any{"text": strings.Repeat("payload 中", 500)}, false))},
 		{ID: "other", Type: session.EventTypeAssistant, Message: message(model.RoleAssistant, model.NewTextPart("other model output")), Invocation: &session.EventInvocation{Provider: "fixture", Model: "two"}, Meta: map[string]any{"prompt_tokens": 300, "total_tokens": 320, "completion_tokens": 20}},
 		session.NewModelInvocationReceipt(model.Invocation{ID: "receipt", Provider: "fixture", Model: "one", Usage: model.Usage{PromptTokens: 7000, CompletionTokens: 30, TotalTokens: 7030}}, "main"),
-		{ID: "compact", Type: session.EventTypeCompact, Text: "checkpoint replacement", Meta: map[string]any{compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{ContractVersion: 1, SummarizedThroughSeq: 2})}},
-		{ID: "next-compact", Type: session.EventTypeCompact, Text: "new checkpoint", Meta: map[string]any{compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{ContractVersion: 1, SummarizedThroughSeq: 4})}},
+		{ID: "compact", Type: session.EventTypeCompact, Text: "checkpoint replacement", Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{ContractVersion: 1, SummarizedThroughSeq: 2})}},
+		{ID: "next-compact", Type: session.EventTypeCompact, Text: "new checkpoint", Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{ContractVersion: 1, SummarizedThroughSeq: 4})}},
 		{ID: "next-user", Type: session.EventTypeUser, Message: message(model.RoleUser, model.NewTextPart("new input"))},
 	}
 	var projection ContextUsageProjection

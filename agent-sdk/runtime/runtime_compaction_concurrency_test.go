@@ -31,7 +31,7 @@ func (c *blockingRevisionCompactor) Force(_ context.Context, req compact.Request
 	c.started <- req
 	<-c.release
 	covered := session.LastEventSeq(req.Events)
-	event := buildCompactEvent(req.Session, "CONTEXT CHECKPOINT\nsummary through source revision", compact.CompactEventData{
+	event := buildCompactEvent(req.Session, "CONTEXT CHECKPOINT\nsummary through source revision", session.CheckpointData{
 		ContractVersion:      compact.CompactContractVersion,
 		SummarizedThroughSeq: covered,
 		SummarizedThroughID:  lastEventID(req.Events),
@@ -164,7 +164,7 @@ func TestCompactionReplayRoundTripKeepsConcurrentCoveredSequenceSuccessor(t *tes
 		t.Fatalf("Session() error = %v", err)
 	}
 	checkpointMessage := model.NewTextMessage(model.RoleUser, normalizeCompactMarkdown("CONTEXT CHECKPOINT\nsummary through Seq 10"))
-	checkpoint := buildCompactEvent(current, checkpointMessage.TextContent(), compact.CompactEventData{
+	checkpoint := buildCompactEvent(current, checkpointMessage.TextContent(), session.CheckpointData{
 		ContractVersion:      compact.CompactContractVersion,
 		SummarizedThroughSeq: 10,
 		SourceEventCount:     10,

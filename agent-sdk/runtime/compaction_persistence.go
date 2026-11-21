@@ -45,7 +45,7 @@ func (r *Runtime) persistContextArtifactUsing(ctx context.Context, active *sessi
 		event.ID = r.nextID("compact", nil)
 	}
 	if strings.TrimSpace(event.IdempotencyKey) == "" {
-		if data, ok := compact.CompactEventDataFromEvent(event); ok && data.SummarizedThroughSeq > 0 {
+		if data, ok := session.CheckpointDataFromEvent(event); ok && data.SummarizedThroughSeq > 0 {
 			event.IdempotencyKey = fmt.Sprintf("compact:%d:%s:%s", data.SummarizedThroughSeq, data.Generator, data.Trigger)
 		}
 	}

@@ -381,7 +381,7 @@ func systemManagedAgentConversationEvents(events []*session.Event) []*session.Ev
 		cloned.Time = time.Time{}
 		cloned.Scope = nil
 		if compact.IsCompactEvent(cloned) && cloned.Meta != nil {
-			delete(cloned.Meta, compact.MetaKeyCompact)
+			delete(cloned.Meta, session.CheckpointMetadataKey)
 			if len(cloned.Meta) == 0 {
 				cloned.Meta = nil
 			}

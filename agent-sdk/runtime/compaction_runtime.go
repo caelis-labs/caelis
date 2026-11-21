@@ -371,7 +371,7 @@ func compactionProgressFromEvent(event *session.Event) compactionProgress {
 	progress := compactionProgress{
 		eventID: strings.TrimSpace(event.ID),
 	}
-	if data, ok := compact.CompactEventDataFromEvent(event); ok {
+	if data, ok := session.CheckpointDataFromEvent(event); ok {
 		progress.hasCompactData = true
 		progress.sourceEventCount = data.SourceEventCount
 		progress.summarizedThroughID = strings.TrimSpace(data.SummarizedThroughID)
