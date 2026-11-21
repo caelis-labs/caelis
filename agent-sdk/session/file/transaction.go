@@ -478,25 +478,23 @@ func readEventLogTransactionTail(
 	if _, err := file.ReadAt(lastByte[:], info.Size()-1); err != nil {
 		return 0, nil, err
 	}
-	tailComplete := lastByte[0] == '\n'
-	firstRecord := true
+	skipTail := lastByte[0] != '\n'
 	var throughSeq uint64
 	bySeq := map[uint64]*session.Event{}
 
 	consume := func(raw []byte) (bool, error) {
-		trimmed := bytes.TrimSpace(raw)
-		if len(trimmed) == 0 {
+		if skipTail {
+			skipTail = false
 			return false, nil
 		}
-		if firstRecord && !tailComplete {
-			firstRecord = false
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 {
 			return false, nil
 		}
 		event, err := decodeIndexedEvent(trimmed, path, 0)
 		if err != nil {
 			return false, err
 		}
-		firstRecord = false
 		if throughSeq == 0 {
 			throughSeq = event.Seq
 		}

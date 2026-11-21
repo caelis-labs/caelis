@@ -157,13 +157,16 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 		}
 		lineStart := offset
 		line, readErr := reader.ReadString('\n')
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return session.EventPage{}, readErr
+		}
 		offset += int64(len(line))
 		lineNo++
 		if len(line) > 0 && s.eventPageLineRead != nil {
 			s.eventPageLineRead(path, lineNo, lineStart)
-		}
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return session.EventPage{}, readErr
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
@@ -171,9 +174,6 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 				Seq uint64 `json:"seq"`
 			}
 			if err := json.Unmarshal([]byte(trimmed), &header); err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
 				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d header: %w", path, lineNo, err)
 			}
 			// A finite read owns only its durable cut. In particular, history
@@ -188,9 +188,6 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 			lineCheckpoint := newEventPageCheckpoint(header.Seq, lineStart, offset, lineNo, line)
 			if header.Seq > 0 && header.Seq <= req.AfterSeq {
 				lastConsumed = lineCheckpoint
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
 				continue
 			}
 			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
@@ -198,16 +195,10 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 			}
 			migratedRaw, err := session.MigrateEventJSON(json.RawMessage(trimmed))
 			if err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
 				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
 			}
 			var event session.Event
 			if err := json.Unmarshal(migratedRaw, &event); err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
 				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d: %w", path, lineNo, err)
 			}
 			if err := session.ValidateDurableCoreEvent(&event); err != nil {
@@ -227,9 +218,6 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 			if req.ThroughSeq > 0 && header.Seq == req.ThroughSeq {
 				break
 			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
 		}
 	}
 	endInfo, err := os.Stat(path)
@@ -348,38 +336,31 @@ func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.
 	buf := make([]byte, chunkSize)
 	var suffix []byte
 	position := info.Size()
-	tailComplete := false
 	var lastByte [1]byte
 	if _, err := file.ReadAt(lastByte[:], info.Size()-1); err != nil {
 		return 0, nil, err
 	}
-	tailComplete = lastByte[0] == '\n'
-	firstRecord := true
+	skipTail := lastByte[0] != '\n'
 	var throughSeq uint64
 	var lastReplay *session.Event
 
 	consume := func(raw []byte) (bool, error) {
+		if skipTail {
+			skipTail = false
+			return false, nil
+		}
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			return false, nil
 		}
 		migrated, err := session.MigrateEventJSON(json.RawMessage(trimmed))
 		if err != nil {
-			if firstRecord && !tailComplete {
-				firstRecord = false
-				return false, nil
-			}
 			return false, fmt.Errorf("agent-sdk/session/file: migrate event checkpoint %s: %w", path, err)
 		}
 		var event session.Event
 		if err := json.Unmarshal(migrated, &event); err != nil {
-			if firstRecord && !tailComplete {
-				firstRecord = false
-				return false, nil
-			}
 			return false, fmt.Errorf("agent-sdk/session/file: decode event checkpoint %s: %w", path, err)
 		}
-		firstRecord = false
 		if err := session.ValidateDurableCoreEvent(&event); err != nil {
 			return false, fmt.Errorf("agent-sdk/session/file: invalid event checkpoint %s: %w", path, err)
 		}
