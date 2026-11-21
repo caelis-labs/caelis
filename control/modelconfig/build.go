@@ -13,22 +13,31 @@ type ModelResolution struct {
 	DefaultReasoningEffort string
 }
 
+// ModelBuildOptions supplies the Host build identity and context-window policy.
+type ModelBuildOptions struct {
+	ClientVersion         string
+	FallbackContextWindow int
+	OverrideContextWindow int
+}
+
 // BuildModel constructs an SDK model from a complete Control configuration.
-// overrideContextWindow wins over the configured and host fallback values.
-func BuildModel(cfg Config, fallbackContextWindow int, overrideContextWindow int) (ModelResolution, error) {
+// OverrideContextWindow wins over the configured and host fallback values.
+func BuildModel(cfg Config, opts ModelBuildOptions) (ModelResolution, error) {
 	cfg = NormalizeConfig(cfg)
-	effectiveContextWindow := fallbackContextWindow
+	effectiveContextWindow := opts.FallbackContextWindow
 	if cfg.ContextWindowTokens > 0 {
 		effectiveContextWindow = cfg.ContextWindowTokens
 	}
-	if overrideContextWindow > 0 {
-		effectiveContextWindow = overrideContextWindow
+	if opts.OverrideContextWindow > 0 {
+		effectiveContextWindow = opts.OverrideContextWindow
 	}
 	llm, err := providers.New(providers.Config{
 		Provider:                cfg.Provider,
 		API:                     cfg.API,
 		Model:                   cfg.Model,
 		BaseURL:                 cfg.BaseURL,
+		Headers:                 providerAttributionHeaders(cfg.API),
+		UserAgent:               providerUserAgent(opts.ClientVersion),
 		HTTPClient:              cfg.HTTPClient,
 		Timeout:                 cfg.Timeout,
 		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,

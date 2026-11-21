@@ -30,8 +30,8 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		if r.URL.Path != "/responses" {
 			t.Errorf("path = %q, want /responses", r.URL.Path)
 		}
-		if got := r.Header.Get("originator"); got != "caelis" {
-			t.Errorf("originator = %q, want caelis", got)
+		if got := r.Header.Get("originator"); got != "test-product" {
+			t.Errorf("originator = %q, want test-product", got)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
 			t.Errorf("Authorization = %q, want injected bearer", got)
@@ -96,6 +96,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		Model:      "gpt-5.4",
 		BaseURL:    server.URL,
 		HTTPClient: client,
+		Headers:    map[string]string{"originator": "test-product"},
 		Auth:       AuthConfig{Type: AuthOAuthToken},
 	})
 	if err != nil {

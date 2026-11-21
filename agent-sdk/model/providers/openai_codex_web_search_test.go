@@ -18,8 +18,8 @@ func TestOpenAICodexSearchWebUsesStandaloneSearchEndpoint(t *testing.T) {
 		if r.URL.Path != "/alpha/search" {
 			t.Errorf("path = %q, want /alpha/search", r.URL.Path)
 		}
-		if got := r.Header.Get("originator"); got != "caelis" {
-			t.Errorf("originator = %q, want caelis", got)
+		if got := r.Header.Get("originator"); got != "test-product" {
+			t.Errorf("originator = %q, want test-product", got)
 		}
 		if got := r.Header.Get("session-id"); got != "search-session" {
 			t.Errorf("session-id = %q, want search-session", got)
@@ -54,6 +54,7 @@ func TestOpenAICodexSearchWebUsesStandaloneSearchEndpoint(t *testing.T) {
 		Model:      "gpt-5.4",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
+		Headers:    map[string]string{"originator": "test-product"},
 	})
 	llm := model.WithRetry(inner, model.RetryConfig{})
 	searcher, ok := llm.(model.WebSearcher)

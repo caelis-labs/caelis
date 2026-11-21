@@ -18,12 +18,13 @@ var ErrOllamaUnreachable = errorcode.New(errorcode.Unavailable, "Cannot reach Ol
 var ErrOllamaAPINotFound = errorcode.New(errorcode.NotFound, "Ollama model API not found. Check the selected endpoint and retry.")
 
 // selectableOllamaModels discovers installed models from the selected endpoint.
-func selectableOllamaModels(ctx context.Context, baseURL string, client *http.Client) ([]SelectableModel, error) {
+func selectableOllamaModels(ctx context.Context, baseURL string, client *http.Client, clientVersion string) ([]SelectableModel, error) {
 	remote, err := providers.DiscoverModels(ctx, providers.Config{
 		Provider:   "ollama",
 		API:        providers.APIOllama,
 		BaseURL:    baseURL,
 		HTTPClient: client,
+		UserAgent:  providerUserAgent(clientVersion),
 		Auth:       providers.AuthConfig{Type: providers.AuthNone},
 	})
 	if err != nil {

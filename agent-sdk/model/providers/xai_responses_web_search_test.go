@@ -40,6 +40,9 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 		if got := r.Header.Get("originator"); got != "" {
 			t.Errorf("originator = %q, want empty", got)
 		}
+		if got := r.Header.Get("User-Agent"); got != "test-product/1" {
+			t.Errorf("User-Agent = %q, want test-product/1", got)
+		}
 		identity := wireIdentity{
 			conversationID: r.Header.Get("x-grok-conv-id"),
 			requestID:      r.Header.Get("x-grok-req-id"),
@@ -95,7 +98,7 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
 	llm, err := New(Config{
-		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
+		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5", UserAgent: "test-product/1",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768,
 		Auth: AuthConfig{Type: AuthOAuthToken},
 	})

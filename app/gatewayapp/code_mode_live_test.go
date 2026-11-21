@@ -79,7 +79,7 @@ func TestCodeModeLive(t *testing.T) {
 	// No Client.Timeout or shorter outer/header context. Each Generate below has
 	// its own 600-second budget, including selector generations; no client retry.
 	cfg.HTTPClient = &http.Client{Transport: &codeLiveTransport{base: http.DefaultTransport, root: root}}
-	resolved, err := modelconfig.BuildModel(cfg, 0, 0)
+	resolved, err := modelconfig.BuildModel(cfg, modelconfig.ModelBuildOptions{})
 	if err != nil {
 		t.Fatal("model construction: " + string(errorcode.CodeOf(err)))
 	}

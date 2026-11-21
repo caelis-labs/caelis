@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/version"
 )
 
 func (s *controlCommandBackend) executeHostModelConfigurationCommand(ctx context.Context, action appserver.Action, request any) (appserver.CommandResult, error) {
@@ -150,6 +151,7 @@ func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cf
 	}
 	assembled, err := modelconfig.AssembleConnect(ctx, modelconfig.ConnectRequest{
 		Provider:                       cfg.Provider,
+		ClientVersion:                  version.String(),
 		EndpointID:                     cfg.EndpointID,
 		Models:                         hostConnectModelSelections(cfg),
 		BaseURL:                        cfg.BaseURL,

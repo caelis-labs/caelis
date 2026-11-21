@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/internal/version"
 )
 
 // ConnectionModels reads the same endpoint-scoped catalog used by connection
 // assembly. Retained credentials are resolved privately and never returned to
 // a presentation client or saved as new connection input.
 func (s ModelService) ConnectionModels(ctx context.Context, req modelconfig.ConnectRequest) ([]modelconfig.SelectableModel, error) {
+	req.ClientVersion = version.String()
 	template, ok := modelconfig.LookupProvider(req.Provider)
 	if !ok || template.Provider != "magpie" || req.APIKey != "" || s.composition == nil {
 		return modelconfig.SelectableModels(ctx, req)

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/controlserver"
@@ -75,7 +74,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if len(args) > 0 && args[0] == "collaboration" {
 		return runCollaboration(ctx, args[1:], stdin, stdout)
 	}
-	providers.SetAttributionBuildVersion(version.String())
 	return run(ctx, args, stdin, stdout, stderr)
 }
 

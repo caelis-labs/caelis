@@ -23,6 +23,7 @@ type openAICompatLLM struct {
 	baseURL             string
 	token               string
 	headers             map[string]string
+	userAgent           string
 	client              *http.Client
 	requestTimeout      time.Duration
 	firstEventTimeout   time.Duration
@@ -77,6 +78,7 @@ func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 		baseURL:             strings.TrimRight(cfg.BaseURL, "/"),
 		token:               token,
 		headers:             cloneHeaders(cfg.Headers),
+		userAgent:           cfg.UserAgent,
 		client:              coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:      cfg.Timeout,
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
@@ -187,7 +189,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		applyDefaultAttributionHeaders(httpReq, l.api)
+		setUserAgent(httpReq, l.userAgent)
 		applyDefaultAuthHeader(httpReq, Config{API: l.api, Provider: l.provider}, l.token, false)
 		applyConfiguredHeaders(httpReq, l.headers)
 

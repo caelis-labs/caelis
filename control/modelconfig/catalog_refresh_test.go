@@ -40,7 +40,7 @@ func TestCodex61ConnectContextDefaultsAndExplicitOverrides(t *testing.T) {
 			if cfg.ContextWindowTokens != tc.want || cfg.Model != tc.model {
 				t.Fatalf("connected config = %#v, want original model ID and window %d", cfg, tc.want)
 			}
-			resolved, err := BuildModel(cfg, 128000, 0)
+			resolved, err := BuildModel(cfg, ModelBuildOptions{FallbackContextWindow: 128000})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +81,7 @@ func TestBuildSol61ContextWindowPrecedence(t *testing.T) {
 				Model:               "gpt-6.1-sol",
 				HTTPClient:          &http.Client{},
 				ContextWindowTokens: tc.configured,
-			}, 128000, tc.override)
+			}, ModelBuildOptions{FallbackContextWindow: 128000, OverrideContextWindow: tc.override})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -456,7 +456,7 @@ func guardianCommandE2EModel(t *testing.T, alias string) (model.LLM, *guardianRe
 	wire := &guardianReasoningTransport{inner: http.DefaultTransport}
 	cfg := guardianLiveModelConfig(t, alias, &http.Client{Transport: wire})
 	cfg.ReasoningEffort, cfg.DefaultReasoningEffort, cfg.ReasoningMode = "", "", ""
-	resolved, err := modelconfig.BuildModel(cfg, 0, 0)
+	resolved, err := modelconfig.BuildModel(cfg, modelconfig.ModelBuildOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

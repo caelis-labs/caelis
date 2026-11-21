@@ -67,6 +67,9 @@ type Config struct {
 	Headers    map[string]string
 	HTTPClient *http.Client
 	Timeout    time.Duration
+	// UserAgent is the caller's product identity for model discovery and
+	// direct HTTP adapters. SDK-managed generation uses its library's identity.
+	UserAgent string
 	// StreamResponseHeaderTimeout bounds the wait for an HTTP streaming
 	// response to return headers. It does not bound the lifetime of the body.
 	StreamResponseHeaderTimeout time.Duration

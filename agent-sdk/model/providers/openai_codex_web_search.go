@@ -95,11 +95,11 @@ func (l *openAICodexLLM) SearchWeb(ctx context.Context, req model.WebSearchReque
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
-	setHeaderDefault(httpReq.Header, "originator", "caelis")
+
 	if requestAffinity != "" {
-		setHeaderDefault(httpReq.Header, "session-id", requestAffinity)
+		httpReq.Header.Set("session-id", requestAffinity)
 	}
-	applyDefaultAttributionHeaders(httpReq, APIOpenAICodex)
+	setUserAgent(httpReq, l.userAgent)
 	applyConfiguredHeaders(httpReq, l.headers)
 
 	resp, err := l.client.Do(httpReq)

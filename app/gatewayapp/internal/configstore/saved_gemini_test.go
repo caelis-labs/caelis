@@ -31,7 +31,7 @@ func TestSavedGeminiImageCapabilitySurvivesLoadAndSave(t *testing.T) {
 					t.Fatalf("saved identity or settings changed: %#v", cfg)
 				}
 				cfg.Token = "synthetic"
-				resolved, err := modelconfig.BuildModel(cfg, 0, 0)
+				resolved, err := modelconfig.BuildModel(cfg, modelconfig.ModelBuildOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}

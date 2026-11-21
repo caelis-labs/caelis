@@ -172,6 +172,7 @@ func TestOpenAIResponsesAuthHeadersHaveNoOAuthOrCodexGrokIdentity(t *testing.T) 
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
 				Headers:    tc.headers,
+				UserAgent:  "test-product/1",
 				Auth:       tc.auth,
 			}, strings.TrimSpace(tc.auth.Token))
 			if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
@@ -183,8 +184,8 @@ func TestOpenAIResponsesAuthHeadersHaveNoOAuthOrCodexGrokIdentity(t *testing.T) 
 			if got.header.Get("Content-Type") != "application/json" {
 				t.Fatalf("Content-Type = %q, want application/json", got.header.Get("Content-Type"))
 			}
-			if !strings.HasPrefix(got.header.Get("User-Agent"), "caelis/") {
-				t.Fatalf("User-Agent = %q, want caelis attribution", got.header.Get("User-Agent"))
+			if got.header.Get("User-Agent") != "test-product/1" {
+				t.Fatalf("User-Agent = %q, want test-product/1", got.header.Get("User-Agent"))
 			}
 			if tc.wantAuthEmpty {
 				if got := got.header.Get("Authorization"); got != "" {

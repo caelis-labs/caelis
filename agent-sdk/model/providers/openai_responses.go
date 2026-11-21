@@ -27,6 +27,7 @@ type openAIResponsesLLM struct {
 	token                 string
 	auth                  AuthConfig
 	headers               map[string]string
+	userAgent             string
 	client                *http.Client
 	requestTimeout        time.Duration
 	responseHeaderTimeout time.Duration
@@ -50,6 +51,7 @@ func newOpenAIResponses(cfg Config, token string) *openAIResponsesLLM {
 	return &openAIResponsesLLM{
 		api: cfg.API, name: strings.TrimSpace(cfg.Model), provider: provider,
 		baseURL: baseURL, token: token, auth: cfg.Auth, headers: cloneHeaders(cfg.Headers),
+		userAgent:             cfg.UserAgent,
 		client:                coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:        cfg.Timeout,
 		responseHeaderTimeout: normalizeStreamResponseHeaderTimeout(cfg.StreamResponseHeaderTimeout),
@@ -97,7 +99,7 @@ func (l *openAIResponsesLLM) Generate(ctx context.Context, req *model.Request) i
 		if req.Stream {
 			httpReq.Header.Set("Accept", "text/event-stream")
 		}
-		applyDefaultAttributionHeaders(httpReq, l.api)
+		setUserAgent(httpReq, l.userAgent)
 		if l.auth.Type != AuthNone {
 			applyDefaultAuthHeader(httpReq, Config{API: l.api, Auth: l.auth}, l.token, false)
 		}

@@ -149,7 +149,7 @@ func TestOpenAIConnectRoundTripDispatchesResponsesVersusChatCompletions(t *testi
 				}
 			})}
 
-			resolved, err := BuildModel(cfg, 0, 0)
+			resolved, err := BuildModel(cfg, ModelBuildOptions{})
 			if err != nil {
 				t.Fatalf("BuildModel() error = %v", err)
 			}

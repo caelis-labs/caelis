@@ -25,6 +25,7 @@ type openAICodexLLM struct {
 	provider              string
 	baseURL               string
 	headers               map[string]string
+	userAgent             string
 	client                *http.Client
 	requestTimeout        time.Duration
 	responseHeaderTimeout time.Duration
@@ -44,6 +45,7 @@ func newOpenAICodex(cfg Config) *openAICodexLLM {
 		provider:              strings.TrimSpace(cfg.Provider),
 		baseURL:               baseURL,
 		headers:               cloneHeaders(cfg.Headers),
+		userAgent:             cfg.UserAgent,
 		client:                coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:        cfg.Timeout,
 		responseHeaderTimeout: normalizeStreamResponseHeaderTimeout(cfg.StreamResponseHeaderTimeout),
@@ -109,11 +111,11 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
-		setHeaderDefault(httpReq.Header, "originator", "caelis")
+
 		if requestAffinity != "" {
-			setHeaderDefault(httpReq.Header, "session-id", requestAffinity)
+			httpReq.Header.Set("session-id", requestAffinity)
 		}
-		applyDefaultAttributionHeaders(httpReq, APIOpenAICodex)
+		setUserAgent(httpReq, l.userAgent)
 		applyConfiguredHeaders(httpReq, l.headers)
 
 		resp, err := doStreamingRequest(l.client, httpReq, l.responseHeaderTimeout)

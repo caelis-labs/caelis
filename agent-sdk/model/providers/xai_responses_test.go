@@ -50,8 +50,8 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 				t.Errorf("%s = %q, want %q", header, got, want)
 			}
 		}
-		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "caelis/") {
-			t.Errorf("User-Agent = %q, want Caelis attribution", got)
+		if got := r.Header.Get("User-Agent"); got != "test-product/1" {
+			t.Errorf("User-Agent = %q, want test-product/1", got)
 		}
 		requestID := r.Header.Get("x-grok-req-id")
 		if requestID == "" || requestID == "spoofed-request" {
@@ -101,7 +101,7 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
 	llm, err := New(Config{
-		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
+		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5", UserAgent: "test-product/1",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768, ContextWindowTokens: 500000,
 		Auth: AuthConfig{Type: AuthOAuthToken},
 		Headers: map[string]string{

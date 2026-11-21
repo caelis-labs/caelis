@@ -23,6 +23,7 @@ type ollamaLLM struct {
 	auth                AuthConfig
 	token               string
 	headers             map[string]string
+	userAgent           string
 	requestTimeout      time.Duration
 	firstEventTimeout   time.Duration
 	maxOutputTok        int
@@ -107,6 +108,7 @@ func newOllama(cfg Config, token string) model.LLM {
 		auth:                cfg.Auth,
 		token:               token,
 		headers:             cloneHeaders(cfg.Headers),
+		userAgent:           cfg.UserAgent,
 		requestTimeout:      cfg.Timeout,
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
@@ -171,7 +173,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		applyDefaultAttributionHeaders(httpReq, APIOllama)
+		setUserAgent(httpReq, l.userAgent)
 		if l.auth.Type != "" && l.auth.Type != AuthNone {
 			applyDefaultAuthHeader(httpReq, Config{API: APIOllama, Auth: l.auth}, l.token, false)
 		}

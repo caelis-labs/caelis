@@ -107,10 +107,13 @@ func TestSelectableOllamaModelsUsesLocalInstalledModelsOnly(t *testing.T) {
 		if r.URL.Host != "local.test" {
 			return modelconfigHTTPResponse(r, http.StatusNotFound, ""), nil
 		}
+		if got := r.Header.Get("User-Agent"); got != "caelis/2.3.4" {
+			t.Errorf("User-Agent = %q, want caelis/2.3.4", got)
+		}
 		return modelconfigHTTPResponse(r, http.StatusOK, `{"models":[{"name":"gemma4:12b-mlx"},{"name":"glm-5.2:cloud"}]}`), nil
 	})}
 
-	models, err := selectableOllamaModels(context.Background(), "http://local.test", client)
+	models, err := selectableOllamaModels(context.Background(), "http://local.test", client, "v2.3.4")
 	if err != nil {
 		t.Fatalf("selectableOllamaModels() error = %v", err)
 	}
@@ -143,7 +146,7 @@ func TestSelectableOllamaModelsClassifiesDiscoveryFailures(t *testing.T) {
 				}
 				return modelconfigHTTPResponse(r, test.status, "not found"), nil
 			})}
-			_, err := selectableOllamaModels(context.Background(), "http://local.test", client)
+			_, err := selectableOllamaModels(context.Background(), "http://local.test", client, "v2.3.4")
 			if !errors.Is(err, test.want) || errorcode.CodeOf(err) != test.code {
 				t.Fatalf("selectableOllamaModels() error = %v, code = %q, want %v with code %q", err, errorcode.CodeOf(err), test.want, test.code)
 			}
@@ -506,7 +509,7 @@ func TestBuildModelConstructsSDKModelFromControlConfig(t *testing.T) {
 		BaseURL:             "http://localhost:11434",
 		ContextWindowTokens: 131072,
 		MaxOutputTok:        16384,
-	}, 128000, 0)
+	}, ModelBuildOptions{FallbackContextWindow: 128000})
 	if err != nil {
 		t.Fatalf("BuildModel() error = %v", err)
 	}
@@ -558,7 +561,7 @@ func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
 		},
 	}
 	for _, cfg := range tests {
-		resolved, err := BuildModel(cfg, 0, 0)
+		resolved, err := BuildModel(cfg, ModelBuildOptions{})
 		if err != nil {
 			t.Fatalf("BuildModel(%s/%s) error = %v", cfg.Provider, cfg.Model, err)
 		}
@@ -663,7 +666,7 @@ func TestAssembleConnectPinsNativeAndCustomImageCapabilities(t *testing.T) {
 	if len(configs) != 1 || configs[0].ImageInput == nil || !*configs[0].ImageInput {
 		t.Fatalf("custom image config = %#v, want explicit image input", configs)
 	}
-	resolved, err := BuildModel(configs[0], 0, 0)
+	resolved, err := BuildModel(configs[0], ModelBuildOptions{})
 	if err != nil {
 		t.Fatalf("BuildModel(custom image model) error = %v", err)
 	}

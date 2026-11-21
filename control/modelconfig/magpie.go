@@ -12,7 +12,7 @@ import (
 
 // Magpie is a connection/discovery preset. Its chat and judgment requests use
 // existing SDK protocols; upstream IDs remain opaque to Caelis.
-func selectableMagpieModels(ctx context.Context, template ProviderTemplate, baseURL string, client *http.Client, token string, includeJudgments bool) ([]SelectableModel, error) {
+func selectableMagpieModels(ctx context.Context, template ProviderTemplate, baseURL string, client *http.Client, token string, includeJudgments bool, clientVersion string) ([]SelectableModel, error) {
 	headers := map[string]string{}
 	judgmentOnly := template.API == APISystemOne
 	if judgmentOnly || includeJudgments {
@@ -22,7 +22,10 @@ func selectableMagpieModels(ctx context.Context, template ProviderTemplate, base
 	if token != "" {
 		auth = providers.AuthConfig{Type: providers.AuthAPIKey, Token: token}
 	}
-	remote, err := providers.DiscoverModels(ctx, providers.Config{Provider: "magpie", API: providers.APIOpenAIResponses, BaseURL: baseURL, HTTPClient: client, Auth: auth, Headers: headers})
+	remote, err := providers.DiscoverModels(ctx, providers.Config{
+		Provider: "magpie", API: providers.APIOpenAIResponses, BaseURL: baseURL,
+		HTTPClient: client, Auth: auth, Headers: headers, UserAgent: providerUserAgent(clientVersion),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("modelconfig: discover Magpie models: %w", err)
 	}

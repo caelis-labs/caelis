@@ -70,7 +70,7 @@ func TestAssembleConnectBuildsManagedGrokOAuthProfiles(t *testing.T) {
 	if configs[1].ImageInput == nil || !*configs[1].ImageInput {
 		t.Fatalf("unknown account model image override = %v, want explicit capability", configs[1].ImageInput)
 	}
-	resolution, err := BuildModel(configs[1], 0, 0)
+	resolution, err := BuildModel(configs[1], ModelBuildOptions{})
 	if err != nil {
 		t.Fatalf("BuildModel(grok account model) error = %v", err)
 	}
