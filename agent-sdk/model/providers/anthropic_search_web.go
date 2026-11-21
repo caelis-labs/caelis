@@ -22,7 +22,7 @@ func (l *anthropicSDKLLM) WebSearchUnavailableReason() string {
 	if provider == "" {
 		provider = "this provider"
 	}
-	return fmt.Sprintf("%s does not support provider-native web_search through Caelis. Use web_fetch with a known URL, or choose a DeepSeek/Anthropic provider.", provider)
+	return fmt.Sprintf("%s does not support provider-native web search.", provider)
 }
 
 func (l *anthropicSDKLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
