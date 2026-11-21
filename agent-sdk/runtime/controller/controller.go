@@ -37,8 +37,6 @@ type ApprovalRequest struct {
 	// tool invocation. Legacy ToolCall/Options are used when it is absent.
 	Approval          *session.ProtocolApproval `json:"approval,omitempty"`
 	EndpointSessionID string                    `json:"endpoint_session_id,omitempty"`
-	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
-	Session           session.Session           `json:"session,omitempty"`
 	Agent             string                    `json:"agent,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ToolCall          ApprovalToolCall          `json:"tool_call,omitempty"`

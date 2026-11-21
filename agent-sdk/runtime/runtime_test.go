@@ -3403,8 +3403,9 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 		participantSessionID: "remote-side-1",
 	}
 	_, err := requester.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
-		Agent: "claude",
-		Mode:  "default",
+		EndpointSessionID: "remote-side-1",
+		Agent:             "claude",
+		Mode:              "default",
 		ToolCall: controller.ApprovalToolCall{
 			ID:   "call-1",
 			Name: "RunCommand",
@@ -3412,6 +3413,12 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("RequestControllerApproval() error = %v", err)
+	}
+	if captured.SessionRef.SessionID != "sess-approval" || captured.Session.SessionID != "sess-approval" {
+		t.Fatalf("request local owner = %+v, snapshot = %+v", captured.SessionRef, captured.Session.SessionRef)
+	}
+	if captured.Origin == nil || captured.Origin.SessionID != "remote-side-1" || captured.Origin.ParentSessionID != "sess-approval" {
+		t.Fatalf("request approval origin = %+v", captured.Origin)
 	}
 	for key, want := range map[string]string{
 		"scope":                  "participant",

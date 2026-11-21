@@ -122,7 +122,6 @@ func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, ha
 		return fmt.Errorf("internal/acpagentbridge/controller: participant %q already has a prompt in progress", r.id)
 	}
 	r.turnID = firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(req.ParticipantID), r.id)
-	r.turnSession = session.CloneSession(req.Session)
 	r.turnStream = req.Observer != nil
 	r.turnMode = strings.TrimSpace(req.Mode)
 	r.approvalRequester = req.ApprovalRequester
@@ -143,7 +142,6 @@ func (r *participantRun) finishPrompt(owner *turnHandle) bool {
 	}
 	stream := r.turnStream
 	r.turnID = ""
-	r.turnSession = session.Session{}
 	r.turnStream = false
 	r.turnMode = ""
 	r.approvalRequester = nil

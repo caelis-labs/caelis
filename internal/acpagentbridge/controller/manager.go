@@ -148,7 +148,6 @@ type participantRun struct {
 	operationMu           sync.Mutex
 	mu                    sync.Mutex
 	turnID                string
-	turnSession           session.Session
 	turnStream            bool
 	turnMode              string
 	approvalRequester     controller.ApprovalRequester
@@ -1164,7 +1163,6 @@ func acpSessionCapability(resp client.InitializeResponse, name string) bool {
 }
 
 func translateApprovalRequest(
-	turnSession session.Session,
 	agent string,
 	mode string,
 	req client.RequestPermissionRequest,
@@ -1193,8 +1191,6 @@ func translateApprovalRequest(
 	}
 	return controller.ApprovalRequest{
 		EndpointSessionID: string(req.SessionId),
-		SessionRef:        session.NormalizeSessionRef(turnSession.SessionRef),
-		Session:           session.CloneSession(turnSession),
 		Agent:             strings.TrimSpace(agent),
 		Mode:              strings.TrimSpace(mode),
 		ToolCall: controller.ApprovalToolCall{

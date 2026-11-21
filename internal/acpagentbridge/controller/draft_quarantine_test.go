@@ -180,7 +180,7 @@ func TestDraftControllerAcceptedReceiptFailurePreservesUnknownAndApprovalOwner(t
 			case <-ctx.Done():
 				t.Fatal("original approval owner was lost")
 			}
-			if approval.EndpointSessionID != peer.SessionID || approval.SessionRef != parent.SessionRef || approval.Approval == nil || approval.Approval.Context == nil || len(approval.Approval.Context.NativeRequestID) == 0 || approval.Approval.Subject == nil || approval.Approval.Subject.Kind != "command" || len(approval.Approval.Subject.Targets) != 2 || approval.Approval.Subject.Targets[0].Text != "git status" || len(approval.Approval.Options) != 2 || approval.Approval.Options[0].ID != "native-allow" {
+			if approval.EndpointSessionID != peer.SessionID || approval.Approval == nil || approval.Approval.Context == nil || len(approval.Approval.Context.NativeRequestID) == 0 || approval.Approval.Subject == nil || approval.Approval.Subject.Kind != "command" || len(approval.Approval.Subject.Targets) != 2 || approval.Approval.Subject.Targets[0].Text != "git status" || len(approval.Approval.Options) != 2 || approval.Approval.Options[0].ID != "native-allow" {
 				t.Fatalf("approval identity/options/subject lost: %+v", approval)
 			}
 			manager.mu.RLock()

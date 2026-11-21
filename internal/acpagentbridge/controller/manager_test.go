@@ -408,9 +408,7 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 
 	kind := acpsdk.ToolKindExecute
 	status := acpsdk.ToolCallStatusPending
-	req, err := translateApprovalRequest(session.Session{
-		SessionRef: session.SessionRef{SessionID: "sess-1"},
-	}, "codex", "default", client.RequestPermissionRequest{
+	req, err := translateApprovalRequest("codex", "default", client.RequestPermissionRequest{
 		SessionId: "remote-1",
 		ToolCall: acpsdk.ToolCallUpdate{
 			ToolCallId: "call-1",
