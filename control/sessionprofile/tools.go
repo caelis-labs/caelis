@@ -88,9 +88,9 @@ func (t callbackTool) invoke(ctx context.Context, call tool.Call, identity tool.
 		return tool.Result{}, ErrUnauthorized
 	}
 	provenance := CallContext{Scope: t.binding.Scope, SessionID: identity.SessionID, TurnID: identity.TurnID, ItemID: identity.ItemID, CallID: call.ID, ToolsVersion: t.configuration.Profile.ToolsVersion, ConfigurationRevision: t.configuration.Revision, Source: t.source}
-	result, err := t.store.Invoke(ctx, provenance, t.definition.Name, call.Input)
+	result, receiptID, err := t.store.invoke(ctx, provenance, t.definition.Name, call.Input)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return t.store.projectResult(ctx, provenance, t.resultFormat, result)
+	return t.store.projectResult(ctx, provenance, receiptID, t.resultFormat, result)
 }
