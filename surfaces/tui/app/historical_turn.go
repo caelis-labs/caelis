@@ -197,7 +197,7 @@ func historicalTurnEvents(events []SubagentEvent) []SubagentEvent {
 	for _, ev := range events {
 		switch ev.Kind {
 		case SEToolCall:
-			if (isScriptToolEvent(ev) && ev.Done) || parents[ev.CallID] != "" {
+			if (isScriptToolEvent(ev) || ev.desktopWorld != nil) && ev.Done || parents[ev.CallID] != "" {
 				out = append(out, ev)
 			}
 		case SEAssistant, SEUserInput:

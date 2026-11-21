@@ -73,7 +73,11 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 		if ev.Kind == SEToolCall && parents[ev.CallID] != "" {
 			continue
 		}
-		if groupRows, end, ok := renderInvocationToolGroupRows(blockID, visible, i, width, ctx, opts); ok {
+		groupRows, end, grouped := renderInvocationToolGroupRows(blockID, visible, i, width, ctx, opts)
+		if !grouped {
+			groupRows, end, grouped = renderDesktopWorldGroupRows(blockID, visible, i, width, ctx, opts)
+		}
+		if grouped {
 			if len(groupRows) > 0 {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
 				rows = appendACPTranscriptSemanticRows(rows, blockID, groupRows, &pendingSemanticGap)

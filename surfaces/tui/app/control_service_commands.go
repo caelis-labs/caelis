@@ -64,7 +64,11 @@ func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn controlpro
 }
 
 func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent {
-	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
+	var out []TranscriptEvent
+	for _, env := range events {
+		out = append(out, transcript.ProjectReplayEvent(env, tuiTranscriptProjector{desktopWorld: desktopWorldProjection(env)})...)
+	}
+	return out
 }
 
 func slashConnectWithContext(ctx context.Context, service ControlServices, agents controlagents.Connector, send func(tea.Msg), args string) TaskResultMsg {

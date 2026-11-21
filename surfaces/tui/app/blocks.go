@@ -671,7 +671,7 @@ func shouldRenderToolEvent(ev SubagentEvent) bool {
 	if ev.Kind != SEToolCall {
 		return true
 	}
-	if !ev.Done || ev.Err {
+	if !ev.Done || ev.Err || ev.desktopWorld != nil {
 		return true
 	}
 	if !renderableTextHasContent(ev.Output) || strings.EqualFold(strings.TrimSpace(ev.Output), "completed") {
@@ -686,15 +686,21 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	}
 	hidePlan := strings.EqualFold(strings.TrimSpace(status), "waiting_approval") && hasApprovalEvent(events)
 	out := make([]SubagentEvent, 0, len(events))
-	reviews := make(map[string]string)
+	reviews := make(map[string]SubagentEvent)
 	for _, ev := range events {
 		if ev.Kind == SEApproval && ev.CallID != "" {
-			reviews[ev.CallID] = firstNonEmpty(ev.ApprovalStatus, "reviewed")
+			reviews[ev.CallID] = ev
 		}
 	}
 	for i, ev := range events {
 		if ev.Kind == SEToolCall {
-			ev.ApprovalStatus = reviews[ev.CallID]
+			ev.ApprovalStatus = ""
+			if review, ok := reviews[ev.CallID]; ok {
+				ev.ApprovalStatus = firstNonEmpty(review.ApprovalStatus, "reviewed")
+				if ev.desktopWorld != nil {
+					ev.ApprovalText = review.ApprovalText
+				}
+			}
 		}
 		// Defense for replayed or legacy snapshots that may already contain a
 		// whitespace-only narrative event. New live streams are guarded by

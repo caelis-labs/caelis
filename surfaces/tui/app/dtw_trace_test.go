@@ -1,60 +1,419 @@
 package tuiapp
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 )
 
-func desktopTraceEvents() []*session.Event {
-	makeCall := func(id, pluginID string, parent *session.EventParentTool) *session.Event {
-		const name = "dtw__exec"
-		binding := mcp.BindingForDefinition(tool.Definition{Name: name, Metadata: map[string]any{
-			mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: pluginID, mcp.MetadataServer: "dtw",
-			mcp.MetadataTool: "exec", mcp.MetadataSourceFingerprint: "fixture",
-		}})
-		return &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{
-			ID: id, Name: name, Status: "completed", Parent: parent, Binding: &binding,
-			Input: map[string]any{"app": "fixture.app", "source": "if (false) await app.quit({}); return 42;"},
-			Result: &tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{
-				"app":"fixture.app","execution_id":"exe_fixture_1","status":"completed",
-				"result":{"operation":"scene.quit","private":"SECRET_OUTPUT"},
-				"effects":{"dispatch":{"dispatched":2,"unknown":1},"interrupted":1,
-				"acknowledgements":[{"call":1,"operation":"scene.click","confirmed":"element_focused"}]}}
-			`)}}},
-		}}
+const desktopTraceApp = "C:/Program Files/Example Distribution/Long Browser Install/Chrome.exe"
+const desktopTraceSource = `const view = await app.look();
+await app.click({selector:{role:"button",text:"New tab"}});
+await app.look();
+await app.keypress({keys:["META","L"]});`
+const desktopTraceResultJSON = `{"status":"completed","execution_id":"fixture","effects":{"dispatch":{"dispatched":2}},"result":{"value":"RESULT_DETAIL"}}`
+
+func desktopTraceFact(id, server, method, pluginID string, input map[string]any) *session.EventTool {
+	name := mcp.ServerToolNamePrefix(server) + method
+	binding := mcp.BindingForDefinition(tool.Definition{Name: name, Metadata: map[string]any{
+		mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: pluginID, mcp.MetadataServer: server,
+		mcp.MetadataTool: method, mcp.MetadataSourceFingerprint: "fixture",
+	}})
+	return &session.EventTool{ID: id, Name: name, Status: "pending", Binding: &binding, Input: input}
+}
+
+func desktopTraceResult(fact *session.EventTool, status, data string) *session.Event {
+	result := *fact
+	result.Status = status
+	result.Result = &tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(data)}}}
+	message := model.Message{Role: model.RoleTool, Parts: []model.Part{{
+		Kind: model.PartKindToolResult,
+		ToolResult: &model.ToolResultPart{
+			ToolUseID: result.ID, Name: result.Name, Content: tool.ModelParts(result.Result.Content),
+		},
+	}}}
+	if err := json.Unmarshal([]byte(data), &result.Output); err != nil {
+		panic(err)
 	}
-	parent := &session.EventParentTool{Kind: "code_mode", CallID: "dtw-script", Name: "js_exec"}
-	script := &session.EventTool{ID: parent.CallID, Name: parent.Name, Status: "completed", Input: map[string]any{"code": "return await dtw__exec(args);"}}
+	return &session.Event{Type: session.EventTypeToolResult, Tool: &result, Message: &message}
+}
+
+func desktopTraceEvents() []*session.Event {
+	start := func(fact *session.EventTool) *session.Event {
+		return &session.Event{Type: session.EventTypeToolCall, Tool: fact}
+	}
+	native := desktopTraceFact("native", "dtw", "exec", "desktop-world", map[string]any{"app": desktopTraceApp, "source": desktopTraceSource})
+	nested := desktopTraceFact("nested", "desktop-world", "exec", "desktop-world", map[string]any{"app": desktopTraceApp, "source": desktopTraceSource})
+	nested.Parent = &session.EventParentTool{Kind: "code_mode", CallID: "script", Name: "js_exec"}
+	script := &session.EventTool{ID: "script", Name: "js_exec", Status: "pending", Input: map[string]any{"code": `await desktop_world__exec({app:"Long app path",source:"OUTER_SOURCE"});`}}
+	scriptDone := *script
+	scriptDone.Status = "completed"
+	apps := desktopTraceFact("apps", "dtw", "apps", "desktop-world", map[string]any{"query": "Chrome", "state": "running", "limit": 2})
+	failed := desktopTraceFact("failed", "dtw", "exec", "desktop-world", map[string]any{
+		"app": "com.example.Editor", "source": `if (ready) await app.click("Continue");`,
+	})
 	return []*session.Event{
-		makeCall("dtw-native", "desktop-world", nil),
-		{Type: session.EventTypeToolCall, Tool: script},
-		makeCall("dtw-nested", "desktop-world", parent),
-		{Type: session.EventTypeToolResult, Tool: script, Meta: map[string]any{"code_mode_script_completion": "completed"}},
-		makeCall("dtw-foreign", "foreign", nil),
+		start(native), desktopTraceResult(native, "completed", desktopTraceResultJSON),
+		start(apps), desktopTraceResult(apps, "completed", `{"apps":[],"coverage":{"complete":false}}`),
+		start(failed), desktopTraceResult(failed, "failed", `{"error":"fixture permission denied"}`),
+		start(script), start(nested), desktopTraceApproval(nested), desktopTraceResult(nested, "completed", desktopTraceResultJSON),
+		{Type: session.EventTypeToolResult, Tool: &scriptDone, Meta: map[string]any{"code_mode_script_completion": "completed"}},
 	}
 }
 
-func TestDesktopWorldTraceRendersForNativeAndScriptOnlyFromBoundSource(t *testing.T) {
-	const summary = "dtw__exec · click, 2 dispatched, 1 unknown, 1 interrupted · fixture.app"
-	for _, replay := range []bool{false, true} {
-		m, block := groupedCanonicalModel(t, desktopTraceEvents(), "main", replay)
-		ctx := m.blockRenderContext(110)
-		text := joinRenderedPlain(block.Render(ctx))
-		if strings.Count(text, summary) != 2 {
-			t.Fatalf("expected compact native and nested summaries (replay=%t):\n%s", replay, text)
-		}
-		for _, hidden := range []string{"scene.", "element_focused", "dtw__exec · quit", "SECRET_OUTPUT"} {
-			if strings.Contains(text, hidden) {
-				t.Fatalf("unexpected %q in collapsed trace (replay=%t):\n%s", hidden, replay, text)
+func desktopTraceApproval(fact *session.EventTool) *session.Event {
+	return &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
+		Approval: &session.ApprovalRecord{Status: session.ApprovalRecordResolved, TurnID: "turn",
+			ToolCallID: fact.ID, ToolName: fact.Name, Approved: true, ReviewText: "approved: fixture review"},
+	}
+}
+
+func desktopTraceModel(t *testing.T, events []*session.Event, width int, replay bool) (*Model, Block) {
+	t.Helper()
+	m := newACPEventstreamRegressionModel(t, width, 48)
+	m.currentSessionID = "desktop-fixture"
+	var history []eventstream.Envelope
+	for i, original := range events {
+		ev := session.CloneEvent(original)
+		ev.SessionID = m.currentSessionID
+		ev.ID, ev.Seq = fmt.Sprintf("desktop-event-%d", i), uint64(i+1)
+		if ev.Visibility == "" {
+			ev.Visibility = session.VisibilityCanonical
+			if ev.Tool != nil && ev.Tool.Parent != nil {
+				ev.Visibility = session.VisibilityMirror
 			}
 		}
-		clickScriptToken(t, m, block, ctx, acpToolPanelClickToken("dtw-nested"))
-		if got := joinRenderedPlain(block.Render(ctx)); !strings.Contains(got, "if (false) await app.quit") {
-			t.Fatalf("nested disclosure lost original source:\n%s", got)
+		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: ev.SessionID}, ev, projection.SessionEventTransport{TurnID: "turn"})
+		for _, envelope := range projection.ProjectSessionEventEnvelope(base, ev) {
+			if !replay {
+				m.Update(envelope)
+				continue
+			}
+			wire, err := wirev1.MarshalEnvelope(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := wirev1.UnmarshalEnvelope(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			history = append(history, decoded)
+		}
+	}
+	if replay {
+		m.beginSessionHistory(sessionViewStartMsg{state: appserver.SessionState{SessionID: m.currentSessionID}})
+		m.sessionHistory.model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: projectResumeReplayEvents(history), ReconnectReplay: true})
+		m.commitSessionHistory()
+	}
+	b := requireMainACPTurnBlockForTest(t, m)
+	return m, b
+}
+
+func TestDesktopWorldTraceGoldenAndDisclosure(t *testing.T) {
+	for _, width := range []int{24, 112} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			for _, replay := range []bool{false, true} {
+				m, b := desktopTraceModel(t, desktopTraceEvents(), width, replay)
+				ctx := m.blockRenderContext(width)
+				rows := b.Render(ctx)
+				for _, row := range rows {
+					if cells := displayColumns(row.Plain); cells > minInt(width, 60) {
+						t.Fatalf("row exceeds width: %d, %q", cells, row.Plain)
+					}
+				}
+				collapsed := joinRenderedPlain(rows) + "\n"
+				path := filepath.Join("testdata", fmt.Sprintf("desktop_world_%d.golden", width))
+				if !replay && os.Getenv("UPDATE_GOLDEN") == "1" {
+					if err := os.WriteFile(path, []byte(collapsed), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				want, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if collapsed != string(want) {
+					t.Fatalf("replay=%v rendered rows differ from %s:\n%s", replay, path, collapsed)
+				}
+				for _, hidden := range []string{"unknown", "coverage", "RESULT_DETAIL", "OUTER_SOURCE", "await app", "approved", "permission denied"} {
+					if strings.Contains(collapsed, hidden) {
+						t.Fatalf("collapsed trace exposes detail %q:\n%s", hidden, collapsed)
+					}
+				}
+				for _, callID := range []string{"native", "nested"} {
+					ctx := m.blockRenderContext(44)
+					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(callID))
+					details := joinRenderedPlain(b.Render(ctx))
+					squeezed := strings.Join(strings.Fields(details), "")
+					path := strings.Join(strings.Fields(desktopTraceApp), "")
+					if !strings.Contains(squeezed, path) || !strings.Contains(squeezed, "awaitapp.look()") {
+						t.Fatalf("%s lost complete app or source in disclosure:\n%s", callID, details)
+					}
+					if !strings.Contains(details, "RESULT_DETAIL") {
+						t.Fatalf("%s lost the structured result in disclosure:\n%s", callID, details)
+					}
+					if callID == "nested" && !strings.Contains(details, "[approved]") {
+						t.Fatalf("missing nested approval record:\n%s", details)
+					}
+					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(callID))
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("failed"))
+				failure := strings.Join(strings.Fields(joinRenderedPlain(b.Render(ctx))), "")
+				if !strings.Contains(failure, "fixturepermissiondenied") {
+					t.Fatalf("failed call lost error detail: %s", failure)
+				}
+			}
+		})
+	}
+}
+
+func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		t.Run(fmt.Sprintf("nested=%t", nested), func(t *testing.T) {
+			var events []*session.Event
+			if nested {
+				events = append(events, &session.Event{Type: session.EventTypeToolCall, Tool: &session.EventTool{
+					ID: "script", Name: "js_exec", Status: "pending", Input: map[string]any{"code": "OUTER_SOURCE"},
+				}})
+			}
+			for i := 1; i <= 5; i++ {
+				fact := desktopTraceFact(fmt.Sprint(i), "dtw", "exec", "desktop-world", map[string]any{
+					"app": fmt.Sprintf("App%d", i), "source": `await app.click("Continue");`,
+				})
+				if nested {
+					fact.Parent = &session.EventParentTool{Kind: "code_mode", CallID: "script", Name: "js_exec"}
+				}
+				events = append(events, &session.Event{Type: session.EventTypeToolCall, Tool: fact})
+				if i < 5 {
+					events = append(events, desktopTraceResult(fact, "completed", desktopTraceResultJSON))
+				}
+			}
+			for _, replay := range []bool{false, true} {
+				m, b := desktopTraceModel(t, events, 24, replay)
+				ctx := m.blockRenderContext(24)
+				got := joinRenderedPlain(b.Render(ctx))
+				for _, want := range []string{"App1", "App2", "App5", "+2 more"} {
+					if !strings.Contains(got, want) {
+						t.Fatalf("replay=%v missing %s in running group:\n%s", replay, want, got)
+					}
+				}
+				if strings.Contains(got, "App3") || strings.Contains(got, "App4") {
+					t.Fatalf("running group exceeds three default calls:\n%s", got)
+				}
+				label, key := "Using computer", "computer:1"
+				if nested {
+					label, key = "Running script", "tools:script"
+				}
+				if !strings.Contains(got, label) {
+					t.Fatalf("missing active group label %q:\n%s", label, got)
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("5"))
+				if got := joinRenderedPlain(b.Render(ctx)); !strings.Contains(got, "Arguments") {
+					t.Fatalf("running invocation cannot disclose input:\n%s", got)
+				}
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken(key))
+				expanded := joinRenderedPlain(b.Render(ctx))
+				if !strings.Contains(expanded, "App3") || !strings.Contains(expanded, "App4") || strings.Contains(expanded, "+2 more") {
+					t.Fatalf("group disclosure lost calls:\n%s", expanded)
+				}
+			}
+		})
+	}
+}
+
+func TestDesktopWorldTraceTerminalIntent(t *testing.T) {
+	const beforeKey = `await app.look({role:'text_field',text:'Search inventory'});
+await app.click({selector:{role:'text_field',text:'Search inventory'}});
+await app.look({role:'text_field',text:'Search inventory'});
+`
+	const key = `await app.keypress({keys:['META','A']});`
+	const twoDispatches = `{"execution_id":"fixture","effects":{"dispatch":{"dispatched":2}}}`
+	for _, test := range []struct {
+		name, source, status, result string
+		wide, narrow, forbidden      string
+	}{
+		{"straight-line source remains a plan", beforeKey + key, "completed", twoDispatches,
+			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+		{"no dispatch evidence still permits intent", beforeKey + key, "completed", `{"execution_id":"fixture"}`,
+			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+		{"B09 literal chord in straight-line source", "const chord = ['META','A'];\n" + beforeKey + "await app.keypress({keys:chord});", "completed", twoDispatches,
+			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+		{"S02 guarded read", `const view = await app.look({role:'text_area',text:'Handoff note'});
+if (view.elements.length !== 1) return null;
+return await app.readText({target:view.elements[0].id});`, "completed", `{"execution_id":"fixture"}`,
+			"look for “Handoff note”", "To inspect", "press"},
+		{"S06 read after dead branch", `const text = "app.keypress()";
+if (false) await app.quit({});
+await app.look({text:'order number'});
+return {text};`, "completed", `{"execution_id":"fixture"}`,
+			"look for “order number”", "To inspect", "press"},
+		{"interrupted", beforeKey + key, "failed", `{"execution_id":"fixture","error":{"code":"execution_interrupted"}}`,
+			"Script failed", "Failed", "press"},
+		{"early return", beforeKey + "return 42;\n" + key, "completed", `{"execution_id":"fixture","result":42}`,
+			"Plan to click “Search inventory”", "To click", "press"},
+		{"refused input caught by script", beforeKey + "try { " + key + " } catch (e) { return e.code; }", "completed",
+			`{"execution_id":"fixture","effects":{"dispatch":{"dispatched":1,"not_dispatched":1}},"result":"input_not_ready"}`,
+			"Run a script", "Run script", "press"},
+		{"B04 argument evaluation order", `await app.keypress({keys: (await app.click({selector:{role:'text_field',text:'Search inventory'}}), ['META','A'])});`,
+			"completed", twoDispatches, "Run a script", "Run script", "press"},
+		{"B05 uninstantiated class", `class Clicker {
+  effect = app.click({selector:{role:'text_field',text:'Search inventory'}});
+}
+class Unused {
+  effect = app.keypress({keys:['META','A']});
+}
+await new Clicker().effect;
+await new Clicker().effect;`, "completed", twoDispatches, "Run a script", "Run script", "press"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, nested := range []bool{false, true} {
+				fact := desktopTraceFact("desktop", "dtw", "exec", "desktop-world", map[string]any{"app": "fixture.desktop", "source": test.source})
+				final := desktopTraceResult(fact, test.status, test.result)
+				events := desktopTracePlacement(t, fact, final, nested, "")
+				for _, width := range []int{24, 112} {
+					want := test.wide
+					if width == 24 {
+						want = test.narrow
+					}
+					for _, replay := range []bool{false, true} {
+						m, b := desktopTraceModel(t, events, width, replay)
+						got := joinRenderedPlain(b.Render(m.blockRenderContext(width)))
+						if !strings.Contains(got, want) || test.forbidden != "" && strings.Contains(strings.ToLower(got), strings.ToLower(test.forbidden)) {
+							t.Fatalf("nested=%t replay=%t width=%d want %q without %q:\n%s", nested, replay, width, want, test.forbidden, got)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// Native Code Mode stores the structured result on the child, while its
+// bare structured payload may be absent from the child's ACP update.
+func desktopTracePlacement(t *testing.T, call *session.EventTool, final *session.Event, nested bool, parentOutput string) []*session.Event {
+	t.Helper()
+	start := &session.Event{Type: session.EventTypeToolCall, Tool: call}
+	if !nested {
+		return []*session.Event{start, final}
+	}
+	args, err := json.Marshal(call.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := "return await " + call.Name + "(" + string(args) + ");"
+	root := &session.EventTool{ID: "outer", Name: "js_exec", Status: "pending", Input: map[string]any{"code": code}}
+	call.Parent = &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
+	final.Tool.Parent = call.Parent
+	if parentOutput == "" {
+		parentOutput = `{"script":"outer only"}`
+	}
+	final.Tool.Output = nil
+	return []*session.Event{{Type: session.EventTypeToolCall, Tool: root}, start, final, desktopTraceResult(root, "completed", parentOutput)}
+}
+
+func TestDesktopWorldAppsResultBelongsToItsCall(t *testing.T) {
+	const empty = `{"apps":[],"coverage":{"complete":false},"next":null}`
+	const matching = `{"apps":[{"app":"fixture.desktop","name":"Fixture Desktop"}],"next":null}`
+	for _, test := range []struct {
+		name, child, parent string
+		nested, childOutput bool
+		wantEmpty           bool
+	}{
+		{"direct empty", empty, "", false, true, true},
+		{"direct more pages", `{"apps":[],"next":"cursor"}`, "", false, true, false},
+		{"nested child output", empty, matching, true, true, true},
+		{"nested equal parent still not child output", empty, empty, true, false, false},
+		{"B08 shadowed parent returns false empty", matching, empty, true, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fact := desktopTraceFact("apps", "dtw", "apps", "desktop-world", map[string]any{"query": "Fixture"})
+			final := desktopTraceResult(fact, "completed", test.child)
+			ownOutput := final.Tool.Output
+			events := desktopTracePlacement(t, fact, final, test.nested, test.parent)
+			if test.childOutput {
+				final.Tool.Output = ownOutput
+			}
+			for _, replay := range []bool{false, true} {
+				m, b := desktopTraceModel(t, events, 112, replay)
+				ctx := m.blockRenderContext(112)
+				got := joinRenderedPlain(b.Render(ctx))
+				if strings.Contains(got, "No apps in scope") != test.wantEmpty || !strings.Contains(got, "Fixture") || strings.Contains(got, "coverage") {
+					t.Fatalf("replay=%t wrong scoped search summary:\n%s", replay, got)
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(fact.ID))
+				got = joinRenderedPlain(b.Render(ctx))
+				if !strings.Contains(got, "Arguments") || strings.Contains(got, "└ Result") != test.childOutput ||
+					strings.Contains(got, "Fixture Desktop") {
+					t.Fatalf("replay=%t wrong result ownership in disclosure:\n%s", replay, got)
+				}
+			}
+		})
+	}
+}
+
+func TestDesktopWorldTraceGroupsAdjacentDirectCalls(t *testing.T) {
+	events := desktopTraceEvents()
+	ordinary := &session.Event{Type: session.EventTypeToolCall, Tool: &session.EventTool{
+		ID: "other", Name: "RunCommand", Status: "in_progress", Input: map[string]any{"command": "printf example"},
+	}}
+	events = append(events[:2:2], append([]*session.Event{ordinary}, events[2:]...)...)
+	for _, replay := range []bool{false, true} {
+		m, b := desktopTraceModel(t, events, 112, replay)
+		text := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
+		if strings.Count(text, "Used computer") != 2 || strings.Count(text, "Ran script") != 1 {
+			t.Fatalf("replay=%v unrelated invocation merged adjacent computer groups:\n%s", replay, text)
+		}
+	}
+}
+
+func TestDesktopWorldTraceUsesGenericDisplayForUnknownSource(t *testing.T) {
+	input := map[string]any{"app": "Peer", "source": `await app.click("Pretend");`}
+	foreign := desktopTraceFact("foreign", "dtw", "exec", "foreign", input)
+	name := foreign.Name
+	forged := &session.Event{Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "peer", Name: &name, Title: name + " · Peer", Status: "pending",
+			RawInput: input,
+			Meta:     map[string]any{"tui.desktop_world": "exec", "caelis": map[string]any{"display": map[string]any{"desktop_world": "exec"}}},
+		}},
+	}
+	transient := desktopTraceFact("unpositioned", "dtw", "exec", "desktop-world", input)
+	for _, replay := range []bool{false, true} {
+		m, b := desktopTraceModel(t, []*session.Event{
+			{Type: session.EventTypeToolCall, Tool: foreign}, forged,
+			{Type: session.EventTypeToolCall, Visibility: session.VisibilityUIOnly, Tool: transient},
+		}, 90, replay)
+		text := joinRenderedPlain(b.Render(m.blockRenderContext(90)))
+		if !strings.Contains(text, "dtw__exec") || strings.Contains(text, "Using computer") || strings.Contains(text, "Peer · Click") {
+			t.Fatalf("replay=%t unknown source selected native presentation:\n%s", replay, text)
+		}
+		for _, ev := range scriptBlockEvents(b) {
+			if ev.desktopWorld != nil {
+				t.Fatalf("unknown source supplied presentation: %s", ev.CallID)
+			}
+		}
+	}
+}
+
+func TestDesktopWorldTraceReadyWithPhysicalSize(t *testing.T) {
+	m, b := desktopTraceModel(t, desktopTraceEvents(), 24, false)
+	m.Update(tea.WindowSizeMsg{Width: 24, Height: 30})
+	for _, row := range b.Render(m.blockRenderContext(m.viewport.Width())) {
+		if displayColumns(row.Plain) > m.viewport.Width() {
+			t.Fatalf("row wider than TUI viewport: %q", row.Plain)
 		}
 	}
 }
