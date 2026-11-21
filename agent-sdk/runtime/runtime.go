@@ -204,20 +204,19 @@ func (r *Runtime) currentApprovalMode(state map[string]any) approval.Mode {
 }
 
 func validateControllerForwarder(cfg Config) error {
-	if requiresControllerForwarder(cfg) && cfg.ControllerEventForwarder == nil {
+	if cfg.Controllers == nil {
+		return nil
+	}
+	if cfg.ControllerEventForwarder == nil {
 		return errors.New("agent-sdk/runtime: controller event forwarder is required when ACP controllers are configured")
 	}
-	if cfg.Controllers != nil && cfg.ControllerContextRouter == nil {
+	if cfg.ControllerContextRouter == nil {
 		return errors.New("agent-sdk/runtime: controller context router is required when controller endpoints are configured")
 	}
-	if cfg.Controllers != nil && cfg.ControllerRecovery == nil {
+	if cfg.ControllerRecovery == nil {
 		return errors.New("agent-sdk/runtime: controller recovery coordinator is required when ACP controllers are configured")
 	}
 	return nil
-}
-
-func requiresControllerForwarder(cfg Config) bool {
-	return cfg.Controllers != nil
 }
 
 // Terminals returns the command fallback/control surface for this Runtime.
@@ -259,9 +258,6 @@ func (r *Runtime) Run(
 		if err := validateRunRequestAgentSpec(req); err != nil {
 			return agent.RunResult{}, err
 		}
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	if activeSession.Controller.Kind == session.ControllerKindACP {

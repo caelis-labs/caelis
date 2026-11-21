@@ -340,8 +340,10 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		if a.resolveModelRequest != nil {
 			request.Instructions = model.CloneParts(a.instructions)
+		} else if a.systemPrompt != "" {
+			request.Instructions = []model.Part{model.NewTextPart(a.systemPrompt)}
 		} else {
-			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
+			request.Instructions = []model.Part{}
 		}
 		if invalidAttempts > 0 {
 			// The rejected envelope never entered Session or tool dispatch.
@@ -526,14 +528,6 @@ func isModelInputSubmission(sub agent.Submission) bool {
 	default:
 		return false
 	}
-}
-
-func instructionsFromContext(_ agent.Context, systemPrompt string) []model.Part {
-	out := make([]model.Part, 0, 1)
-	if strings.TrimSpace(systemPrompt) != "" {
-		out = append(out, model.NewTextPart(strings.TrimSpace(systemPrompt)))
-	}
-	return out
 }
 
 // Metadata returns one stable agent metadata map for upstream assembly.
