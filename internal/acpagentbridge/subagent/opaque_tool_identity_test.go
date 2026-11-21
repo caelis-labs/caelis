@@ -64,11 +64,11 @@ func TestDraftDistinctOpaqueToolIDsCannotClearNewActivityResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
+	_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal := waitChildActivityTerminalFor(t, ctx, events, started.ActivityID)
+	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if terminal.Result == nil || terminal.Result.Result != "current answer" {
 		t.Fatalf("replayed Session revision took current result: %+v", terminal.Result)
 	}

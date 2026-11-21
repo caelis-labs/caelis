@@ -87,7 +87,7 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 		t.Fatal(err)
 	}
 	target := run.slot.target
-	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "guide now",
@@ -96,10 +96,10 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
 		t.Fatal(releaseErr)
 	}
-	if err != nil || result.StartedActivity || result.ActivityID == "" {
+	if err != nil || result.StartedActivity || expectedActivityID == "" {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want active steering", result, err)
 	}
-	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 	for _, frame := range frames {
 		if isProducerRunningEvidence(frame) {
 			t.Fatalf("steering published idle producer running evidence: %#v", frames)
@@ -113,13 +113,13 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 	outputFrame, acceptedFrame := frames[0], frames[1]
 	if communication := session.ProtocolAgentCommunicationOf(acceptedFrame.Event); communication == nil ||
 		communication.Text != "guide now" || acceptedFrame.Event.Actor.ID != "controller-1" ||
-		!strings.HasPrefix(acceptedFrame.Event.ID, "agent-input:"+result.ActivityID+":") {
+		!strings.HasPrefix(acceptedFrame.Event.ID, "agent-input:"+expectedActivityID+":") {
 		t.Fatalf("accepted active input = %#v, want stable standard Agent communication", acceptedFrame.Event)
 	}
 	if got := outputFrame.Event.Text; got != "steered output" {
 		t.Fatalf("steering output = %q, want notification received before acceptance", got)
 	}
-	if terminal.ActivityID != result.ActivityID || terminal.Cursor <= 2 {
+	if terminal.ActivityID != expectedActivityID || terminal.Cursor <= 2 {
 		t.Fatalf("terminal order = %#v after frames %#v", terminal, frames)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
@@ -145,7 +145,7 @@ func TestActiveChildInputPreservesStandardACPImageContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		ContentParts: []model.ContentPart{{
@@ -159,7 +159,7 @@ func TestActiveChildInputPreservesStandardACPImageContent(t *testing.T) {
 	if err != nil || result.StartedActivity {
 		t.Fatalf("image SubmitChildInput() = (%#v, %v), want active steering", result, err)
 	}
-	waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+			_, _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 				Target: run.slot.target,
 				Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 				Input:  "cannot inject",
@@ -295,7 +295,7 @@ func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := agent.ChildInputRequest{Target: run.slot.target, UserInput: true, Source: session.ActorRef{Kind: session.ActorKindUser, ID: "owner"}, Input: "recheck the fix"}
-	_, err = submitChildInputTest(runner, events, ctx, req)
+	_, _, err = submitChildInputTest(runner, events, ctx, req)
 	// A no-injection receipt must settle before the independent producer terminal
 	// can cancel its waiter; otherwise this fixture tests an unknown delivery.
 	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
@@ -318,11 +318,11 @@ func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	result, err := submitChildInputTest(runner, events, ctx, req)
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, req)
 	if err != nil || !result.StartedActivity {
 		t.Fatalf("idle followup = %#v %v", result, err)
 	}
-	waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -345,15 +345,15 @@ func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "second prompt",
 	})
-	if err != nil || !result.StartedActivity || result.ActivityID == "" || result.ActivityID == firstTerminal.ActivityID {
+	if err != nil || !result.StartedActivity || expectedActivityID == "" || expectedActivityID == firstTerminal.ActivityID {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want new prompt activity", result, err)
 	}
-	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 	acceptedFrame, outputFrame := requireIdlePromptRunningThenAccepted(t, frames)
 	if communication := session.ProtocolAgentCommunicationOf(acceptedFrame.Event); communication == nil ||
 		communication.Text != "second prompt" || acceptedFrame.Event.Actor.ID != "controller-1" {
@@ -409,7 +409,7 @@ func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+			_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 				Target: run.slot.target,
 				Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 				Input:  test.text,
@@ -424,7 +424,7 @@ func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+			frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 			communicationCount := 0
 			for _, frame := range frames {
 				if communication := session.ProtocolAgentCommunicationOf(frame.Event); communication != nil {
@@ -482,7 +482,7 @@ func TestIdleChildInputCancellationBeforeWriteRestoresCompleteRunState(t *testin
 
 	cancelled, cancelInput := context.WithCancel(context.Background())
 	cancelInput()
-	_, err = submitChildInputTest(runner, events, cancelled, agent.ChildInputRequest{
+	_, _, err = submitChildInputTest(runner, events, cancelled, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "must not be written",
@@ -536,13 +536,13 @@ func TestPromptAuthenticationRetryKeepsChildInputAdmissionFence(t *testing.T) {
 			activityID := run.slot.activityCheckpoint().activityID
 			if mode == "auth-idle" {
 				waitChildActivityTerminalFor(t, ctx, events, activityID)
-				started, inputErr := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+				started, expectedActivityID, inputErr := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 					Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "requires authentication",
 				})
 				if inputErr != nil || !started.StartedActivity {
 					t.Fatalf("authenticated idle SubmitChildInput() = (%#v, %v)", started, inputErr)
 				}
-				activityID = started.ActivityID
+				activityID = expectedActivityID
 			}
 			waitForChildInputFile(t, ctx, authReady)
 			waitForPromptDispatchFence(t, ctx, run.slot)
@@ -550,7 +550,7 @@ func TestPromptAuthenticationRetryKeepsChildInputAdmissionFence(t *testing.T) {
 			cancelledCtx, cancelWaiter := context.WithCancel(ctx)
 			cancelledResult := make(chan error, 1)
 			go func() {
-				_, waitErr := submitChildInputTest(runner, events, cancelledCtx, agent.ChildInputRequest{
+				_, _, waitErr := submitChildInputTest(runner, events, cancelledCtx, agent.ChildInputRequest{
 					Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "cancel this waiter",
 				})
 				cancelledResult <- waitErr
@@ -571,7 +571,7 @@ func TestPromptAuthenticationRetryKeepsChildInputAdmissionFence(t *testing.T) {
 				err    error
 			}, 1)
 			go func() {
-				result, inputErr := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+				result, _, inputErr := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 					Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "steer after authenticated prompt",
 				})
 				liveResult <- struct {
@@ -592,7 +592,7 @@ func TestPromptAuthenticationRetryKeepsChildInputAdmissionFence(t *testing.T) {
 			}
 			select {
 			case got := <-liveResult:
-				if got.err != nil || got.result.StartedActivity || got.result.ActivityID != activityID {
+				if got.err != nil || got.result.StartedActivity {
 					t.Fatalf("post-auth steering = (%#v, %v), want original activity %q", got.result, got.err, activityID)
 				}
 			case <-ctx.Done():
@@ -643,7 +643,7 @@ func TestGenericReconnectDoesNotRequirePrivateMessageCapability(t *testing.T) {
 	run.state = delegation.StateFailed
 	run.running = false
 	run.mu.Unlock()
-	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "resume prompt",
@@ -651,7 +651,7 @@ func TestGenericReconnectDoesNotRequirePrivateMessageCapability(t *testing.T) {
 	if err != nil || !result.StartedActivity {
 		t.Fatalf("SubmitChildInput() after reconnect = (%#v, %v)", result, err)
 	}
-	terminal := waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("reconnected terminal = %#v", terminal)
 	}
@@ -715,6 +715,7 @@ func TestActiveChildInputKeepsProducerBindingBeforeRuntimeObservation(t *testing
 	}
 	unexpected := make(chan childInputTestEvent, 16)
 	candidate := &childInputTestSink{activityID: "not-started", events: unexpected}
+	originalActivityID := spawn.ActivityID
 	spawn.ActivityID, spawn.Output, spawn.Completion = candidate.activityID, candidate, candidate
 	if err := runner.BindChildEndpoint(ctx, run.slot.target, spawn); err != nil {
 		t.Fatal(err)
@@ -723,7 +724,7 @@ func TestActiveChildInputKeepsProducerBindingBeforeRuntimeObservation(t *testing
 		Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "steer",
 		ActivityID: candidate.activityID, Output: candidate, Completion: candidate,
 	})
-	if err != nil || result.StartedActivity || result.ActivityID == candidate.activityID {
+	if err != nil || result.StartedActivity {
 		t.Fatalf("steering = %#v, %v", result, err)
 	}
 	// This case tests an active producer binding, so hold the original Prompt
@@ -731,7 +732,7 @@ func TestActiveChildInputKeepsProducerBindingBeforeRuntimeObservation(t *testing
 	if err := os.WriteFile(terminalRelease, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	waitChildActivityTerminalFor(t, ctx, events, originalActivityID)
 	select {
 	case event := <-unexpected:
 		t.Fatalf("unstarted candidate received producer output: %#v", event)
@@ -765,13 +766,13 @@ func TestRehydratedEndpointResumesWithoutProcessLocalRun(t *testing.T) {
 	if err := rehydrated.BindChildEndpoint(ctx, target, spawn); err != nil {
 		t.Fatal(err)
 	}
-	result, err := submitChildInputTest(rehydrated, events, ctx, agent.ChildInputRequest{
+	result, expectedActivityID, err := submitChildInputTest(rehydrated, events, ctx, agent.ChildInputRequest{
 		Target: target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "after activation",
 	})
 	if err != nil || !result.StartedActivity {
 		t.Fatalf("rehydrated SubmitChildInput() = (%#v, %v)", result, err)
 	}
-	terminal := waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("rehydrated terminal = %#v", terminal)
 	}
@@ -799,7 +800,7 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	first, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "prompt two",
 	})
 	if err != nil || !first.StartedActivity {
@@ -810,7 +811,7 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 	for i := range 2 {
 		select {
 		case event := <-events:
-			if event.ActivityID != first.ActivityID || event.Frame == nil {
+			if event.ActivityID != expectedActivityID || event.Frame == nil {
 				t.Fatalf("pre-output event = %#v, want new activity frame", event)
 			}
 			if i == 0 {
@@ -824,17 +825,17 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 			t.Fatal("new activity waited for assistant output before publishing running state")
 		}
 	}
-	second, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	second, _, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "steer two",
 	})
 	// Keep the producer active until its independent steering receipt settles.
 	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
 		t.Fatal(releaseErr)
 	}
-	if err != nil || second.StartedActivity || second.ActivityID != first.ActivityID {
+	if err != nil || second.StartedActivity {
 		t.Fatalf("immediate second input = (%#v, %v), want same-activity steering", second, err)
 	}
-	waitChildActivityTerminalFor(t, ctx, events, first.ActivityID)
+	waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +859,7 @@ func TestUnknownSteeringOutcomePreservesOriginalActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	_, _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "ambiguous steer",
 	})
 	if !errorcode.Is(err, errorcode.UnknownOutcome) {
@@ -891,7 +892,7 @@ func TestMalformedSteeringResultDoesNotSettleOriginalActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	_, _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "malformed steering result",
@@ -927,7 +928,7 @@ func TestMalformedIdlePromptResultFinishesUnknownAndIsolatesTransport(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	started, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target,
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "prompt with malformed terminal result",
@@ -935,7 +936,7 @@ func TestMalformedIdlePromptResultFinishesUnknownAndIsolatesTransport(t *testing
 	if err != nil || !started.StartedActivity {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want started activity", started, err)
 	}
-	terminal := waitChildActivityTerminalFor(t, ctx, events, started.ActivityID)
+	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 	if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome {
 		t.Fatalf("malformed prompt terminal = %#v, want unknown", terminal)
 	}
@@ -959,7 +960,7 @@ func childInputSpawnContext(t *testing.T, taskID string, events chan<- childInpu
 	}
 }
 
-func submitChildInputTest(runner *Runner, events chan<- childInputTestEvent, ctx context.Context, req agent.ChildInputRequest) (agent.ChildInputResult, error) {
+func submitChildInputTest(runner *Runner, events chan<- childInputTestEvent, ctx context.Context, req agent.ChildInputRequest) (agent.ChildInputResult, string, error) {
 	activityID := strings.TrimSpace(req.ActivityID)
 	if slot, err := runner.lookupChildSlot(req.Target); err == nil {
 		run := slot.currentRun()
@@ -980,7 +981,8 @@ func submitChildInputTest(runner *Runner, events chan<- childInputTestEvent, ctx
 	req.ActivityID = activityID
 	req.Output = sink
 	req.Completion = sink
-	return runner.SubmitChildInput(ctx, req)
+	result, err := runner.SubmitChildInput(ctx, req)
+	return result, activityID, err
 }
 
 func childInputTestRunner(t *testing.T, mode string) *Runner {

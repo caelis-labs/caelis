@@ -73,10 +73,9 @@ const (
 // RunState projects only a live handle in this Runtime. An empty value means
 // no live handle; historical outcomes belong to their owning Session or Task facts.
 type RunState struct {
-	Status            RunLifecycleStatus `json:"status,omitempty"`
-	ActiveRunID       string             `json:"active_run_id,omitempty"`
-	WaitingApproval   bool               `json:"waiting_approval,omitempty"`
-	ApprovalRequestID string             `json:"approval_request_id,omitempty"`
+	Status          RunLifecycleStatus `json:"status,omitempty"`
+	ActiveRunID     string             `json:"active_run_id,omitempty"`
+	WaitingApproval bool               `json:"waiting_approval,omitempty"`
 }
 
 // Runner is one active runtime run handle. Live source observation is installed
@@ -172,8 +171,7 @@ type ChildInputCommand struct {
 // true when idle input started a prompt activity; active steering
 // remains part of the already running activity.
 type ChildInputResult struct {
-	ActivityID      string `json:"activity_id,omitempty"`
-	StartedActivity bool   `json:"started_activity,omitempty"`
+	StartedActivity bool `json:"started_activity,omitempty"`
 }
 
 // ChildInputRunner is the optional provider-neutral input capability for an

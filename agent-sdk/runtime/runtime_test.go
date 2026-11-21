@@ -3224,7 +3224,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}
 	sessions.beforeAppend = func() {
 		state, err := runtime.RunState(t.Context(), activeSession.SessionRef)
-		if err != nil || state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || state.ApprovalRequestID != "" {
+		if err != nil || state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval {
 			t.Errorf("before pending approval is committed, RunState = %+v, %v", state, err)
 		}
 	}
@@ -3255,7 +3255,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	deadline := time.After(10 * time.Second)
 	for {
 		waiting, err = runtime.RunState(context.Background(), activeSession.SessionRef)
-		if err == nil && waiting.WaitingApproval && waiting.ApprovalRequestID != "" {
+		if err == nil && waiting.WaitingApproval {
 			break
 		}
 		select {
@@ -3265,12 +3265,13 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
+	requestID := waitForPendingApprovalRecord(t, sessions, activeSession.SessionRef, run.Handle.RunID())
 	resumed, err := runtime.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: run.Handle.RunID()})
 	if err != nil || resumed.Handle != run.Handle {
 		t.Fatalf("AttachLiveRun() = %+v, %v; want same live runner", resumed, err)
 	}
 	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: waiting.ApprovalRequestID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() error = %v", err)
 	}
 	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
@@ -3282,7 +3283,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("tool calls = %d, want 1", calls)
 	}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: waiting.ApprovalRequestID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("idempotent ResolveApproval() error = %v", err)
 	}
 	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
@@ -3292,6 +3293,9 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	var pauseStatuses []session.ApprovalRecordStatus
 	for _, event := range events {
 		if event.Type == session.EventTypeLifecycle && event.Approval != nil {
+			if event.Approval.RequestID != requestID {
+				t.Fatalf("pause token ID = %q, want original %q", event.Approval.RequestID, requestID)
+			}
 			pauseStatuses = append(pauseStatuses, event.Approval.Status)
 		}
 	}
@@ -3299,13 +3303,17 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 		t.Fatalf("pause token journal = %v, want %v", pauseStatuses, want)
 	}
 
-	reopened, err := New(Config{Sessions: sessionfile.NewStore(sessionfile.Config{RootDir: root}), AgentFactory: chat.Factory{}})
+	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened, err := New(Config{Sessions: reopenedStore, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatalf("New(reopened) error = %v", err)
 	}
 	state, err := reopened.RunState(context.Background(), activeSession.SessionRef)
 	if err != nil || state.ActiveRunID != "" {
 		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
+	}
+	if err := reopened.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+		t.Fatalf("ResolveApproval() after reopening with original request ID: %v", err)
 	}
 	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
 	var notResumable *agent.RunNotAttachableError

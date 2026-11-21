@@ -93,11 +93,11 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 			run.ctx = producerCtx
 			run.cancel = cancelProducer
 			run.mu.Unlock()
-			started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "original-controller"}, Input: "followup input"})
+			started, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "original-controller"}, Input: "followup input"})
 			if err != nil || !started.StartedActivity {
 				t.Fatalf("idle input admission = %+v, %v", started, err)
 			}
-			terminal := waitChildActivityTerminalFor(t, ctx, events, started.ActivityID)
+			terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
 			if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome || terminal.Result.TaskID != anchor.TaskID || terminal.Result.Result != "" {
 				t.Fatalf("receipt failure falsely settled or lost task: %+v", terminal)
 			}
@@ -199,7 +199,7 @@ func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testi
 				t.Fatal(err)
 			}
 			steerCtx, cancelSteer := context.WithTimeout(ctx, 50*time.Millisecond)
-			_, err = submitChildInputTest(runner, events, steerCtx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "ambiguous input"})
+			_, _, err = submitChildInputTest(runner, events, steerCtx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "ambiguous input"})
 			cancelSteer()
 			if !errorcode.Is(err, errorcode.UnknownOutcome) {
 				t.Fatalf("input outcome = %v", err)
@@ -215,8 +215,8 @@ func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testi
 				<-lateReturned
 			}
 			// The next send is an explicit decision, never an automatic replay.
-			next, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "explicit next message"})
-			if err != nil || next.StartedActivity || next.ActivityID != spawn.ActivityID {
+			next, _, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "explicit next message"})
+			if err != nil || next.StartedActivity {
 				t.Fatalf("next message = %+v, %v", next, err)
 			}
 			if err := peer.Update(ctx, v2.SessionId(anchor.SessionID), map[string]any{"sessionUpdate": "agent_message", "messageId": "later-output", "content": []any{map[string]any{"type": "text", "text": "continued original Activity"}}}); err != nil {
@@ -279,7 +279,7 @@ func TestDraftChildTerminalReleasesSteeringWithoutEchoOrInputDeadline(t *testing
 	}
 	sent := make(chan error, 1)
 	go func() {
-		_, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "missing echo"})
+		_, _, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "missing echo"})
 		sent <- err
 	}()
 	<-steering
