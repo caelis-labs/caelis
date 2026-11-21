@@ -802,6 +802,47 @@ func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
 	}
 }
 
+func TestStartCommandCleanupUsesSettledStatusAfterCleanupError(t *testing.T) {
+	cleanupErr := errors.New("sandbox cleanup reply failed")
+	for _, tc := range []struct {
+		name         string
+		terminateErr error
+		waitErr      error
+		running      bool
+	}{
+		{name: "terminate", terminateErr: cleanupErr},
+		{name: "wait", waitErr: cleanupErr, running: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
+			store := newSagaTaskStore()
+			runtime.tasks.store = store
+			running := tc.running
+			handle := &commandTerminateProbeSession{
+				yieldProbeSandboxSession: &yieldProbeSandboxSession{statusRunning: &running, waitErr: tc.waitErr},
+				err:                      tc.terminateErr,
+			}
+			startErr := errors.New("start returned a session and an error")
+			backend := newCommandStartProbe(handle, startErr)
+			req := taskapi.CommandStartRequest{Command: "probe", ParentCall: "settled-cleanup"}
+			got, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if got.State != taskapi.StateFailed || got.Running || !isCommandToolError(err) ||
+				!errors.Is(err, startErr) || !errors.Is(err, cleanupErr) {
+				t.Fatalf("StartCommand() = %+v, %v; want settled start failure with both errors", got, err)
+			}
+			entry, err := store.Get(t.Context(), got.Ref.TaskID)
+			if err != nil || entry.State != taskapi.StateFailed || entry.Running ||
+				entry.Terminal.SessionID != handle.Ref().SessionID {
+				t.Fatalf("persisted cleanup = %+v, %v; want settled failure with original identity", entry, err)
+			}
+			again, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if err != nil || again.Ref.TaskID != got.Ref.TaskID || backend.startCalls() != 1 || handle.terminateCalls() != 1 {
+				t.Fatalf("retry = %+v, %v, starts=%d, terminates=%d", again, err, backend.startCalls(), handle.terminateCalls())
+			}
+		})
+	}
+}
+
 func TestCommandCancelClaimPreventsRepeatedTerminate(t *testing.T) {
 	t.Parallel()
 

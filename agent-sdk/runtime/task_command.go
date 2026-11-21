@@ -312,12 +312,12 @@ func (tm *taskRuntime) startClaimedCommand(
 	runningEntry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	if err := tm.persistTaskEntry(ctx, runningEntry); err != nil {
-		status, exitErr := terminateFailedCommandStart(ctx, sessionHandle)
-		if exitErr != nil {
-			return tm.retainCommandWithUnconfirmedExit(ctx, task, status, err, exitErr)
+		status, settled, cleanupErr := terminateFailedCommandStart(ctx, sessionHandle)
+		if !settled {
+			return tm.retainCommandWithUnconfirmedExit(ctx, task, status, err, cleanupErr)
 		}
-		snapshot, cleanupErr := tm.finalizeCommandStartCleanup(ctx, task, status, err)
-		return snapshot, errors.Join(err, cleanupErr)
+		snapshot, persistErr := tm.finalizeCommandStartCleanup(ctx, task, status, err)
+		return snapshot, errors.Join(err, cleanupErr, persistErr)
 	}
 	if req.Observer != nil {
 		task.mu.Lock()
@@ -464,29 +464,34 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 	task.metadata["terminal_id"] = task.ref.TerminalID
 	task.mu.Unlock()
 	tm.installCommandTask(task)
-	status, exitErr := terminateFailedCommandStart(ctx, handle)
-	if exitErr != nil {
-		return tm.retainCommandWithUnconfirmedExit(ctx, task, status, startErr, exitErr)
+	status, settled, cleanupErr := terminateFailedCommandStart(ctx, handle)
+	if !settled {
+		return tm.retainCommandWithUnconfirmedExit(ctx, task, status, startErr, cleanupErr)
 	}
 	snapshot, persistErr := tm.finalizeCommandStartCleanup(ctx, task, status, startErr)
 	if persistErr == nil {
-		return snapshot, &commandToolError{startErr}
+		return snapshot, &commandToolError{errors.Join(startErr, cleanupErr)}
 	}
-	return snapshot, errors.Join(startErr, persistErr)
+	return snapshot, errors.Join(startErr, cleanupErr, persistErr)
 }
 
-func terminateFailedCommandStart(ctx context.Context, handle sandbox.Session) (sandbox.SessionStatus, error) {
+func terminateFailedCommandStart(ctx context.Context, handle sandbox.Session) (sandbox.SessionStatus, bool, error) {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := handle.Terminate(cleanupCtx); err != nil {
-		status, statusErr := handle.Status(cleanupCtx)
-		return status, errors.Join(err, statusErr)
+	cleanupErr := handle.Terminate(cleanupCtx)
+	if cleanupErr == nil {
+		status, waitErr := handle.Wait(cleanupCtx, taskCancelWait)
+		if waitErr == nil {
+			if status.Running {
+				return status, false, errors.New("command termination has not reached a settled exit")
+			}
+			return status, true, nil
+		}
+		cleanupErr = waitErr
 	}
-	status, err := handle.Wait(cleanupCtx, taskCancelWait)
-	if err == nil && status.Running {
-		err = errors.New("command termination has not reached a settled exit")
-	}
-	return status, err
+	// Status can confirm a settled exit even when the cleanup operation reported an error.
+	status, statusErr := handle.Status(cleanupCtx)
+	return status, statusErr == nil && !status.Running, errors.Join(cleanupErr, statusErr)
 }
 
 func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *commandTask, status sandbox.SessionStatus, cause error) (taskapi.Snapshot, error) {
