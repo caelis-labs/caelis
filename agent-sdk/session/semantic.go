@@ -58,18 +58,12 @@ func CanonicalToolName(event *Event, update *ProtocolUpdate) string {
 	if event == nil {
 		return ""
 	}
-	if toolPayload := EventToolProjection(event); toolPayload != nil {
-		if name := strings.TrimSpace(toolPayload.Name); name != "" {
+	if event.Tool != nil {
+		if name := strings.TrimSpace(event.Tool.Name); name != "" {
 			return name
 		}
 	}
-	if update == nil {
-		update = ProtocolUpdateOf(event)
-	}
-	if name := messageToolCallName(event, update); name != "" {
-		return name
-	}
-	return ""
+	return messageToolCallName(event, update)
 }
 
 func messageToolCallName(event *Event, update *ProtocolUpdate) string {
@@ -79,6 +73,8 @@ func messageToolCallName(event *Event, update *ProtocolUpdate) string {
 	callID := ""
 	if update != nil {
 		callID = update.ToolCallID
+	} else if event.Protocol != nil && event.Protocol.Update != nil {
+		callID = strings.TrimSpace(event.Protocol.Update.ToolCallID)
 	}
 	if callID == "" && event.Tool != nil {
 		callID = event.Tool.ID
