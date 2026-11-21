@@ -190,29 +190,20 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 				lastConsumed = lineCheckpoint
 				continue
 			}
-			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
+			event, err := decodeEventLogRecord([]byte(trimmed), path, lineNo)
+			if err != nil {
 				return session.EventPage{}, err
 			}
-			migratedRaw, err := session.MigrateEventJSON(json.RawMessage(trimmed))
-			if err != nil {
-				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
-			}
-			var event session.Event
-			if err := json.Unmarshal(migratedRaw, &event); err != nil {
-				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d: %w", path, lineNo, err)
-			}
-			if err := session.ValidateDurableCoreEvent(&event); err != nil {
-				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
-			}
 			if event.Seq > req.AfterSeq && (req.ThroughSeq == 0 || event.Seq <= req.ThroughSeq) {
-				if session.EventMatchesPageVisibility(&event, req.Visibility) && len(out.Events) >= req.Limit {
+				visible := session.EventMatchesPageVisibility(event, req.Visibility)
+				if visible && len(out.Events) >= req.Limit {
 					out.HasMore = true
 					break
 				}
 				out.NextSeq = event.Seq
 				lastConsumed = lineCheckpoint
-				if session.EventMatchesPageVisibility(&event, req.Visibility) {
-					out.Events = append(out.Events, session.CanonicalizeEvent(&event))
+				if visible {
+					out.Events = append(out.Events, session.CanonicalizeEvent(event))
 				}
 			}
 			if req.ThroughSeq > 0 && header.Seq == req.ThroughSeq {
@@ -233,7 +224,29 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 	return out, nil
 }
 
-func rejectUnsupportedLegacyEventLogLine(data []byte, path string, lineNo int) error {
+func decodeEventLogRecord(data []byte, path string, lineNo int) (*session.Event, error) {
+	label := path
+	if lineNo > 0 {
+		label = fmt.Sprintf("%s line %d", path, lineNo)
+	}
+	if err := rejectUnsupportedLegacyEventLogLine(data, label); err != nil {
+		return nil, err
+	}
+	migratedRaw, err := session.MigrateEventJSON(json.RawMessage(data))
+	if err != nil {
+		return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s: %w", label, err)
+	}
+	var event session.Event
+	if err := json.Unmarshal(migratedRaw, &event); err != nil {
+		return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s: %w", label, err)
+	}
+	if err := session.ValidateDurableCoreEvent(&event); err != nil {
+		return nil, fmt.Errorf("agent-sdk/session/file: invalid event log %s: %w", label, err)
+	}
+	return &event, nil
+}
+
+func rejectUnsupportedLegacyEventLogLine(data []byte, label string) error {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
 		//nolint:nilerr // This legacy-field probe defers malformed JSON to the authoritative event decoder.
@@ -247,7 +260,7 @@ func rejectUnsupportedLegacyEventLogLine(data []byte, path string, lineNo int) e
 		"tool_result",
 	} {
 		if raw, ok := root[key]; ok && len(raw) > 0 && strings.TrimSpace(string(raw)) != "null" {
-			return fmt.Errorf("agent-sdk/session/file: %w: event log %s line %d contains legacy semantic field %q", session.ErrUnsupportedLegacyFormat, path, lineNo, key)
+			return fmt.Errorf("agent-sdk/session/file: %w: event log %s contains legacy semantic field %q", session.ErrUnsupportedLegacyFormat, label, key)
 		}
 	}
 	return nil
@@ -309,27 +322,50 @@ func eventLogPath(documentPath string) string {
 	return strings.TrimSuffix(documentPath, ".json") + ".events.jsonl"
 }
 
-// readEventLogCheckpoint scans complete JSONL records from the tail. Memory is
-// bounded by one chunk plus the largest event line; ordinary checkpoints read
-// only the final durable record and the nearest client-replay record.
+// readEventLogCheckpoint reads the durable high-water mark and nearest
+// client-replay event from complete records at the tail.
 func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.Event, error) {
+	var throughSeq uint64
+	var lastReplay *session.Event
+	err := walkEventLogTail(ctx, path, func(raw []byte) (bool, error) {
+		event, err := decodeEventLogRecord(raw, path, 0)
+		if err != nil {
+			return false, err
+		}
+		if throughSeq == 0 {
+			throughSeq = event.Seq
+		}
+		if lastReplay == nil && session.IsClientReplayEvent(event) {
+			lastReplay = session.CloneEvent(event)
+		}
+		return throughSeq > 0 && lastReplay != nil, nil
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return throughSeq, lastReplay, nil
+}
+
+// walkEventLogTail passes complete, nonblank records in reverse order. It holds
+// only one read chunk and the largest record, and stops at the visitor's cut.
+func walkEventLogTail(ctx context.Context, path string, visit func([]byte) (bool, error)) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil, nil
+			return nil
 		}
-		return 0, nil, err
+		return err
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return 0, nil, err
+		return err
 	}
 	if info.Size() == 0 {
-		return 0, nil, nil
+		return nil
 	}
 
 	const chunkSize = 64 << 10
@@ -338,11 +374,9 @@ func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.
 	position := info.Size()
 	var lastByte [1]byte
 	if _, err := file.ReadAt(lastByte[:], info.Size()-1); err != nil {
-		return 0, nil, err
+		return err
 	}
 	skipTail := lastByte[0] != '\n'
-	var throughSeq uint64
-	var lastReplay *session.Event
 
 	consume := func(raw []byte) (bool, error) {
 		if skipTail {
@@ -353,29 +387,12 @@ func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.
 		if len(trimmed) == 0 {
 			return false, nil
 		}
-		migrated, err := session.MigrateEventJSON(json.RawMessage(trimmed))
-		if err != nil {
-			return false, fmt.Errorf("agent-sdk/session/file: migrate event checkpoint %s: %w", path, err)
-		}
-		var event session.Event
-		if err := json.Unmarshal(migrated, &event); err != nil {
-			return false, fmt.Errorf("agent-sdk/session/file: decode event checkpoint %s: %w", path, err)
-		}
-		if err := session.ValidateDurableCoreEvent(&event); err != nil {
-			return false, fmt.Errorf("agent-sdk/session/file: invalid event checkpoint %s: %w", path, err)
-		}
-		if throughSeq == 0 {
-			throughSeq = event.Seq
-		}
-		if lastReplay == nil && session.IsClientReplayEvent(&event) {
-			lastReplay = session.CloneEvent(&event)
-		}
-		return throughSeq > 0 && lastReplay != nil, nil
+		return visit(trimmed)
 	}
 
 	for position > 0 {
 		if err := ctx.Err(); err != nil {
-			return 0, nil, err
+			return err
 		}
 		readSize := int64(len(buf))
 		if position < readSize {
@@ -384,7 +401,7 @@ func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.
 		position -= readSize
 		chunk := buf[:readSize]
 		if _, err := file.ReadAt(chunk, position); err != nil && !errors.Is(err, io.EOF) {
-			return 0, nil, err
+			return err
 		}
 		data := make([]byte, 0, len(chunk)+len(suffix))
 		data = append(data, chunk...)
@@ -396,10 +413,10 @@ func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.
 			}
 			stop, err := consume(data[index+1 : end])
 			if err != nil {
-				return 0, nil, err
+				return err
 			}
 			if stop {
-				return throughSeq, lastReplay, nil
+				return nil
 			}
 			end = index
 		}
@@ -407,8 +424,8 @@ func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.
 	}
 	if len(bytes.TrimSpace(suffix)) > 0 {
 		if _, err := consume(suffix); err != nil {
-			return 0, nil, err
+			return err
 		}
 	}
-	return throughSeq, lastReplay, nil
+	return nil
 }

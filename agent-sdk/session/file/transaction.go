@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -454,44 +452,10 @@ func readEventLogTransactionTail(
 	path string,
 	firstSeq uint64,
 ) (uint64, map[uint64]*session.Event, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, map[uint64]*session.Event{}, nil
-		}
-		return 0, nil, err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return 0, nil, err
-	}
-	if info.Size() == 0 {
-		return 0, map[uint64]*session.Event{}, nil
-	}
-
-	const chunkSize = 64 << 10
-	buf := make([]byte, chunkSize)
-	var suffix []byte
-	position := info.Size()
-	var lastByte [1]byte
-	if _, err := file.ReadAt(lastByte[:], info.Size()-1); err != nil {
-		return 0, nil, err
-	}
-	skipTail := lastByte[0] != '\n'
 	var throughSeq uint64
 	bySeq := map[uint64]*session.Event{}
-
-	consume := func(raw []byte) (bool, error) {
-		if skipTail {
-			skipTail = false
-			return false, nil
-		}
-		trimmed := bytes.TrimSpace(raw)
-		if len(trimmed) == 0 {
-			return false, nil
-		}
-		event, err := decodeIndexedEvent(trimmed, path, 0)
+	err := walkEventLogTail(ctx, path, func(raw []byte) (bool, error) {
+		event, err := decodeEventLogRecord(raw, path, 0)
 		if err != nil {
 			return false, err
 		}
@@ -503,44 +467,9 @@ func readEventLogTransactionTail(
 		}
 		bySeq[event.Seq] = event
 		return event.Seq == firstSeq, nil
-	}
-
-	for position > 0 {
-		if err := ctx.Err(); err != nil {
-			return 0, nil, err
-		}
-		readSize := int64(len(buf))
-		if position < readSize {
-			readSize = position
-		}
-		position -= readSize
-		chunk := buf[:readSize]
-		if _, err := file.ReadAt(chunk, position); err != nil && !errors.Is(err, io.EOF) {
-			return 0, nil, err
-		}
-		data := make([]byte, 0, len(chunk)+len(suffix))
-		data = append(data, chunk...)
-		data = append(data, suffix...)
-		end := len(data)
-		for index := len(data) - 1; index >= 0; index-- {
-			if data[index] != '\n' {
-				continue
-			}
-			stop, err := consume(data[index+1 : end])
-			if err != nil {
-				return 0, nil, err
-			}
-			if stop {
-				return throughSeq, bySeq, nil
-			}
-			end = index
-		}
-		suffix = append(suffix[:0], data[:end]...)
-	}
-	if len(bytes.TrimSpace(suffix)) > 0 {
-		if _, err := consume(suffix); err != nil {
-			return 0, nil, err
-		}
+	})
+	if err != nil {
+		return 0, nil, err
 	}
 	return throughSeq, bySeq, nil
 }

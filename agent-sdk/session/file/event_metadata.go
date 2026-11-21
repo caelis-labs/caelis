@@ -284,7 +284,7 @@ func eventMetadataFromJSON(raw []byte, path string, line int) (eventMetadataReco
 	event.Approval = header.Approval
 	if header.Schema != session.EventSchemaVersion || header.Type == "" || header.Type == session.EventTypeContext || len(header.Notice) > 0 {
 		var err error
-		event, err = decodeIndexedEvent(raw, path, line)
+		event, err = decodeEventLogRecord(raw, path, line)
 		if err != nil {
 			return eventMetadataRecord{}, err
 		}
