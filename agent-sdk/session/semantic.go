@@ -74,7 +74,7 @@ func messageToolCallName(event *Event, update *ProtocolUpdate) string {
 	if update != nil {
 		callID = update.ToolCallID
 	} else if event.Protocol != nil && event.Protocol.Update != nil {
-		callID = strings.TrimSpace(event.Protocol.Update.ToolCallID)
+		callID = event.Protocol.Update.ToolCallID
 	}
 	if callID == "" && event.Tool != nil {
 		callID = event.Tool.ID

@@ -43,6 +43,10 @@ func EventTypeOf(event *Event) EventType {
 			}
 		}
 		switch strings.TrimSpace(protocol.Method) {
+		case "":
+			if protocol.AgentCommunication != nil {
+				return EventTypeContext
+			}
 		case ProtocolMethodParticipantUpdate:
 			return EventTypeParticipant
 		case ProtocolMethodControllerHandoff:
