@@ -220,7 +220,7 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		intValue(nestedAny(payload, "usage_metadata", "total_token_count")),
 		intValue(nestedAny(payload, "usageMetadata", "totalTokenCount")),
 	)
-	cachedTokens := cachedInputTokensFromPayload(payload)
+	cachedTokens, cachedTokensReported := cachedInputTokensFromPayload(payload)
 	reasoningTokens := reasoningTokensFromPayload(payload)
 	cacheSeparated := model.ProviderSeparatesCachedInputForUsage(provider, payload)
 	if totalTokens == 0 && (promptTokens != 0 || cachedTokens != 0 || completionTokens != 0 || reasoningTokens != 0) {
@@ -246,7 +246,7 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		CacheWriteTokens:           firstPresentUsageInt(payload["cache_write_tokens"], payload["cache_creation_input_tokens"]),
 		CacheWrite5mTokens:         firstPresentUsageInt(payload["cache_write_5m_tokens"], nestedAny(payload, "cache_creation", "ephemeral_5m_input_tokens")),
 		CacheWrite1hTokens:         firstPresentUsageInt(payload["cache_write_1h_tokens"], nestedAny(payload, "cache_creation", "ephemeral_1h_input_tokens")),
-		CachedInputTokensReported:  payload["cached_input_tokens_reported"] == true || (payload["cached_input_tokens"] == nil && payload["cache_read_input_tokens"] != nil),
+		CachedInputTokensReported:  cachedTokensReported,
 		CacheWriteTokensReported:   cacheMeasurementReported(payload, "cache_write_tokens", "cache_write_tokens_reported", payload["cache_creation_input_tokens"]),
 		CacheWrite5mTokensReported: cacheMeasurementReported(payload, "cache_write_5m_tokens", "cache_write_5m_tokens_reported", nestedAny(payload, "cache_creation", "ephemeral_5m_input_tokens")),
 		CacheWrite1hTokensReported: cacheMeasurementReported(payload, "cache_write_1h_tokens", "cache_write_1h_tokens_reported", nestedAny(payload, "cache_creation", "ephemeral_1h_input_tokens")),
@@ -263,24 +263,30 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 	return usage
 }
 
-func cachedInputTokensFromPayload(payload map[string]any) int {
+func cachedInputTokensFromPayload(payload map[string]any) (int, bool) {
+	reported, hasFlag := payload["cached_input_tokens_reported"].(bool)
 	if value := payload["cached_input_tokens"]; value != nil {
-		return intValue(value)
+		// Older normalized metadata always included this counter, even when
+		// the provider omitted it. Its legacy zero does not establish presence.
+		return intValue(value), reported
 	}
-	if value := payload["cache_read_input_tokens"]; value != nil {
-		return intValue(value)
+	for _, value := range []any{
+		payload["cache_read_input_tokens"],
+		payload["cached_prompt_tokens"],
+		payload["cached_tokens"],
+		payload["prompt_cache_hit_tokens"],
+		payload["cached_content_token_count"],
+		payload["cachedContentTokenCount"],
+		nestedAny(payload, "input_tokens_details", "cached_tokens"),
+		nestedAny(payload, "prompt_tokens_details", "cached_tokens"),
+		nestedAny(payload, "usage_metadata", "cached_content_token_count"),
+		nestedAny(payload, "usageMetadata", "cachedContentTokenCount"),
+	} {
+		if value != nil {
+			return intValue(value), !hasFlag || reported
+		}
 	}
-	return firstNonZeroInt(
-		intValue(payload["cached_prompt_tokens"]),
-		intValue(payload["cached_tokens"]),
-		intValue(payload["prompt_cache_hit_tokens"]),
-		intValue(payload["cached_content_token_count"]),
-		intValue(payload["cachedContentTokenCount"]),
-		intValue(nestedAny(payload, "input_tokens_details", "cached_tokens")),
-		intValue(nestedAny(payload, "prompt_tokens_details", "cached_tokens")),
-		intValue(nestedAny(payload, "usage_metadata", "cached_content_token_count")),
-		intValue(nestedAny(payload, "usageMetadata", "cachedContentTokenCount")),
-	)
+	return 0, reported
 }
 
 func explicitCacheReadInputTokens(payload map[string]any) int {

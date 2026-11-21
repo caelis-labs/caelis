@@ -60,3 +60,23 @@ func TestInvocationMetadataCachePresenceSurvivesJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestRawResponsesUncachedMeasurementSurvivesLegacyRead(t *testing.T) {
+	for _, tc := range []struct {
+		details string
+		present bool
+	}{
+		{`{}`, false},
+		{`{"cached_tokens":null}`, false},
+		{`{"cached_tokens":0}`, true},
+	} {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(`{"input_tokens":1024,"input_tokens_details":`+tc.details+`}`), &payload); err != nil {
+			t.Fatal(err)
+		}
+		usage := UsageSnapshotFromMapForProvider(payload, "openai")
+		if usage == nil || usage.CachedInputTokensReported != tc.present || usage.CachedInputTokens != 0 || usage.PromptTokens != 1024 {
+			t.Fatalf("details %s: %+v", tc.details, usage)
+		}
+	}
+}

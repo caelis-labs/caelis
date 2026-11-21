@@ -12,7 +12,7 @@ import (
 
 func TestJSExecProviderDeclarationPreservesSourceSelector(t *testing.T) {
 	req := &model.Request{Tools: tool.ModelSpecs([]tool.Tool{&codemode.Tool{Name: codemode.ToolName}})}
-	codex, err := openAICodexRequestFromModel(req, "synthetic")
+	codex, err := (&openAICodexLLM{name: "synthetic"}).buildRequest(req)
 	if err != nil {
 		t.Fatal(err)
 	}

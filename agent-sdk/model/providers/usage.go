@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -10,8 +11,8 @@ type openAICompatUsage struct {
 	PromptTokens            int                      `json:"prompt_tokens"`
 	CompletionTokens        int                      `json:"completion_tokens"`
 	TotalTokens             int                      `json:"total_tokens"`
-	CachedTokens            int                      `json:"cached_tokens"`
-	PromptCacheHitTokens    int                      `json:"prompt_cache_hit_tokens"`
+	CachedTokens            *int                     `json:"cached_tokens"`
+	PromptCacheHitTokens    *int                     `json:"prompt_cache_hit_tokens"`
 	ReasoningTokens         int                      `json:"reasoning_tokens"`
 	PromptTokensDetails     openAIInputTokenDetails  `json:"prompt_tokens_details"`
 	InputTokensDetails      openAIInputTokenDetails  `json:"input_tokens_details"`
@@ -20,7 +21,7 @@ type openAICompatUsage struct {
 }
 
 type openAIInputTokenDetails struct {
-	CachedTokens int `json:"cached_tokens"`
+	CachedTokens *int `json:"cached_tokens"`
 }
 
 type openAIOutputTokenDetails struct {
@@ -31,7 +32,7 @@ func (u openAICompatUsage) hasAny() bool {
 	return u.reported || u.PromptTokens != 0 ||
 		u.CompletionTokens != 0 ||
 		u.TotalTokens != 0 ||
-		u.cachedInputTokens() != 0 ||
+		u.cachedInputTokens() != nil ||
 		u.reasoningTokens() != 0
 }
 
@@ -40,14 +41,18 @@ func (u openAICompatUsage) toKernelUsage() model.Usage {
 	if total == 0 && (u.PromptTokens != 0 || u.CompletionTokens != 0) {
 		total = u.PromptTokens + u.CompletionTokens
 	}
-	return usageWithPresence(model.Usage{
+	usage := model.Usage{
 		CacheReadAccounting: model.CacheReadIncluded,
 		PromptTokens:        u.PromptTokens,
-		CachedInputTokens:   u.cachedInputTokens(),
 		CompletionTokens:    u.CompletionTokens,
 		ReasoningTokens:     u.reasoningTokens(),
 		TotalTokens:         total,
-	}, u.reported)
+	}
+	if cached := u.cachedInputTokens(); cached != nil {
+		usage.CachedInputTokens = *cached
+		usage.CachedInputTokensReported = true
+	}
+	return usageWithPresence(usage, u.reported)
 }
 
 func (u openAICompatUsage) toKernelUsageOr(fallback model.Usage) model.Usage {
@@ -58,14 +63,14 @@ func (u openAICompatUsage) toKernelUsageOr(fallback model.Usage) model.Usage {
 	return out
 }
 
-func (u openAICompatUsage) cachedInputTokens() int {
-	if u.PromptCacheHitTokens != 0 {
+func (u openAICompatUsage) cachedInputTokens() *int {
+	if u.PromptCacheHitTokens != nil {
 		return u.PromptCacheHitTokens
 	}
-	if u.CachedTokens != 0 {
+	if u.CachedTokens != nil {
 		return u.CachedTokens
 	}
-	if u.InputTokensDetails.CachedTokens != 0 {
+	if u.InputTokensDetails.CachedTokens != nil {
 		return u.InputTokensDetails.CachedTokens
 	}
 	return u.PromptTokensDetails.CachedTokens

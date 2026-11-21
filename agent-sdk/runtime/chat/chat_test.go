@@ -727,6 +727,11 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 	if !reflect.DeepEqual(initial, testModel.requests[2].Instructions) {
 		t.Fatal("repair instructions leaked into the next step")
 	}
+	for i, request := range testModel.requests {
+		if request.BaseInstructionCount != 1 || request.Instructions[0].Text.Text != "Use tools when needed." {
+			t.Fatalf("request %d changed the configured base: %+v", i, request)
+		}
+	}
 	if got, want := invocations, 1; got != want {
 		t.Fatalf("tool invocations = %d, want %d", got, want)
 	}

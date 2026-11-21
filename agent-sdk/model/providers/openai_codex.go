@@ -89,7 +89,7 @@ func (l *openAICodexLLM) Generate(ctx context.Context, req *model.Request) iter.
 			yield(nil, fmt.Errorf("openai codex: model is nil"))
 			return
 		}
-		payload, err := openAICodexRequestFromModel(req, l.name)
+		payload, err := l.buildRequest(req)
 		if err != nil {
 			yield(nil, err)
 			return

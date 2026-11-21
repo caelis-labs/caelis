@@ -56,6 +56,15 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 		if err == nil && next.Request == nil {
 			err = fmt.Errorf("model preparation requires a request")
 		}
+		if err == nil {
+			// Hooks can edit this request. Only the unchanged configured prefix
+			// retains its provenance, even if a later hook restores old text.
+			count := p.Request.BaseInstructionCount
+			next.Request.BaseInstructionCount = 0
+			if count > 0 && len(next.Request.Instructions) >= count && reflect.DeepEqual(next.Request.Instructions[:count], p.Request.Instructions[:count]) {
+				next.Request.BaseInstructionCount = count
+			}
+		}
 		if err == nil && !reflect.DeepEqual(next.Request.Messages, req.Messages) {
 			err = fmt.Errorf("messages require durable ContextEdit")
 		}

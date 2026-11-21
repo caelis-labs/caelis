@@ -55,13 +55,16 @@ func TestSkillInstructionsRejectedAdmissionDoesNotPinNewSummary(t *testing.T) {
 	var instructions string
 	ctx = model.WithInvocationStart(ctx, func(_ context.Context, _ model.Invocation, req *model.Request) error {
 		starts++
-		instructions = model.Message{Parts: req.Instructions}.TextContent()
+		if req.BaseInstructionCount != 1 || len(req.Instructions) != 2 || req.Instructions[0].Text.Text != "configured base" {
+			t.Fatalf("configured base or Skill guidance changed: %+v", req)
+		}
+		instructions = req.Instructions[1].Text.Text
 		return nil
 	})
 	chatAgent, err := (chat.Factory{}).NewAgent(ctx, agent.AgentSpec{
 		ResolveSessionInstructions: resolve,
 		ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
-			return agent.ModelRequestSnapshot{Model: systemManagedAgentResponseModel{}, Admit: func(context.Context, agent.ModelRequestAdmission) error {
+			return agent.ModelRequestSnapshot{Model: systemManagedAgentResponseModel{}, Instructions: []model.Part{model.NewTextPart("configured base")}, Admit: func(context.Context, agent.ModelRequestAdmission) error {
 				admissions++
 				if admissions == 1 {
 					state, err := store.SnapshotState(ctx, active.SessionRef)
