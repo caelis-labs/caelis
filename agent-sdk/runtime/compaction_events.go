@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -54,7 +55,7 @@ func buildCompactNoticeEvent(activeSession session.Session, turnID string, occur
 		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Scope: &scope,
 	}
-	event = session.MarkNotice(event, "notice", compact.CompactNoticeLabel)
+	event = session.MarkNotice(event, "notice", display.CompactNoticeLabel)
 	if event != nil && event.Notice != nil {
 		event.Notice.Kind = session.EventNoticeKindCompact
 	}
@@ -79,9 +80,9 @@ func buildCompactFailureNoticeEvent(activeSession session.Session, turnID string
 func compactFailureNoticeText(cause error) string {
 	text := strings.TrimSpace(compactionFailureCauseText(cause))
 	if text == "" {
-		return compact.CompactFailureLabel
+		return display.CompactFailureNoticeLabel
 	}
-	return compact.CompactFailureLabel + ": " + truncateCompactFailureNotice(text)
+	return display.CompactFailureNoticeLabel + ": " + truncateCompactFailureNotice(text)
 }
 
 func compactionFailureCauseText(cause error) string {

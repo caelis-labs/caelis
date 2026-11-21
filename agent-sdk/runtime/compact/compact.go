@@ -5,16 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-const (
-	CompactContractVersion = 1
-	CompactNoticeLabel     = display.CompactNoticeLabel
-	CompactFailureLabel    = display.CompactFailureNoticeLabel
-)
+const CompactContractVersion = 1
 
 type UsageSource string
 

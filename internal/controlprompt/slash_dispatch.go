@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -165,7 +165,7 @@ func (r router) dispatchCompact(ctx context.Context, args string) (Result, error
 	if err != nil {
 		return Result{}, FriendlyCommandError("compact", err)
 	}
-	notice := compact.CompactNoticeLabel
+	notice := display.CompactNoticeLabel
 	if !compacted {
 		notice = "Nothing to compact"
 	}

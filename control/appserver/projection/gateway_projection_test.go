@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
@@ -110,7 +110,7 @@ func TestProjectSessionEventEnvelopeProjectsNoticeEventstreamOnly(t *testing.T) 
 		ID:        "notice-1",
 		SessionID: "session-1",
 		Type:      session.EventTypeNotice,
-	}, "notice", compact.CompactNoticeLabel)
+	}, "notice", display.CompactNoticeLabel)
 	event.Notice.Kind = session.EventNoticeKindCompact
 	events := ProjectSessionEventEnvelope(eventstream.Envelope{
 		SessionID: "session-1",
@@ -120,7 +120,7 @@ func TestProjectSessionEventEnvelopeProjectsNoticeEventstreamOnly(t *testing.T) 
 	if len(events) != 1 {
 		t.Fatalf("ProjectSessionEventEnvelope() returned %d events, want 1: %#v", len(events), events)
 	}
-	if events[0].Kind != eventstream.KindNotice || events[0].Notice != compact.CompactNoticeLabel {
+	if events[0].Kind != eventstream.KindNotice || events[0].Notice != display.CompactNoticeLabel {
 		t.Fatalf("projected notice = %#v, want eventstream notice", events[0])
 	}
 	if events[0].NoticeKind != eventstream.NoticeKindCompact {
@@ -136,7 +136,7 @@ func TestProjectSessionEventEnvelopeUpgradesLegacyCompactNoticeKind(t *testing.T
 		ID:        "notice-legacy-compact",
 		SessionID: "session-1",
 		Type:      session.EventTypeNotice,
-	}, "notice", compact.CompactNoticeLabel)
+	}, "notice", display.CompactNoticeLabel)
 	events := ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "session-1"}, event)
 	if len(events) != 1 || events[0].NoticeKind != eventstream.NoticeKindCompact {
 		t.Fatalf("projected legacy compact notice = %#v, want typed compact kind", events)
