@@ -7,6 +7,7 @@ import (
 
 	"github.com/aymanbagabas/go-udiff/lcs"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
 type ToolContent struct {
@@ -48,7 +49,7 @@ func FormatToolContent(content []ToolContent) string {
 
 func toolDiffText(item ToolContent) string {
 	if item.Changes != nil {
-		return session.StructuredDiffText(item.Changes, item.Patch)
+		return projection.StructuredDiffText(item.Changes, item.Patch)
 	}
 	oldText := ""
 	if item.OldText != nil {

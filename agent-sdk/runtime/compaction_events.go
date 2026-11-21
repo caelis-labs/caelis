@@ -104,13 +104,6 @@ func truncateCompactFailureNotice(text string) string {
 	return strings.TrimSpace(text[:limit]) + "..."
 }
 
-func compactTextFromEvent(event *session.Event) string {
-	if event == nil {
-		return ""
-	}
-	return strings.TrimSpace(session.EventText(event))
-}
-
 func compactableEvents(events []*session.Event) []*session.Event {
 	return compact.EventsAfterLatestCompact(events)
 }
@@ -120,13 +113,7 @@ func compactableEventCount(events []*session.Event) int {
 }
 
 func eventTextForCompaction(event *session.Event) string {
-	if event == nil {
-		return ""
-	}
-	if text := strings.TrimSpace(session.EventText(event)); text != "" {
-		return text
-	}
-	return ""
+	return strings.TrimSpace(session.EventText(event))
 }
 
 func pendingEventsForCompaction(events []*session.Event) []*session.Event {

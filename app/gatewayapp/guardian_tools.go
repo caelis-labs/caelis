@@ -169,7 +169,7 @@ func (q *guardianQueries) admit(ctx context.Context, req *model.Request) error {
 		return err
 	}
 	if q.model != nil {
-		usage := sdkruntime.EvaluateModelRequestBudget(q.model, req, guardianCompactionConfig(q.model, req.Output, q.queryTools)).Usage
+		usage := sdkruntime.EvaluateModelRequestBudget(q.model, req, guardianCompactionConfig(q.model, req.Output, q.queryTools))
 		q.resultBytes = max(1024, min(64*1024, (usage.EffectiveInputBudget-usage.TotalTokens)/2))
 		q.maxRequestTokens = max(q.maxRequestTokens, usage.TotalTokens)
 		q.inputBudget = usage.EffectiveInputBudget

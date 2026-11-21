@@ -28,9 +28,9 @@ type codeModeTask struct {
 	result     tool.Result
 	err        error
 	persistErr error
-	// Reuse Task's model-output frontier; Surface output has independent cursors.
-	frontier commandObservationFrontier
-	observer output.Observer
+	// modelOutputCursor records the selected result observed by the model.
+	modelOutputCursor int64
+	observer          output.Observer
 }
 
 func (t runtimeCodeModeTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
@@ -115,9 +115,9 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	case <-task.done:
 		task.mu.Lock()
 		result, err := task.result, task.err
-		task.frontier.model = int64(len(taskStringValue(task.entry.Result["tool_result_json"])))
+		task.modelOutputCursor = int64(len(taskStringValue(task.entry.Result["tool_result_json"])))
 		snapshot := codeModeSnapshot(task.entry)
-		snapshot.Metadata["model_output_cursor"] = task.frontier.model
+		snapshot.Metadata["model_output_cursor"] = task.modelOutputCursor
 		o := toolbinding.Observed(ctx)
 		o.TaskEvent = taskToolMeta(snapshot)
 		observeScriptTask(ctx, snapshot, legacyScriptDisposition{})
@@ -215,61 +215,56 @@ func codeModeSnapshot(entry *taskapi.Entry) taskapi.Snapshot {
 	return taskapi.Snapshot{Ref: taskapi.Ref{TaskID: entry.TaskID, SessionID: entry.Session.SessionID}, Handle: entry.Handle, Revision: entry.Revision, Kind: entry.Kind, Title: entry.Title, State: entry.State, Running: entry.Running, SupportsCancel: entry.Running, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt, Result: session.CloneState(entry.Result), Metadata: session.CloneState(entry.Metadata)}
 }
 
-type codeModeControlTarget struct {
-	runtime *taskRuntime
-	task    *codeModeTask
-}
-
-func (t codeModeControlTarget) Read(_ context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+func (t *codeModeTask) Read(_ context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	return t.snapshot(req, false)
 }
 
-func (t codeModeControlTarget) snapshot(req taskapi.ControlRequest, statusOnly bool) (taskapi.Snapshot, error) {
-	t.task.mu.Lock()
-	defer t.task.mu.Unlock()
-	snapshot := codeModeSnapshot(t.task.entry)
+func (t *codeModeTask) snapshot(req taskapi.ControlRequest, statusOnly bool) (taskapi.Snapshot, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	snapshot := codeModeSnapshot(t.entry)
 	modelObserver := req.Source == "agent_tool" && req.Principal == session.ActorKindTool
 	if statusOnly && modelObserver {
 		// The model cancel only reports status. Leave the selected result
 		// available for a subsequent wait.
 		delete(snapshot.Result, "tool_result_json")
 	}
-	if statusOnly || t.task.persistErr != nil {
-		return snapshot, t.task.persistErr
+	if statusOnly || t.persistErr != nil {
+		return snapshot, t.persistErr
 	}
 	if modelObserver {
 		raw := taskStringValue(snapshot.Result["tool_result_json"])
-		if t.task.frontier.model >= int64(len(raw)) {
+		if t.modelOutputCursor >= int64(len(raw)) {
 			delete(snapshot.Result, "tool_result_json")
 		} else {
-			t.task.frontier.model = int64(len(raw))
+			t.modelOutputCursor = int64(len(raw))
 		}
 		if snapshot.Metadata == nil {
 			snapshot.Metadata = map[string]any{}
 		}
-		snapshot.Metadata["output_cursor"] = t.task.frontier.model
-		snapshot.Metadata["model_output_cursor"] = t.task.frontier.model
+		snapshot.Metadata["output_cursor"] = t.modelOutputCursor
+		snapshot.Metadata["model_output_cursor"] = t.modelOutputCursor
 	}
 	return snapshot, nil
 }
-func (t codeModeControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+func (t *codeModeTask) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	timer := time.NewTimer(max(req.Yield, 0))
 	defer timer.Stop()
 	select {
-	case <-t.task.done:
+	case <-t.done:
 	case <-timer.C:
 	case <-ctx.Done():
 		return taskapi.Snapshot{}, ctx.Err()
 	}
 	return t.Read(ctx, req)
 }
-func (t codeModeControlTarget) Write(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error) {
+func (t *codeModeTask) Write(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	return taskapi.Snapshot{}, tool.NewError(errorcode.Unsupported, "js_exec Tasks do not accept input; wait/cancel the original handle")
 }
-func (t codeModeControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	t.task.cancel()
+func (t *codeModeTask) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	t.cancel()
 	select {
-	case <-t.task.done:
+	case <-t.done:
 	case <-ctx.Done():
 		return taskapi.Snapshot{}, ctx.Err()
 	}
@@ -281,7 +276,7 @@ func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRe
 	task := tm.codeTasks[id]
 	tm.mu.RUnlock()
 	if task != nil && task.sessionRef.SessionID == ref.SessionID {
-		return codeModeControlTarget{runtime: tm, task: task}, nil
+		return task, nil
 	}
 	if tm.store == nil {
 		return nil, fmt.Errorf("script Task is unavailable")
@@ -300,14 +295,14 @@ func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRe
 	done := make(chan struct{})
 	close(done)
 	task = &codeModeTask{entry: entry, sessionRef: ref, handle: entry.Handle, done: done, cancel: func() {}, observer: output.Nop()}
-	task.frontier.model, _ = taskInt64Value(entry.Metadata["model_output_cursor"])
+	task.modelOutputCursor, _ = taskInt64Value(entry.Metadata["model_output_cursor"])
 	tm.mu.Lock()
 	if tm.codeTasks == nil {
 		tm.codeTasks = map[string]*codeModeTask{}
 	}
 	tm.codeTasks[id] = task
 	tm.mu.Unlock()
-	return codeModeControlTarget{runtime: tm, task: task}, nil
+	return task, nil
 }
 
 // Canonical delivery advances the existing Task frontier without replacing its

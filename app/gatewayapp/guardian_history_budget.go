@@ -39,7 +39,7 @@ func guardianMessageTokens(event *session.Event) int {
 	if !ok {
 		return 0
 	}
-	return sdkruntime.EvaluateModelRequestBudget(nil, &model.Request{Messages: []model.Message{message}}, sdkruntime.CompactionConfig{}).Usage.TotalTokens
+	return sdkruntime.EvaluateModelRequestBudget(nil, &model.Request{Messages: []model.Message{message}}, sdkruntime.CompactionConfig{}).TotalTokens
 }
 
 func guardianHistoryUsage(events []*session.Event) (tokens, turns int) {
@@ -111,7 +111,7 @@ func guardianRetainedHistory(events, users []*session.Event, optional ...[]*sess
 func guardianFitHistory(events []*session.Event, llm model.LLM, input string, output *model.OutputSpec, queryTools bool) ([]*session.Event, bool) {
 	users, assistants, reviews := guardianSplitHistory(events)
 	cfg := guardianCompactionConfig(llm, output, queryTools)
-	fixed := sdkruntime.EvaluateModelRequestBudget(llm, guardianModelRequest(nil, input, output, queryTools), cfg).Usage
+	fixed := sdkruntime.EvaluateModelRequestBudget(llm, guardianModelRequest(nil, input, output, queryTools), cfg)
 	room := fixed.EffectiveInputBudget - fixed.TotalTokens
 	if room < 0 {
 		return users, false

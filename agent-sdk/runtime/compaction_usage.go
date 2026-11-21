@@ -575,33 +575,19 @@ func usageRatio(usage compact.UsageSnapshot) float64 {
 	return float64(usage.TotalTokens) / float64(usage.EffectiveInputBudget)
 }
 
-// ModelRequestBudget is the unified model-visible budget evaluation for one
-// fully assembled request. Usage includes instructions, messages, tools, and
-// the output contract; Compaction applies the Runtime's configured watermark
-// policy to that same total.
-type ModelRequestBudget struct {
-	Usage      compact.UsageSnapshot
-	Compaction compact.TriggerDecision
-}
-
 // EvaluateModelRequestBudget evaluates one fully assembled model request
-// without reading or mutating Session history. Callers must not add
-// EstimatedPromptPrefixTokens separately because req already contains the
-// complete model-visible prefix.
-func EvaluateModelRequestBudget(llm model.LLM, req *model.Request, cfg CompactionConfig) ModelRequestBudget {
+// without reading or mutating Session history. The estimate includes the
+// assembled instructions, messages, tools, and output contract.
+func EvaluateModelRequestBudget(llm model.LLM, req *model.Request, cfg CompactionConfig) compact.UsageSnapshot {
 	cfg = normalizeCompactionConfig(cfg)
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	reserve := resolveReserveOutputTokens(window, cfg.ReserveOutputTokens)
 	safety := resolveSafetyMarginTokens(window, cfg.SafetyMarginTokens)
-	usage := compact.UsageSnapshot{
+	return compact.UsageSnapshot{
 		TotalTokens:          estimateModelRequestTokens(req),
 		ContextWindowTokens:  window,
 		EffectiveInputBudget: resolveEffectiveInputBudget(window, reserve, safety),
 		Source:               compact.UsageSourceEstimated,
-	}
-	return ModelRequestBudget{
-		Usage:      usage,
-		Compaction: evaluateWatermark(usage, cfg),
 	}
 }
 

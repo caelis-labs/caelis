@@ -188,7 +188,7 @@ func (s *Store) repairSessionWorkspaceKey(ctx context.Context, repair WorkspaceK
 	if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil, nil); err != nil {
 		return false, fmt.Errorf("agent-sdk/session/file: repair Session %q workspace key: %w", repair.SessionID, err)
 	}
-	delete(s.pathCache, pathCacheKey(repair.SessionID, repair.ExpectedWorkspaceKey))
+	delete(s.pathCache, sanitizeSessionID(repair.SessionID))
 	return true, nil
 }
 

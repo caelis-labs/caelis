@@ -107,7 +107,9 @@ func TestTaskStateSteeringMatchesFullMetadataDecoder(t *testing.T) {
 
 func TestTaskStateReadHonorsCanceledStoreAcquisition(t *testing.T) {
 	store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
-	store.store.mu.Lock()
+	if err := store.store.mu.LockContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	defer store.store.mu.Unlock()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

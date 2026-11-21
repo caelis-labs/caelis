@@ -182,7 +182,7 @@ func (s *Store) StartSession(
 			CWD:             strings.TrimSpace(req.Workspace.CWD),
 			ExecutionConfig: sandbox.CloneExecutionConfig(req.ExecutionConfig),
 			Title:           strings.TrimSpace(req.Title),
-			Metadata:        cloneMap(req.Metadata),
+			Metadata:        cloneState(req.Metadata),
 			Controller:      session.CloneControllerBinding(req.Controller),
 			CreatedAt:       now,
 			UpdatedAt:       now,
