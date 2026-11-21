@@ -663,6 +663,11 @@ func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 	}
 	if len(in.Locations) > 0 {
 		out.Locations = slices.Clone(in.Locations)
+		for i := range out.Locations {
+			if line := out.Locations[i].Line; line != nil {
+				out.Locations[i].Line = new(*line)
+			}
+		}
 	}
 	out.Entries = cloneProtocolPlanEntries(in.Entries)
 	return out

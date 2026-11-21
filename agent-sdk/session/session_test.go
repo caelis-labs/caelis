@@ -674,6 +674,7 @@ func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 	t.Parallel()
 
+	line := 17
 	protocol := CloneEventProtocol(EventProtocol{
 		Update: &ProtocolUpdate{
 			SessionUpdate: string(ProtocolUpdateTypeToolCall),
@@ -682,6 +683,7 @@ func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 			Kind:          "execute",
 			Status:        "pending",
 			RawInput:      map[string]any{"command": "echo hi"},
+			Locations:     []ProtocolToolCallLocation{{Path: "README.md", Line: &line}},
 		},
 	})
 
@@ -696,6 +698,10 @@ func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 	update.RawInput["command"] = "mutated"
 	if got := protocol.Update.RawInput["command"]; got != "echo hi" {
 		t.Fatalf("source update raw input = %#v, want clone isolation", got)
+	}
+	*update.Locations[0].Line = 42
+	if got := *protocol.Update.Locations[0].Line; got != 17 || line != 17 {
+		t.Fatalf("source lines after mutation = %d, %d, want isolated line 17", got, line)
 	}
 }
 
