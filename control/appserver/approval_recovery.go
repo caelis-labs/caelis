@@ -170,18 +170,7 @@ func sweepSessionApprovals(
 		if err != nil {
 			return time.Time{}, err
 		}
-		for _, event := range page.Events {
-			requestID := strings.TrimSpace(event.ApprovalRequestID)
-			if requestID == "" {
-				continue
-			}
-			switch {
-			case session.ProtocolPermissionOf(event) != nil:
-				pending[requestID] = event
-			case event.Lifecycle != nil:
-				delete(pending, requestID)
-			}
-		}
+		session.ApplyPendingApprovalEvents(pending, page.Events)
 		if page.NextSeq <= afterSeq || !page.HasMore {
 			break
 		}

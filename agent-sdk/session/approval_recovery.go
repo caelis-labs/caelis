@@ -54,6 +54,53 @@ type ApprovalRecoveryService interface {
 	ApprovalRecoverySettler
 }
 
+// ApplyPendingApprovalEvents updates a recovery index from ordered durable
+// events. Entries borrow the input event pointers. A Store must copy them before
+// exposing the index outside its persistence critical section.
+func ApplyPendingApprovalEvents(pending map[string]*Event, events []*Event) {
+	for _, event := range events {
+		requestID, open := pendingApprovalTransition(event)
+		if requestID == "" {
+			continue
+		}
+		if open {
+			pending[requestID] = event
+		} else {
+			delete(pending, requestID)
+		}
+	}
+}
+
+// PendingApprovalEvent finds the currently pending request in ordered durable
+// events. It returns a borrowed event, which callers must treat as read-only.
+func PendingApprovalEvent(events []*Event, requestID string) *Event {
+	requestID = strings.TrimSpace(requestID)
+	for i := len(events) - 1; i >= 0; i-- {
+		id, open := pendingApprovalTransition(events[i])
+		if id == "" || id != requestID {
+			continue
+		}
+		if open {
+			return events[i]
+		}
+		return nil
+	}
+	return nil
+}
+
+func pendingApprovalTransition(event *Event) (requestID string, open bool) {
+	if event == nil {
+		return "", false
+	}
+	if event.Protocol != nil && event.Protocol.Permission != nil {
+		return strings.TrimSpace(event.ApprovalRequestID), true
+	}
+	if event.Lifecycle != nil {
+		return strings.TrimSpace(event.ApprovalRequestID), false
+	}
+	return "", false
+}
+
 // ValidateSettlePendingApprovalRequest validates the reusable conditional
 // settlement contract before a Store enters its persistence transaction.
 func ValidateSettlePendingApprovalRequest(req SettlePendingApprovalRequest) error {
@@ -63,7 +110,7 @@ func ValidateSettlePendingApprovalRequest(req SettlePendingApprovalRequest) erro
 		return ErrInvalidTransaction
 	}
 	if req.Settlement == nil || req.Settlement.Type != EventTypeLifecycle || req.Settlement.Lifecycle == nil ||
-		ProtocolPermissionOf(req.Settlement) != nil ||
+		req.Settlement.Protocol != nil && req.Settlement.Protocol.Permission != nil ||
 		strings.TrimSpace(req.Settlement.ApprovalRequestID) != requestID {
 		return ErrInvalidEvent
 	}
@@ -78,8 +125,8 @@ func PendingApprovalMatches(current *Event, req SettlePendingApprovalRequest) bo
 	if current == nil {
 		return false
 	}
-	return strings.TrimSpace(current.ApprovalRequestID) == strings.TrimSpace(req.ApprovalRequestID) &&
+	requestID, open := pendingApprovalTransition(current)
+	return open && requestID == strings.TrimSpace(req.ApprovalRequestID) &&
 		strings.TrimSpace(current.ID) == strings.TrimSpace(req.ExpectedRequestEventID) &&
-		current.Seq == req.ExpectedRequestSeq &&
-		ProtocolPermissionOf(current) != nil
+		current.Seq == req.ExpectedRequestSeq
 }

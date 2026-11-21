@@ -177,26 +177,8 @@ func (s *Store) SettlePendingApproval(
 
 func pendingApprovalsFromEvents(events []*session.Event) map[string]*session.Event {
 	pending := map[string]*session.Event{}
-	applyPendingApprovalEvents(pending, events)
+	session.ApplyPendingApprovalEvents(pending, events)
 	return pending
-}
-
-func applyPendingApprovalEvents(pending map[string]*session.Event, events []*session.Event) {
-	for _, event := range events {
-		requestID := ""
-		if event != nil {
-			requestID = strings.TrimSpace(event.ApprovalRequestID)
-		}
-		if requestID == "" {
-			continue
-		}
-		switch {
-		case session.ProtocolPermissionOf(event) != nil:
-			pending[requestID] = session.CloneEvent(event)
-		case event.Lifecycle != nil:
-			delete(pending, requestID)
-		}
-	}
 }
 
 func clonePendingApprovals(in map[string]*session.Event) map[string]*session.Event {

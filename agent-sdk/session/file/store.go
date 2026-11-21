@@ -376,7 +376,7 @@ func (s *Store) prepareAppendTransactionForDocument(
 		}
 		doc.PendingApprovals = pendingApprovalsFromEvents(existingEvents)
 	}
-	applyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
+	session.ApplyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
 	if tx.RecordTransaction {
 		if doc.AppliedTransactions == nil {
 			doc.AppliedTransactions = map[string]bool{}

@@ -244,7 +244,7 @@ func (s *Store) SettlePendingApproval(
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	current := pendingApprovalForEvents(record.events, req.ApprovalRequestID)
+	current := session.PendingApprovalEvent(record.events, req.ApprovalRequestID)
 	if !session.PendingApprovalMatches(current, req) {
 		return nil
 	}
@@ -268,23 +268,6 @@ func (s *Store) SettlePendingApproval(
 	}
 	s.applyAppendTransactionToRecord(record, tx)
 	return nil
-}
-
-func pendingApprovalForEvents(events []*session.Event, approvalRequestID string) *session.Event {
-	requestID := strings.TrimSpace(approvalRequestID)
-	var pending *session.Event
-	for _, event := range events {
-		if event == nil || strings.TrimSpace(event.ApprovalRequestID) != requestID {
-			continue
-		}
-		switch {
-		case session.ProtocolPermissionOf(event) != nil:
-			pending = event
-		case event.Lifecycle != nil:
-			pending = nil
-		}
-	}
-	return pending
 }
 
 func (s *Store) prepareAppendTransactionForRecord(
@@ -753,21 +736,7 @@ func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval
 	keys := make([]pendingKey, 0)
 	for _, record := range s.sessions {
 		pending := map[string]*session.Event{}
-		for _, event := range record.events {
-			requestID := ""
-			if event != nil {
-				requestID = strings.TrimSpace(event.ApprovalRequestID)
-			}
-			if requestID == "" {
-				continue
-			}
-			switch {
-			case session.ProtocolPermissionOf(event) != nil:
-				pending[requestID] = event
-			case event.Lifecycle != nil:
-				delete(pending, requestID)
-			}
-		}
+		session.ApplyPendingApprovalEvents(pending, record.events)
 		for requestID, request := range pending {
 			keys = append(keys, pendingKey{
 				sessionID: record.session.SessionID, requestID: requestID,
