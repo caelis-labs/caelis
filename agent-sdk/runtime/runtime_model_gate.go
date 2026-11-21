@@ -321,7 +321,7 @@ func (r *Runtime) autoCompactModelRequestView(
 	}
 	events := loaded.Events
 	events = mainInvocationEvents(events)
-	delta := compactableEvents(events)
+	delta := compact.EventsAfterLatestCompact(events)
 	if len(delta) == 0 {
 		return autoCompactModelRequestView{sourceThroughSeq: session.LastEventSeq(events)}, true, nil
 	}

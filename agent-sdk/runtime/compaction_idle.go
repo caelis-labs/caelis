@@ -158,7 +158,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 			}
 		}
 	}
-	delta := compactableEvents(events)
+	delta := compact.EventsAfterLatestCompact(events)
 	if estimatePromptEventsTokens(delta) < 16000 {
 		return nil, nil
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -103,14 +102,6 @@ func truncateCompactFailureNotice(text string) string {
 		return text
 	}
 	return strings.TrimSpace(text[:limit]) + "..."
-}
-
-func compactableEvents(events []*session.Event) []*session.Event {
-	return compact.EventsAfterLatestCompact(events)
-}
-
-func compactableEventCount(events []*session.Event) int {
-	return len(compactableEvents(events))
 }
 
 func eventTextForCompaction(event *session.Event) string {

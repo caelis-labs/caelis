@@ -1962,9 +1962,9 @@ func TestCompactableEventsIgnoreReplacementOverlayHistory(t *testing.T) {
 		canonical,
 	}
 
-	got := compactableEvents(events)
+	got := compact.EventsAfterLatestCompact(events)
 	if len(got) != 1 {
-		t.Fatalf("compactableEvents() count = %d, want 1 (%v)", len(got), got)
+		t.Fatalf("compact.EventsAfterLatestCompact() count = %d, want 1 (%v)", len(got), got)
 	}
 	if text := eventTextForCompaction(got[0]); text != "Fresh canonical user event after the latest compact." {
 		t.Fatalf("compactable event text = %q, want fresh canonical event", text)
@@ -1994,9 +1994,9 @@ func TestCompactableEventsIgnoreSyntheticCheckpointPromptReplacement(t *testing.
 		t.Fatalf("PromptEventsFromLatestCompact() = %+v, want checkpoint replacement plus next event", promptEvents)
 	}
 
-	got := compactableEvents(events)
+	got := compact.EventsAfterLatestCompact(events)
 	if len(got) != 1 {
-		t.Fatalf("compactableEvents() count = %d, want only post-compact event (%+v)", len(got), got)
+		t.Fatalf("compact.EventsAfterLatestCompact() count = %d, want only post-compact event (%+v)", len(got), got)
 	}
 	if text := eventTextForCompaction(got[0]); text != "Fresh canonical user event after the latest compact." {
 		t.Fatalf("compactable event text = %q, want fresh canonical event", text)

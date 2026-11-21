@@ -193,7 +193,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	if err != nil || prefix != req.Source.SourcePrefixHash || session.LastEventSeq(events) != req.Source.SourceThroughSeq {
 		return false, nil
 	}
-	delta := compactableEvents(events)
+	delta := compact.EventsAfterLatestCompact(events)
 	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) || !asyncToolPairsComplete(compact.PromptEventsFromLatestCompact(events)) {
 		return false, nil
 	}

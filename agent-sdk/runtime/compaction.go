@@ -63,9 +63,9 @@ func (c *codexStyleCompactor) Prepare(ctx context.Context, req compact.Request) 
 	if !c.cfg.Enabled || req.Model == nil {
 		return result, nil
 	}
-	decision, err := c.decide(ctx, result.Usage, req)
-	if err != nil || !decision.ShouldCompact {
-		return result, err
+	decision := c.decide(result.Usage, req)
+	if !decision.ShouldCompact {
+		return result, nil
 	}
 	compacted, err := c.compact(ctx, req, decision.Reason)
 	if err != nil {
@@ -83,7 +83,7 @@ func (c *codexStyleCompactor) Force(ctx context.Context, req compact.Request, tr
 		PromptEvents: promptEvents,
 		Usage:        c.snapshotUsage(req, promptEventsWithPending(promptEvents, req.PendingEvents)),
 	}
-	if compactableEventCount(req.Events) == 0 {
+	if len(compact.EventsAfterLatestCompact(req.Events)) == 0 {
 		return result, nil
 	}
 	if req.Model == nil {
@@ -110,14 +110,14 @@ func (c *codexStyleCompactor) CompactOnOverflow(ctx context.Context, req compact
 	return c.compact(ctx, req, "overflow_recovery")
 }
 
-func (c *codexStyleCompactor) decide(_ context.Context, usage compact.UsageSnapshot, req compact.Request) (compact.TriggerDecision, error) {
+func (c *codexStyleCompactor) decide(usage compact.UsageSnapshot, req compact.Request) compact.TriggerDecision {
 	if usage.EffectiveInputBudget <= 0 || req.Model == nil {
-		return compact.TriggerDecision{}, nil
+		return compact.TriggerDecision{}
 	}
-	if compactableEventCount(req.Events) == 0 {
-		return compact.TriggerDecision{}, nil
+	if len(compact.EventsAfterLatestCompact(req.Events)) == 0 {
+		return compact.TriggerDecision{}
 	}
-	return evaluateWatermark(usage, c.cfg), nil
+	return evaluateWatermark(usage, c.cfg)
 }
 
 func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, trigger string) (compact.Result, error) {
@@ -126,7 +126,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 	}
 	baseEvent, baseData, _ := compact.LatestCompactEvent(req.Events)
 	baseText := stripRuntimeContinuity(eventTextForCompaction(baseEvent))
-	delta := compactableEvents(req.Events)
+	delta := compact.EventsAfterLatestCompact(req.Events)
 	if len(delta) == 0 {
 		promptEvents := compact.PromptEventsFromLatestCompact(req.Events)
 		return compact.Result{

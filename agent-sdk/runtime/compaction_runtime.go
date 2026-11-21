@@ -13,7 +13,6 @@ import (
 
 func (r *Runtime) prepareInvocationContext(
 	ctx context.Context,
-	activeSession session.Session,
 	ref session.SessionRef,
 	turnID string,
 	req agent.RunRequest,
