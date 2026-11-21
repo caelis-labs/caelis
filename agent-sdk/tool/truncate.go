@@ -308,8 +308,8 @@ func TruncateString(s string, policy TruncationPolicy) (string, int) {
 
 // TruncateText truncates text and includes total line count when useful.
 func TruncateText(s string, policy TruncationPolicy) (string, int) {
-	if prefix, body, totalLines, ok := splitExistingTotalOutputHeader(s); ok {
-		return truncateTextWithLinePrefix(s, prefix, body, totalLines, policy)
+	if prefix, body, ok := splitExistingTotalOutputHeader(s); ok {
+		return truncateTextWithLinePrefix(s, prefix, body, policy)
 	}
 
 	if estimateTextTokens(s) <= policy.tokenBudget() || policy.tokenBudget() <= 0 {
@@ -318,7 +318,7 @@ func TruncateText(s string, policy TruncationPolicy) (string, int) {
 	if strings.Contains(s, "\n") {
 		lines := strings.Count(s, "\n") + 1
 		prefix := fmt.Sprintf("Total output lines: %d\n\n", lines)
-		return truncateTextWithLinePrefix(s, prefix, s, lines, policy)
+		return truncateTextWithLinePrefix(s, prefix, s, policy)
 	}
 	return TruncateString(s, policy)
 }
@@ -611,20 +611,17 @@ func truncateTextForJSONBudget(s string, budgetTokens int) (string, bool) {
 	return out, estimateTokensForJSONString(out) <= budgetTokens
 }
 
-func truncateTextWithLinePrefix(original string, prefix string, body string, totalLines int, policy TruncationPolicy) (string, int) {
+func truncateTextWithLinePrefix(original, prefix, body string, policy TruncationPolicy) (string, int) {
 	prefixCost := estimateTextTokens(prefix)
 	if prefixCost >= policy.tokenBudget() && policy.tokenBudget() > 0 {
 		return TruncateString(original, policy)
 	}
 	bodyPolicy := subTruncationPolicy(policy, prefixCost, len(prefix))
-	truncatedBody, removed := truncateLineUnits(body, totalLines, bodyPolicy)
-	if removed == 0 {
-		return prefix + truncatedBody, removed
-	}
+	truncatedBody, removed := truncateLineUnits(body, bodyPolicy)
 	return prefix + truncatedBody, removed
 }
 
-func truncateLineUnits(s string, totalLines int, policy TruncationPolicy) (string, int) {
+func truncateLineUnits(s string, policy TruncationPolicy) (string, int) {
 	budgetTokens := policy.tokenBudget()
 	if budgetTokens <= 0 || estimateTextTokens(s) <= budgetTokens {
 		return s, 0
@@ -661,9 +658,6 @@ func truncateLineUnits(s string, totalLines int, policy TruncationPolicy) (strin
 	}
 	for estimateTextTokens(best) > budgetTokens && lineBudget > 1 {
 		lineBudget = max(lineBudget*8/10, 1)
-		for i, line := range lines {
-			lineTok[i] = estimateTextTokens(truncateLineUnit(line, lineBudget))
-		}
 		best = buildLineTruncation(lines, head, tail, lineBudget)
 	}
 	if estimateTextTokens(best) > budgetTokens {
@@ -921,20 +915,20 @@ func formatTruncationMarker(policy TruncationPolicy, removedTokens, removedBytes
 	return fmt.Sprintf("...%d chars truncated...", removedBytes)
 }
 
-func splitExistingTotalOutputHeader(s string) (string, string, int, bool) {
+func splitExistingTotalOutputHeader(s string) (string, string, bool) {
 	if !strings.HasPrefix(s, "Total output lines: ") {
-		return "", "", 0, false
+		return "", "", false
 	}
 	header, body, ok := strings.Cut(s, "\n\n")
 	if !ok {
-		return "", "", 0, false
+		return "", "", false
 	}
 	countText := strings.TrimSpace(strings.TrimPrefix(header, "Total output lines: "))
 	totalLines, err := strconv.Atoi(countText)
 	if err != nil || totalLines <= 0 {
-		return "", "", 0, false
+		return "", "", false
 	}
-	return header + "\n\n", body, totalLines, true
+	return header + "\n\n", body, true
 }
 
 func subTruncationPolicy(policy TruncationPolicy, usedTokens int, usedBytes int) TruncationPolicy {
