@@ -44,8 +44,8 @@ func (s *Store) readTaskStates(ctx context.Context, ref session.SessionRef, task
 	// Reuse the canonical metadata decoder: malformed values anywhere in that
 	// map must still fail, including number overflow and duplicate-key behavior.
 	// Large specification/result/context/terminal payloads are never selected.
-	query := `SELECT task_id, revision, state, metadata_json FROM tasks WHERE session_id = ?`
-	args := []any{ref.SessionID}
+	query := `SELECT task_id, revision, state, metadata_json FROM tasks` + taskIndexSessionScope
+	args := []any{ref.SessionID, ref.AppName, ref.UserID, ref.WorkspaceKey}
 	if len(taskIDs) > 0 {
 		query += ` AND task_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(taskIDs)), ",") + `)`
 		for _, id := range taskIDs {

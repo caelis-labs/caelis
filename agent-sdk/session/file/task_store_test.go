@@ -724,6 +724,10 @@ func TestTaskStoreScopedReadsVerifyOwningSession(t *testing.T) {
 			if err != nil || len(list) != 0 {
 				t.Errorf("ListSession = %v, %v, want no entries in mismatched scope", list, err)
 			}
+			states, err := reopened.ReadTaskStates(t.Context(), tt.ref, []string{"task-original"})
+			if err != nil || len(states) != 0 {
+				t.Errorf("ReadTaskStates = %v, %v, want no entries in mismatched scope", states, err)
+			}
 			entry, err := reopened.GetSessionTaskByHandle(t.Context(), tt.ref, "reviewer")
 			if err == nil || entry != nil {
 				t.Errorf("GetSessionTaskByHandle = %v, %v, want not found", entry, err)
@@ -734,6 +738,10 @@ func TestTaskStoreScopedReadsVerifyOwningSession(t *testing.T) {
 		entries, err := reopened.ListSession(t.Context(), scope)
 		if err != nil || len(entries) != 1 || entries[0].TaskID != "task-original" {
 			t.Errorf("ListSession = %v, %v, want original task", entries, err)
+		}
+		states, err := reopened.ReadTaskStates(t.Context(), scope, []string{"task-original"})
+		if err != nil || len(states) != 1 || states[0].TaskID != "task-original" {
+			t.Errorf("ReadTaskStates = %v, %v, want original task", states, err)
 		}
 		entry, err := reopened.GetSessionTaskByHandle(t.Context(), scope, "reviewer")
 		if err != nil || entry == nil || entry.TaskID != "task-original" {
