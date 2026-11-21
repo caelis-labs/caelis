@@ -2864,11 +2864,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 	}
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Tools: []tool.Tool{targetTool},
-	}, approvalContext{
-		ctx:        context.Background(),
-		session:    activeSession,
-		sessionRef: activeSession.SessionRef,
-	})
+	}, approvalContext{ctx: context.Background()})
 	if got := len(wrapped); got != 1 {
 		t.Fatalf("len(wrapped) = %d, want 1", got)
 	}
@@ -2916,11 +2912,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Metadata: map[string]any{policy.MetadataPolicyProfile: "unknown-policy"},
 		Tools:    []tool.Tool{targetTool},
-	}, approvalContext{
-		ctx:        context.Background(),
-		session:    activeSession,
-		sessionRef: activeSession.SessionRef,
-	})
+	}, approvalContext{ctx: context.Background()})
 	if got := len(wrapped); got != 1 {
 		t.Fatalf("len(wrapped) = %d, want 1", got)
 	}
@@ -2971,7 +2963,7 @@ func TestRuntimePolicyRegistryErrorAndEmptyDecisionFailClosed(t *testing.T) {
 			runtime := &Runtime{policies: tt.registry, defaultPolicyMode: "empty"}
 			wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 				Tools: []tool.Tool{targetTool},
-			}, approvalContext{ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef})
+			}, approvalContext{ctx: context.Background()})
 			_, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
 			switch tt.wantType.(type) {
 			case *policy.ProfileError:

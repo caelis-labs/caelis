@@ -95,7 +95,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		}
 		spec.Metadata[codeModeCatalogKey] = catalog
 	}
-	modeName, _ := r.policyForName(ctx, r.policyMode(*spec))
+	modeName := r.policyMode(*spec)
 	authority, _ := ctx.Value(modelRequestAuthorityKey{}).(*modelRequestAuthority)
 	if authority == nil && r.compaction.Enabled {
 		authority = &modelRequestAuthority{epoch: "static", deferredTools: spec.DeferredTools, validate: func(context.Context) (func(), error) { return func() {}, nil }, refs: 1}

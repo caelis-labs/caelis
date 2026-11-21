@@ -22,13 +22,11 @@ type sandboxRuntimeProvider interface {
 }
 
 type approvalContext struct {
-	ctx        context.Context
-	requester  agent.ApprovalRequester
-	runtime    *Runtime
-	session    session.Session
-	sessionRef session.SessionRef
-	runID      string
-	turnID     string
+	ctx       context.Context
+	requester agent.ApprovalRequester
+	runtime   *Runtime
+	runID     string
+	turnID    string
 }
 
 type policyWrappedTool struct {
@@ -237,7 +235,7 @@ func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, 
 		ProducingModel: dispatch.Model,
 		ModelStep:      agent.CloneModelStepRef(dispatch.Step),
 		Approval:       cloneApproval(decision.Approval),
-		Metadata:       mapsClone(decision.Metadata),
+		Metadata:       session.CloneState(decision.Metadata),
 	}
 	if len(request.Approval.Options) == 0 {
 		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
@@ -343,10 +341,6 @@ func cloneApproval(in *session.ProtocolApproval) *session.ProtocolApproval {
 	}
 	out := session.CloneProtocolApproval(*in)
 	return &out
-}
-
-func mapsClone(in map[string]any) map[string]any {
-	return session.CloneState(in)
 }
 
 func firstNonEmpty(values ...string) string {

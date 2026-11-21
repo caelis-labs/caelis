@@ -613,7 +613,7 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 			scope.revoke(errTaskAuthorizationChanged, false)
 			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name}}}, nil
 		}},
-		approval: approvalContext{ctx: owner, runtime: r, session: active, sessionRef: active.SessionRef, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approval: approvalContext{ctx: owner, runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 			approvals++
 			return agent.ApprovalResponse{Approved: true}, nil
 		})},

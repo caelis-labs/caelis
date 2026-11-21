@@ -89,7 +89,7 @@ func (r *Runtime) CallControllerSpawn(ctx context.Context, ref session.SessionRe
 	}
 	spec := cloneAgentSpec(active.spec)
 	spec.Tools = []tool.Tool{base}
-	mode, _ := r.policyForName(workCtx, r.policyMode(spec))
+	mode := r.policyMode(spec)
 	spec.Tools = r.wrapToolsForRuntime(current, ref, spec, runtimeToolContext{mode: mode, approvalMode: string(r.currentApprovalMode(state)), approvalRequester: active.approvalRequester})
 	wrapped := r.wrapTurnTools(workCtx, current, ref, state, spec, active.approvalRequester, active.handle.RunID(), active.turnID, &active.handle.toolSequence)
 	workCtx = toolbinding.WithOccurrence(workCtx, toolbinding.Allocate(wrapped[0], call), nil, nil)
