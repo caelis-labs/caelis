@@ -92,8 +92,12 @@ func TestWebSearchUnavailableReachesProviderAndFileHistory(t *testing.T) {
 			if _, err := drainRunnerEvents(t, run.Handle); err != nil {
 				t.Fatal(err)
 			}
-			if requests.Load() != 2 || !json.Valid(nextRequest) {
-				t.Fatalf("provider requests=%d, next body=%s", requests.Load(), nextRequest)
+			if requests.Load() != 2 {
+				t.Fatalf("provider requests=%d, want 2", requests.Load())
+			}
+			var wireResult map[string]any
+			if err := json.Unmarshal([]byte(webSearchToolResultOnWire(t, fixture.api, nextRequest)), &wireResult); err != nil {
+				t.Fatalf("decode WebSearch result on %s wire: %v", fixture.api, err)
 			}
 			reopened := sessionfile.NewStore(config)
 			loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
@@ -110,12 +114,19 @@ func TestWebSearchUnavailableReachesProviderAndFileHistory(t *testing.T) {
 					if result.Result["status"] != "unavailable" || result.Result["query"] != "release notes" || result.Result["provider"] != fixture.name {
 						t.Fatalf("durable model result = %#v", result)
 					}
+					for _, key := range []string{"status", "query", "provider", "message"} {
+						got, ok := wireResult[key].(string)
+						want, _ := result.Result[key].(string)
+						if !ok || got != want {
+							t.Fatalf("WebSearch %q differs on provider wire and durable model message: %#v != %#v", key, wireResult[key], result.Result[key])
+						}
+					}
 					unavailable, _ = result.Result["message"].(string)
 				}
 			}
 			for _, want := range []string{fixture.detail, "Use " + web.FetchToolName + " with a known URL"} {
-				if !strings.Contains(unavailable, want) || !strings.Contains(string(nextRequest), want) {
-					t.Fatalf("missing %q in durable message %q or provider request %s", want, unavailable, nextRequest)
+				if !strings.Contains(unavailable, want) {
+					t.Fatalf("missing %q in model tool message %q", want, unavailable)
 				}
 			}
 			if strings.Contains(unavailable, "through Caelis") || strings.Contains(unavailable, "use web_fetch") {
@@ -123,4 +134,40 @@ func TestWebSearchUnavailableReachesProviderAndFileHistory(t *testing.T) {
 			}
 		})
 	}
+}
+
+func webSearchToolResultOnWire(t *testing.T, api model.APIType, request []byte) string {
+	t.Helper()
+	var wire struct {
+		Messages []struct {
+			Role       string          `json:"role"`
+			ToolCallID string          `json:"tool_call_id"`
+			Content    json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(request, &wire); err != nil || len(wire.Messages) == 0 {
+		t.Fatalf("decode %s provider messages: %v", api, err)
+	}
+	last := wire.Messages[len(wire.Messages)-1]
+	if api == model.APIMimo {
+		var result string
+		if err := json.Unmarshal(last.Content, &result); err != nil || last.Role != "tool" || last.ToolCallID != "call_search" {
+			t.Fatalf("expected Chat Completions tool message, got %s: %v", request, err)
+		}
+		return result
+	}
+	var blocks []struct {
+		Type      string `json:"type"`
+		ToolUseID string `json:"tool_use_id"`
+		Content   []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(last.Content, &blocks); err != nil || last.Role != "user" || len(blocks) != 1 ||
+		blocks[0].Type != "tool_result" || blocks[0].ToolUseID != "call_search" || len(blocks[0].Content) != 1 ||
+		blocks[0].Content[0].Type != "text" {
+		t.Fatalf("expected Anthropic tool_result message, got %s: %v", request, err)
+	}
+	return blocks[0].Content[0].Text
 }
