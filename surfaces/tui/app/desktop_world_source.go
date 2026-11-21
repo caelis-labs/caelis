@@ -32,8 +32,13 @@ var desktopWorldActions = map[string]desktopWorldAction{
 	"quit":             {phrase: "quit the app", short: "quit"},
 }
 
-// Summarize the intent of a small straight-line subset of Desktop World
-// scripts. An unsupported statement or argument leaves the script opaque.
+type desktopWorldBinding struct {
+	literal     ast.Expression
+	observation bool
+}
+
+// Summarize intent from straight-line input calls and read-only observations.
+// Keep the two lists separate so mixed scripts only preview the input calls.
 func desktopWorldScriptActions(source string) []desktopWorldAction {
 	if source == "" || len(source) > 64<<10 {
 		return nil
@@ -51,21 +56,44 @@ func desktopWorldScriptActions(source string) []desktopWorldAction {
 		return nil
 	}
 
-	var actions []desktopWorldAction
-	returned := false
+	bindings := make(map[string]desktopWorldBinding)
+	var reads, inputs []desktopWorldAction
+	returned, guardedRead := false, false
+	record := func(expr ast.Expression) (desktopWorldBinding, bool) {
+		if desktopWorldLiteral(expr, nil) {
+			return desktopWorldBinding{literal: expr}, true
+		}
+		action, ok := desktopWorldCallAction(expr, bindings)
+		if !ok || guardedRead && !action.read {
+			return desktopWorldBinding{}, false
+		}
+		// Later declarations still need validation because they may shadow
+		// an earlier app or constant reference.
+		if !returned {
+			actions := &inputs
+			if action.read {
+				actions = &reads
+			}
+			if len(*actions) < 2 && !slices.Contains(*actions, action) {
+				*actions = append(*actions, action)
+			}
+		}
+		return desktopWorldBinding{observation: action.read}, true
+	}
 	for _, stmt := range fn.Body.List {
-		var expressions []ast.Expression
-		ends := false
 		switch node := stmt.(type) {
 		case *ast.EmptyStatement:
-			continue
 		case *ast.ExpressionStatement:
-			expressions = append(expressions, node.Expression)
-		case *ast.ReturnStatement:
-			if node.Argument != nil {
-				expressions = append(expressions, node.Argument)
+			if _, ok := record(node.Expression); !ok {
+				return nil
 			}
-			ends = true
+		case *ast.ReturnStatement:
+			if !desktopWorldLiteralReturn(node.Argument, bindings) {
+				if _, ok := record(node.Argument); !ok {
+					return nil
+				}
+			}
+			returned = true
 		case *ast.LexicalDeclaration:
 			if node.Token != token.CONST {
 				return nil
@@ -75,42 +103,97 @@ func desktopWorldScriptActions(source string) []desktopWorldAction {
 				if !ok || id.Name == "app" {
 					return nil
 				}
-				expressions = append(expressions, binding.Initializer)
+				name := id.Name.String()
+				if _, exists := bindings[name]; exists {
+					return nil
+				}
+				value, ok := record(binding.Initializer)
+				if !ok {
+					return nil
+				}
+				bindings[name] = value
 			}
+		case *ast.IfStatement:
+			if test, ok := node.Test.(*ast.BooleanLiteral); ok && !test.Value &&
+				node.Alternate == nil && desktopWorldDeadStatements(node.Consequent) {
+				continue
+			}
+			if len(inputs) > 0 || !desktopWorldReadGuard(node, bindings) {
+				return nil
+			}
+			guardedRead = true
 		default:
 			return nil
 		}
-		for _, expr := range expressions {
-			if desktopWorldLiteral(expr) {
-				continue
-			}
-			action, ok := desktopWorldCallAction(expr)
-			if !ok {
-				return nil
-			}
-			// Validate the rest of the body too, since declarations can
-			// affect the app binding before a return.
-			if !returned {
-				actions = append(actions, action)
-			}
-		}
-		returned = returned || ends
 	}
-
-	readsOnly := !slices.ContainsFunc(actions, func(action desktopWorldAction) bool { return !action.read })
-	var chosen []desktopWorldAction
-	for _, action := range actions {
-		if action.read == readsOnly && !slices.Contains(chosen, action) {
-			chosen = append(chosen, action)
-			if len(chosen) == 2 {
-				break
-			}
-		}
+	if len(inputs) > 0 {
+		return inputs
 	}
-	return chosen
+	return reads
 }
 
-func desktopWorldCallAction(expr ast.Expression) (desktopWorldAction, bool) {
+// A literal false test skips these statements without hiding declarations.
+func desktopWorldDeadStatements(stmt ast.Statement) bool {
+	switch node := stmt.(type) {
+	case *ast.EmptyStatement, *ast.ExpressionStatement:
+		return true
+	case *ast.BlockStatement:
+		for _, stmt := range node.List {
+			if !desktopWorldDeadStatements(stmt) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// A simple early exit based on a prior read can limit subsequent observations.
+// Keep describing read intent without evaluating the predicate.
+func desktopWorldReadGuard(node *ast.IfStatement, bindings map[string]desktopWorldBinding) bool {
+	ret, returns := node.Consequent.(*ast.ReturnStatement)
+	test, compares := node.Test.(*ast.BinaryExpression)
+	if node.Alternate != nil || !returns || !compares ||
+		(test.Operator != token.STRICT_EQUAL && test.Operator != token.STRICT_NOT_EQUAL) {
+		return false
+	}
+	return (ret.Argument == nil || desktopWorldLiteral(ret.Argument, nil)) &&
+		desktopWorldReadPath(test.Left, bindings) && desktopWorldLiteral(test.Right, nil)
+}
+
+func desktopWorldReadPath(expr ast.Expression, bindings map[string]desktopWorldBinding) bool {
+	switch node := expr.(type) {
+	case *ast.Identifier:
+		return bindings[node.Name.String()].observation
+	case *ast.DotExpression:
+		return desktopWorldReadPath(node.Left, bindings)
+	case *ast.BracketExpression:
+		switch node.Member.(type) {
+		case *ast.NumberLiteral, *ast.StringLiteral:
+			return desktopWorldReadPath(node.Left, bindings)
+		}
+	}
+	return false
+}
+
+func desktopWorldLiteralReturn(expr ast.Expression, bindings map[string]desktopWorldBinding) bool {
+	if expr == nil || desktopWorldLiteral(expr, nil) {
+		return true
+	}
+	object, ok := expr.(*ast.ObjectLiteral)
+	if !ok {
+		return false
+	}
+	for _, property := range object.Value {
+		shorthand, ok := property.(*ast.PropertyShort)
+		if !ok || shorthand.Initializer != nil || bindings[shorthand.Name.Name.String()].literal == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func desktopWorldCallAction(expr ast.Expression, bindings map[string]desktopWorldBinding) (desktopWorldAction, bool) {
 	if awaited, ok := expr.(*ast.AwaitExpression); ok {
 		expr = awaited.Argument
 	}
@@ -137,15 +220,38 @@ func desktopWorldCallAction(expr ast.Expression) (desktopWorldAction, bool) {
 	}
 	if len(call.ArgumentList) == 1 {
 		arg := call.ArgumentList[0]
-		if !desktopWorldLiteral(arg) {
+		var reference ast.Expression
+		var chord string
+		switch method {
+		case "keypress":
+			if key, ok := desktopWorldKeys(arg).(*ast.Identifier); ok {
+				if array, ok := bindings[key.Name.String()].literal.(*ast.ArrayLiteral); ok {
+					reference, chord = key, desktopWorldChordKeys(array)
+				}
+			}
+		case "readText":
+			target := desktopWorldField(arg, "target")
+			if desktopWorldReadPath(target, bindings) {
+				reference = target
+			}
+		}
+		if !desktopWorldLiteral(arg, reference) {
 			return desktopWorldAction{}, false
 		}
 		action.phrase = desktopWorldActionPhrase(method, action.phrase, arg)
+		if chord != "" {
+			action.phrase = desktopWorldKeypressPhrase(action.phrase, chord)
+		}
 	}
 	return action, true
 }
 
-func desktopWorldLiteral(expr ast.Expression) bool {
+// One validated read path or chord reference can stand in for a literal
+// argument. Other expressions, including calls, are left opaque.
+func desktopWorldLiteral(expr, reference ast.Expression) bool {
+	if reference != nil && expr == reference {
+		return true
+	}
 	switch node := expr.(type) {
 	case *ast.StringLiteral, *ast.BooleanLiteral, *ast.NumberLiteral, *ast.NullLiteral, *ast.RegExpLiteral:
 		return true
@@ -153,7 +259,7 @@ func desktopWorldLiteral(expr ast.Expression) bool {
 		return node.Tag == nil && len(node.Expressions) == 0
 	case *ast.ArrayLiteral:
 		for _, item := range node.Value {
-			if !desktopWorldLiteral(item) {
+			if !desktopWorldLiteral(item, reference) {
 				return false
 			}
 		}
@@ -161,7 +267,7 @@ func desktopWorldLiteral(expr ast.Expression) bool {
 	case *ast.ObjectLiteral:
 		for _, property := range node.Value {
 			keyed, ok := property.(*ast.PropertyKeyed)
-			if !ok || keyed.Computed || keyed.Kind != ast.PropertyKindValue || !desktopWorldLiteral(keyed.Value) {
+			if !ok || keyed.Computed || keyed.Kind != ast.PropertyKindValue || !desktopWorldLiteral(keyed.Value, reference) {
 				return false
 			}
 		}

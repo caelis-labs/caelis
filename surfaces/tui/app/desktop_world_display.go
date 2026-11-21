@@ -136,6 +136,15 @@ func (d *desktopWorldDisplay) label(width int, failed bool, done bool) string {
 	if title := d.app + " · " + medium; medium != "" && displayColumns(title) <= width {
 		return title
 	}
+	if done && !failed && len(d.actions) > 0 {
+		// Keep literal action details when the full sentence is just too
+		// wide. The short lead-in still identifies these as intended steps.
+		intent := desktopWorldCompactIntent(d.actions)
+		room := width - displayColumns(": "+intent)
+		if room >= minInt(3, displayColumns(d.app)) {
+			return ansi.Truncate(d.app, room, "…") + ": " + intent
+		}
+	}
 	available := width - displayColumns(" · ")
 	if available < 6 {
 		return ansi.Truncate(short, width, "…")
@@ -145,6 +154,18 @@ func (d *desktopWorldDisplay) label(width int, failed bool, done bool) string {
 	}
 	actionWidth := minInt(displayColumns(short), available-3)
 	return ansi.Truncate(d.app, available-actionWidth, "…") + " · " + ansi.Truncate(short, actionWidth, "…")
+}
+
+func desktopWorldCompactIntent(actions []desktopWorldAction) string {
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		phrase := action.phrase
+		if before, target, ok := strings.Cut(phrase, "“"); ok {
+			phrase = before + strings.TrimSuffix(target, "”")
+		}
+		parts = append(parts, phrase)
+	}
+	return "To " + strings.Join(parts, ", ")
 }
 
 func desktopWorldActionList(actions []desktopWorldAction, separator string, compact bool) string {

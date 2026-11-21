@@ -246,9 +246,20 @@ await app.look({role:'text_field',text:'Search inventory'});
 		wide, narrow, forbidden      string
 	}{
 		{"straight-line source remains a plan", beforeKey + key, "completed", twoDispatches,
-			"To click, press", "To click", "Inspect"},
+			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
 		{"no dispatch evidence still permits intent", beforeKey + key, "completed", `{"execution_id":"fixture"}`,
-			"To click, press", "To click", "Inspect"},
+			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+		{"B09 literal chord in straight-line source", "const chord = ['META','A'];\n" + beforeKey + "await app.keypress({keys:chord});", "completed", twoDispatches,
+			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+		{"S02 guarded read", `const view = await app.look({role:'text_area',text:'Handoff note'});
+if (view.elements.length !== 1) return null;
+return await app.readText({target:view.elements[0].id});`, "completed", `{"execution_id":"fixture"}`,
+			"look for “Handoff note”", "To inspect", "press"},
+		{"S06 read after dead branch", `const text = "app.keypress()";
+if (false) await app.quit({});
+await app.look({text:'order number'});
+return {text};`, "completed", `{"execution_id":"fixture"}`,
+			"look for “order number”", "To inspect", "press"},
 		{"interrupted", beforeKey + key, "failed", `{"execution_id":"fixture","error":{"code":"execution_interrupted"}}`,
 			"Script failed", "Failed", "press"},
 		{"early return", beforeKey + "return 42;\n" + key, "completed", `{"execution_id":"fixture","result":42}`,
