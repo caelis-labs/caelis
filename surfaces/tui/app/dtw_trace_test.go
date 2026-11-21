@@ -234,37 +234,125 @@ func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
 	}
 }
 
-func TestDesktopWorldTraceInterruptedBeforeKeypress(t *testing.T) {
-	// S01 from the independent acceptance corpus uses the native workbench
-	// selector and a key array, with a read between the two operations.
-	const source = `await app.look({role:'text_field',text:'Search inventory'});
+func TestDesktopWorldTraceTerminalEvidence(t *testing.T) {
+	// S01 uses a native selector and a key array, with a read between the inputs.
+	const beforeKey = `await app.look({role:'text_field',text:'Search inventory'});
 await app.click({selector:{role:'text_field',text:'Search inventory'}});
 await app.look({role:'text_field',text:'Search inventory'});
-await app.keypress({keys:['META','A']});`
+`
+	const key = `await app.keypress({keys:['META','A']});`
+	const branch = `await app.look({text:'Web note'});
+if (matches.length === 1) { await app.click({target:matches[0].id}); } else { await app.capture({}); }`
+	const literalChord = `const chord = ['META','A'];
+await app.look();
+if (matches.length !== 1) return null;
+await app.click({target:matches[0].id});
+await app.keypress({keys:chord});
+await app.typeText({text:'hidden'});`
 	for _, test := range []struct {
-		name, status, result, want string
-		showKey                    bool
+		name, source, status, result string
+		wide, narrow, forbidden      string
 	}{
-		{"complete", "completed", `{"effects":{"dispatch":{"dispatched":2}}}`, "fixture.desktop · Click “Search inventory”, press META+A", true},
-		{"interrupted", "failed", `{"effects":{"dispatch":{"dispatched":1}},"error":{"code":"execution_interrupted"}}`, "fixture.desktop · Script failed", false},
-		{"uncertain receipt", "completed", `{"effects":{"dispatch":{"dispatched":1,"unknown":1}}}`, "fixture.desktop · Run a script", false},
+		{"complete", beforeKey + key, "completed", `{"execution_id":"ok","effects":{"dispatch":{"dispatched":2}}}`,
+			"Click “Search inventory”, press META+A", "Click, press", "Inspect"},
+		{"interrupted", beforeKey + key, "failed", `{"execution_id":"interrupted","effects":{"dispatch":{"dispatched":1}},"error":{"code":"execution_interrupted"}}`,
+			"Script failed", "Failed", "press"},
+		{"unknown dispatch", beforeKey + key, "completed", `{"execution_id":"uncertain","effects":{"dispatch":{"dispatched":1,"unknown":1}}}`,
+			"Run a script", "Run script", "press"},
+		{"early return", beforeKey + "return 42;\n" + key, "completed", `{"execution_id":"returned","effects":{"dispatch":{"dispatched":1}},"result":42}`,
+			"Click “Search inventory”", "Click", "press"},
+		{"refused input caught by script", beforeKey + "try { " + key + " } catch (e) { return e.code; }", "completed",
+			`{"execution_id":"caught","effects":{"dispatch":{"dispatched":1,"not_dispatched":1}},"result":"input_not_ready"}`,
+			"Run a script", "Run script", "press"},
+		{"missing dispatch evidence", beforeKey + key, "completed", `{"execution_id":"no-effects"}`,
+			"Run a script", "Run script", "press"},
+		{"conditional readonly fallback", branch, "completed", `{"execution_id":"read-fallback","status":"completed"}`,
+			"May take a screenshot", "May capture", "click"},
+		{"conditional input", branch, "completed", `{"execution_id":"branch-click","effects":{"dispatch":{"dispatched":1}}}`,
+			"May click", "May click", "capture"},
+		{"literal chord", literalChord, "completed", `{"execution_id":"chord","effects":{"dispatch":{"dispatched":3}}}`,
+			"Click and press META+A", "Click, press", "type"},
+		{"repeated input totals cannot prove later sites", `for (const row of rows) await app.click(row); await app.keypress("ESC");`,
+			"completed", `{"execution_id":"loop","effects":{"dispatch":{"dispatched":2}}}`,
+			"May click and may press ESC", "May click", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for _, nested := range []bool{false, true} {
-				fact := desktopTraceFact("s01", "dtw", "exec", "desktop-world", map[string]any{"app": "fixture.desktop", "source": source})
-				var events []*session.Event
-				if nested {
-					root := &session.EventTool{ID: "outer", Name: "js_exec", Status: "pending", Input: map[string]any{"code": "OUTER_SOURCE"}}
-					events = append(events, &session.Event{Type: session.EventTypeToolCall, Tool: root})
-					fact.Parent = &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
-				}
-				events = append(events, &session.Event{Type: session.EventTypeToolCall, Tool: fact}, desktopTraceResult(fact, test.status, test.result))
-				for _, replay := range []bool{false, true} {
-					m, b := desktopTraceModel(t, events, 112, replay)
-					got := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
-					if !strings.Contains(got, test.want) || strings.Contains(got, "META+A") != test.showKey {
-						t.Fatalf("nested=%t replay=%t S01 final disagrees with receipt:\n%s", nested, replay, got)
+				fact := desktopTraceFact("desktop", "dtw", "exec", "desktop-world", map[string]any{"app": "fixture.desktop", "source": test.source})
+				final := desktopTraceResult(fact, test.status, test.result)
+				events := desktopTracePlacement(t, fact, final, nested, "")
+				for _, width := range []int{24, 112} {
+					want := test.wide
+					if width == 24 {
+						want = test.narrow
 					}
+					for _, replay := range []bool{false, true} {
+						m, b := desktopTraceModel(t, events, width, replay)
+						got := joinRenderedPlain(b.Render(m.blockRenderContext(width)))
+						if !strings.Contains(got, want) || test.forbidden != "" && strings.Contains(strings.ToLower(got), strings.ToLower(test.forbidden)) {
+							t.Fatalf("nested=%t replay=%t width=%d want %q without %q:\n%s", nested, replay, width, want, test.forbidden, got)
+						}
+						if width == 112 && test.name == "complete" {
+							ctx := m.blockRenderContext(width)
+							clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(fact.ID))
+							open := joinRenderedPlain(b.Render(ctx))
+							if !strings.Contains(open, "Result") || !strings.Contains(open, `"execution_id"`) || !strings.Contains(open, "app.keypress") {
+								t.Fatalf("nested=%t replay=%t lost disclosed arguments or result:\n%s", nested, replay, open)
+							}
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// Native Code Mode records carry the result without EventTool.Output on the
+// child. The parent may return the exact same structured reply.
+func desktopTracePlacement(t *testing.T, call *session.EventTool, final *session.Event, nested bool, code string) []*session.Event {
+	t.Helper()
+	start := &session.Event{Type: session.EventTypeToolCall, Tool: call}
+	if !nested {
+		return []*session.Event{start, final}
+	}
+	if code == "" {
+		args, err := json.Marshal(call.Input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code = "return await " + call.Name + "(" + string(args) + ");"
+	}
+	root := &session.EventTool{ID: "outer", Name: "js_exec", Status: "pending", Input: map[string]any{"code": code}}
+	call.Parent = &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
+	final.Tool.Parent = call.Parent
+	raw, err := json.Marshal(final.Tool.Output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootFinal := desktopTraceResult(root, "completed", string(raw))
+	final.Tool.Output = nil
+	return []*session.Event{{Type: session.EventTypeToolCall, Tool: root}, start, final, rootFinal}
+}
+
+func TestDesktopWorldAppsEmptyScopedResult(t *testing.T) {
+	for _, test := range []struct {
+		name, code, output, want string
+		nested                   bool
+	}{
+		{"direct", "", `{"apps":[],"coverage":{"complete":false},"next":null}`, "No apps in scope", false},
+		{"nested returned", "", `{"apps":[],"coverage":{"complete":false},"next":null}`, "No apps in scope", true},
+		{"another page", "", `{"apps":[],"coverage":{"complete":false},"next":"cursor"}`, "Find apps", true},
+		{"different arguments", `return await dtw__apps({"query":"Not Chrome"});`, `{"apps":[],"next":null}`, "Find apps", true},
+		{"unrelated parent return", `await dtw__apps({"query":"Chrome"}); return {"apps":[]};`, `{"apps":[],"next":null}`, "Find apps", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fact := desktopTraceFact("apps", "dtw", "apps", "desktop-world", map[string]any{"query": "Chrome"})
+			events := desktopTracePlacement(t, fact, desktopTraceResult(fact, "completed", test.output), test.nested, test.code)
+			for _, replay := range []bool{false, true} {
+				m, b := desktopTraceModel(t, events, 112, replay)
+				got := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
+				if !strings.Contains(got, test.want) || !strings.Contains(got, "Chrome") || strings.Contains(got, "coverage") {
+					t.Fatalf("replay=%t want %q and search query:\n%s", replay, test.want, got)
 				}
 			}
 		})

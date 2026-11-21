@@ -98,7 +98,7 @@ func renderDesktopWorldMoreRow(blockID string, count, width int, ctx BlockRender
 func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	budget := minInt(width, desktopWorldSummaryColumns)
 	prefix = ansi.Truncate(prefix, maxInt(0, budget-1), "")
-	header := ev.desktopWorld.label(maxInt(1, budget-displayColumns(prefix)), ev.Err)
+	header := ev.desktopWorld.label(maxInt(1, budget-displayColumns(prefix)), ev.Err, ev.Done)
 	line := prefix + header
 	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
 	styled := styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)

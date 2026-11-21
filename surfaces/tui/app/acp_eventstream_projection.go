@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -57,19 +56,7 @@ func (p tuiTranscriptProjector) decorateTool(input transcript.ToolProjectionInpu
 	}
 	if summary := projectDesktopWorldDisplay(input); summary != nil {
 		if transcript.ToolStatusFinal(event.ToolStatus, event.ToolError) {
-			output := transcript.RawMap(input.RawOutput)
-			if desktopWorldIncomplete(output) {
-				summary.actions = nil
-			}
-			// Some replies carry only a generic ACP status in Content.
-			// Keep the existing structured output available on disclosure.
-			text := strings.TrimSpace(event.ToolOutput)
-			if len(output) > 0 && (event.ToolOutputSynthetic || text == "" || text == "completed" || text == "failed") {
-				if raw, err := json.MarshalIndent(input.RawOutput, "", "  "); err == nil {
-					event.ToolOutput = string(raw)
-					event.ToolOutputSynthetic = false
-				}
-			}
+			summary.recordProjectedResult(input, event)
 		}
 		if event.Meta == nil {
 			event.Meta = make(map[string]any)
