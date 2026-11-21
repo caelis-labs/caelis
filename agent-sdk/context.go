@@ -86,6 +86,9 @@ type Runner interface {
 	RunID() string
 	Submit(Submission) error
 	Cancel() CancelResult
+	// WaitCompletion waits for the producer and its final durable writes to
+	// finish, then returns its terminal outcome. If the wait context ends
+	// first, completion remains unproven.
 	WaitCompletion(context.Context) error
 	Close() error
 }
@@ -103,14 +106,6 @@ type ContextSubmissionRunner interface {
 type BatchSubmissionRunner interface {
 	SubmitBatch(context.Context, []AgentCommunicationInput) error
 }
-
-// RunnerCompletionWaiter reports when the execution producer, including its
-// final durable writes, is quiescent. Returning proves that the producer is no
-// longer live; a non-nil error describes its terminal outcome. If the supplied
-// wait context ends first, completion remains unproven. Runtime decorators that
-// own an external fence require this contract before releasing authority after
-// natural completion, cancellation, or Close.
-type RunnerCompletionWaiter interface{ WaitCompletion(context.Context) error }
 
 // SubagentRunner starts delegated child runs from the current invocation.
 // Concrete child-agent configuration is app-owned; runtime only sees the
@@ -217,10 +212,6 @@ type EndpointApprovalToolCall struct {
 	RawOutput   map[string]any                    `json:"raw_output,omitempty"`
 	Content     []session.ProtocolToolCallContent `json:"content,omitempty"`
 }
-
-// SubagentApprovalToolCall preserves the scope-specific name while sharing the
-// endpoint approval tool-call contract.
-type SubagentApprovalToolCall = EndpointApprovalToolCall
 
 // SubagentApprovalRequest is one child permission request bridged into the
 // parent runtime approval surface.

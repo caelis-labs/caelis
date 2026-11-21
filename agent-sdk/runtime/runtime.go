@@ -114,8 +114,8 @@ type Runtime struct {
 	lifecycle               agent.TraceOptions
 }
 
-// RunnerCompletionWaiterGuaranteed marks that every non-nil Runner returned
-// by Runtime implements agent.RunnerCompletionWaiter.
+// RunnerCompletionWaiterGuaranteed marks that every Runner returned by
+// Runtime honors the WaitCompletion contract.
 func (*Runtime) RunnerCompletionWaiterGuaranteed() {}
 
 // New returns one baseline local runtime.

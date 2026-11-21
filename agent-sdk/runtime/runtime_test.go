@@ -438,13 +438,12 @@ func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	waiter, ok := result.Handle.(agent.RunnerCompletionWaiter)
-	if !ok {
-		t.Fatal("Runner does not implement RunnerCompletionWaiter")
+	if result.Handle == nil {
+		t.Fatal("Run() did not return an execution handle")
 	}
 	completionCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := waiter.WaitCompletion(completionCtx); err != nil {
+	if err := result.Handle.WaitCompletion(completionCtx); err != nil {
 		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
@@ -3247,12 +3246,10 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}
 	defer func() {
 		run.Handle.Cancel()
-		if waiter, ok := run.Handle.(agent.RunnerCompletionWaiter); ok {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := waiter.WaitCompletion(cleanupCtx); err != nil {
-				t.Errorf("WaitCompletion(cleanup) error = %v", err)
-			}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := run.Handle.WaitCompletion(cleanupCtx); err != nil {
+			t.Errorf("WaitCompletion(cleanup) error = %v", err)
 		}
 	}()
 	var waiting agent.RunState

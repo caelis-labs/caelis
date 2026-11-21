@@ -166,10 +166,10 @@ type Runtime interface {
 	RunState(context.Context, session.SessionRef) (RunState, error)
 }
 
-// RunnerCompletionRuntime guarantees that every successful producer entry
-// point returning a non-nil Runner, including optional participant prompts,
-// also returns a RunnerCompletionWaiter. Control fencing decorators require
-// this capability before starting a producer.
+// RunnerCompletionRuntime guarantees that the Runners returned by every
+// producer entry point, including optional participant prompts, honor the
+// WaitCompletion contract. Control fencing decorators require this guarantee
+// before starting a producer.
 type RunnerCompletionRuntime interface {
 	Runtime
 	RunnerCompletionWaiterGuaranteed()
