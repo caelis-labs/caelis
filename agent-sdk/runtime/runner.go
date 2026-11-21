@@ -191,6 +191,7 @@ func (r *runner) Cancel() agent.CancelResult {
 		return agent.CancelResult{Status: agent.CancelStatusAlreadyCancelled}
 	}
 	r.cancelled = true
+	r.closed = true
 	cancelFn := r.cancelFn
 	cancelHook := r.cancelHook
 	r.mu.Unlock()
