@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -321,22 +322,11 @@ func (t *Tool) ReadSource(call tool.Call, limit int) (Source, error) {
 		if t.Sandbox == nil || filePath == "" {
 			return Source{}, fmt.Errorf("code mode file requires a sandbox filesystem and path")
 		}
-		fsys := t.Sandbox.FileSystem()
-		if constrained, ok := t.Sandbox.(interface {
-			FileSystemFor(sandbox.Constraints) sandbox.FileSystem
-		}); ok {
-			var constraints sandbox.Constraints
-			if raw, ok := call.Metadata["sandbox_constraints"]; ok {
-				encoded, err := json.Marshal(raw)
-				if err != nil {
-					return Source{}, err
-				}
-				if err := json.Unmarshal(encoded, &constraints); err != nil {
-					return Source{}, err
-				}
-			}
-			fsys = constrained.FileSystemFor(sandbox.NormalizeConstraints(constraints))
+		constraints, _, err := sandboxmeta.DecodeConstraints(call.Metadata)
+		if err != nil {
+			return Source{}, err
 		}
+		fsys := t.Sandbox.FileSystemFor(constraints)
 		if fsys == nil {
 			return Source{}, fmt.Errorf("code mode filesystem is unavailable")
 		}

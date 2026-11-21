@@ -312,7 +312,7 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
-	constraints, _ := sandboxmeta.Constraints(call.Metadata)
+	constraints, _, _ := sandboxmeta.DecodeConstraints(call.Metadata)
 	req := taskapi.CommandStartRequest{OperationID: toolTaskOperationID(ctx, call),
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),

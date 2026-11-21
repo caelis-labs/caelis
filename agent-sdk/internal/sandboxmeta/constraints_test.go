@@ -19,11 +19,12 @@ func TestConstraintsDecodesCallMetadata(t *testing.T) {
 		meta map[string]any
 		want sandbox.Constraints
 		ok   bool
+		bad  bool
 	}{
 		{name: "missing"},
 		{name: "nil", meta: map[string]any{ConstraintsKey: nil}},
-		{name: "invalid encoding", meta: map[string]any{ConstraintsKey: func() {}}},
-		{name: "invalid shape", meta: map[string]any{ConstraintsKey: map[string]any{"route": "host", "path_rules": true}}},
+		{name: "invalid encoding", bad: true, meta: map[string]any{ConstraintsKey: func() {}}},
+		{name: "invalid shape", bad: true, meta: map[string]any{ConstraintsKey: map[string]any{"route": "host", "path_rules": true}}},
 		{name: "empty typed", meta: map[string]any{ConstraintsKey: sandbox.Constraints{}}, ok: true},
 		{name: "empty object", meta: map[string]any{ConstraintsKey: map[string]any{}}, ok: true},
 		{name: "encoded null", meta: map[string]any{ConstraintsKey: json.RawMessage("null")}, ok: true},
@@ -33,9 +34,9 @@ func TestConstraintsDecodesCallMetadata(t *testing.T) {
 		}}, want: normalized, ok: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := Constraints(tc.meta)
-			if ok != tc.ok || !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Constraints() = %+v, %t, want %+v, %t", got, ok, tc.want, tc.ok)
+			got, ok, err := DecodeConstraints(tc.meta)
+			if ok != tc.ok || (err != nil) != tc.bad || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("DecodeConstraints() = %+v, %t, %v, want %+v, %t, error=%t", got, ok, err, tc.want, tc.ok, tc.bad)
 			}
 			if len(got.PathRules) != 0 {
 				got.PathRules[0].Path = "edited"
