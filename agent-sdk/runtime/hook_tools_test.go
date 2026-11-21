@@ -151,8 +151,8 @@ func TestHooksModelCacheAndResultKeepActualAccounting(t *testing.T) {
 	var providers atomic.Int64
 	llm := scriptedTestModel{generate: func(_ context.Context, r *model.Request) *model.Response {
 		providers.Add(1)
-		if r.Instructions[0].Text.Text != "hook instruction" {
-			t.Error("request transformation missing")
+		if r.Instructions[0].Text.Text != "hook instruction" || r.BaseInstructionCount != 0 {
+			t.Errorf("hook instruction gained base provenance or was lost: %+v", r)
 		}
 		return textResponse("provider", model.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12})
 	}}
@@ -162,6 +162,7 @@ func TestHooksModelCacheAndResultKeepActualAccounting(t *testing.T) {
 				t.Error("missing logical/assembly identity")
 			}
 			p.Request.Instructions = []model.Part{model.NewTextPart("hook instruction")}
+			p.Request.BaseInstructionCount = len(p.Request.Instructions)
 			if cached {
 				p.Response = textResponse("cache", model.Usage{TotalTokens: 999})
 			}
@@ -171,7 +172,7 @@ func TestHooksModelCacheAndResultKeepActualAccounting(t *testing.T) {
 			r.Usage = model.Usage{TotalTokens: 999}
 			return r, nil
 		}}}}
-		rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hooks})
+		rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{SystemPrompt: "configured base"}, Hooks: hooks})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -25,7 +25,7 @@ func TestToolAvailabilityPreservesHistoryAcrossProviderProtocols(t *testing.T) {
 				var err error
 				switch protocol {
 				case "codex":
-					value, err = openAICodexRequestFromModel(req, "test-model")
+					value, err = (&openAICodexLLM{name: "test-model"}).buildRequest(req)
 				case "xai":
 					value, err = xAIResponsesRequestFromModel(req, "test-model", 100)
 				case "responses":

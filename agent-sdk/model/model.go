@@ -712,14 +712,18 @@ type Request struct {
 	// DisableTools closes tool selection for this step while retaining definitions
 	// needed to interpret prior tool calls. Providers use their native no-tool
 	// choice; protocols without one omit declarations from the wire request.
-	DisableTools bool            `json:"disable_tools,omitempty"`
-	Instructions []Part          `json:"instructions,omitempty"`
-	Messages     []Message       `json:"messages,omitempty"`
-	Tools        []ToolSpec      `json:"tools,omitempty"`
-	Output       *OutputSpec     `json:"output,omitempty"`
-	Reasoning    ReasoningConfig `json:"reasoning,omitempty"`
-	ServiceTier  ServiceTier     `json:"service_tier,omitempty"`
-	Stream       bool            `json:"stream,omitempty"`
+	DisableTools bool `json:"disable_tools,omitempty"`
+	// BaseInstructionCount marks the leading Instructions supplied by stable
+	// configuration. Providers may place that prefix in a reusable wire message.
+	// The remaining parts apply only to this request. Zero opts out of splitting.
+	BaseInstructionCount int             `json:"base_instruction_count,omitempty"`
+	Instructions         []Part          `json:"instructions,omitempty"`
+	Messages             []Message       `json:"messages,omitempty"`
+	Tools                []ToolSpec      `json:"tools,omitempty"`
+	Output               *OutputSpec     `json:"output,omitempty"`
+	Reasoning            ReasoningConfig `json:"reasoning,omitempty"`
+	ServiceTier          ServiceTier     `json:"service_tier,omitempty"`
+	Stream               bool            `json:"stream,omitempty"`
 }
 
 // Usage reports model token usage on a best-effort basis.

@@ -1588,7 +1588,7 @@ func TestLargeIntegerToolReceiptProviderProjection(t *testing.T) {
 			if err != nil || !strings.Contains(string(geminiWire), "9007199254740993") || strings.Contains(string(geminiWire), `"id":9007199254740992`) {
 				t.Fatalf("Gemini wire = %s, %v", geminiWire, err)
 			}
-			_, inputs, err := openAICodexInputs(nil, []model.Message{assistant, result})
+			_, inputs, err := openAIResponsesInputs(nil, []model.Message{assistant, result}, openAICodexReplayProvider)
 			if err != nil {
 				t.Fatal(err)
 			}

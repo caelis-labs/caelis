@@ -21,6 +21,8 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 	}{
 		{model.APIAnthropic, "anthropic"},
 		{model.APIAnthropicCompatible, "custom"},
+		{model.APIOpenAI, "openai"},
+		{model.APIOpenAICodex, "openai-codex"},
 		{model.APIOpenAIResponses, "custom"},
 		// API accounting must override even a conflicting provider label.
 		{model.APIOpenAIResponses, "anthropic"},
@@ -31,7 +33,7 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 				if phase == "warm" {
 					cached = 25000
 				}
-				anthropic := route.api != model.APIOpenAIResponses
+				anthropic := route.api == model.APIAnthropic || route.api == model.APIAnthropicCompatible
 				if phase == "cold" && anthropic {
 					written = 25000
 				}
@@ -52,12 +54,19 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 				if !anthropic {
 					wire = fmt.Sprintf(`{"id":"fixture","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}],"usage":%s}`, raw)
 				}
+				auth := providers.AuthConfig{Type: model.AuthAPIKey, Token: "fixture"}
+				contentType := "application/json"
+				if route.api == model.APIOpenAICodex {
+					auth = providers.AuthConfig{Type: model.AuthOAuthToken}
+					contentType = "text/event-stream"
+					wire = `data: {"type":"response.completed","response":` + wire + "}\n\n"
+				}
 				calls := 0
 				transport := compactionTerminalTransport(func(req *http.Request) (*http.Response, error) {
 					calls++
-					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
 				})
-				llm, err := providers.New(providers.Config{API: route.api, Provider: route.provider, Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: model.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}})
+				llm, err := providers.New(providers.Config{API: route.api, Provider: route.provider, Model: "fixture", BaseURL: "http://fixture.invalid", Auth: auth, HTTPClient: &http.Client{Transport: transport}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -102,7 +111,7 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 				if measured.PromptTokens != usage.PromptTokens || measured.TotalTokens != wantPrompt+50 || measured.CachedInputTokens != cached || measured.CacheWriteTokens != written || measured.CacheReadAccounting != usage.CacheReadAccounting {
 					t.Errorf("usage after Session round trip=%+v, provider usage=%+v", measured, usage)
 				}
-				if anthropic && (measured.CachedInputTokensReported != (phase != "missing") || measured.CacheWriteTokensReported != (phase != "missing")) {
+				if measured.CachedInputTokensReported != (phase != "missing") || measured.CacheWriteTokensReported != (anthropic && phase != "missing") {
 					t.Fatalf("cache presence changed: %+v", measured)
 				}
 			})
