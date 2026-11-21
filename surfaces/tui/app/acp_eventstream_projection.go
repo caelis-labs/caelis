@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -9,7 +10,7 @@ import (
 )
 
 func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEvent {
-	return transcript.ProjectACPEventToEvents(env, tuiTranscriptProjector{})
+	return transcript.ProjectACPEventToEvents(env, tuiTranscriptProjector{desktopWorld: desktopWorldProjection(env)})
 }
 
 // projectACPEventToTranscriptEvents resolves display handles without changing
@@ -32,14 +33,49 @@ func (m *Model) projectACPEventToTranscriptEvents(env eventstream.Envelope) []Tr
 	return events
 }
 
-type tuiTranscriptProjector struct{}
-
-func (tuiTranscriptProjector) ProjectToolCall(input transcript.ToolProjectionInput) transcript.Event {
-	return projectTranscriptToolCall(input)
+type tuiTranscriptProjector struct {
+	desktopWorld bool
 }
 
-func (tuiTranscriptProjector) ProjectToolResult(input transcript.ToolProjectionInput, defaultSuccessStatus string) (transcript.Event, bool) {
-	return projectTranscriptToolResult(input, defaultSuccessStatus)
+func (p tuiTranscriptProjector) ProjectToolCall(input transcript.ToolProjectionInput) transcript.Event {
+	event := projectTranscriptToolCall(input)
+	p.decorateTool(input, &event)
+	return event
+}
+
+func (p tuiTranscriptProjector) ProjectToolResult(input transcript.ToolProjectionInput, defaultSuccessStatus string) (transcript.Event, bool) {
+	event, ok := projectTranscriptToolResult(input, defaultSuccessStatus)
+	if ok {
+		p.decorateTool(input, &event)
+	}
+	return event, ok
+}
+
+func (p tuiTranscriptProjector) decorateTool(input transcript.ToolProjectionInput, event *transcript.Event) {
+	if !p.desktopWorld {
+		return
+	}
+	if summary := projectDesktopWorldDisplay(input); summary != nil {
+		if transcript.ToolStatusFinal(event.ToolStatus, event.ToolError) {
+			output := transcript.RawMap(input.RawOutput)
+			if desktopWorldIncomplete(output) {
+				summary.actions = nil
+			}
+			// Some replies carry only a generic ACP status in Content.
+			// Keep the existing structured output available on disclosure.
+			text := strings.TrimSpace(event.ToolOutput)
+			if len(output) > 0 && (event.ToolOutputSynthetic || text == "" || text == "completed" || text == "failed") {
+				if raw, err := json.MarshalIndent(input.RawOutput, "", "  "); err == nil {
+					event.ToolOutput = string(raw)
+					event.ToolOutputSynthetic = false
+				}
+			}
+		}
+		if event.Meta == nil {
+			event.Meta = make(map[string]any)
+		}
+		event.Meta[desktopWorldDisplayKey] = summary
+	}
 }
 
 func (tuiTranscriptProjector) ApprovalCommandPreview(raw map[string]any) string {

@@ -489,7 +489,11 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		return sessionCommandResult(compacted), nil
+		out := sessionCommandResult(compacted.Session)
+		if compacted.Event != nil {
+			out.CheckpointID = compacted.Event.ID
+		}
+		return out, nil
 	case appserver.CancelRequest:
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {

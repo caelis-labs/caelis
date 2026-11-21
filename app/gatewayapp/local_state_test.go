@@ -1354,17 +1354,22 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BindSessionClient() error = %v", err)
 	}
-	result, err := sessions.CompactSession(ctx, appserver.CompactSessionRequest{WriteBase: appserver.WriteBase{
+	request := appserver.CompactSessionRequest{WriteBase: appserver.WriteBase{
 		OperationID:             "manual-compact-product-path",
 		SessionID:               current.SessionID,
 		ExpectedRevision:        &revision,
 		ExpectedControllerEpoch: current.Controller.EpochID,
-	}})
+	}}
+	result, err := sessions.CompactSession(ctx, request)
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AppServer CompactSession() = %#v, %v", result, err)
 	}
 	if result.Revision != revision+2 {
 		t.Fatalf("AppServer CompactSession().Revision = %d, want committed revision %d", result.Revision, revision+2)
+	}
+	recovered, err := sessions.CompactSession(ctx, request)
+	if err != nil || recovered != result {
+		t.Fatalf("repeated original operation returned %#v, %v, want %#v", recovered, err, result)
 	}
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", got)
@@ -1379,8 +1384,8 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil || noop.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("AppServer no-op CompactSession() = %#v, %v", noop, err)
 	}
-	if noop.Revision != noopRevision {
-		t.Fatalf("AppServer no-op CompactSession().Revision = %d, want unchanged %d", noop.Revision, noopRevision)
+	if noop.Revision != noopRevision || noop.CheckpointID != "" {
+		t.Fatalf("AppServer no-op CompactSession() = %#v, want unchanged revision %d and no checkpoint", noop, noopRevision)
 	}
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls after no-op = %d, want unchanged 1", got)
@@ -1392,6 +1397,9 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	compactEvent, ok := latestGatewayAppCompactEvent(loaded.Events)
 	if !ok {
 		t.Fatal("missing compact event after manual compact")
+	}
+	if result.CheckpointID == "" || result.CheckpointID != compactEvent.ID {
+		t.Fatalf("command checkpoint %q differs from durable event %q", result.CheckpointID, compactEvent.ID)
 	}
 	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {

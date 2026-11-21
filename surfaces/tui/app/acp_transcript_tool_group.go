@@ -38,7 +38,7 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		if event.Kind == SEToolCall && parents[event.CallID] == root.CallID {
 			// Task controls count as invocations even when their rows are hidden.
 			hasChildren = true
-			hasDesktopWorld = hasDesktopWorld || event.DesktopWorld
+			hasDesktopWorld = hasDesktopWorld || event.desktopWorld != nil
 			if !isTaskControlEvent(event) {
 				children = append(children, event)
 			}
@@ -105,14 +105,23 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, root.CallID, output, width, ctx, root.ScriptCompletion == "failed", token)...)
 	}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
+	hiddenDesktop := desktopWorldHiddenCalls(children, expanded)
 	for i := 0; i < len(children); {
 		end := i + 1
 		child := children[i]
+		if child.desktopWorld != nil {
+			if !hiddenDesktop[i] {
+				prefix := explorationChildPrefix(len(rows) == 1)
+				rows = append(rows, renderDesktopWorldCallRows(blockID, child, prefix, width, ctx, opts)...)
+			}
+			i++
+			continue
+		}
 		fullArgs := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(child.CallID)
 		if verb := scriptExplorationGroupVerb(child); !expanded && !fullArgs && verb != "" {
 			for end < len(children) {
 				next := children[end]
-				if next.Name != child.Name || next.Err != child.Err || next.Done != child.Done ||
+				if next.desktopWorld != nil || next.Name != child.Name || next.Err != child.Err || next.Done != child.Done ||
 					scriptExplorationGroupVerb(next) != verb ||
 					(opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(next.CallID)) {
 					break
@@ -126,6 +135,9 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		}
 		rows = append(rows, renderScriptInvocationRows(blockID, children[i:end], width, ctx, token, len(rows) == 1, fullArgs)...)
 		i = end
+	}
+	if len(hiddenDesktop) > 0 {
+		rows = append(rows, renderDesktopWorldMoreRow(blockID, len(hiddenDesktop), width, ctx, foldToken))
 	}
 	return rows, start, true
 }
@@ -180,9 +192,6 @@ func renderScriptInvocationRows(blockID string, events []SubagentEvent, width in
 
 func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budget int, fullArgs bool) string {
 	ev := events[0]
-	if ev.DesktopWorld {
-		return desktopWorldHeader(ev, budget)
-	}
 	labelEvent := ev
 	labelEvent.Args, labelEvent.DiffSummary = "", ""
 	label := strings.TrimPrefix(standardToolLifecycleHeader(labelEvent, false), "• ")

@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // SlashNoticePlacement is the TUI contract for one slash notice.
@@ -24,6 +26,14 @@ func (m *Model) handleSlashNoticeMsg(msg SlashNoticeMsg) (tea.Model, tea.Cmd) {
 	if text == "" {
 		return m, nil
 	}
+	if msg.CheckpointID != "" {
+		if m.currentSessionID != "" && msg.SessionID != m.currentSessionID {
+			return m, nil
+		}
+		if m.duplicateCompactCheckpoint(msg.CheckpointID) {
+			return m, nil
+		}
+	}
 	if msg.Placement == SlashNoticeHint {
 		return m, m.showHint(firstSlashNoticeLine(text), hintOptions{
 			priority:       HintPriorityNormal,
@@ -42,8 +52,15 @@ func sendNotice(send func(tea.Msg), text string, placement SlashNoticePlacement)
 	send(SlashNoticeMsg{Text: text, Placement: placement})
 }
 
-func sendControlSlashNotice(send func(tea.Msg), text string) {
-	sendNotice(send, text, classifyControlSlashNotice(text))
+func sendControlSlashNotice(send func(tea.Msg), event eventstream.Envelope) {
+	if event.NoticeKind == eventstream.NoticeKindCompact && event.EventID != "" {
+		send(SlashNoticeMsg{
+			Text: event.Notice, Placement: SlashNoticeFeedback,
+			SessionID: event.SessionID, CheckpointID: event.EventID,
+		})
+		return
+	}
+	sendNotice(send, event.Notice, classifyControlSlashNotice(event.Notice))
 }
 
 func classifyControlSlashNotice(text string) SlashNoticePlacement {

@@ -302,6 +302,30 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 	}
 }
 
+func TestManualCompactCheckpointSurvivesCommandResultWire(t *testing.T) {
+	t.Parallel()
+
+	want := appserver.CommandResult{
+		OperationID: "manual-compact", Outcome: appserver.OutcomeCommitted,
+		SessionID: "session-1", Revision: math.MaxUint64, CheckpointID: "checkpoint-1",
+	}
+	raw := mustMarshalWire(t, want)
+	var dto generated.CommandResult
+	if err := json.Unmarshal(raw, &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.CheckpointId == nil || *dto.CheckpointId != want.CheckpointID {
+		t.Fatalf("generated checkpoint ID = %v, want %q", dto.CheckpointId, want.CheckpointID)
+	}
+	var got appserver.CommandResult
+	if err := Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("compact receipt = %+v, want %+v", got, want)
+	}
+}
+
 func TestSessionConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
 	decimal := strconv.FormatUint(math.MaxUint64, 10)
 	profile := sessionprofile.Profile{

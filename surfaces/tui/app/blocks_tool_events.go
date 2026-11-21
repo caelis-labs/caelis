@@ -19,7 +19,7 @@ type ToolUpdateMeta struct {
 	MessageTarget      string
 	ToolKind           string
 	ToolTitle          string
-	DesktopWorld       bool
+	desktopWorld       *desktopWorldDisplay
 	ExplorationVerb    string
 	FullArgs           string
 	MessageID          string
@@ -161,7 +161,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			NameExplicit:     update.Meta.ToolNameExplicit,
 			ToolKind:         toolKind,
 			Title:            toolTitle,
-			DesktopWorld:     update.Meta.DesktopWorld,
+			desktopWorld:     update.Meta.desktopWorld,
 			ExplorationVerb:  explorationVerb,
 			Args:             args,
 			StartArgs:        args,
@@ -193,7 +193,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		NameExplicit:     update.Meta.ToolNameExplicit,
 		ToolKind:         toolKind,
 		Title:            toolTitle,
-		DesktopWorld:     update.Meta.DesktopWorld,
+		desktopWorld:     update.Meta.desktopWorld,
 		ExplorationVerb:  explorationVerb,
 		Args:             args,
 		StartArgs:        args,
@@ -361,7 +361,9 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	if strings.TrimSpace(toolTitle) != "" {
 		ev.Title = toolTitle
 	}
-	ev.DesktopWorld = ev.DesktopWorld || meta.DesktopWorld
+	if meta.desktopWorld != nil {
+		ev.desktopWorld = meta.desktopWorld
+	}
 	if explorationVerb := strings.TrimSpace(meta.ExplorationVerb); explorationVerb != "" {
 		ev.ExplorationVerb = explorationVerb
 	}
@@ -605,7 +607,9 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	ev.Name = finalEvent.Name
 	ev.ToolKind = finalEvent.ToolKind
 	ev.Title = finalEvent.Title
-	ev.DesktopWorld = ev.DesktopWorld || finalEvent.DesktopWorld
+	if finalEvent.desktopWorld != nil {
+		ev.desktopWorld = finalEvent.desktopWorld
+	}
 	ev.ExplorationVerb = finalEvent.ExplorationVerb
 	ev.Args = finalEvent.Args
 	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)

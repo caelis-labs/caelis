@@ -130,7 +130,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	if first.FinishReason != model.FinishReasonToolCalls {
 		t.Fatalf("FinishReason = %q, want tool_calls", first.FinishReason)
 	}
-	if first.Usage != (model.Usage{CacheReadAccounting: model.CacheReadIncluded, PromptTokens: 20, CachedInputTokens: 5, CompletionTokens: 8, ReasoningTokens: 3, TotalTokens: 28}) {
+	if first.Usage != (model.Usage{CacheReadAccounting: model.CacheReadIncluded, PromptTokens: 20, CachedInputTokens: 5, CachedInputTokensReported: true, CompletionTokens: 8, ReasoningTokens: 3, TotalTokens: 28}) {
 		t.Fatalf("Usage = %+v", first.Usage)
 	}
 	reasoning := first.Message.ReasoningParts()
@@ -180,9 +180,9 @@ func TestOpenAICodexTokenOnlyReasoningAndPrematureEOF(t *testing.T) {
 	if len(reasoning) != 1 || reasoning[0].Visibility != model.ReasoningVisibilityTokenOnly || reasoning[0].Replay == nil || reasoning[0].Replay.Token != "opaque" {
 		t.Fatalf("reasoning = %#v, want token-only replay", reasoning)
 	}
-	_, inputs, err := openAICodexInputs(nil, []model.Message{message})
+	_, inputs, err := openAIResponsesInputs(nil, []model.Message{message}, openAICodexReplayProvider)
 	if err != nil {
-		t.Fatalf("openAICodexInputs() error = %v", err)
+		t.Fatalf("openAIResponsesInputs() error = %v", err)
 	}
 	if len(inputs) != 2 {
 		t.Fatalf("len(inputs) = %d, want reasoning + assistant", len(inputs))
@@ -228,12 +228,12 @@ func TestOpenAIResponsesInputsCarryViewImageToolResult(t *testing.T) {
 		Name: "ViewImage",
 		Args: `{"path":"pixel.png"}`,
 	}}, "")
-	_, inputs, err := openAICodexInputs(nil, []model.Message{
+	_, inputs, err := openAIResponsesInputs(nil, []model.Message{
 		assistant,
 		imageToolResultMessageForTest("call_image", "ViewImage"),
-	})
+	}, openAICodexReplayProvider)
 	if err != nil {
-		t.Fatalf("openAICodexInputs() error = %v", err)
+		t.Fatalf("openAIResponsesInputs() error = %v", err)
 	}
 	if len(inputs) != 2 {
 		t.Fatalf("Responses inputs = %#v, want function call and output", inputs)
@@ -262,7 +262,7 @@ func TestOpenAIResponsesToolOutputPreservesTextImageAndStructuredReceiptOrder(t 
 			model.NewJSONPart(json.RawMessage(`{"outcome":"failed","structuredContent":{"reason":"not found"}}`)),
 		},
 	}})
-	_, inputs, err := openAICodexInputs(nil, []model.Message{assistant, result})
+	_, inputs, err := openAIResponsesInputs(nil, []model.Message{assistant, result}, openAICodexReplayProvider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,12 +750,12 @@ func TestOpenAICodexRequestSerializesPriorityServiceTier(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			payload, err := openAICodexRequestFromModel(&model.Request{
+			payload, err := (&openAICodexLLM{name: "gpt-5.4"}).buildRequest(&model.Request{
 				Messages:    messages,
 				ServiceTier: tt.tier,
-			}, "gpt-5.4")
+			})
 			if err != nil {
-				t.Fatalf("openAICodexRequestFromModel() error = %v", err)
+				t.Fatalf("buildRequest() error = %v", err)
 			}
 			raw, err := json.Marshal(payload)
 			if err != nil {

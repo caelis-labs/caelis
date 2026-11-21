@@ -109,6 +109,8 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	b := build.model
 	m.sessionHistoryBefore = build.before
 	m.doc = b.doc
+	m.seenCompactCheckpoints = b.seenCompactCheckpoints
+	m.compactNoticePair = compactNoticePairState{}
 	m.mainTimelineTailID = b.mainTimelineTailID
 	m.mainAnchorBlockIDs = b.mainAnchorBlockIDs
 	m.participantTurnIDs = b.participantTurnIDs

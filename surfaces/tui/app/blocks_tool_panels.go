@@ -30,9 +30,9 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 	if callID == "" {
 		return false
 	}
-	if ev, ok := latestToolEventForCallID(events, callID); ok && (ev.DesktopWorld || ev.ParentToolName == "js_exec" || isScriptToolEvent(ev)) {
-		canExpand := toolPanelEventHasHiddenToolArgs(ev)
-		if isScriptToolEvent(ev) || (ev.DesktopWorld && ev.ParentToolName != "js_exec") {
+	if ev, ok := latestToolEventForCallID(events, callID); ok && (ev.desktopWorld != nil || ev.ParentToolName == "js_exec" || isScriptToolEvent(ev)) {
+		canExpand := toolPanelEventHasHiddenToolArgs(ev) || (isScriptToolEvent(ev) && !ev.OutputSynthetic && renderableTextHasContent(ev.Output))
+		if ev.desktopWorld != nil {
 			canExpand = toolPanelHasSourceOrOutput(ev)
 		}
 		if !canExpand || fullOutputState == nil {

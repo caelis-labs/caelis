@@ -689,7 +689,7 @@ func TestSessionClientAdapterRoutesCompactThroughTypedSessionClient(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !compacted {
+	if !compacted.Compacted {
 		t.Fatal("Compact() = false, want committed compaction")
 	}
 	request := client.compact
@@ -713,7 +713,7 @@ func TestSessionClientAdapterReportsCompactNoopFromUnchangedRevision(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if compacted {
+	if compacted.Compacted {
 		t.Fatal("Compact() = true, want no-op from unchanged committed revision")
 	}
 }

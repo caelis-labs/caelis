@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
@@ -68,6 +69,7 @@ type compactNoticePairState struct {
 	key                string
 	canonicalUnmatched int
 	transientUnmatched int
+	lastTransient      eventstream.TransientFeedPosition
 }
 
 var runningSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -380,6 +382,7 @@ type Model struct {
 	nextLiveTurnGeneration uint64
 	submissionDispatches   map[uint64]scheduledSubmissionDispatch
 	compactNoticePair      compactNoticePairState
+	seenCompactCheckpoints map[string]struct{}
 
 	// Task output is transient and independently subscribed from the Session
 	// feed. Spawn output views and RunCommand panels own subscriptions by their

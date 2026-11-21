@@ -524,6 +524,7 @@ type CommandResource struct {
 type CommandResult struct {
 	AcpConnect      *ACPConnectReceipt      `json:"acp_connect,omitempty"`
 	BackgroundGrant *SessionBackgroundGrant `json:"background_grant,omitempty"`
+	CheckpointId    *string                 `json:"checkpoint_id,omitempty"`
 	Configuration   *SessionConfiguration   `json:"configuration,omitempty"`
 	Detail          *string                 `json:"detail,omitempty"`
 	ErrorCode       ErrorCode               `json:"error_code,omitempty"`

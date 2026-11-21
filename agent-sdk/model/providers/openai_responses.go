@@ -184,7 +184,11 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 			return openAIResponsesRequest{}, errorcode.New(errorcode.Unsupported, "openai responses: only function tools are supported")
 		}
 	}
-	instructions, input, err := openAIResponsesInputs(req.Instructions, req.Messages, l.provider)
+	placement := responsesTopLevelInstructions
+	if l.api == model.APIOpenAI && l.baseURL == defaultOpenAIResponsesBaseURL && isGPT62(l.name) {
+		placement = responsesBaseDeveloperMessage
+	}
+	instructions, input, err := openAIResponsesRequestInputs(req, l.provider, placement)
 	if err != nil {
 		return openAIResponsesRequest{}, err
 	}

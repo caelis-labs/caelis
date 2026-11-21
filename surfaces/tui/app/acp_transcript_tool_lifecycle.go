@@ -35,9 +35,6 @@ func renderACPToolLifecycleRowsWithoutReview(blockID string, events []SubagentEv
 	}
 
 	group := events[idx : end+1]
-	if display := group[len(group)-1]; display.DesktopWorld {
-		return renderDesktopWorldToolRows(blockID, display, width, ctx, opts), end
-	}
 	sendMessageLifecycle := toolLifecycleIsSendMessage(group)
 	start := group[0]
 	singleCompletedLifecycle := len(group) == 1 && start.Done && toolEventHasPresentation(start)
@@ -393,6 +390,12 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	semanticName := ev.Name
+	switch semanticName {
+	case "dtw__apps", "dtw__exec", "desktop_world__apps", "desktop_world__exec":
+		if strings.HasPrefix(ev.Title, semanticName+" · ") {
+			return "• " + ev.Title
+		}
+	}
 	presentation := transcript.ResolveToolPresentationWithHint(ev.Name, ev.ToolKind, ev.Title, ev.ExplorationVerb)
 	switch semanticName {
 	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:

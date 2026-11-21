@@ -49,7 +49,8 @@ type openAICodexInputImage struct {
 	ImageURL string `json:"image_url"`
 }
 
-type openAICodexUserInput struct {
+type openAICodexMessageInput struct {
+	Type    string `json:"type,omitempty"`
 	Role    string `json:"role"`
 	Content []any  `json:"content"`
 }
@@ -96,7 +97,7 @@ type openAICodexTool struct {
 	Strict      bool           `json:"strict"`
 }
 
-func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICodexRequest, error) {
+func (l *openAICodexLLM) buildRequest(req *model.Request) (openAICodexRequest, error) {
 	if req == nil {
 		return openAICodexRequest{}, fmt.Errorf("model: request is nil")
 	}
@@ -109,7 +110,13 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 			Detail: "OpenAI Codex Responses structured output is not implemented",
 		}
 	}
-	instructions, input, err := openAICodexInputs(req.Instructions, req.Messages)
+	placement := responsesTopLevelInstructions
+	if l.baseURL == defaultOpenAICodexBaseURL && isGPT62(l.name) {
+		// The official Codex client uses developer input messages on this
+		// endpoint and its current request schema omits top-level instructions.
+		placement = responsesDeveloperInstructions
+	}
+	instructions, input, err := openAIResponsesRequestInputs(req, openAICodexReplayProvider, placement)
 	if err != nil {
 		return openAICodexRequest{}, err
 	}
@@ -123,7 +130,7 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 	}
 	reasoning := &openAICodexReasoning{Effort: strings.TrimSpace(req.Reasoning.Effort), Summary: "auto"}
 	return openAICodexRequest{
-		Model:        strings.TrimSpace(modelName),
+		Model:        l.name,
 		Input:        input,
 		Instructions: instructions,
 		Tools:        tools,
@@ -155,8 +162,48 @@ func openAICodexTools(specs []model.ToolSpec, strictFunctionTools bool) []openAI
 	return out
 }
 
-func openAICodexInputs(instructionParts []model.Part, messages []model.Message) (string, []any, error) {
-	return openAIResponsesInputs(instructionParts, messages, openAICodexReplayProvider)
+type responsesInstructionPlacement uint8
+
+const (
+	responsesTopLevelInstructions responsesInstructionPlacement = iota
+	responsesBaseDeveloperMessage
+	responsesDeveloperInstructions
+)
+
+func isGPT62(name string) bool {
+	return name == "gpt-6.2" || strings.HasPrefix(name, "gpt-6.2-")
+}
+
+func openAIResponsesRequestInputs(req *model.Request, replayProvider string, placement responsesInstructionPlacement) (string, []any, error) {
+	parts := req.Instructions
+	var prefix string
+	if count := req.BaseInstructionCount; placement != responsesTopLevelInstructions && count > 0 && count <= len(parts) {
+		var err error
+		prefix, err = openAICodexTextOnly(parts[:count], "base instructions")
+		if err != nil {
+			return "", nil, err
+		}
+		parts = parts[count:]
+	}
+	instructions, input, err := openAIResponsesInputs(parts, req.Messages, replayProvider)
+	if err != nil {
+		return "", nil, err
+	}
+	if prefix != "" {
+		input = append([]any{responsesDeveloperMessage(prefix)}, input...)
+	}
+	if placement == responsesDeveloperInstructions && instructions != "" {
+		input = append(input, responsesDeveloperMessage(instructions))
+		instructions = ""
+	}
+	return instructions, input, nil
+}
+
+func responsesDeveloperMessage(text string) openAICodexMessageInput {
+	return openAICodexMessageInput{
+		Type: "message", Role: "developer",
+		Content: []any{openAICodexInputText{Type: "input_text", Text: text}},
+	}
 }
 
 func openAIResponsesInputs(instructionParts []model.Part, messages []model.Message, replayProvider string) (string, []any, error) {
@@ -190,7 +237,7 @@ func openAIResponsesInputs(instructionParts []model.Part, messages []model.Messa
 			if len(content) == 0 {
 				return "", nil, errorcode.New(errorcode.InvalidArgument, "openai codex: user message has no supported content")
 			}
-			out = append(out, openAICodexUserInput{Role: string(model.RoleUser), Content: content})
+			out = append(out, openAICodexMessageInput{Role: string(model.RoleUser), Content: content})
 		case model.RoleAssistant:
 			var err error
 			out, err = openAIResponsesAssistantContent(out, message.Parts, seenToolCalls, replayProvider)
@@ -401,16 +448,12 @@ func openAICodexToolResultOutput(result model.ToolResultPart) (any, error) {
 }
 
 type openAICodexUsage struct {
-	reported          bool
-	InputTokens       int `json:"input_tokens"`
-	OutputTokens      int `json:"output_tokens"`
-	TotalTokens       int `json:"total_tokens"`
-	InputTokenDetails struct {
-		CachedTokens int `json:"cached_tokens"`
-	} `json:"input_tokens_details"`
-	OutputTokenDetails struct {
-		ReasoningTokens int `json:"reasoning_tokens"`
-	} `json:"output_tokens_details"`
+	reported           bool
+	InputTokens        int                      `json:"input_tokens"`
+	OutputTokens       int                      `json:"output_tokens"`
+	TotalTokens        int                      `json:"total_tokens"`
+	InputTokenDetails  openAIInputTokenDetails  `json:"input_tokens_details"`
+	OutputTokenDetails openAIOutputTokenDetails `json:"output_tokens_details"`
 }
 
 func (u openAICodexUsage) toKernelUsage() model.Usage {
@@ -418,14 +461,18 @@ func (u openAICodexUsage) toKernelUsage() model.Usage {
 	if total == 0 {
 		total = u.InputTokens + u.OutputTokens
 	}
-	return usageWithPresence(model.Usage{
+	usage := model.Usage{
 		CacheReadAccounting: model.CacheReadIncluded,
 		PromptTokens:        u.InputTokens,
-		CachedInputTokens:   u.InputTokenDetails.CachedTokens,
 		CompletionTokens:    u.OutputTokens,
 		ReasoningTokens:     u.OutputTokenDetails.ReasoningTokens,
 		TotalTokens:         total,
-	}, u.reported)
+	}
+	if cached := u.InputTokenDetails.CachedTokens; cached != nil {
+		usage.CachedInputTokens = *cached
+		usage.CachedInputTokensReported = true
+	}
+	return usageWithPresence(usage, u.reported)
 }
 
 type openAICodexErrorPayload struct {

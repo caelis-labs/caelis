@@ -11,29 +11,29 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob) (bool, error) {
+func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob) (*session.Event, error) {
 	if ctx.Err() != nil || job.guard != session.RuntimeMutationGuard(ctx) {
-		return false, ctx.Err()
+		return nil, ctx.Err()
 	}
 	validator, ok := r.sessions.(session.MutationGuardValidator)
 	if !ok {
-		return false, nil
+		return nil, nil
 	}
 	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
-		return false, err
+		return nil, err
 	}
 
 	adopted, err := r.adoptCompactionCandidate(ctx, l, job, lifecycleScopeFromContext(ctx).turnID, nil)
-	if err != nil || !adopted {
+	if err != nil || adopted == nil {
 		return adopted, err
 	}
 	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
-		return false, err
+		return nil, err
 	}
-	return true, nil
+	return adopted, nil
 }
 
-func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob, turnID string, appendCheckpoint checkpointAppender) (bool, error) {
+func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob, turnID string, appendCheckpoint checkpointAppender) (*session.Event, error) {
 	data, ok := session.CheckpointDataFromEvent(job.result.CompactEvent)
 	delta := compact.EventsAfterLatestCompact(mainInvocationEvents(job.source.Events))
 	_, baseData, _ := compact.LatestCompactEvent(job.source.Events)
@@ -42,30 +42,30 @@ func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGa
 		data.SummarizedThroughSeq != job.coverage.SummarizedThroughSeq || data.SummarizedThroughID != lastEventID(delta) ||
 		data.SummarizedThroughID != job.coverage.SummarizedThroughID ||
 		strings.TrimSpace(stripRuntimeContinuity(job.result.CompactText)) == "" {
-		return false, nil
+		return nil, nil
 	}
 	// A grant-bound idle writer never queues behind existing foreground work.
 	release, err := r.sessionWrites.acquireIf(ctx, l.sessionRef, appendCheckpoint == nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer release()
 	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: l.sessionRef})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if !job.validSource(loaded) {
-		return false, nil
+		return nil, nil
 	}
 	if a := l.requestAuthority; a != nil {
 		if a.validate == nil {
-			return false, nil
+			return nil, nil
 		}
 		ctx = context.WithValue(ctx, checkpointValidationKey{}, a.validate)
 	}
 	appendix, err := r.runtimeCompactionAppendix(ctx, l.sessionRef, loaded.State)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	text := appendRuntimeContinuity(job.result.CompactText, appendix)
 	event := buildCompactEvent(loaded.Session, text, data)
@@ -73,17 +73,17 @@ func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGa
 	current := mainInvocationEvents(loaded.Events)
 	projected := compact.PromptEventsFromLatestCompact(append(session.CloneEvents(current), event))
 	if estimatePromptEventsTokens(projected) >= estimatePromptEventsTokens(compact.PromptEventsFromLatestCompact(current)) {
-		return false, nil
+		return nil, nil
 	}
-	_, err = r.persistContextArtifactUsing(ctx, &loaded.Session, turnID,
+	persisted, err := r.persistContextArtifactUsing(ctx, &loaded.Session, turnID,
 		event, job.validSource, appendCheckpoint)
 	if err != nil {
 		// No adoption, including on an unresolved write outcome. The caller
 		// fails this Turn; it must not mint a second checkpoint as a fallback.
-		return false, err
+		return nil, err
 	}
 
-	return true, nil
+	return persisted, nil
 }
 
 func (j *asyncCompactJob) validSource(current session.LoadedSession) bool {

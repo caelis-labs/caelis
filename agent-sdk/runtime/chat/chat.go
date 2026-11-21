@@ -345,6 +345,7 @@ func (a *Agent) collectCanonicalModelStep(
 		} else {
 			request.Instructions = []model.Part{}
 		}
+		request.BaseInstructionCount = len(request.Instructions)
 		if invalidAttempts > 0 {
 			// The rejected envelope never entered Session or tool dispatch.
 			// Give this regeneration feedback without replaying malformed input.

@@ -21,7 +21,6 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	presentation := transcript.ResolveToolPresentationWithHint(toolName, input.ToolKind, input.ToolTitle, explorationVerb)
 	status := transcript.NormalizeToolStartStatus(input.Status)
 	semanticName := toolName
-	desktopWorld := projection.DesktopWorldToolDisplay(toolName, input.Meta)
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	toolTaskHandle := projection.ToolTaskHandle(rawInput, nil, input.Meta)
 	toolMessageTarget := ""
@@ -43,10 +42,6 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	if semanticName == surfaceToolTask {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
-	if desktopWorld == "exec" {
-		toolArgs = ""
-		toolFullArgs, _ = rawInput["source"].(string)
-	}
 	if semanticName == "js_exec" {
 		input.ToolTitle, _ = displayInput["file"].(string)
 		if source := transcript.MetaString(input.Meta, "code_mode_source", "code"); source != "" {
@@ -65,7 +60,6 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolNameExplicit:     input.ToolNameExplicit,
 		ToolKind:             strings.TrimSpace(input.ToolKind),
 		ToolTitle:            strings.TrimSpace(input.ToolTitle),
-		ToolDesktopWorld:     desktopWorld != "",
 		ToolExplorationVerb:  explorationVerb,
 		ToolArgs:             toolArgs,
 		ToolFullArgs:         toolFullArgs,
@@ -91,7 +85,6 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	explorationVerb := toolDisplayExplorationVerb(input.Meta)
 	presentation := transcript.ResolveToolPresentationWithHint(toolName, input.ToolKind, input.ToolTitle, explorationVerb)
 	semanticName := toolName
-	desktopWorld := projection.DesktopWorldToolDisplay(toolName, input.Meta)
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	rawOutput := transcript.RawMap(input.RawOutput)
 	status, toolErr := transcript.NormalizeToolResultStatus(input.Status, rawOutput, input.Error, defaultSuccessStatus)
@@ -239,10 +232,6 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutput = ""
 		toolOutputSynthetic = false
 	}
-	if desktopWorld == "exec" {
-		toolArgs = ""
-		toolFullArgs, _ = rawInput["source"].(string)
-	}
 	if semanticName == "js_exec" {
 		input.ToolTitle, _ = displayInput["file"].(string)
 		if source := transcript.MetaString(input.Meta, "code_mode_source", "code"); source != "" {
@@ -261,7 +250,6 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolNameExplicit:         input.ToolNameExplicit,
 		ToolKind:                 strings.TrimSpace(input.ToolKind),
 		ToolTitle:                strings.TrimSpace(input.ToolTitle),
-		ToolDesktopWorld:         desktopWorld != "",
 		ToolExplorationVerb:      explorationVerb,
 		ToolArgs:                 toolArgs,
 		ToolFullArgs:             toolFullArgs,

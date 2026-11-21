@@ -126,6 +126,10 @@ func (m *Model) applyTranscriptEvents(events []TranscriptEvent, reconnectReplay 
 		if m.subagentOutputEventKey(event) != "" {
 			continue
 		}
+		if reconnectReplay && event.Kind == TranscriptEventNotice && event.Scope == ACPProjectionMain &&
+			event.NoticeKind == transcript.NoticeKindCompact && m.duplicateCompactCheckpoint(event.SourceEventID) {
+			continue
+		}
 		model, cmd := m.applyTranscriptEvent(event, reconnectReplay)
 		if next, ok := model.(*Model); ok {
 			m = next
@@ -715,6 +719,7 @@ func transcriptParticipantTurnKey(event TranscriptEvent) string {
 }
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
+	desktopWorld, _ := event.Meta[desktopWorldDisplayKey].(*desktopWorldDisplay)
 	return ToolUpdateMeta{
 		OccurredAt:       event.OccurredAt,
 		ScriptCompletion: transcript.MetaString(event.Meta, "code_mode_script_completion"),
@@ -727,7 +732,7 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		MessageTarget:        event.ToolMessageTarget,
 		ToolKind:             event.ToolKind,
 		ToolTitle:            event.ToolTitle,
-		DesktopWorld:         event.ToolDesktopWorld,
+		desktopWorld:         desktopWorld,
 		ExplorationVerb:      event.ToolExplorationVerb,
 		FullArgs:             event.ToolFullArgs,
 		ToolStatus:           event.ToolStatus,
