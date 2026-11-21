@@ -11,6 +11,44 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+func TestStoreStartSessionRejectsConflictingIdentity(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{})
+	ctx := context.Background()
+	req := session.StartSessionRequest{
+		AppName: "app", UserID: "owner", PreferredSessionID: "shared",
+		Workspace: session.WorkspaceRef{Key: "workspace"},
+		Title:     "original title",
+	}
+	original, err := store.StartSession(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name      string
+		changeRef func(*session.StartSessionRequest)
+	}{
+		{"app", func(req *session.StartSessionRequest) { req.AppName = "other" }},
+		{"user", func(req *session.StartSessionRequest) { req.UserID = "other" }},
+		{"workspace", func(req *session.StartSessionRequest) { req.Workspace.Key = "other" }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			conflicting := req
+			tt.changeRef(&conflicting)
+			got, err := store.StartSession(ctx, conflicting)
+			if !errors.Is(err, session.ErrInvalidSession) || got.SessionID != "" {
+				t.Fatalf("conflicting StartSession returned session %q and err %v", got.SessionID, err)
+			}
+		})
+	}
+	req.Title = "ignored on reuse"
+	reused, err := store.StartSession(ctx, req)
+	if err != nil || reused.SessionRef != original.SessionRef || reused.Title != original.Title {
+		t.Fatalf("same-identity StartSession returned %#v, %v", reused, err)
+	}
+}
+
 func TestStoreAppendAndListCanonicalEvents(t *testing.T) {
 	t.Parallel()
 

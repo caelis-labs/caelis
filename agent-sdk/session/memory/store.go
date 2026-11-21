@@ -88,8 +88,9 @@ func (s *Store) StartSession(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if existing, ok := s.sessions[ref.SessionID]; ok {
-		if !session.EqualExecutionConfig(existing.session.ExecutionConfig, req.ExecutionConfig) {
+	if _, occupied := s.sessions[ref.SessionID]; occupied {
+		existing, matches := s.lookupLocked(ref)
+		if !matches || !session.EqualExecutionConfig(existing.session.ExecutionConfig, req.ExecutionConfig) {
 			return session.Session{}, session.ErrInvalidSession
 		}
 		return existing.cloneSession(), nil
