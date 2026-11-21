@@ -1,6 +1,8 @@
 package projection
 
 import (
+	"strings"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -17,8 +19,26 @@ func ToolContentForACPv1(in []eventstream.ToolCallContent) []eventstream.ToolCal
 	copy(out, in)
 	for i, item := range in {
 		if item.Type == "diff" && item.Changes != nil {
-			out[i] = eventstream.ToolCallContent{Type: "content", Content: eventstream.TextContent{Type: "text", Text: session.StructuredDiffText(item.Changes, item.Patch)}, Meta: item.Meta}
+			out[i] = eventstream.ToolCallContent{Type: "content", Content: eventstream.TextContent{Type: "text", Text: StructuredDiffText(item.Changes, item.Patch)}, Meta: item.Meta}
 		}
 	}
 	return out
+}
+
+// StructuredDiffText projects affected files and supplied patch text for text-only consumers.
+func StructuredDiffText(changes *[]session.ProtocolDiffChange, patch *session.ProtocolDiffPatch) string {
+	var parts []string
+	if changes != nil {
+		for _, change := range *changes {
+			label := change.Operation + " " + change.Path
+			if change.OldPath != nil {
+				label += " (from " + *change.OldPath + ")"
+			}
+			parts = append(parts, label)
+		}
+	}
+	if patch != nil && patch.Text != "" {
+		parts = append(parts, patch.Text)
+	}
+	return strings.Join(parts, "\n")
 }
