@@ -116,12 +116,14 @@ func (tm *taskRuntime) enqueueSubagentCompletion(completion *subagentCompletion)
 		return completion.done
 	}
 	tm.mu.Lock()
+	task := tm.subagents[taskID]
 	current, exists := tm.completions[taskID]
 	switch {
 	case !exists || completion.turnSeq > current.turnSeq:
 		if current != nil {
 			current.acknowledgeDurable()
 		}
+		completion.task = task
 		tm.completions[taskID] = completion
 	case completion.turnSeq == current.turnSeq:
 		completion.acknowledgeDurable()
@@ -131,11 +133,9 @@ func (tm *taskRuntime) enqueueSubagentCompletion(completion *subagentCompletion)
 		tm.mu.Unlock()
 		return completion.done
 	}
-	task := tm.subagents[taskID]
 	ready := false
 	discard := false
 	if task != nil {
-		completion.task = task
 		task.mu.Lock()
 		ready = task.completionReady
 		discard = spawnPhaseOfTask(task) == spawnPhaseCompensated
@@ -194,14 +194,14 @@ func (tm *taskRuntime) startSubagentCompletionLocked(taskID string) (*subagentCo
 	if completion == nil {
 		return nil, ""
 	}
-	if live := tm.subagents[taskID]; live != nil {
-		completion.task = live
-	}
-	task := completion.task
-	if task == nil {
+	if _, applying := tm.completionApplying[taskID]; applying {
 		return nil, ""
 	}
-	if _, applying := tm.completionApplying[taskID]; applying {
+	task := tm.subagents[taskID]
+	if task == nil {
+		task = completion.task
+	}
+	if task == nil {
 		return nil, ""
 	}
 	operationKey := taskOperationKey(task.sessionRef, taskID)
@@ -221,6 +221,7 @@ func (tm *taskRuntime) startSubagentCompletionLocked(taskID string) (*subagentCo
 	if !ready || turnSeq < completion.turnSeq && completion.activity == nil {
 		return nil, ""
 	}
+	completion.task = task
 	tm.operations[operationKey] = struct{}{}
 	tm.completionApplying[taskID] = struct{}{}
 	return completion, operationKey
