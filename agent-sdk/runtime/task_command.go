@@ -349,7 +349,6 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 	task.operationID = taskSpecString(entry.Spec, "operation_id")
 	task.revision = entry.Revision
 	task.handle = firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"]))
-	task.lease = taskapi.CloneLease(entry.Lease)
 	task.state = entry.State
 	task.running = entry.Running
 	task.supportsInput = entry.SupportsInput
@@ -514,7 +513,6 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 	persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
 	task.mu.Lock()
 	task.revision = entry.Revision
-	task.lease = taskapi.CloneLease(entry.Lease)
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
 	if persistErr == nil {

@@ -575,7 +575,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		approvalMode:    taskSpecString(entry.Spec, "approval_mode"),
 		createdAt:       entry.CreatedAt,
 		revision:        entry.Revision,
-		lease:           taskapi.CloneLease(entry.Lease),
 		state:           entry.State,
 		running:         entry.Running,
 		turnSeq:         turnSeq,
@@ -796,7 +795,6 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 		SupportsCancel: false,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      time.Now(),
-		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		EventCursor:    max(t.turnSeq, 0),
@@ -826,7 +824,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		SupportsCancel: false,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
-		Lease:          taskapi.CloneLease(t.lease),
 		ContextUsage:   taskapi.CloneContextUsageRecord(t.contextUsage),
 		Spec: map[string]any{
 			"content_parts":        t.contentParts,

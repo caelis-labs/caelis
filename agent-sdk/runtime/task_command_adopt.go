@@ -111,7 +111,6 @@ func (tm *taskRuntime) commandFromDurableEntry(entry *taskapi.Entry) (*commandTa
 	current.title = strings.TrimSpace(entry.Title)
 	current.createdAt = entry.CreatedAt
 	current.revision = entry.Revision
-	current.lease = taskapi.CloneLease(entry.Lease)
 	current.state = entry.State
 	current.running = entry.Running
 	current.outputState.applyDurableCheckpoint(parseCommandOutputCheckpoint(entry))
