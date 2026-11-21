@@ -16,8 +16,6 @@ const (
 	legacyContinuePending        = "continue_pending"
 	legacyContinuePostEffect     = "continue_post_effect"
 	legacyContinueUnknownOutcome = "continue_unknown_outcome"
-
-	legacyContinueRecoveryMeta = "legacy_continue_recovery"
 )
 
 const (
@@ -39,7 +37,6 @@ func (r *Runtime) recoverLegacySubagentContinue(ctx context.Context, entry *task
 	}
 
 	next := taskapi.CloneEntry(entry)
-	next.SupportsInput = false
 	switch phase {
 	case legacyContinuePrepared:
 		next = interruptedSubagentEntry(next, legacyContinueInterruptedDiagnostic)
@@ -68,7 +65,7 @@ func (r *Runtime) recoverLegacySubagentContinue(ctx context.Context, entry *task
 	default:
 		return false, nil
 	}
-	clearLegacyContinueState(next, phase)
+	clearLegacyContinueState(next)
 	return true, r.tasks.persistTaskEntry(ctx, next)
 }
 
@@ -94,7 +91,6 @@ func markLegacyContinueUnknown(entry *taskapi.Entry) {
 	}
 	entry.Running = false
 	entry.State = taskapi.StateUnknownOutcome
-	entry.SupportsInput = false
 	normalizeSubagentEntryResult(entry, legacyContinueUnknownDiagnostic)
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]any{}
@@ -102,14 +98,10 @@ func markLegacyContinueUnknown(entry *taskapi.Entry) {
 	entry.Metadata["state"] = string(taskapi.StateUnknownOutcome)
 }
 
-func clearLegacyContinueState(entry *taskapi.Entry, recoveredPhase string) {
+func clearLegacyContinueState(entry *taskapi.Entry) {
 	if entry == nil {
 		return
 	}
-	if entry.Metadata == nil {
-		entry.Metadata = map[string]any{}
-	}
-	entry.Metadata[legacyContinueRecoveryMeta] = strings.TrimSpace(recoveredPhase)
 	for _, key := range []string{
 		"continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason",
 	} {

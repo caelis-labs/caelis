@@ -71,8 +71,8 @@ func TestRuntimeRecoveryConvergesLegacyContinuePhasesWithoutRemoteEffect(t *test
 			if got.State != tt.wantState || got.Running || got.SupportsInput {
 				t.Fatalf("recovered entry = %#v, want terminal %q without Task input", got, tt.wantState)
 			}
-			if got.Metadata[legacyContinueRecoveryMeta] != tt.phase || legacyContinuePhaseOfEntry(got) != "" {
-				t.Fatalf("legacy markers = %#v / %#v, want recovered phase only", got.Metadata, got.Spec)
+			if legacyContinuePhaseOfEntry(got) != "" {
+				t.Fatalf("legacy markers survived recovery: %#v / %#v", got.Metadata, got.Spec)
 			}
 			if gotMessage := taskStringValue(got.Result["error"]); gotMessage != tt.wantMessage {
 				t.Fatalf("error = %q, want %q", gotMessage, tt.wantMessage)
