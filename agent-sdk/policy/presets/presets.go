@@ -27,11 +27,6 @@ const (
 	// NewRegistry so ordinary policy configuration cannot enable it.
 	ModeDangerFullAccess = "danger-full-access"
 
-	// ModeAutoReview and ModeManual are legacy policy names kept for callers
-	// that still import them. They normalize to ModeWorkspaceWrite.
-	ModeAutoReview = "auto-review"
-	ModeManual     = "manual"
-
 	// ModeDefault is the built-in fallback policy for omitted, legacy, or
 	// otherwise unresolved local policy configuration.
 	ModeDefault = ModeWorkspaceWrite
@@ -51,12 +46,9 @@ func NormalizeModeName(mode string) string {
 	return normalized
 }
 
+// NewRegistry registers the default workspace-write policy under its canonical name.
 func NewRegistry() (*policy.MemoryRegistry, error) {
-	return policy.NewMemory(
-		WorkspaceWriteMode(),
-		workspaceWriteAliasMode(ModeAutoReview),
-		workspaceWriteAliasMode(ModeManual),
-	)
+	return policy.NewMemory(WorkspaceWriteMode())
 }
 
 // WorkspaceWriteMode applies the built-in tool rules and default workspace
@@ -125,14 +117,6 @@ func DangerFullAccessMode() policy.Mode {
 		Decide: func(_ context.Context, _ policy.ToolContext) (policy.Decision, error) {
 			return allow(hostExecutionConstraints()), nil
 		},
-	}
-}
-
-func workspaceWriteAliasMode(id string) policy.Mode {
-	base := WorkspaceWriteMode()
-	return policy.NamedMode{
-		ID:     strings.TrimSpace(id),
-		Decide: base.DecideTool,
 	}
 }
 

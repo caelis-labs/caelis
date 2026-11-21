@@ -77,7 +77,7 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 			command.result.ExitCode = 0
 			rt, err := New(Config{
 				Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{},
-				DefaultPolicyMode: presets.ModeAutoReview,
+				DefaultPolicyMode: presets.ModeWorkspaceWrite,
 				Hooks:             agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "observation-order", Invoke: commandObservationOrder{command: command, afterWait: afterWait, waitReturned: make(chan struct{})}.Invoke}}},
 			})
 			if err != nil {

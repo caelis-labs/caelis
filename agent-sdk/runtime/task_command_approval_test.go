@@ -58,7 +58,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeAutoReview})
+	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeWorkspaceWrite})
 	if err != nil {
 		t.Fatal(err)
 	}

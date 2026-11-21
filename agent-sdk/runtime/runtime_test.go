@@ -2652,7 +2652,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2800,7 +2800,7 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2917,7 +2917,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	}
 	runtime := &Runtime{
 		policies:          registry,
-		defaultPolicyMode: presets.ModeAutoReview,
+		defaultPolicyMode: presets.ModeWorkspaceWrite,
 	}
 	targetTool := tool.NamedTool{
 		Def: tool.Definition{Name: "Write"},
@@ -3046,7 +3046,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3103,7 +3103,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 		SandboxPolicy:     sandboxPolicy,
 	})
 	if err != nil {
@@ -3433,7 +3433,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

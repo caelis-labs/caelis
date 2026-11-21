@@ -2198,7 +2198,7 @@ func newRuntimeRunCommandToolTestHarness(t *testing.T) (session.Service, session
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
