@@ -24,18 +24,18 @@ func (Loader) Load(ctx context.Context, ref skill.Ref) (skill.Bundle, error) {
 	if err != nil {
 		return skill.Bundle{}, err
 	}
-	meta, body, err := parseSkillContent(skillPath, raw)
+	parsed, err := parseSkillContent(skillPath, raw)
 	if err != nil {
 		return skill.Bundle{}, err
 	}
-	meta, err = metaForSkillRef(meta, ref)
+	meta, err := metaForSkillRef(parsed.meta, ref)
 	if err != nil {
 		return skill.Bundle{}, err
 	}
 	return skill.Bundle{
 		Meta:    meta,
 		Root:    root,
-		Content: strings.TrimSpace(body),
+		Content: parsed.body,
 	}, nil
 }
 

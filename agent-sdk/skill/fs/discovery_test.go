@@ -232,9 +232,9 @@ func TestParseMetaCacheIsBounded(t *testing.T) {
 		dir := filepath.Join(root, name)
 		writeSkillForDiscoveryTest(t, dir, name, "cache bounded")
 		path := filepath.Join(dir, "SKILL.md")
-		meta, _, err := parseMetaHashCached(path)
-		if err != nil || meta.Name != name {
-			t.Fatalf("parseMetaHashCached(%s) = %#v, %v", path, meta, err)
+		entry, err := readSkillMetadata(path)
+		if err != nil || entry.meta.Name != name {
+			t.Fatalf("readSkillMetadata(%s) = %#v, %v", path, entry, err)
 		}
 	}
 	metaCache.Lock()
@@ -245,6 +245,33 @@ func TestParseMetaCacheIsBounded(t *testing.T) {
 	metaCache.Unlock()
 	if got != maxMetaCacheEntries || oldestRetained || secondOldestRetained || !newestRetained {
 		t.Fatalf("cache entries=%d, oldest retained=%v/%v, newest retained=%v", got, oldestRetained, secondOldestRetained, newestRetained)
+	}
+}
+
+func TestPluginDiscoveryChecksStandardMetadataAgainstCurrentBytes(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "good")
+	path := filepath.Join(dir, "SKILL.md")
+	writeSkillForDiscoveryTest(t, dir, "good", "skill with a matching directory")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := skill.PluginBundle{Plugin: "fixture", Root: root, Enabled: true, SkipInvalid: true}
+	if metas := DiscoverPluginBundleMeta([]skill.PluginBundle{bundle}); len(metas) != 1 || metas[0].Name != "fixture:good" {
+		t.Fatalf("initial strict scan = %#v, want fixture:good", metas)
+	}
+	writeSkillForDiscoveryTest(t, dir, "badx", "skill with a matching directory")
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	permissive := bundle
+	permissive.SkipInvalid = false
+	if metas := DiscoverPluginBundleMeta([]skill.PluginBundle{permissive}); len(metas) != 1 || metas[0].Name != "fixture:badx" {
+		t.Fatalf("permissive scan = %#v, want fixture:badx", metas)
+	}
+	if metas := DiscoverPluginBundleMeta([]skill.PluginBundle{bundle}); len(metas) != 0 {
+		t.Fatalf("strict scan = %#v, want no entries for mismatched front matter", metas)
 	}
 }
 

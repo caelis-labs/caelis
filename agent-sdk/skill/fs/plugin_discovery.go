@@ -72,20 +72,18 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]skill.Meta, map[s
 				if rootErr != nil || skillErr != nil || !pathWithinPluginSkillRoot(realRoot, realSkill) {
 					continue
 				}
-				if !validStandardPluginSkill(skillPath, entry.Name()) {
-					continue
-				}
 			}
 			skillPath = filepath.Clean(skillPath)
-			meta, hash, err := parseMetaHashCached(skillPath)
-			if err != nil {
+			metadata, err := readSkillMetadata(skillPath)
+			if err != nil || bundle.SkipInvalid && !metadata.standard {
 				continue
 			}
+			meta := metadata.meta
 			localName := strings.TrimSpace(meta.Name)
 			if localName == "" {
 				continue
 			}
-			suppressedRegular[skillIdentityKey(localName, hash)] = true
+			suppressedRegular[skillIdentityKey(localName, metadata.hash)] = true
 			if !bundle.Enabled {
 				continue
 			}
@@ -123,15 +121,7 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]skill.Meta, map[s
 
 var standardSkillName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
 
-func validStandardPluginSkill(path, directory string) bool {
-	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 {
-		return false
-	}
-	front, _, err := parseFrontMatter(normalizeText(string(raw)))
-	if err != nil {
-		return false
-	}
+func validStandardPluginSkill(front frontMatter, directory string) bool {
 	name, description := strings.TrimSpace(front.Name), strings.TrimSpace(front.Description)
 	descriptionCharacters := utf8.RuneCountInString(description)
 	return name == directory && len(name) <= 64 && standardSkillName.MatchString(name) &&

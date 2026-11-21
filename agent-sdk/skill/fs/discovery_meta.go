@@ -24,9 +24,10 @@ var metaCache = struct {
 }
 
 type metaCacheEntry struct {
-	used uint64
-	meta skill.Meta
-	hash string
+	used     uint64
+	meta     skill.Meta
+	hash     string
+	standard bool
 }
 
 // DefaultDiscoveryDirs returns workspace and user-global skill roots without
@@ -87,12 +88,12 @@ func DiscoverRootMeta(root string) (skill.Meta, error) {
 		return skill.Meta{}, fmt.Errorf("skill root is not a directory: %s", resolved)
 	}
 	path := filepath.Join(resolved, "SKILL.md")
-	meta, _, err := parseMetaHashCached(path)
+	entry, err := readSkillMetadata(path)
 	if err != nil {
 		return skill.Meta{}, err
 	}
-	meta.Source = skill.SourceRegular
-	return meta, nil
+	entry.meta.Source = skill.SourceRegular
+	return entry.meta, nil
 }
 
 // DiscoverLegacyPluginCopies identifies regular Skills suppressed by matching plugin copies.
@@ -129,12 +130,12 @@ func scanRegularSkillDirs(dirs []string, include func(skill.Meta, string) bool) 
 				continue
 			}
 			seenPaths[skillPath] = struct{}{}
-			meta, hash, err := parseMetaHashCached(skillPath)
-			if err != nil || !include(meta, hash) {
+			metadata, err := readSkillMetadata(skillPath)
+			if err != nil || !include(metadata.meta, metadata.hash) {
 				continue
 			}
-			meta.Source = skill.SourceRegular
-			out = append(out, meta)
+			metadata.meta.Source = skill.SourceRegular
+			out = append(out, metadata.meta)
 		}
 	}
 	return out
@@ -169,10 +170,10 @@ func ResolvePath(path string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func parseMetaHashCached(path string) (skill.Meta, string, error) {
+func readSkillMetadata(path string) (metaCacheEntry, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return skill.Meta{}, "", err
+		return metaCacheEntry{}, err
 	}
 	// The same path, size, and timestamp can describe different file contents.
 	sum := sha256.Sum256(raw)
@@ -184,19 +185,20 @@ func parseMetaHashCached(path string) (skill.Meta, string, error) {
 		cached.used = metaCache.next
 		metaCache.entries[path] = cached
 		metaCache.Unlock()
-		return cached.meta, cached.hash, nil
+		return cached, nil
 	}
 	metaCache.Unlock()
-	meta, _, err := parseSkillContent(path, raw)
+	parsed, err := parseSkillContent(path, raw)
 	if err != nil {
-		return skill.Meta{}, "", err
+		return metaCacheEntry{}, err
 	}
 	metaCache.Lock()
 	metaCache.next++
-	metaCache.entries[path] = metaCacheEntry{used: metaCache.next, meta: meta, hash: hash}
+	entry := metaCacheEntry{used: metaCache.next, meta: parsed.meta, hash: hash, standard: parsed.standard}
+	metaCache.entries[path] = entry
 	pruneMetaCacheLocked()
 	metaCache.Unlock()
-	return meta, hash, nil
+	return entry, nil
 }
 
 func pruneMetaCacheLocked() {
@@ -221,33 +223,44 @@ type frontMatter struct {
 	Description string `yaml:"description"`
 }
 
-func parseSkillContent(path string, raw []byte) (skill.Meta, string, error) {
+type parsedSkill struct {
+	meta     skill.Meta
+	body     string
+	standard bool
+}
+
+func parseSkillContent(path string, raw []byte) (parsedSkill, error) {
 	content := normalizeText(string(raw))
 	if content == "" {
-		return skill.Meta{}, "", fmt.Errorf("empty SKILL.md: %s", path)
+		return parsedSkill{}, fmt.Errorf("empty SKILL.md: %s", path)
 	}
 	front, body, err := parseFrontMatter(content)
 	if err != nil {
-		return skill.Meta{}, "", fmt.Errorf("invalid skill frontmatter %s: %w", path, err)
+		return parsedSkill{}, fmt.Errorf("invalid skill frontmatter %s: %w", path, err)
 	}
+	directory := filepath.Base(filepath.Dir(path))
 	name := firstNonEmpty(
 		front.Name,
 		firstHeading(body),
-		filepath.Base(filepath.Dir(path)),
+		directory,
 	)
 	description := firstNonEmpty(
 		front.Description,
 		firstParagraph(body),
 	)
 	if name == "" || description == "" {
-		return skill.Meta{}, "", fmt.Errorf("invalid skill metadata: %s", path)
+		return parsedSkill{}, fmt.Errorf("invalid skill metadata: %s", path)
 	}
-	return skill.Meta{
-		Name:        strings.TrimSpace(name),
-		Description: strings.TrimSpace(description),
-		Path:        path,
-		LocalName:   strings.TrimSpace(name),
-	}, strings.TrimSpace(body), nil
+	return parsedSkill{
+		meta: skill.Meta{
+			Name:        strings.TrimSpace(name),
+			Description: strings.TrimSpace(description),
+			Path:        path,
+			LocalName:   strings.TrimSpace(name),
+		},
+		body:     strings.TrimSpace(body),
+		standard: validStandardPluginSkill(front, directory),
+	}, nil
 }
 
 func parseFrontMatter(content string) (frontMatter, string, error) {
