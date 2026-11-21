@@ -409,9 +409,9 @@ func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplifica
 	recoveryStore.approvalRecoverySessionDone = func(session.SessionRef) {
 		reorderOnce.Do(func() {
 			mutator := newLogicalTestStore(t, Config{RootDir: root, Clock: func() time.Time { return base.Add(time.Hour) }})
-			if _, err := mutator.ReplaceState(context.Background(), session.ReplaceStateRequest{
+			if _, err := mutator.UpdateState(context.Background(), session.UpdateStateRequest{
 				SessionRef:    target.SessionRef,
-				State:         map[string]any{"reordered": true},
+				Update:        func(map[string]any) (map[string]any, error) { return map[string]any{"reordered": true}, nil },
 				MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
 			}); err != nil {
 				t.Errorf("reorder target Session: %v", err)

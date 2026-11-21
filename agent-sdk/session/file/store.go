@@ -925,45 +925,6 @@ func (s *Store) SnapshotState(
 	return out, nil
 }
 
-func (s *Store) ReplaceState(
-	ctx context.Context,
-	req session.ReplaceStateRequest,
-) (session.Session, error) {
-	if err := session.ValidateState(req.State); err != nil {
-		return session.Session{}, err
-	}
-	if err := s.mu.LockContext(ctx); err != nil {
-		return session.Session{}, err
-	}
-	defer s.mu.Unlock()
-
-	var out session.Session
-	err := s.withRootLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
-			return err
-		}
-		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
-			return err
-		}
-		doc.State = cloneState(req.State)
-		doc.Session.Revision++
-		doc.Session.UpdatedAt = s.now()
-		out = session.CloneSession(doc.Session)
-		if err := s.writeDocument(ctx, doc); err != nil {
-			if documentWriteCommitted(err) {
-				return &session.CommittedError{Err: err}
-			}
-			return err
-		}
-		return nil
-	})
-	return out, err
-}
-
 func (s *Store) UpdateState(
 	ctx context.Context,
 	req session.UpdateStateRequest,

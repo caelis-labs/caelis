@@ -462,15 +462,6 @@ type AppendEventsAndUpdateStateRequest struct {
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
 }
 
-// ReplaceStateRequest replaces one durable Session state snapshot under an
-// explicit revision and mutation-authority fence.
-type ReplaceStateRequest struct {
-	SessionRef       SessionRef
-	ExpectedRevision *uint64
-	MutationGuard    MutationGuard
-	State            map[string]any
-}
-
 // UpdateStateRequest derives one durable Session state snapshot under an
 // explicit revision and mutation-authority fence.
 type UpdateStateRequest struct {
@@ -722,7 +713,6 @@ type StateReader interface {
 // Implementations enforce ExpectedRevision and MutationGuard before commit and
 // return the exact committed Session alongside post-commit reporting errors.
 type StateWriter interface {
-	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
 	UpdateState(context.Context, UpdateStateRequest) (Session, error)
 }
 

@@ -631,32 +631,6 @@ func (s *Store) SnapshotState(
 	return cloneState(record.state), nil
 }
 
-func (s *Store) ReplaceState(
-	_ context.Context,
-	req session.ReplaceStateRequest,
-) (session.Session, error) {
-	if err := session.ValidateState(req.State); err != nil {
-		return session.Session{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.lookupLocked(req.SessionRef)
-	if !ok {
-		return session.Session{}, session.ErrSessionNotFound
-	}
-	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return session.Session{}, err
-	}
-	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
-		return session.Session{}, err
-	}
-	record.state = cloneState(req.State)
-	record.session.Revision++
-	record.session.UpdatedAt = s.now()
-	return record.cloneSession(), nil
-}
-
 func (s *Store) UpdateState(
 	_ context.Context,
 	req session.UpdateStateRequest,

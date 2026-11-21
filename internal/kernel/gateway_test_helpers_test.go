@@ -589,9 +589,7 @@ func (s staticSessionService) RemoveParticipant(context.Context, session.RemoveP
 func (s staticSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return cloneMap(s.state), nil
 }
-func (s staticSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
-	return s.session, nil
-}
+
 func (s staticSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
 	return s.session, nil
 }
@@ -705,10 +703,6 @@ func (s *recordingSessionService) SnapshotState(context.Context, session.Session
 		return nil, s.snapshotErr
 	}
 	return map[string]any{}, nil
-}
-
-func (s *recordingSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
-	return s.sessionResult, nil
 }
 
 func (s *recordingSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
