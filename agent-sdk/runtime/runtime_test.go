@@ -2993,7 +2993,7 @@ func (r staticPolicyRegistry) Lookup(context.Context, string) (policy.Mode, bool
 	return r.mode, r.mode != nil, nil
 }
 
-func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testing.T) {
+func TestRuntimePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
@@ -3009,9 +3009,11 @@ func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *test
 		"locked-down":     "locked-down",
 		"TeamStrict":      "TeamStrict",
 	}
+	var runtime Runtime
 	for input, want := range tests {
-		if got := normalizePolicyMode(input); got != want {
-			t.Fatalf("normalizePolicyMode(%q) = %q, want %q", input, got, want)
+		spec := agent.AgentSpec{Metadata: map[string]any{policy.MetadataPolicyProfile: input}}
+		if got := runtime.policyMode(spec); got != want {
+			t.Fatalf("policyMode(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

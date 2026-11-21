@@ -182,7 +182,7 @@ func New(cfg Config) (*Runtime, error) {
 	if r.defaultPolicyMode == "" {
 		r.defaultPolicyMode = presets.ModeDefault
 	}
-	r.defaultPolicyMode = normalizePolicyMode(r.defaultPolicyMode)
+	r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	if err := validateControllerForwarder(cfg); err != nil {
 		return nil, err
 	}
@@ -418,5 +418,8 @@ func (r *Runtime) nextID(prefix string, custom func() string) string {
 }
 
 func (r *Runtime) now() time.Time {
-	return r.clock()
+	if r != nil && r.clock != nil {
+		return r.clock()
+	}
+	return time.Now()
 }

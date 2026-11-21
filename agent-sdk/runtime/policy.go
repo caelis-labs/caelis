@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -97,7 +98,7 @@ func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, p
 }
 
 func (r *Runtime) lookupPolicyMode(ctx context.Context, modeName string) (string, policy.Mode, error) {
-	normalized := normalizePolicyMode(modeName)
+	normalized := presets.NormalizeModeName(modeName)
 	if r == nil || r.policies == nil {
 		return normalized, nil, &policy.ProfileError{
 			Profile: normalized,

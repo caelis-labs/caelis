@@ -219,7 +219,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	snapshot.model = fresh.Model
 	snapshot.authority = authority
 	job := &asyncCompactJob{id: r.nextID("idle-compact", nil), source: loaded, frozen: frozen, llm: snapshot.model, epoch: snapshot.authority.epoch, requestHash: requestHash, coverage: compact.Coverage{SourceThroughSeq: final.Seq, SummarizedThroughSeq: session.LastEventSeq(delta), SummarizedThroughID: lastEventID(delta), SourceEventCount: len(delta), SourcePrefixHash: sourceHash, FrozenRequestHash: frozenHash, RequireInContext: true}}
-	out := &IdleCompactionJob{runtime: r, candidate: job, authority: snapshot.authority, release: release, startedAt: snapshot.startedAt, preparedAt: r.compactionSnapshotTime(), turnID: snapshot.turnID, sourceStamp: stamp}
+	out := &IdleCompactionJob{runtime: r, candidate: job, authority: snapshot.authority, release: release, startedAt: snapshot.startedAt, preparedAt: r.now(), turnID: snapshot.turnID, sourceStamp: stamp}
 	if !out.Fresh() {
 		return nil, nil
 	}
@@ -238,7 +238,7 @@ func (j *IdleCompactionJob) Source(hostID, activationID string) session.IdleComp
 // A five-minute cache lifetime with a thirty-second margin is an experimental
 // assumption for other channels, not a provider capability probe.
 func (j *IdleCompactionJob) Fresh() bool {
-	now := j.runtime.compactionSnapshotTime()
+	now := j.runtime.now()
 	age := time.Duration(now.UnixNano() - j.startedAt.UnixNano())
 	wall := time.Duration(now.UnixNano() - j.preparedAt.UnixNano())
 	drift := wall - now.Sub(j.preparedAt)
@@ -384,7 +384,7 @@ func (j *IdleCompactionJob) keepReadyCandidate() {
 	r.idleCandidateMu.Lock()
 	defer r.idleCandidateMu.Unlock()
 	if j.candidate.err == nil && j.candidate.result.Compacted {
-		now := r.compactionSnapshotTime()
+		now := r.now()
 		for key, value := range r.idleCandidates {
 			age := now.Sub(value.readyAt)
 			if age < 0 || age > 120*time.Second {
@@ -401,7 +401,7 @@ func (j *IdleCompactionJob) keepReadyCandidate() {
 			}
 			delete(r.idleCandidates, oldestKey)
 		}
-		r.idleCandidates[compactionSessionKey(j.candidate.source.Session.SessionRef)] = &idleCompactionCandidate{job: j.candidate, readyAt: r.compactionSnapshotTime()}
+		r.idleCandidates[compactionSessionKey(j.candidate.source.Session.SessionRef)] = &idleCompactionCandidate{job: j.candidate, readyAt: r.now()}
 	}
 }
 
@@ -432,7 +432,7 @@ func (l *autoCompactGatedLLM) adoptReadyIdleCandidate(ctx context.Context, req *
 		return false, nil
 	}
 	job := candidate.job
-	age := r.compactionSnapshotTime().Sub(candidate.readyAt)
+	age := r.now().Sub(candidate.readyAt)
 	if age < 0 || age > 120*time.Second || l.requestAuthority == nil || job.epoch != l.requestAuthority.epoch || !sameCompactionModel(job.llm, l.inner) {
 		return false, nil
 	}

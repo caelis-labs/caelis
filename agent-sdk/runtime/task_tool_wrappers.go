@@ -514,7 +514,7 @@ func newSubagentApprovalRequester(
 	if requester == nil && runtime != nil {
 		requester = runtime.childApprovalRequester
 	}
-	if requester == nil && (runtime == nil || normalizePolicyMode(mode) != presets.ModeDangerFullAccess) {
+	if requester == nil && (runtime == nil || presets.NormalizeModeName(mode) != presets.ModeDangerFullAccess) {
 		return nil
 	}
 	return subagentApprovalRequester{

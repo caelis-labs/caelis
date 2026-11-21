@@ -164,7 +164,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		}
 	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
-	hint, _ := state[codeModeCatalogKey].(string)
+	hint, _ := state[codemode.MetadataCatalog].(string)
 	if !strings.Contains(hint, "fixture__exec") || strings.Contains(hint, `"input_schema":`) {
 		t.Fatalf("selected name/description hints missing or schema leaked: %q", hint)
 	}

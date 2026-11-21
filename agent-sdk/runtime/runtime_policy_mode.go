@@ -14,7 +14,7 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 	mode := strings.TrimSpace(r.defaultPolicyMode)
 	// When the Host injects the dangerous default policy, Agent metadata cannot
 	// override it with another profile.
-	if normalizePolicyMode(mode) == presets.ModeDangerFullAccess {
+	if presets.NormalizeModeName(mode) == presets.ModeDangerFullAccess {
 		return presets.ModeDangerFullAccess
 	}
 	if raw, ok := spec.Metadata[policy.MetadataPolicyProfile].(string); ok {
@@ -22,10 +22,6 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 			mode = trimmed
 		}
 	}
-	return normalizePolicyMode(mode)
-}
-
-func normalizePolicyMode(mode string) string {
 	return presets.NormalizeModeName(mode)
 }
 

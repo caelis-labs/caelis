@@ -40,7 +40,7 @@ func (r *Runtime) resolveEndpointApprovalByPolicy(
 	modeName string,
 	request agent.ApprovalRequest,
 ) (agent.ApprovalResponse, bool, error) {
-	modeName = normalizePolicyMode(modeName)
+	modeName = presets.NormalizeModeName(modeName)
 	if modeName != presets.ModeDangerFullAccess {
 		return agent.ApprovalResponse{}, false, nil
 	}

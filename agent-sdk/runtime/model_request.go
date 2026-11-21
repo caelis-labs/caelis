@@ -62,7 +62,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		}
 		snapshot.Models = bound.Models
 		snapshot.Model, snapshot.Tools, snapshot.DeferredTools = bound.Model, bound.Tools, bound.DeferredTools
-		if catalog, _ := bound.Metadata[codeModeCatalogKey].(string); catalog != "" {
+		if catalog, _ := bound.Metadata[codemode.MetadataCatalog].(string); catalog != "" {
 			snapshot.Instructions = append(snapshot.Instructions, model.NewTextPart(catalog))
 		}
 		if admit := snapshot.Admit; admit != nil {
@@ -93,7 +93,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		if spec.Metadata == nil {
 			spec.Metadata = map[string]any{}
 		}
-		spec.Metadata[codeModeCatalogKey] = catalog
+		spec.Metadata[codemode.MetadataCatalog] = catalog
 	}
 	modeName := r.policyMode(*spec)
 	authority, _ := ctx.Value(modelRequestAuthorityKey{}).(*modelRequestAuthority)

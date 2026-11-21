@@ -13,8 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
-const codeModeCatalogKey = codemode.MetadataCatalog
-
 // This is a hint snapshot, not discovery or authorization. An empty initial
 // ready catalog stays empty; later tools remain discoverable without rewriting
 // a Session's earlier instructions. Raw schemas never enter this snapshot.
@@ -23,7 +21,7 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 	if err != nil {
 		return "", err
 	}
-	if text, ok := state[codeModeCatalogKey].(string); ok {
+	if text, ok := state[codemode.MetadataCatalog].(string); ok {
 		return text, nil
 	}
 	type hint struct {
@@ -99,14 +97,14 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 		text += "\n\nPartial tool hint snapshot; use tools.search for other capabilities.\n" + string(raw)
 	}
 	_, err = r.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Update: func(current map[string]any) (map[string]any, error) {
-		if prior, ok := current[codeModeCatalogKey].(string); ok {
+		if prior, ok := current[codemode.MetadataCatalog].(string); ok {
 			text = prior
 			return current, nil
 		}
 		if current == nil {
 			current = map[string]any{}
 		}
-		current[codeModeCatalogKey] = text
+		current[codemode.MetadataCatalog] = text
 		return current, nil
 	}})
 	return text, err
