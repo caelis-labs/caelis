@@ -58,7 +58,7 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	err := s.store.withRootWriteLockContext(ctx, func() error {
+	err := s.store.withRootLockContext(ctx, func() error {
 		if guard.Purpose == session.ControlMutationPurposeSubagentCancellation {
 			if err := s.validateDetachedSubagentLifecycle(entry, expected, guard.Purpose); err != nil {
 				return err
@@ -287,7 +287,7 @@ func (s *TaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, err
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	if err := s.store.withRootReadLockContext(ctx, func() error {
+	if err := s.store.withRootLockContext(ctx, func() error {
 		entry, err := s.store.getTaskIndex(taskID)
 		if err != nil {
 			return err
@@ -315,7 +315,7 @@ func (s *TaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]
 	defer s.store.mu.Unlock()
 
 	var out []*taskapi.Entry
-	if err := s.store.withRootReadLockContext(ctx, func() error {
+	if err := s.store.withRootLockContext(ctx, func() error {
 		entries, err := s.store.listTaskIndex(ref)
 		if err != nil {
 			return err
@@ -347,7 +347,7 @@ func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.Sess
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	if err := s.store.withRootReadLockContext(ctx, func() error {
+	if err := s.store.withRootLockContext(ctx, func() error {
 		entry, err := s.store.getSessionTaskIndexByHandle(ref, handle)
 		if err != nil {
 			return err

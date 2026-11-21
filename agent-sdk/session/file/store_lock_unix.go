@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMode) (*os.File, error) {
+func lockSessionStoreRoot(ctx context.Context, root string) (*os.File, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -26,16 +26,12 @@ func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMo
 		_ = file.Close()
 		return nil, err
 	}
-	flag := syscall.LOCK_SH
-	if mode == storeRootLockExclusive {
-		flag = syscall.LOCK_EX
-	}
 	for {
 		if err := ctx.Err(); err != nil {
 			_ = file.Close()
 			return nil, err
 		}
-		err = syscall.Flock(int(file.Fd()), flag|syscall.LOCK_NB)
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			if err := ctx.Err(); err != nil {
 				_ = unlockSessionStoreRoot(file)

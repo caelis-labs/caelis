@@ -148,7 +148,7 @@ func TestStoreListHonorsContextWhileWaitingForRootFileLock(t *testing.T) {
 	if _, err := store.ListSessions(context.Background(), session.ListSessionsRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	held, err := lockSessionStoreRoot(context.Background(), root, storeRootLockExclusive)
+	held, err := lockSessionStoreRoot(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

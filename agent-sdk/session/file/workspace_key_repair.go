@@ -51,7 +51,7 @@ func (s *Store) PendingWorkspaceKeyRepairs(ctx context.Context) ([]WorkspaceKeyR
 	}
 	defer s.mu.Unlock()
 	var repairs []WorkspaceKeyRepair
-	err := s.withRootReadLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		loaded, err := s.readWorkspaceKeyRepairMarker()
 		if err != nil {
 			return err
@@ -79,7 +79,7 @@ func (s *Store) RepairWorkspaceKeys(
 	defer s.mu.Unlock()
 
 	var report WorkspaceKeyRepairReport
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		pending, err := s.readWorkspaceKeyRepairMarker()
 		if err != nil {
 			return err

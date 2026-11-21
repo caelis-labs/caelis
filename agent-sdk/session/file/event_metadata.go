@@ -96,7 +96,7 @@ func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, f
 		return err
 	}
 	defer s.mu.Unlock()
-	return s.withRootReadLockContext(ctx, func() error {
+	return s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err

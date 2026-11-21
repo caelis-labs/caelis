@@ -16,7 +16,7 @@ func (s *Store) HistoryPath(ctx context.Context, ref session.SessionRef) (string
 	}
 	defer s.mu.Unlock()
 	var path string
-	err := s.withRootReadLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err

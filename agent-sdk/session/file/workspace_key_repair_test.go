@@ -104,7 +104,7 @@ func TestRepairWorkspaceKeysResumesPersistedPlan(t *testing.T) {
 	if err := store.mu.LockContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	err = store.withRootWriteLockContext(ctx, func() error {
+	err = store.withRootLockContext(ctx, func() error {
 		if err := store.writeWorkspaceKeyRepairMarker(ctx, []WorkspaceKeyRepair{repair}); err != nil {
 			return err
 		}

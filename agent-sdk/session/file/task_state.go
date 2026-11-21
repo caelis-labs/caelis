@@ -26,7 +26,7 @@ func (s *TaskStore) ReadTaskStates(ctx context.Context, ref session.SessionRef, 
 	}
 	defer s.store.mu.Unlock()
 	var out []task.StateSnapshot
-	err := s.store.withRootReadLockContext(ctx, func() error {
+	err := s.store.withRootLockContext(ctx, func() error {
 		var err error
 		out, err = s.store.readTaskStates(ctx, ref, taskIDs)
 		return err
