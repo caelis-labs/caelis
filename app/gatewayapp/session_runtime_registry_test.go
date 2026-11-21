@@ -19,7 +19,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -211,7 +211,7 @@ func TestActiveSessionRuntimePromptsAfterConnectingAndSelectingNewModel(t *testi
 		ApprovalMode: "auto-review",
 		Model: ModelConfig{
 			Provider:   "xiaomi",
-			API:        providers.APIMimo,
+			API:        model.APIMimo,
 			Model:      "mimo-v2.5-pro",
 			BaseURL:    "https://token-plan-cn.xiaomimimo.com/v1",
 			Token:      "mimo-secret",

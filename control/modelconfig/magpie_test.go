@@ -24,6 +24,9 @@ func TestMagpieDiscoveryAssemblyAndPersistedDispatch(t *testing.T) {
 				body := ""
 				switch req.URL.Path {
 				case "/v1/models":
+					if got := req.Header.Get("User-Agent"); got != "caelis/2.3.4" {
+						t.Errorf("User-Agent = %q, want caelis/2.3.4", got)
+					}
 					body = `{"data":[{"id":"xiaomi/mimo-v2.5","context_window":1048576,"max_output_tokens":131072,"reasoning":true,"supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],"modalities":{"input":["text","image"]}}]}`
 					if decision {
 						if req.Header.Get("X-Magpie-Deciders") != "1" {
@@ -56,7 +59,7 @@ func TestMagpieDiscoveryAssemblyAndPersistedDispatch(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 			})}
-			configs, err := AssembleConnect(context.Background(), ConnectRequest{Provider: provider, HTTPClient: client, Models: []ModelSelection{{Name: name}}}, ConnectOptions{})
+			configs, err := AssembleConnect(context.Background(), ConnectRequest{Provider: provider, ClientVersion: "v2.3.4", HTTPClient: client, Models: []ModelSelection{{Name: name}}}, ConnectOptions{})
 			if err != nil || len(configs) != 1 {
 				t.Fatalf("connect: %#v %v", configs, err)
 			}
@@ -90,7 +93,7 @@ func TestMagpieDiscoveryAssemblyAndPersistedDispatch(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				resolved, err := BuildModel(cfg, 0, 0)
+				resolved, err := BuildModel(cfg, ModelBuildOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}

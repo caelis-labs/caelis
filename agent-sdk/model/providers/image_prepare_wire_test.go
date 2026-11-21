@@ -30,7 +30,7 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 		model.NewTextMessage(model.RoleUser, "continue"),
 	}}
 	original := model.CloneRequest(req)
-	for _, api := range []APIType{APIOpenAI, APIOpenAIResponses, APIOpenAICompatible, APIOpenRouter, APIAnthropic, APIAnthropicCompatible, APIDeepSeek, APIMiniMax, APIMimo, APIVolcengine, APIVolcengineCoding, APIGemini, APIOllama, APIOpenAICodex, APIXAIResponses} {
+	for _, api := range []model.APIType{model.APIOpenAI, model.APIOpenAIResponses, model.APIOpenAICompatible, model.APIOpenRouter, model.APIAnthropic, model.APIAnthropicCompatible, model.APIDeepSeek, model.APIMiniMax, model.APIMimo, model.APIVolcengine, model.APIVolcengineCoding, model.APIGemini, model.APIOllama, model.APIOpenAICodex, model.APIXAIResponses} {
 		t.Run(string(api), func(t *testing.T) {
 			requests := 0
 			server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +64,7 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 				case strings.HasSuffix(r.URL.Path, "/api/chat"):
 					_, _ = fmt.Fprint(w, `{"model":"test-model","message":{"role":"assistant","content":"ok"},"done":true,"done_reason":"stop"}`)
 				case strings.HasSuffix(r.URL.Path, "/responses"):
-					if api == APIOpenAICodex || api == APIXAIResponses {
+					if api == model.APIOpenAICodex || api == model.APIXAIResponses {
 						w.Header().Set("Content-Type", "text/event-stream")
 						_, _ = fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"model\":\"test-model\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n")
 					} else {
@@ -76,12 +76,12 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 			}))
 			defer server.Close()
 			cfg := Config{API: api, Provider: "gateway", Model: "deepseek/deepseek-flash", BaseURL: server.URL, HTTPClient: server.Client(), ImageInput: true, MaxOutputTok: 1024,
-				Auth: AuthConfig{Type: AuthAPIKey, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}
-			if api == APIDeepSeek {
+				Auth: AuthConfig{Type: model.AuthAPIKey, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}
+			if api == model.APIDeepSeek {
 				cfg.BaseURL += "/anthropic"
 			}
-			if api == APIOpenAICodex || api == APIXAIResponses {
-				cfg.Auth.Type = AuthOAuthToken
+			if api == model.APIOpenAICodex || api == model.APIXAIResponses {
+				cfg.Auth.Type = model.AuthOAuthToken
 			}
 			llm, err := New(cfg)
 			if err != nil {
@@ -131,7 +131,7 @@ func wireInlineImages(value any) []string {
 }
 
 func TestFactoryDoesNotRetryPermanentImageHTTPFailures(t *testing.T) {
-	for _, api := range []APIType{APIOpenAIResponses, APIOpenAICompatible, APIAnthropic, APIGemini, APIOllama, APIOpenAICodex, APIXAIResponses} {
+	for _, api := range []model.APIType{model.APIOpenAIResponses, model.APIOpenAICompatible, model.APIAnthropic, model.APIGemini, model.APIOllama, model.APIOpenAICodex, model.APIXAIResponses} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", api, stream), func(t *testing.T) {
 				requests := 0
@@ -143,8 +143,8 @@ func TestFactoryDoesNotRetryPermanentImageHTTPFailures(t *testing.T) {
 				}))
 				defer server.Close()
 				cfg := Config{API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}
-				if api == APIOpenAICodex || api == APIXAIResponses {
-					cfg.Auth.Type = AuthOAuthToken
+				if api == model.APIOpenAICodex || api == model.APIXAIResponses {
+					cfg.Auth.Type = model.AuthOAuthToken
 				}
 				llm, err := New(cfg)
 				if err != nil {
@@ -163,7 +163,7 @@ func TestFactoryDoesNotRetryPermanentImageHTTPFailures(t *testing.T) {
 }
 
 func TestFactoryDoesNotRetryPermanentImageResponsesEvents(t *testing.T) {
-	for _, api := range []APIType{APIOpenAIResponses, APIOpenAICodex, APIXAIResponses} {
+	for _, api := range []model.APIType{model.APIOpenAIResponses, model.APIOpenAICodex, model.APIXAIResponses} {
 		for _, event := range []string{
 			`{"type":"response.failed","response":{"status":"failed","error":{"code":"image_too_large"}}}`,
 			`{"type":"error","code":"unsupported_image"}`,
@@ -177,7 +177,7 @@ func TestFactoryDoesNotRetryPermanentImageResponsesEvents(t *testing.T) {
 					_, _ = fmt.Fprintf(w, "data: %s\n\n", event)
 				}))
 				defer server.Close()
-				llm, err := New(Config{API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Type: AuthOAuthToken, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
+				llm, err := New(Config{API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Type: model.AuthOAuthToken, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
 				if err != nil {
 					t.Fatal(err)
 				}

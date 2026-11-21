@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -28,7 +28,7 @@ func newRegressionDriver(t *testing.T) (*assembler, *gatewayapp.Stack) {
 		},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -320,7 +320,7 @@ func TestRegressionCommandNewDriverWithSandboxConfig(t *testing.T) {
 		},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})

@@ -23,7 +23,7 @@ func TestMagpieLiveGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := BuildModel(rows[0], 0, 0)
+	resolved, err := BuildModel(rows[0], ModelBuildOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestMagpieLiveGateway(t *testing.T) {
 	endpoint := SanitizePersistedProviderEndpoint(ProviderEndpointFromConfig(rows[0]))
 	saved = MergeConfigProviderEndpoint(saved, endpoint)
 	saved.HTTPClient = client
-	resolved, err = BuildModel(saved, 0, 0)
+	resolved, err = BuildModel(saved, ModelBuildOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

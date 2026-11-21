@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -14,13 +15,13 @@ import (
 
 func TestProviderIncrementalTextWithReasoning(t *testing.T) {
 	for _, tc := range []struct {
-		api  providers.APIType
+		api  model.APIType
 		wire string
 	}{
-		{providers.APIOllama, `{"message":{"role":"assistant","thinking":"think"},"done":false}
+		{model.APIOllama, `{"message":{"role":"assistant","thinking":"think"},"done":false}
 {"message":{"role":"assistant","content":"hello"},"done":true,"done_reason":"stop"}
 `},
-		{providers.APIOpenAICompatible, `data: {"choices":[{"delta":{"content":"hello"}}]}
+		{model.APIOpenAICompatible, `data: {"choices":[{"delta":{"content":"hello"}}]}
 
 data: {"choices":[{"delta":{"reasoning_content":"think"},"finish_reason":"stop"}]}
 
@@ -32,7 +33,7 @@ data: [DONE]
 			transport := compactionTerminalTransport(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.wire)), Request: req}, nil
 			})
-			llm, err := providers.New(providers.Config{Model: "fixture", API: tc.api, BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthNone}, HTTPClient: &http.Client{Transport: transport}})
+			llm, err := providers.New(providers.Config{Model: "fixture", API: tc.api, BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: model.AuthNone}, HTTPClient: &http.Client{Transport: transport}})
 			if err != nil {
 				t.Fatal(err)
 			}

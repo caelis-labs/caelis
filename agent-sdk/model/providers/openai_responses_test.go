@@ -25,11 +25,11 @@ func TestNewRoutesOfficialAndGenericToOpenAIResponses(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 
-		api     APIType
+		api     model.APIType
 		wantAPI string
 	}{
-		{name: "official openai", api: APIOpenAI, wantAPI: "openai"},
-		{name: "generic openai_responses", api: APIOpenAIResponses, wantAPI: "openai_responses"},
+		{name: "official openai", api: model.APIOpenAI, wantAPI: "openai"},
+		{name: "generic openai_responses", api: model.APIOpenAIResponses, wantAPI: "openai_responses"},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestNewRoutesOfficialAndGenericToOpenAIResponses(t *testing.T) {
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
-				Auth:       AuthConfig{Type: AuthAPIKey, Token: "sk-test"},
+				Auth:       AuthConfig{Type: model.AuthAPIKey, Token: "sk-test"},
 			})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
@@ -83,11 +83,11 @@ func TestOpenAIResponsesCompatibleFactoryStaysChatCompletions(t *testing.T) {
 	llm, err := New(Config{
 
 		Provider:   "openai-compatible",
-		API:        APIOpenAICompatible,
+		API:        model.APIOpenAICompatible,
 		Model:      "gpt-test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
-		Auth:       AuthConfig{Type: AuthAPIKey, Token: "sk-test"},
+		Auth:       AuthConfig{Type: model.AuthAPIKey, Token: "sk-test"},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -121,31 +121,31 @@ func TestOpenAIResponsesAuthHeadersHaveNoOAuthOrCodexGrokIdentity(t *testing.T) 
 	}{
 		{
 			name:     "api key bearer",
-			auth:     AuthConfig{Type: AuthAPIKey, Token: "sk-live"},
+			auth:     AuthConfig{Type: model.AuthAPIKey, Token: "sk-live"},
 			wantAuth: "Bearer sk-live",
 		},
 		{
 			name:          "auth none",
-			auth:          AuthConfig{Type: AuthNone},
+			auth:          AuthConfig{Type: model.AuthNone},
 			wantAuthEmpty: true,
 		},
 		{
 			name:          "custom header key",
-			auth:          AuthConfig{Type: AuthAPIKey, Token: "tenant-key", HeaderKey: "X-Api-Key"},
+			auth:          AuthConfig{Type: model.AuthAPIKey, Token: "tenant-key", HeaderKey: "X-Api-Key"},
 			wantAuthEmpty: true,
 			wantCustomKey: "X-Api-Key",
 			wantCustomVal: "tenant-key",
 		},
 		{
 			name:          "custom prefix",
-			auth:          AuthConfig{Type: AuthAPIKey, Token: "tenant-key", HeaderKey: "X-Auth", Prefix: "Token"},
+			auth:          AuthConfig{Type: model.AuthAPIKey, Token: "tenant-key", HeaderKey: "X-Auth", Prefix: "Token"},
 			wantAuthEmpty: true,
 			wantCustomKey: "X-Auth",
 			wantCustomVal: "Token tenant-key",
 		},
 		{
 			name:          "safe configured header preserved",
-			auth:          AuthConfig{Type: AuthAPIKey, Token: "sk-live"},
+			auth:          AuthConfig{Type: model.AuthAPIKey, Token: "sk-live"},
 			headers:       map[string]string{"X-Custom-Safe": "preserved"},
 			wantAuth:      "Bearer sk-live",
 			wantCustomKey: "X-Custom-Safe",
@@ -167,11 +167,12 @@ func TestOpenAIResponsesAuthHeadersHaveNoOAuthOrCodexGrokIdentity(t *testing.T) 
 
 			llm := newOpenAIResponses(Config{
 				Provider:   "openai",
-				API:        APIOpenAIResponses,
+				API:        model.APIOpenAIResponses,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
 				Headers:    tc.headers,
+				UserAgent:  "test-product/1",
 				Auth:       tc.auth,
 			}, strings.TrimSpace(tc.auth.Token))
 			if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
@@ -183,8 +184,8 @@ func TestOpenAIResponsesAuthHeadersHaveNoOAuthOrCodexGrokIdentity(t *testing.T) 
 			if got.header.Get("Content-Type") != "application/json" {
 				t.Fatalf("Content-Type = %q, want application/json", got.header.Get("Content-Type"))
 			}
-			if !strings.HasPrefix(got.header.Get("User-Agent"), "caelis/") {
-				t.Fatalf("User-Agent = %q, want caelis attribution", got.header.Get("User-Agent"))
+			if got.header.Get("User-Agent") != "test-product/1" {
+				t.Fatalf("User-Agent = %q, want test-product/1", got.header.Get("User-Agent"))
 			}
 			if tc.wantAuthEmpty {
 				if got := got.header.Get("Authorization"); got != "" {
@@ -233,7 +234,7 @@ func TestOpenAIResponsesGenerateRespectsStreamAcceptAndBody(t *testing.T) {
 			}))
 			defer server.Close()
 
-			llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+			llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 			response, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 				Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 				Stream:   stream,
@@ -275,7 +276,7 @@ func TestOpenAIResponsesRequestIsStatelessStoreFalseFullHistory(t *testing.T) {
 
 	llm := newOpenAIResponses(Config{
 		Provider:     "openai",
-		API:          APIOpenAIResponses,
+		API:          model.APIOpenAIResponses,
 		Model:        "gpt-test",
 		BaseURL:      server.URL,
 		HTTPClient:   server.Client(),
@@ -326,11 +327,11 @@ func TestOpenAIResponsesMaxOutputTokensAndReasoningEffort(t *testing.T) {
 	defer server.Close()
 
 	official := newOpenAIResponses(Config{
-		Provider: "openai", API: APIOpenAI, Model: "gpt-test",
+		Provider: "openai", API: model.APIOpenAI, Model: "gpt-test",
 		BaseURL: server.URL, HTTPClient: server.Client(), MaxOutputTok: 32768,
 	}, "sk-test")
 	generic := newOpenAIResponses(Config{
-		Provider: "openai", API: APIOpenAIResponses, Model: "gpt-test",
+		Provider: "openai", API: model.APIOpenAIResponses, Model: "gpt-test",
 		BaseURL: server.URL, HTTPClient: server.Client(), MaxOutputTok: 32768,
 	}, "sk-test")
 	hello := []model.Message{model.NewTextMessage(model.RoleUser, "hi")}
@@ -373,7 +374,7 @@ func TestOpenAIResponsesMaxOutputTokensAndReasoningEffort(t *testing.T) {
 func TestOpenAIResponsesRejectsReasoningBudgetsAndHostedTools(t *testing.T) {
 	t.Parallel()
 
-	llm := newOpenAIResponses(Config{Provider: "openai", API: APIOpenAIResponses, Model: "gpt-test"}, "sk-test")
+	llm := newOpenAIResponses(Config{Provider: "openai", API: model.APIOpenAIResponses, Model: "gpt-test"}, "sk-test")
 	_, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		Reasoning: model.ReasoningConfig{BudgetTokens: 8192},
@@ -412,7 +413,7 @@ func TestOpenAIResponsesNoSelectorPreservesGatewayReasoningDefault(t *testing.T)
 				writeOpenAIResponsesJSON(t, w, openAIResponsesCompletedJSON("route/model", "ok"))
 			}))
 			defer server.Close()
-			llm := newOpenAIResponses(Config{API: APIOpenAIResponses, Model: "route/model", ReasoningMode: mode, BaseURL: server.URL, HTTPClient: server.Client()}, "fixture")
+			llm := newOpenAIResponses(Config{API: model.APIOpenAIResponses, Model: "route/model", ReasoningMode: mode, BaseURL: server.URL, HTTPClient: server.Client()}, "fixture")
 			if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "fixture")}, Reasoning: model.ReasoningConfig{Effort: "none"}}); err != nil || !called {
 				t.Fatalf("generation: called=%v err=%v", called, err)
 			}
@@ -472,7 +473,7 @@ func TestOpenAIResponsesTextFormatJSONAndJSONSchema(t *testing.T) {
 				writeOpenAIResponsesJSON(t, w, openAIResponsesCompletedJSON("gpt-test", `{"answer":"ok"}`))
 			}))
 			defer server.Close()
-			llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+			llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 			if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 				Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 				Output:   tc.output,
@@ -483,7 +484,7 @@ func TestOpenAIResponsesTextFormatJSONAndJSONSchema(t *testing.T) {
 		})
 	}
 
-	llm := newOpenAIResponses(Config{Provider: "openai", API: APIOpenAIResponses, Model: "gpt-test"}, "sk-test")
+	llm := newOpenAIResponses(Config{Provider: "openai", API: model.APIOpenAIResponses, Model: "gpt-test"}, "sk-test")
 	_, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		Output:   &model.OutputSpec{Mode: model.OutputModeSchema},
@@ -507,11 +508,11 @@ func TestOpenAIResponsesFunctionToolsFlattenedWithExplicitStrictBit(t *testing.T
 
 	for _, tc := range []struct {
 		name       string
-		api        APIType
+		api        model.APIType
 		wantStrict bool
 	}{
-		{name: "official preserves strict", api: APIOpenAI, wantStrict: true},
-		{name: "generic conservative false", api: APIOpenAIResponses, wantStrict: false},
+		{name: "official preserves strict", api: model.APIOpenAI, wantStrict: true},
+		{name: "generic conservative false", api: model.APIOpenAIResponses, wantStrict: false},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -584,7 +585,7 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 			)
 		}))
 		defer server.Close()
-		llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+		llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 		response, reasoningDelta, toolStarted, err := collectOpenAICodexTestResponse(llm, &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "weather")},
 			Tools:    []model.ToolSpec{model.NewFunctionToolSpec("lookup", "lookup weather", map[string]any{"type": "object"})},
@@ -630,7 +631,7 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 			})
 		}))
 		defer server.Close()
-		llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+		llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 		response, reasoningDelta, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		})
@@ -664,7 +665,7 @@ func TestOpenAIResponsesErrorsFailedIncompleteAndTruncatedEOF(t *testing.T) {
 			writeOpenAICodexSSE(t, w, map[string]any{"type": "response.output_text.delta", "item_id": "msg_1", "delta": "partial"})
 		}))
 		defer server.Close()
-		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 			Stream:   true,
 		})
@@ -685,7 +686,7 @@ func TestOpenAIResponsesErrorsFailedIncompleteAndTruncatedEOF(t *testing.T) {
 			})
 		}))
 		defer server.Close()
-		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 			Stream:   true,
 		})
@@ -708,7 +709,7 @@ func TestOpenAIResponsesErrorsFailedIncompleteAndTruncatedEOF(t *testing.T) {
 			})
 		}))
 		defer server.Close()
-		response, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+		response, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 			Stream:   true,
 		})
@@ -729,7 +730,7 @@ func TestOpenAIResponsesErrorsFailedIncompleteAndTruncatedEOF(t *testing.T) {
 			})
 		}))
 		defer server.Close()
-		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		})
 		if !errorcode.Is(err, errorcode.InvalidArgument) {
@@ -748,7 +749,7 @@ func TestOpenAIResponsesErrorsFailedIncompleteAndTruncatedEOF(t *testing.T) {
 			})
 		}))
 		defer server.Close()
-		response, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+		response, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		})
 		if err != nil {
@@ -765,7 +766,7 @@ func TestOpenAIResponsesErrorsFailedIncompleteAndTruncatedEOF(t *testing.T) {
 			http.Error(w, `{"error":"expired"}`, http.StatusUnauthorized)
 		}))
 		defer server.Close()
-		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+		_, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		})
 		if !errorcode.Is(err, errorcode.Unauthenticated) {
@@ -817,7 +818,7 @@ func TestOpenAIResponsesStatelessMultiTurnRoundTripThroughMessageJSON(t *testing
 	}))
 	defer server.Close()
 
-	llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+	llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 	tool := model.NewFunctionToolSpec("lookup", "lookup weather", map[string]any{"type": "object"})
 	user := model.NewTextMessage(model.RoleUser, "check weather")
 	first, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
@@ -893,7 +894,7 @@ func TestOpenAIResponsesForeignEncryptedReplayIsDropped(t *testing.T) {
 		}(),
 		model.NewTextPart("hello"),
 	)
-	llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+	llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 	if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi"), foreign},
 	}); err != nil {
@@ -950,7 +951,7 @@ func TestOpenAIResponsesPlainReasoningIsNotSummary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+	llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 	first, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		Stream:   true,
@@ -1001,6 +1002,9 @@ func TestOpenAIResponsesSessionFileStoreRebuildsModelContext(t *testing.T) {
 		mu.Unlock()
 		if requestCount.Add(1) == 1 {
 			writeOpenAIResponsesJSON(t, w, map[string]any{
+				// The conversation uses output item and call IDs. The remote
+				// response ID is neither stored nor sent on the next request.
+				"id":     123,
 				"model":  "gpt-test",
 				"status": "completed",
 				"output": []any{
@@ -1017,7 +1021,7 @@ func TestOpenAIResponsesSessionFileStoreRebuildsModelContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
+	llm := newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses)
 	tool := model.NewFunctionToolSpec("lookup", "lookup weather", map[string]any{"type": "object"})
 	user := model.NewTextMessage(model.RoleUser, "check weather")
 	first, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
@@ -1104,14 +1108,14 @@ func TestOpenAIResponsesSessionFileStoreRebuildsModelContext(t *testing.T) {
 	}
 }
 
-func newOpenAIResponsesTestLLM(server *providerTestServer, api APIType) *openAIResponsesLLM {
+func newOpenAIResponsesTestLLM(server *providerTestServer, api model.APIType) *openAIResponsesLLM {
 	return newOpenAIResponses(Config{
 		Provider:   "openai",
 		API:        api,
 		Model:      "gpt-test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
-		Auth:       AuthConfig{Type: AuthAPIKey, Token: "sk-test"},
+		Auth:       AuthConfig{Type: model.AuthAPIKey, Token: "sk-test"},
 	}, "sk-test")
 }
 

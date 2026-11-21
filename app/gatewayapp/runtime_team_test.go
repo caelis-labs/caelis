@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -49,8 +48,8 @@ func TestRuntimeTeamRevisionAcrossActivatedSessions(t *testing.T) {
 	profiles, err := stack.connectTestModels([]ModelConfig{
 		{Provider: "xiaomi", Model: "mimo-v2.6-flash", Token: "synthetic"},
 		{Provider: "deepseek", Model: "deepseek-v4-flash", Token: "synthetic"},
-		{Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-luna", Token: "synthetic", ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"}},
-		{Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-sol", Token: "synthetic", ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"}},
+		{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-luna", Token: "synthetic", ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"}},
+		{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol", Token: "synthetic", ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"}},
 	})
 	if err != nil {
 		t.Fatal(err)

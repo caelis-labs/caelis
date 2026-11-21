@@ -20,7 +20,7 @@ func TestReadSSEWithFirstEventTimeout(t *testing.T) {
 		go func() {
 			errCh <- readSSEWithFirstEventTimeout(reader, 20*time.Millisecond, func([]byte) error {
 				return nil
-			})
+			}, nil)
 		}()
 
 		select {
@@ -95,7 +95,7 @@ func TestReadSSEWithFirstEventTimeout_AllowsSilenceAfterFirstEvent(t *testing.T)
 			errCh <- readSSEWithFirstEventTimeout(reader, 20*time.Millisecond, func(data []byte) error {
 				dataCh <- string(data)
 				return nil
-			})
+			}, nil)
 		}()
 
 		if _, err := writer.Write([]byte("data: first\n\n")); err != nil {

@@ -127,6 +127,28 @@ func TestDiscoverMetaSkipsSystemRootWhenMaterializationFails(t *testing.T) {
 	}
 }
 
+func TestDiscoverMetaDoesNotReplaceAnUnavailableExplicitSystemRoot(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	if err := os.MkdirAll(filepath.Join(home, ".caelis"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".caelis", "skills"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeSkillForDiscoveryTest(t, filepath.Join(home, ".agents", "skills", "other"), "other", "unselected user skill")
+	pluginRoot := t.TempDir()
+	writeSkillForDiscoveryTest(t, filepath.Join(pluginRoot, "selected"), "selected", "configured plugin skill")
+
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{
+		Dirs:          []string{"~/.caelis/skills/.system"},
+		PluginBundles: []skill.PluginBundle{{Plugin: "fixture", Root: pluginRoot, Enabled: true}},
+	})
+	if len(metas) != 1 || metas[0].Name != "fixture:selected" {
+		t.Fatalf("DiscoverMetaRequest() = %#v, want only the configured plugin Skill", metas)
+	}
+}
+
 func TestDiscoverMetaConcurrentSystemMaterializationDoesNotExposeEmptySkills(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)

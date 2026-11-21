@@ -131,8 +131,8 @@ func TestAsyncCompactionLiveProvider(t *testing.T) {
 		t.Skip("DEEPSEEK_API_KEY is unavailable")
 	}
 	provider, err := providers.New(providers.Config{
-		Provider: "deepseek", API: providers.APIDeepSeek, Model: "deepseek-flash",
-		BaseURL: "https://api.deepseek.com/anthropic", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: key},
+		Provider: "deepseek", API: model.APIDeepSeek, Model: "deepseek-flash",
+		BaseURL: "https://api.deepseek.com/anthropic", Auth: providers.AuthConfig{Type: model.AuthAPIKey, Token: key},
 		Timeout: 45 * time.Second, MaxOutputTok: 1200, ContextWindowTokens: 10000,
 	})
 	if err != nil {

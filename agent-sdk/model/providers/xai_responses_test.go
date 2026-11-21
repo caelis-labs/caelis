@@ -50,8 +50,8 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 				t.Errorf("%s = %q, want %q", header, got, want)
 			}
 		}
-		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "caelis/") {
-			t.Errorf("User-Agent = %q, want Caelis attribution", got)
+		if got := r.Header.Get("User-Agent"); got != "test-product/1" {
+			t.Errorf("User-Agent = %q, want test-product/1", got)
 		}
 		requestID := r.Header.Get("x-grok-req-id")
 		if requestID == "" || requestID == "spoofed-request" {
@@ -101,9 +101,9 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
 	llm, err := New(Config{
-		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
+		Provider: "xai", API: model.APIXAIResponses, Model: "grok-4.5", UserAgent: "test-product/1",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768, ContextWindowTokens: 500000,
-		Auth: AuthConfig{Type: AuthOAuthToken},
+		Auth: AuthConfig{Type: model.AuthOAuthToken},
 		Headers: map[string]string{
 			"Accept":                   "application/x-spoofed",
 			"Authorization":            "Bearer spoofed",
@@ -237,15 +237,15 @@ func TestXAIResponsesFactoryRequiresOAuthClient(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		auth AuthType
+		auth model.AuthType
 		want string
 	}{
-		{name: "wrong auth", auth: AuthAPIKey, want: "requires oauth authentication"},
-		{name: "missing client", auth: AuthOAuthToken, want: "authenticated http client"},
+		{name: "wrong auth", auth: model.AuthAPIKey, want: "requires oauth authentication"},
+		{name: "missing client", auth: model.AuthOAuthToken, want: "authenticated http client"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := New(Config{
-				API: APIXAIResponses, Model: "grok-4.5", Auth: AuthConfig{Type: tc.auth},
+				API: model.APIXAIResponses, Model: "grok-4.5", Auth: AuthConfig{Type: tc.auth},
 			}); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("New() error = %v, want %q", err, tc.want)
 			}

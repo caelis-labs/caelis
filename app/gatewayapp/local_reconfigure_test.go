@@ -12,7 +12,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -467,7 +467,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 	stack, session := newLocalStateTestStack(t)
 	altProfile, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "alt-model",
 	})
 	if err != nil {
@@ -529,7 +529,7 @@ func TestHostConfigurationMutationsDoNotReplaceActiveSessionRuntime(t *testing.T
 			run: func() error {
 				_, err := stack.connectTestModel(ModelConfig{
 					Provider: "ollama",
-					API:      providers.APIOllama,
+					API:      model.APIOllama,
 					Model:    "blocked-model",
 				})
 				return err
@@ -877,7 +877,7 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 
 	_, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "save-failed-model",
 	})
 	if err == nil {

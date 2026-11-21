@@ -4,9 +4,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
 func TerminalFinalWithoutContent(input ToolOutputFallbackInput) bool {
@@ -60,11 +60,11 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 		return text
 	}
 	toolName := strings.TrimSpace(input.ToolName)
-	if toolName == tasktool.ToolName && commandTaskTargetKind(display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
+	if toolName == tasktool.ToolName && commandTaskTargetKind(projection.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
 		if TerminalTaskStillRunning(input.RawOutput, input.Meta) || !ToolStatusFinal(input.Status, input.Error) {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["latest_output"]), rawDisplayString(input.RawOutput["output_preview"]))
 		}
-		if text := display.CommandTaskOutputText(input.RawOutput); text != "" {
+		if text := projection.CommandTaskOutputText(input.RawOutput); text != "" {
 			return text
 		}
 		return ""
@@ -80,7 +80,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["stderr"]), rawDisplayString(input.RawOutput["error"]))
 		}
 		if ToolStatusFinal(input.Status, input.Error) {
-			return display.SubagentTaskOutputText(input.RawOutput)
+			return projection.SubagentTaskOutputText(input.RawOutput)
 		}
 		return firstRawNonEmpty(rawDisplayString(input.RawOutput["text"]), rawDisplayString(input.RawOutput["stdout"]), rawDisplayString(input.RawOutput["output_preview"]), rawDisplayString(input.RawOutput["stderr"]))
 	}
@@ -90,7 +90,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	if !ToolStatusFinal(input.Status, input.Error) {
 		return firstRawNonEmpty(rawDisplayString(input.RawOutput["latest_output"]), rawDisplayString(input.RawOutput["output_preview"]))
 	}
-	if text := display.CommandTaskOutputText(input.RawOutput); text != "" {
+	if text := projection.CommandTaskOutputText(input.RawOutput); text != "" {
 		return text
 	}
 	return ""
@@ -106,25 +106,25 @@ func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 	}
 	targetKind := strings.ToLower(firstRawNonEmpty(
 		rawDisplayString(input.RawOutput["target_kind"]),
-		display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta),
+		projection.ToolTaskTargetKind(nil, input.RawOutput, input.Meta),
 	))
 	state := rawDisplayString(input.RawOutput["state"])
 	if toolName == spawn.ToolName || !commandTaskTargetKind(targetKind) {
-		if text := display.SubagentTaskFinalText(state, input.RawOutput); text != "" {
+		if text := projection.SubagentTaskFinalText(state, input.RawOutput); text != "" {
 			return text
 		}
 	} else if TerminalRawOutputHasText(input.RawOutput) {
-		if text := display.CommandTaskFinalText(state, input.RawOutput); text != "" {
+		if text := projection.CommandTaskFinalText(state, input.RawOutput); text != "" {
 			return text
 		}
 	}
 	taskMeta := RuntimeTaskMeta(input.Meta)
 	state = firstRawNonEmpty(rawDisplayString(taskMeta["state"]), state)
 	if toolName == spawn.ToolName || !commandTaskTargetKind(targetKind) {
-		return display.SubagentTaskFinalText(state, taskMeta)
+		return projection.SubagentTaskFinalText(state, taskMeta)
 	}
 	if TerminalRawOutputHasText(taskMeta) {
-		return display.CommandTaskFinalText(state, taskMeta)
+		return projection.CommandTaskFinalText(state, taskMeta)
 	}
 	return ""
 }

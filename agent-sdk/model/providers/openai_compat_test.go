@@ -481,11 +481,6 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 	var gotTitle string
 	var gotUserAgent string
 	var gotModel string
-	var gotModels []any
-	var gotRoute string
-	var gotTransforms []any
-	var gotProvider map[string]any
-	var gotPlugins []any
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
 			http.NotFound(w, r)
@@ -499,11 +494,6 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 			t.Fatalf("decode request payload: %v", err)
 		}
 		gotModel, _ = payload["model"].(string)
-		gotModels, _ = payload["models"].([]any)
-		gotRoute, _ = payload["route"].(string)
-		gotTransforms, _ = payload["transforms"].([]any)
-		gotProvider, _ = payload["provider"].(map[string]any)
-		gotPlugins, _ = payload["plugins"].([]any)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"model":"test-model","choices":[{"message":{"role":"assistant","content":"ok","reasoning":"thinking..."}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	}))
@@ -511,25 +501,15 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/healer-alpha",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
+		UserAgent:  "default-client/1",
 		Headers: map[string]string{
 			"HTTP-Referer": "https://example.com/app",
 			"X-Title":      "caelis",
 			"User-Agent":   "custom-client/9.9.9",
-		},
-		OpenRouter: OpenRouterConfig{
-			Models:     []string{"openrouter/openai/gpt-4o-mini", "openrouter/anthropic/claude-sonnet-4"},
-			Route:      "fallback",
-			Transforms: []string{"middle-out"},
-			Provider: map[string]any{
-				"allow_fallbacks": true,
-			},
-			Plugins: []map[string]any{
-				{"id": "web"},
-			},
 		},
 		Timeout: 2 * time.Second,
 	}, "token")
@@ -555,68 +535,8 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 	if gotModel != "openrouter/healer-alpha" {
 		t.Fatalf("expected native openrouter model id preserved, got %q", gotModel)
 	}
-	if len(gotModels) != 2 {
-		t.Fatalf("expected native openrouter models list, got %#v", gotModels)
-	}
-	if gotModels[0] != "openai/gpt-4o-mini" || gotModels[1] != "anthropic/claude-sonnet-4" {
-		t.Fatalf("expected routed model ids normalized for request payload, got %#v", gotModels)
-	}
-	if gotRoute != "fallback" {
-		t.Fatalf("expected native openrouter route, got %q", gotRoute)
-	}
-	if len(gotTransforms) != 1 || gotTransforms[0] != "middle-out" {
-		t.Fatalf("expected native openrouter transforms, got %#v", gotTransforms)
-	}
-	if value, _ := gotProvider["allow_fallbacks"].(bool); !value {
-		t.Fatalf("expected native openrouter provider preferences, got %#v", gotProvider)
-	}
-	if len(gotPlugins) != 1 {
-		t.Fatalf("expected native openrouter plugins, got %#v", gotPlugins)
-	}
 	if finalReasoning != "thinking..." {
 		t.Fatalf("expected native openrouter reasoning field, got %q", finalReasoning)
-	}
-}
-
-func TestOpenRouterRequest_ModelsOnlyOmitsEmptyModel(t *testing.T) {
-	var payload map[string]any
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("decode request payload: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"model":"openai/gpt-4o-mini","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
-	}))
-	defer server.Close()
-
-	llm := newOpenRouter(Config{
-		Provider:   "openrouter",
-		API:        APIOpenRouter,
-		BaseURL:    server.URL,
-		HTTPClient: server.Client(),
-		OpenRouter: OpenRouterConfig{
-			Models: []string{"openrouter/openai/gpt-4o-mini", "openrouter/anthropic/claude-sonnet-4"},
-		},
-		Timeout: 2 * time.Second,
-	}, "token")
-
-	for _, err := range llm.Generate(context.Background(), &model.Request{
-		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
-	}) {
-		if err != nil {
-			t.Fatalf("Generate() error = %v", err)
-		}
-	}
-	if _, ok := payload["model"]; ok {
-		t.Fatalf("models-only OpenRouter request includes empty model: %#v", payload["model"])
-	}
-	models, _ := payload["models"].([]any)
-	if len(models) != 2 || models[0] != "openai/gpt-4o-mini" || models[1] != "anthropic/claude-sonnet-4" {
-		t.Fatalf("models-only OpenRouter request models = %#v", models)
 	}
 }
 
@@ -637,7 +557,7 @@ func TestOpenRouterRequest_DoesNotForceStrictForOptionalStructuredOutput(t *test
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
@@ -685,7 +605,7 @@ func TestOpenRouterRequest_UsesStrictFunctionToolsFromRuntimeToolSpecs(t *testin
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
@@ -746,7 +666,7 @@ func TestOpenRouterStream_PropagatesTerminalFinishReason(t *testing.T) {
 
 	llm := newOpenRouter(Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		Model:      "openrouter/test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),

@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"google.golang.org/genai"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func jsonArgs(v map[string]any) string {
@@ -33,8 +34,8 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 		Role:    "assistant",
 		Content: "cited answer",
 		Annotations: []openAICompatAnnotation{
-			{Type: "url_citation", URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
-			{Type: "url_citation", URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
+			{URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
+			{URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
 		},
 	})
 	if err != nil {
@@ -55,7 +56,6 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 		Role:    "assistant",
 		Content: "answer",
 		Annotations: []openAICompatAnnotation{{
-			Type:        "url_citation",
 			URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"},
 		}},
 	})
@@ -73,11 +73,11 @@ func TestNewRequiresTokenFromConfig(t *testing.T) {
 
 	cfg := Config{
 		Provider: "openai",
-		API:      APIOpenAI,
+		API:      model.APIOpenAI,
 		Model:    "gpt-4o-mini",
 		BaseURL:  "https://api.openai.com/v1",
 		Auth: AuthConfig{
-			Type: AuthAPIKey,
+			Type: model.AuthAPIKey,
 		},
 	}
 	_, err := New(cfg)
@@ -173,13 +173,13 @@ func TestAnthropicSDKStream_DoesNotApplyRequestTimeout(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic",
-		API:        APIAnthropic,
+		API:        model.APIAnthropic,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    50 * time.Millisecond,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "sk-anthropic",
 		},
 	}, "sk-anthropic")
@@ -583,10 +583,9 @@ func TestFromToOpenAIMessage(t *testing.T) {
 		t.Fatalf("did not expect reasoning_content in generic openai-compatible request")
 	}
 	back, err := toKernelMessage(openAICompatMsg{
-		Role:       raw.Role,
-		Content:    raw.Content,
-		ToolCallID: raw.ToolCallID,
-		ToolCalls:  raw.ToolCalls,
+		Role:      raw.Role,
+		Content:   raw.Content,
+		ToolCalls: raw.ToolCalls,
 		ReasoningContent: func() string {
 			if raw.ReasoningContent == nil {
 				return ""
@@ -664,7 +663,7 @@ func TestDeepSeekUsesAnthropicCompatibleEndpointAndBearerAuth(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -702,7 +701,7 @@ func TestDeepSeekThinkingConfigMapsEmptyMaxAndNone(t *testing.T) {
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -766,7 +765,7 @@ func TestDeepSeekThinkingContentWithoutUsageDetailsDoesNotFabricateReasoningToke
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -857,7 +856,7 @@ func TestDeepSeekProviderExecutedWebSearchPOC(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -953,7 +952,7 @@ func TestDeepSeekLiveProviderExecutedWebSearch(t *testing.T) {
 		BaseURL:  baseURL,
 		Timeout:  90 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: token,
 		},
 	}, token)
@@ -1083,7 +1082,7 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 			name: "openrouter",
 			llm: newOpenRouter(Config{
 				Provider: "openrouter",
-				API:      APIOpenRouter,
+				API:      model.APIOpenRouter,
 				Model:    "openai/gpt-5",
 			}, "token"),
 			wantStrict: true,
@@ -1892,13 +1891,13 @@ func TestAnthropicSDKNonStream_NormalizesBaseURLAndMapsParts(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic",
-		API:        APIAnthropic,
+		API:        model.APIAnthropic,
 		Model:      "test-model",
 		BaseURL:    server.URL + "/v1",
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "sk-anthropic",
 		},
 	}, "sk-anthropic")
@@ -1998,13 +1997,13 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic-compatible",
-		API:        APIAnthropicCompatible,
+		API:        model.APIAnthropicCompatible,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:      AuthAPIKey,
+			Type:      model.AuthAPIKey,
 			Token:     "compat-token",
 			HeaderKey: "x-minimax-api-key",
 		},
@@ -2096,7 +2095,7 @@ func TestDeepSeekAnthropicStreamWrapsMalformedToolInputBeforeSDKMarshal(t *testi
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -2148,13 +2147,13 @@ func TestAnthropicHeaderKeyDisablesEnvironmentDefaults(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic-compatible",
-		API:        APIAnthropicCompatible,
+		API:        model.APIAnthropicCompatible,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:      AuthAPIKey,
+			Type:      model.AuthAPIKey,
 			Token:     "compat-token",
 			HeaderKey: "x-minimax-api-key",
 		},
@@ -2195,13 +2194,13 @@ func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *tes
 
 	llm := newAnthropic(Config{
 		Provider:   "minimax",
-		API:        APIAnthropicCompatible,
+		API:        model.APIAnthropicCompatible,
 		Model:      "MiniMax-M2.5",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:      AuthAPIKey,
+			Type:      model.AuthAPIKey,
 			Token:     "compat-token",
 			HeaderKey: "x-minimax-api-key",
 		},
@@ -2246,10 +2245,10 @@ func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *tes
 func TestMiniMaxUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
 	llm := newMiniMax(Config{
 		Provider: "minimax",
-		API:      APIMiniMax,
+		API:      model.APIMiniMax,
 		Model:    "MiniMax-M2",
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: "compat-token",
 		},
 	}, "compat-token")
@@ -2268,10 +2267,10 @@ func TestMiniMaxUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
 func TestDeepSeekUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
 	llm := newDeepSeek(Config{
 		Provider: "deepseek",
-		API:      APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -2285,7 +2284,7 @@ func TestDeepSeekUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
 	if typed.maxOutputTok != deepSeekDefaultMaxTokens {
 		t.Fatalf("maxOutputTok = %d, want %d", typed.maxOutputTok, deepSeekDefaultMaxTokens)
 	}
-	if typed.auth.Type != AuthBearerToken {
+	if typed.auth.Type != model.AuthBearerToken {
 		t.Fatalf("auth type = %q, want bearer token", typed.auth.Type)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
@@ -26,9 +26,9 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 		WorkspaceKey: workdir, WorkspaceCWD: workdir, ApprovalMode: "auto-review",
 		SkillDirs: []string{t.TempDir()}, Sandbox: SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
-			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
+			Provider: "openai-compatible", API: model.APIOpenAICompatible,
 			Model: "final-tool-assembly", BaseURL: provider.URL, HTTPClient: provider.Client(),
-			Token: "test-token", AuthType: providers.AuthBearerToken,
+			Token: "test-token", AuthType: model.AuthBearerToken,
 			ContextWindowTokens: 128000, MaxOutputTok: 1024, Timeout: 5 * time.Second,
 		},
 	})

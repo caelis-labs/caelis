@@ -7,25 +7,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
-// spawnReplayProjector normalizes canonical parent Spawn results from durable
+// normalizeSpawnReplay normalizes canonical parent Spawn results from durable
 // Session history into standard ACP tool-result content. It never derives a
 // parent result from a Task read or wait observation.
-type spawnReplayProjector struct{}
-
-func newSpawnReplayProjector(_ []*session.Event) *spawnReplayProjector {
-	return &spawnReplayProjector{}
-}
-
-func (p *spawnReplayProjector) normalize(
+func normalizeSpawnReplay(
 	event *session.Event,
 	notification eventstream.SessionNotification,
 ) eventstream.SessionNotification {
-	if p == nil {
-		return notification
-	}
 	update, ok := notification.Update.(eventstream.ToolCallUpdate)
 	if !ok || !toolStatusFinal(update.Status) || !sessionEventOwnsSpawnCall(event, update.ToolCallID) {
 		return notification
@@ -95,7 +87,7 @@ func spawnReplayResultText(status string, rawOutput map[string]any) string {
 		}
 		return ""
 	}
-	return display.SubagentTaskFinalText(display.MapString(rawOutput, "state"), rawOutput)
+	return projection.SubagentTaskFinalText(display.MapString(rawOutput, "state"), rawOutput)
 }
 
 func sessionEventOwnsSpawnCall(event *session.Event, toolCallID string) bool {

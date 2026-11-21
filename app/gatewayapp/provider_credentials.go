@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
@@ -21,7 +21,7 @@ func (s *controlCommandBackend) prepareProviderCredentials(ctx context.Context, 
 	seenSources := map[string]credentialstore.Source{}
 	for _, raw := range configs {
 		configured := modelconfig.NormalizeConfig(raw)
-		if configured.AuthType == providers.AuthNone {
+		if configured.AuthType == model.AuthNone {
 			configured.Token = ""
 			configured.PersistToken = false
 			prepared = append(prepared, configured)

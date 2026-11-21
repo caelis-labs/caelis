@@ -3,7 +3,7 @@ package gatewayapp
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -12,7 +12,7 @@ import (
 
 func TestSelfApprovalInheritsEffectiveParentSessionAndHostPosture(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "self-mode"})
+	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "self-mode"})
 	if err != nil {
 		t.Fatal(err)
 	}

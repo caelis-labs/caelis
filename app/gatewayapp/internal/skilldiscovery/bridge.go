@@ -41,27 +41,15 @@ func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) []skill.Meta {
 }
 
 func prepareDiscovery(req skill.DiscoverRequest) skill.DiscoverRequest {
-	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
-	if systemRoot, err := maybeEnsureSystemSkills(dirs); err != nil {
-		dirs = withoutDiscoveryDir(dirs, systemRoot)
+	if req.Dirs == nil {
+		req.Dirs = DefaultDiscoveryDirs(req.WorkspaceDir)
 	}
-	req.Dirs = dirs
+	if systemDiscoveryRequested(req.Dirs) {
+		if systemRoot, err := Ensure(); err != nil {
+			req.Dirs = withoutDiscoveryDir(req.Dirs, systemRoot)
+		}
+	}
 	return req
-}
-
-func discoveryDirs(dirs []string, workspaceDir string) []string {
-	if len(dirs) == 0 {
-		return DefaultDiscoveryDirs(workspaceDir)
-	}
-	return dirs
-}
-
-func maybeEnsureSystemSkills(dirs []string) (string, error) {
-	if len(dirs) == 0 || systemDiscoveryRequested(dirs) {
-		systemRoot, err := Ensure()
-		return systemRoot, err
-	}
-	return "", nil
 }
 
 func systemDiscoveryRequested(dirs []string) bool {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sandboxport "github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -454,7 +454,7 @@ func modelConfigMissingAPIKey(cfg ModelConfig) bool {
 	if cfg.Provider == "" || cfg.Model == "" {
 		return false
 	}
-	if cfg.AuthType == "" || cfg.AuthType == providers.AuthNone {
+	if cfg.AuthType == "" || cfg.AuthType == model.AuthNone {
 		return false
 	}
 	if strings.TrimSpace(cfg.Token) != "" {

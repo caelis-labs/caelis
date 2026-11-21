@@ -60,7 +60,8 @@ type Config struct {
 	ContextWindow int
 	SystemPrompt  string
 	Assembly      assembly.ResolvedAssembly
-	SkillDirs     []string
+	// SkillDirs selects the regular roots for the Host. Nil uses product defaults.
+	SkillDirs []string
 	// ModelProfileID selects one Control-owned ModelProfile for this process.
 	// Runtime startup is read-only: profiles and provider credentials may only
 	// be created or replaced by the /connect owner.

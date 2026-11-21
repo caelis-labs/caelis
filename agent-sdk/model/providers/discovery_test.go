@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestDiscoverResponsesModelsUsesModelsEndpoint(t *testing.T) {
@@ -20,8 +22,8 @@ func TestDiscoverResponsesModelsUsesModelsEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 	models, err := DiscoverModels(t.Context(), Config{
-		API: APIOpenAIResponses, BaseURL: server.URL + "/v1", HTTPClient: server.Client(),
-		Auth: AuthConfig{Type: AuthAPIKey, Token: "token"},
+		API: model.APIOpenAIResponses, BaseURL: server.URL + "/v1", HTTPClient: server.Client(),
+		Auth: AuthConfig{Type: model.AuthAPIKey, Token: "token"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,11 +48,11 @@ func TestDiscoverGeminiModels_UsesAPIKeyHeader(t *testing.T) {
 
 	got, err := discoverGeminiModels(context.Background(), server.Client(), Config{
 		Provider:   "gemini",
-		API:        APIGemini,
+		API:        model.APIGemini,
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "token",
 		},
 	}, "token")
@@ -80,7 +82,7 @@ func TestDiscoverOpenRouterModels_ParsesOpenRouterShapeAndConfiguredHeaders(t *t
 
 	got, err := discoverOpenAIModels(context.Background(), server.Client(), Config{
 		Provider:   "openrouter",
-		API:        APIOpenRouter,
+		API:        model.APIOpenRouter,
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Headers: map[string]string{
@@ -88,7 +90,7 @@ func TestDiscoverOpenRouterModels_ParsesOpenRouterShapeAndConfiguredHeaders(t *t
 			"X-Title":      "caelis",
 		},
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "token",
 		},
 	}, "token")

@@ -25,7 +25,7 @@ func withMiniMaxDefaults(cfg Config) Config {
 		cfg.BaseURL = miniMaxDefaultBaseURL
 	}
 	if cfg.Auth.Type == "" {
-		cfg.Auth.Type = AuthBearerToken
+		cfg.Auth.Type = model.AuthBearerToken
 	}
 	return cfg
 }

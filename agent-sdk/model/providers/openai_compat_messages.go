@@ -15,13 +15,11 @@ type openAICompatMsg struct {
 	Content          any                      `json:"content,omitempty"`
 	Reasoning        string                   `json:"reasoning,omitempty"`
 	ReasoningContent string                   `json:"reasoning_content,omitempty"`
-	ToolCallID       string                   `json:"tool_call_id,omitempty"`
 	ToolCalls        []openAICompatToolCall   `json:"tool_calls,omitempty"`
 	Annotations      []openAICompatAnnotation `json:"annotations,omitempty"`
 }
 
 type openAICompatAnnotation struct {
-	Type        string                         `json:"type"`
 	URL         string                         `json:"url"`
 	Title       string                         `json:"title"`
 	Summary     string                         `json:"summary"`
@@ -67,7 +65,6 @@ type openAICompatResponse struct {
 }
 
 type openAICompatStreamChunk struct {
-	Model   string `json:"model"`
 	Choices []struct {
 		Delta        openAICompatMsg `json:"delta"`
 		FinishReason string          `json:"finish_reason"`

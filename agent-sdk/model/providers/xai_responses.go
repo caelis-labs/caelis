@@ -33,6 +33,7 @@ type xAIResponsesLLM struct {
 	provider              string
 	baseURL               string
 	headers               map[string]string
+	userAgent             string
 	client                *http.Client
 	requestTimeout        time.Duration
 	responseHeaderTimeout time.Duration
@@ -53,6 +54,7 @@ func newXAIResponses(cfg Config) *xAIResponsesLLM {
 		provider:              strings.TrimSpace(cfg.Provider),
 		baseURL:               baseURL,
 		headers:               cloneHeaders(cfg.Headers),
+		userAgent:             cfg.UserAgent,
 		client:                coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:        cfg.Timeout,
 		responseHeaderTimeout: normalizeStreamResponseHeaderTimeout(cfg.StreamResponseHeaderTimeout),
@@ -115,7 +117,7 @@ func (l *xAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter
 			return
 		}
 		applyConfiguredHeaders(httpReq, l.headers)
-		applyXAIResponsesHeaders(httpReq, "text/event-stream", l.name, xAIResponsesWireIdentity{
+		applyXAIResponsesHeaders(httpReq, "text/event-stream", l.name, l.userAgent, xAIResponsesWireIdentity{
 			conversationID: affinity,
 			requestID:      uuid.NewString(),
 			sessionID:      affinity,
@@ -171,7 +173,7 @@ func xAIResponsesRequestAffinity(sessionAffinity string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 }
 
-func applyXAIResponsesHeaders(req *http.Request, accept string, modelName string, identity xAIResponsesWireIdentity) {
+func applyXAIResponsesHeaders(req *http.Request, accept, modelName, userAgent string, identity xAIResponsesWireIdentity) {
 	if req == nil {
 		return
 	}
@@ -182,7 +184,7 @@ func applyXAIResponsesHeaders(req *http.Request, accept string, modelName string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", accept)
-	req.Header.Set("User-Agent", caelisUserAgent())
+	setUserAgent(req, userAgent)
 	req.Header.Set("x-grok-model-override", strings.TrimSpace(modelName))
 	req.Header.Set("x-grok-conv-id", identity.conversationID)
 	req.Header.Set("x-grok-req-id", identity.requestID)

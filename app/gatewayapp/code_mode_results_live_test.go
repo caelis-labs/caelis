@@ -125,7 +125,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 		transport.ResponseHeaderTimeout = 0
 		localCfg := cfg
 		localCfg.HTTPClient = &http.Client{Transport: &fairTransport{base: transport, root: dir}}
-		built, e := modelconfig.BuildModel(localCfg, 0, 0)
+		built, e := modelconfig.BuildModel(localCfg, modelconfig.ModelBuildOptions{})
 		if e != nil {
 			t.Fatal("authorized model construction failed")
 		}

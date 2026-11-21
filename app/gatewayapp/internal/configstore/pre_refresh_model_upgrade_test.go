@@ -213,7 +213,7 @@ func preRefreshSolModelConfig(t *testing.T, doc AppConfig) modelconfig.Config {
 func assertCodexSolSDKImageCapability(t *testing.T, cfg modelconfig.Config) {
 	t.Helper()
 	cfg.HTTPClient = &http.Client{Transport: rejectNetworkRoundTripper{t}}
-	resolution, err := modelconfig.BuildModel(cfg, 0, 0)
+	resolution, err := modelconfig.BuildModel(cfg, modelconfig.ModelBuildOptions{})
 	if err != nil {
 		t.Fatalf("BuildModel() error = %v", err)
 	}

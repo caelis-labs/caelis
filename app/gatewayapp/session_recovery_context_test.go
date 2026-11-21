@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/memorybinding"
@@ -47,7 +46,7 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 		AppName: "caelis", UserID: "retirement-test", StoreDir: root, WorkspaceKey: "workspace", WorkspaceCWD: workspace, SkillDirs: []string{},
 		Sandbox:                   SandboxConfig{RequestedType: "host"},
 		ResolveProviderHTTPClient: func(context.Context, ModelConfig) (*http.Client, error) { return client, nil },
-		Model:                     ModelConfig{Provider: "openai-compatible", API: providers.APIOpenAICompatible, Model: "retirement-test", BaseURL: "http://retirement.test", HTTPClient: client, Token: "fixture-token", AuthType: providers.AuthBearerToken, ContextWindowTokens: 128000, MaxOutputTok: 4096},
+		Model:                     ModelConfig{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "retirement-test", BaseURL: "http://retirement.test", HTTPClient: client, Token: "fixture-token", AuthType: model.AuthBearerToken, ContextWindowTokens: 128000, MaxOutputTok: 4096},
 		MemoryBindingRef:          "missing-retired-binding",
 		MemoryBindingSelector: func(context.Context, MemoryBindingSelectionContext) (memorybinding.BindingRef, error) {
 			t.Error("retired binding selector invoked")

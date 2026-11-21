@@ -49,7 +49,8 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[{"delta":{"role":"assistant","reasoning_content":"think "},"finish_reason":null}]}`+"\n\n")
+				// A compatible endpoint's echo cannot change the selected model.
+				_, _ = fmt.Fprint(w, `data: {"model":123,"choices":[{"delta":{"role":"assistant","reasoning_content":"think "},"finish_reason":null}]}`+"\n\n")
 				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`+"\n\n")
 				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
 				_, _ = fmt.Fprint(w, `data: {"model":"test-model","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"completion_tokens_details":{"reasoning_tokens":3}}}`+"\n\n")
@@ -72,27 +73,15 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			build: func(server *providerTestServer) model.LLM {
 				return newOpenRouter(Config{
 					Provider:   "openrouter",
-					API:        APIOpenRouter,
+					API:        model.APIOpenRouter,
 					Model:      "openrouter/openai/test-model",
 					BaseURL:    server.URL,
 					HTTPClient: server.Client(),
 					Timeout:    2 * time.Second,
-					OpenRouter: OpenRouterConfig{
-						Models:     []string{"openrouter/anthropic/fallback-model"},
-						Route:      "fallback",
-						Transforms: []string{"middle-out"},
-						Provider:   map[string]any{"allow_fallbacks": true},
-						Plugins:    []map[string]any{{"id": "web"}},
-					},
 				}, "token")
 			},
 			requestOK: func(raw string) bool {
 				return strings.Contains(raw, `"model":"openai/test-model"`) &&
-					strings.Contains(raw, `"models":["anthropic/fallback-model"]`) &&
-					strings.Contains(raw, `"route":"fallback"`) &&
-					strings.Contains(raw, `"transforms":["middle-out"]`) &&
-					strings.Contains(raw, `"allow_fallbacks":true`) &&
-					strings.Contains(raw, `"plugins":[{"id":"web"}]`) &&
 					strings.Contains(raw, `"response_format"`) &&
 					strings.Contains(raw, `"lookup"`) &&
 					strings.Contains(raw, `data:image/png;base64,aW1n`)
@@ -163,13 +152,13 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			build: func(server *providerTestServer) model.LLM {
 				return newAnthropic(Config{
 					Provider:   "anthropic",
-					API:        APIAnthropic,
+					API:        model.APIAnthropic,
 					Model:      "claude-test",
 					BaseURL:    server.URL,
 					HTTPClient: server.Client(),
 					Timeout:    2 * time.Second,
 					Auth: AuthConfig{
-						Type:  AuthAPIKey,
+						Type:  model.AuthAPIKey,
 						Token: "sk-anthropic",
 					},
 				}, "sk-anthropic")

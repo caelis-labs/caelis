@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -32,7 +31,7 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "alt-model",
 	})
 	if err != nil {
@@ -267,11 +266,11 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	if !ok {
 		t.Fatal("expected minimax config")
 	}
-	if cfg.API != providers.APIMiniMax {
-		t.Fatalf("cfg.API = %q, want %q", cfg.API, providers.APIMiniMax)
+	if cfg.API != model.APIMiniMax {
+		t.Fatalf("cfg.API = %q, want %q", cfg.API, model.APIMiniMax)
 	}
-	if cfg.AuthType != providers.AuthBearerToken {
-		t.Fatalf("cfg.AuthType = %q, want %q", cfg.AuthType, providers.AuthBearerToken)
+	if cfg.AuthType != model.AuthBearerToken {
+		t.Fatalf("cfg.AuthType = %q, want %q", cfg.AuthType, model.AuthBearerToken)
 	}
 
 	resolved, err := lookup.ResolveModel(context.Background(), "minimax/minimax-m2", 0)
@@ -303,11 +302,11 @@ func TestModelLookupRequiresControlResolverForManagedCodexCredential(t *testing.
 	}
 	if _, err := lookup.Upsert(ModelConfig{
 		Provider:      "openai-codex",
-		API:           providers.APIOpenAICodex,
+		API:           model.APIOpenAICodex,
 		Model:         "gpt-5.4",
 		BaseURL:       modelconfig.CodexOAuthBaseURL,
 		CredentialRef: modelconfig.CodexOAuthCredentialRef,
-		AuthType:      providers.AuthOAuthToken,
+		AuthType:      model.AuthOAuthToken,
 	}); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}
@@ -349,7 +348,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:            "xai",
-			API:                 providers.APIXAIResponses,
+			API:                 model.APIXAIResponses,
 			Model:               "grok-4.5",
 			BaseURL:             modelconfig.GrokOAuthBaseURL,
 			ContextWindowTokens: 500000,
@@ -410,7 +409,7 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	}
 	deepSeek := modelconfig.NormalizeConfig(ModelConfig{
 		Provider:            "deepseek",
-		API:                 providers.APIDeepSeek,
+		API:                 model.APIDeepSeek,
 		Model:               "deepseek-v4-pro",
 		BaseURL:             "https://api.deepseek.com/anthropic",
 		ContextWindowTokens: 1048576,
@@ -506,7 +505,7 @@ func TestSessionFastModePersistsAcrossRestartIntoResolvedModelRequest(t *testing
 		ApprovalMode: "auto-review",
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
-			Provider: "openai", API: providers.APIOpenAI, Model: "gpt-5.6-sol",
+			Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.6-sol",
 			BaseURL: "https://api.openai.com/v1", Token: "fast-round-trip-secret",
 			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
 		},
@@ -704,7 +703,7 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 
 	connected, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "alt-model",
 	})
 	if err != nil {
@@ -754,7 +753,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	}
 	firstProfile, err := stack.connectTestModel(ModelConfig{
 		Provider:     "deepseek",
-		API:          providers.APIDeepSeek,
+		API:          model.APIDeepSeek,
 		Model:        "deepseek-v4-flash",
 		Token:        "secret",
 		PersistToken: true,
@@ -765,7 +764,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	firstID := firstProfile.Backend.Provider.ModelConfigID
 	secondProfile, err := stack.connectTestModel(ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 	})
 	if err != nil {
@@ -802,8 +801,8 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
 
 	for _, cfg := range []ModelConfig{
-		{Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://api.xiaomimimo.com/v1"},
-		{Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
+		{Provider: "xiaomi", API: model.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://api.xiaomimimo.com/v1"},
+		{Provider: "xiaomi", API: model.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
 	} {
 		if _, err := stack.connectTestModel(cfg); err != nil {
 			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
@@ -823,7 +822,7 @@ func TestPresentationSourceUsesPublicSelectorsForDuplicateAliases(t *testing.T) 
 	stack, activeSession := newLocalStateTestStack(t)
 	apiProfile, err := stack.connectTestModel(ModelConfig{
 		Provider: "xiaomi",
-		API:      providers.APIMimo,
+		API:      model.APIMimo,
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  "https://api.xiaomimimo.com/v1",
 	})
@@ -833,7 +832,7 @@ func TestPresentationSourceUsesPublicSelectorsForDuplicateAliases(t *testing.T) 
 	apiID := apiProfile.Backend.Provider.ModelConfigID
 	tokenPlanProfile, err := stack.connectTestModel(ModelConfig{
 		Provider: "xiaomi",
-		API:      providers.APIMimo,
+		API:      model.APIMimo,
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  "https://token-plan-cn.xiaomimimo.com/v1",
 	})
@@ -941,7 +940,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	}
 	connected, err := stack.connectTestModel(ModelConfig{
 		Provider:        "deepseek",
-		API:             providers.APIDeepSeek,
+		API:             model.APIDeepSeek,
 		Model:           "deepseek-v4-pro",
 		ReasoningLevels: []string{"none", "high", "max"},
 	})
@@ -1029,7 +1028,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	minimaxAlias := minimaxProfile.Backend.Provider.ModelConfigID
 	if _, err := stack.connectTestModel(ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "deepseek-secret",
 	}); err != nil {
@@ -1232,7 +1231,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 		Assembly:      assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
-			API:        providers.APIOllama,
+			API:        model.APIOllama,
 			Model:      "compact-test",
 			BaseURL:    server.URL,
 			HTTPClient: server.Client(),
@@ -1291,7 +1290,7 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 		Assembly:      assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
-			API:        providers.APIOllama,
+			API:        model.APIOllama,
 			Model:      "compact-test",
 			BaseURL:    server.URL,
 			HTTPClient: server.Client(),
@@ -1329,7 +1328,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 		Assembly:      assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
-			API:        providers.APIOllama,
+			API:        model.APIOllama,
 			Model:      "compact-test",
 			BaseURL:    server.URL,
 			HTTPClient: server.Client(),
@@ -1422,7 +1421,7 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 		SystemPrompt: strings.Repeat("count this stable prefix instruction. ", 2000),
 		Model: ModelConfig{
 			Provider:            "ollama",
-			API:                 providers.APIOllama,
+			API:                 model.APIOllama,
 			Model:               "llama3",
 			ContextWindowTokens: 1000000,
 		},
@@ -1570,7 +1569,7 @@ func newLocalStateTestHost(t *testing.T) *Stack {
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})

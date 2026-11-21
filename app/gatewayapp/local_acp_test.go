@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -223,7 +223,7 @@ func bindProfileToModelForToolTest(t *testing.T, stack *Stack, handle agentbindi
 	t.Helper()
 	modelProfile, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "bound-" + string(handle),
 	})
 	if err != nil {

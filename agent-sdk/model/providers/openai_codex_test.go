@@ -30,8 +30,8 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		if r.URL.Path != "/responses" {
 			t.Errorf("path = %q, want /responses", r.URL.Path)
 		}
-		if got := r.Header.Get("originator"); got != "caelis" {
-			t.Errorf("originator = %q, want caelis", got)
+		if got := r.Header.Get("originator"); got != "test-product" {
+			t.Errorf("originator = %q, want test-product", got)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
 			t.Errorf("Authorization = %q, want injected bearer", got)
@@ -92,11 +92,12 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	client.Transport = openAICodexTestAuthTransport{base: client.Transport}
 	llm, err := New(Config{
 		Provider:   "openai-codex",
-		API:        APIOpenAICodex,
+		API:        model.APIOpenAICodex,
 		Model:      "gpt-5.4",
 		BaseURL:    server.URL,
 		HTTPClient: client,
-		Auth:       AuthConfig{Type: AuthOAuthToken},
+		Headers:    map[string]string{"originator": "test-product"},
+		Auth:       AuthConfig{Type: model.AuthOAuthToken},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -417,7 +418,7 @@ func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
 			llm, err := New(Config{
 
 				Provider:   "openai-codex",
-				API:        APIOpenAICodex,
+				API:        model.APIOpenAICodex,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
@@ -497,7 +498,7 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 			llm, err := New(Config{
 
 				Provider:   "openai-codex",
-				API:        APIOpenAICodex,
+				API:        model.APIOpenAICodex,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
@@ -531,7 +532,7 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {
 	t.Parallel()
 
-	if _, err := New(Config{API: APIOpenAICodex, Model: "gpt-test"}); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
+	if _, err := New(Config{API: model.APIOpenAICodex, Model: "gpt-test"}); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
 		t.Fatalf("New() error = %v", err)
 	}
 }

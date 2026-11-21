@@ -456,9 +456,9 @@ func anthropicAuthOptions(cfg Config, token string) []option.RequestOption {
 		return []option.RequestOption{option.WithHeader(key, value)}
 	}
 	switch auth.Type {
-	case AuthBearerToken, AuthOAuthToken:
+	case model.AuthBearerToken, model.AuthOAuthToken:
 		return []option.RequestOption{option.WithAuthToken(token)}
-	case AuthNone:
+	case model.AuthNone:
 		return nil
 	default:
 		return []option.RequestOption{option.WithAPIKey(token)}

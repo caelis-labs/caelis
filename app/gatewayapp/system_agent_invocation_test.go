@@ -39,7 +39,7 @@ func TestProductionReasoningWrapperCountsHTTPAttempts(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: body}, nil
 			})}
-			inner, err := providers.New(providers.Config{Provider: "openai-compatible", Model: "probe", API: providers.APIOpenAICompatible, Auth: providers.AuthConfig{Type: providers.AuthNone}, BaseURL: "https://provider.invalid", HTTPClient: client, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
+			inner, err := providers.New(providers.Config{Provider: "openai-compatible", Model: "probe", API: model.APIOpenAICompatible, Auth: providers.AuthConfig{Type: model.AuthNone}, BaseURL: "https://provider.invalid", HTTPClient: client, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
 			if err != nil {
 				t.Fatal(err)
 			}

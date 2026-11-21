@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -58,7 +58,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	firstProfile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "session-model-a",
+		Provider: "ollama", API: model.APIOllama, Model: "session-model-a",
 		ContextWindowTokens: 111111,
 		ReasoningEffort:     "medium", DefaultReasoningEffort: "medium", ReasoningLevels: []string{"low", "medium", "high"},
 	})
@@ -66,7 +66,7 @@ func TestSelfDelegationPlacementTracksEffectiveSessionModelAndEffort(t *testing.
 		t.Fatalf("Connect(first) error = %v", err)
 	}
 	secondProfile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "session-model-b",
+		Provider: "ollama", API: model.APIOllama, Model: "session-model-b",
 		ContextWindowTokens: 222222,
 		ReasoningEffort:     "low", DefaultReasoningEffort: "low", ReasoningLevels: []string{"low", "high"},
 	})
@@ -173,7 +173,7 @@ func TestDelegatedModelAgentIdentityNamesParticipant(t *testing.T) {
 func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "drift-model", BaseURL: "http://one.example",
+		Provider: "ollama", API: model.APIOllama, Model: "drift-model", BaseURL: "http://one.example",
 	})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)

@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
@@ -34,7 +35,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	}
 	callID := strings.TrimSpace(taskStreamToolCallID(envelope.Update))
 	kind := task.Kind("")
-	targetKind := strings.ToLower(strings.TrimSpace(display.ToolTaskTargetKind(input, output, meta)))
+	targetKind := strings.ToLower(strings.TrimSpace(projection.ToolTaskTargetKind(input, output, meta)))
 	terminalInfo, hasTerminalInfo := acpmeta.ReadTerminalInfo(meta)
 	switch {
 	case targetKind == string(task.KindCommand) &&
@@ -51,7 +52,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 	if kind == "" {
 		return acpTaskStreamAnchor{}, false
 	}
-	handle := strings.TrimSpace(display.ToolTaskHandle(input, output, meta))
+	handle := strings.TrimSpace(projection.ToolTaskHandle(input, output, meta))
 	if kind == task.KindSubagent {
 		if parentCall := strings.TrimSpace(display.MapString(output, "parent_call")); parentCall != "" && parentCall != callID {
 			return acpTaskStreamAnchor{}, false

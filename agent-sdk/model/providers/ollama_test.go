@@ -72,12 +72,12 @@ func TestOllamaRegisterAndCreate(t *testing.T) {
 
 	cfg := Config{
 		Provider:   "ollama",
-		API:        APIOllama,
+		API:        model.APIOllama,
 		Model:      "qwen2.5:7b",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Auth: AuthConfig{
-			Type: AuthNone,
+			Type: model.AuthNone,
 		},
 	}
 	llm, err := New(cfg)
@@ -166,11 +166,11 @@ func TestOllamaStructuredOutputRequest(t *testing.T) {
 func TestOllamaAuthNoneAllowsEmptyToken(t *testing.T) {
 	cfg := Config{
 		Provider: "ollama",
-		API:      APIOllama,
+		API:      model.APIOllama,
 		Model:    "test-model",
 		BaseURL:  "http://localhost:11434",
 		Auth: AuthConfig{
-			Type: AuthNone,
+			Type: model.AuthNone,
 		},
 	}
 	llm, err := New(cfg)
@@ -289,7 +289,7 @@ func TestOllamaDirectCloudUsesBearerAndRawModelName(t *testing.T) {
 		Model:      "glm-5.2",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
-		Auth:       AuthConfig{Type: AuthAPIKey},
+		Auth:       AuthConfig{Type: model.AuthAPIKey},
 	}, "cloud-secret")
 	for _, err := range llm.Generate(context.Background(), &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
@@ -319,8 +319,9 @@ func TestDiscoverOllamaModels(t *testing.T) {
 					"name":  "qwen2.5:7b",
 					"model": "qwen2.5:7b",
 					"details": map[string]any{
-						"family":         "qwen2",
-						"parameter_size": "7.6B",
+						"family":             "qwen2",
+						"parameter_size":     "7.6B",
+						"quantization_level": 4,
 					},
 				},
 				{
@@ -339,10 +340,10 @@ func TestDiscoverOllamaModels(t *testing.T) {
 	defer server.Close()
 
 	models, err := DiscoverModels(context.Background(), Config{
-		API:        APIOllama,
+		API:        model.APIOllama,
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
-		Auth:       AuthConfig{Type: AuthNone},
+		Auth:       AuthConfig{Type: model.AuthNone},
 	})
 	if err != nil {
 		t.Fatalf("discover ollama models: %v", err)
@@ -368,10 +369,10 @@ func TestDiscoverOllamaModelsEmpty(t *testing.T) {
 	defer server.Close()
 
 	models, err := DiscoverModels(context.Background(), Config{
-		API:        APIOllama,
+		API:        model.APIOllama,
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
-		Auth:       AuthConfig{Type: AuthNone},
+		Auth:       AuthConfig{Type: model.AuthNone},
 	})
 	if err != nil {
 		t.Fatalf("discover should not error on empty list: %v", err)
@@ -395,10 +396,10 @@ func TestDiscoverOllamaModelsWithV1BaseURL(t *testing.T) {
 	defer server.Close()
 
 	models, err := DiscoverModels(context.Background(), Config{
-		API:        APIOllama,
+		API:        model.APIOllama,
 		BaseURL:    server.URL + "/v1",
 		HTTPClient: server.Client(),
-		Auth:       AuthConfig{Type: AuthNone},
+		Auth:       AuthConfig{Type: model.AuthNone},
 	})
 	if err != nil {
 		t.Fatalf("discover with /v1 base url: %v", err)
@@ -563,7 +564,7 @@ func TestOllamaEffortReasoningSendsNamedThinkLevel(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestResolveTokenAuthNone(t *testing.T) {
-	token, err := resolveToken(AuthConfig{Type: AuthNone})
+	token, err := resolveToken(AuthConfig{Type: model.AuthNone})
 	if err != nil {
 		t.Fatalf("resolveToken with AuthNone should not error: %v", err)
 	}
@@ -573,7 +574,7 @@ func TestResolveTokenAuthNone(t *testing.T) {
 }
 
 func TestResolveTokenAuthNoneWithOptionalToken(t *testing.T) {
-	token, err := resolveToken(AuthConfig{Type: AuthNone, Token: "optional-key"})
+	token, err := resolveToken(AuthConfig{Type: model.AuthNone, Token: "optional-key"})
 	if err != nil {
 		t.Fatalf("resolveToken with AuthNone and optional token should not error: %v", err)
 	}

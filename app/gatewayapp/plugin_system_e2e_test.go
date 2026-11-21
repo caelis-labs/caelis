@@ -12,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -65,12 +67,12 @@ func TestPluginSystemE2E(t *testing.T) {
 		Model: ModelConfig{
 			Alias:               "plugin-e2e",
 			Provider:            "openai-compatible",
-			API:                 providers.APIOpenAICompatible,
+			API:                 model.APIOpenAICompatible,
 			Model:               "plugin-e2e-model",
 			BaseURL:             fakeProvider.URL,
 			HTTPClient:          fakeProvider.Client(),
 			Token:               "plugin-e2e-token",
-			AuthType:            providers.AuthBearerToken,
+			AuthType:            model.AuthBearerToken,
 			ContextWindowTokens: 128000,
 			MaxOutputTok:        1024,
 			Timeout:             5 * time.Second,

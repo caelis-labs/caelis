@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -26,7 +26,7 @@ func TestConnectStoresProviderAPIKeyBehindOpaqueReference(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	secret := "sk-connect-secret"
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-test", BaseURL: "https://api.example/v1", Token: secret, PersistToken: true,
+		Provider: "openai", API: model.APIOpenAI, Model: "gpt-test", BaseURL: "https://api.example/v1", Token: secret, PersistToken: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestConnectReplacesLegacyEnvironmentCredential(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	configured := modelconfig.NormalizeConfig(ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "replacement-secret",
 	})
@@ -111,7 +111,7 @@ func TestConnectLegacyEnvironmentCredentialRollbackAllowsRetry(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	configured := modelconfig.NormalizeConfig(ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "replacement-secret",
 	})
@@ -139,7 +139,7 @@ func TestResolveModelConfigHidesLegacyCredentialStorageDetails(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	configured := modelconfig.NormalizeConfig(ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
@@ -162,7 +162,7 @@ func TestHasReusableProviderAuthRejectsLegacyCredential(t *testing.T) {
 	baseURL := "https://api.deepseek.com/anthropic"
 	configured := modelconfig.NormalizeConfig(ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		BaseURL:  baseURL,
 		Token:    "current-secret",
@@ -184,7 +184,7 @@ func TestHasReusableProviderAuthRejectsLegacyCredential(t *testing.T) {
 func TestConnectRollsBackNewProviderCredentialWhenConfigSaveFails(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	configured := modelconfig.NormalizeConfig(ModelConfig{
-		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-rollback", BaseURL: "https://rollback.example/v1", Token: "secret",
+		Provider: "openai", API: model.APIOpenAI, Model: "gpt-rollback", BaseURL: "https://rollback.example/v1", Token: "secret",
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
 	stack.composition.authorities.store.saveHook = func(AppConfig) error { return errors.New("save failed") }
@@ -204,7 +204,7 @@ func TestProviderCredentialCASLoserRestoresCommittedWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 	winner := modelconfig.NormalizeConfig(ModelConfig{
-		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-winner", BaseURL: "https://shared.example/v1", Token: "winner-secret",
+		Provider: "openai", API: model.APIOpenAI, Model: "gpt-winner", BaseURL: "https://shared.example/v1", Token: "winner-secret",
 	})
 	if _, err := stack.connectTestModel(winner); err != nil {
 		t.Fatalf("Connect(winner) error = %v", err)
@@ -261,7 +261,7 @@ func writeLegacyEnvironmentCredentialForTest(t *testing.T, root string, ref stri
 func TestConnectRollsForwardCredentialAfterCommittedConfigWriteFault(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	configured := modelconfig.NormalizeConfig(ModelConfig{
-		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-committed", BaseURL: "https://committed.example/v1", Token: "committed-secret",
+		Provider: "openai", API: model.APIOpenAI, Model: "gpt-committed", BaseURL: "https://committed.example/v1", Token: "committed-secret",
 	})
 	ref := credentialstore.BuildReference(configured.Provider, configured.ProviderEndpointID)
 	fault := errors.New("directory fsync failed")
@@ -312,7 +312,7 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	stack, activeSession := newLocalStateTestStack(t)
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:               "ollama",
-		API:                    providers.APIOllama,
+		API:                    model.APIOllama,
 		Model:                  "use-committed",
 		ReasoningLevels:        []string{"none", "high"},
 		DefaultReasoningEffort: "none",
@@ -418,7 +418,7 @@ func TestHostModelSelectionDoesNotRequireOrMutateSession(t *testing.T) {
 	stack, activeSession := newLocalStateTestStack(t)
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:               "ollama",
-		API:                    providers.APIOllama,
+		API:                    model.APIOllama,
 		Model:                  "host-only-selection",
 		ReasoningLevels:        []string{"none", "high"},
 		DefaultReasoningEffort: "none",
@@ -443,7 +443,7 @@ func TestConnectPersistsCanonicalProfileForFutureActivation(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	originalID := stack.composition.lookup.DefaultID()
 	originalRuntimeModel := stack.composition.runtimeProcessSnapshot().runtime.Model.ID
-	_, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "new-model"})
+	_, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "new-model"})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -473,8 +473,8 @@ func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(
 	stack := newLocalStateTestHost(t)
 	originalDefaultID := stack.composition.lookup.DefaultID()
 	profiles, err := stack.connectTestModels([]ModelConfig{
-		{Provider: "ollama", API: providers.APIOllama, Model: "batch-first"},
-		{Provider: "ollama", API: providers.APIOllama, Model: "batch-second"},
+		{Provider: "ollama", API: model.APIOllama, Model: "batch-first"},
+		{Provider: "ollama", API: model.APIOllama, Model: "batch-second"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +497,7 @@ func TestConnectModelsPersistsStandardProfilesAtomicallyAndKeepsExistingDefault(
 
 	before := stack.composition.lookup.Snapshot()
 	_, err = stack.connectTestModels([]ModelConfig{
-		{Provider: "ollama", API: providers.APIOllama, Model: "should-rollback"},
+		{Provider: "ollama", API: model.APIOllama, Model: "should-rollback"},
 		{Model: "invalid-without-provider"},
 	})
 	if err == nil {
@@ -516,8 +516,8 @@ func TestConnectModelsSelectsFirstProfileWhenNoModelExists(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 	profiles, err := stack.connectTestModels([]ModelConfig{
-		{Provider: "ollama", API: providers.APIOllama, Model: "first"},
-		{Provider: "ollama", API: providers.APIOllama, Model: "second"},
+		{Provider: "ollama", API: model.APIOllama, Model: "first"},
+		{Provider: "ollama", API: model.APIOllama, Model: "second"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +532,7 @@ func TestDeleteModelRemovesProviderProfileAndOrdinaryBindings(t *testing.T) {
 	ctx := context.Background()
 	stack := newLocalStateTestHost(t)
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "delete-profile-model",
+		Provider: "ollama", API: model.APIOllama, Model: "delete-profile-model",
 		ReasoningMode: "effort", ReasoningLevels: []string{"high"}, ReasoningEffort: "high",
 	})
 	if err != nil {
@@ -563,7 +563,7 @@ func TestDeleteNonDefaultModelPreservesGlobalEffort(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	selected, err := stack.connectTestModel(ModelConfig{
 		Provider:               "ollama",
-		API:                    providers.APIOllama,
+		API:                    model.APIOllama,
 		Model:                  "selected-before-delete",
 		ReasoningLevels:        []string{"none", "high"},
 		DefaultReasoningEffort: "none",
@@ -576,7 +576,7 @@ func TestDeleteNonDefaultModelPreservesGlobalEffort(t *testing.T) {
 	}
 	unrelated, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "unrelated-delete",
 	})
 	if err != nil {
@@ -609,7 +609,7 @@ func TestConnectPreservesACPHostDefault(t *testing.T) {
 	stack := newLocalStateTestHost(t)
 	acpProfileID := selectACPHostDefault(t, stack, "codex")
 
-	connected, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "after-acp-default"})
+	connected, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "after-acp-default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +625,7 @@ func TestDeleteNonDefaultProviderPreservesACPHostDefault(t *testing.T) {
 	acpProfileID := selectACPHostDefault(t, stack, "codex")
 	unrelated, err := stack.connectTestModel(ModelConfig{
 		Provider: "ollama",
-		API:      providers.APIOllama,
+		API:      model.APIOllama,
 		Model:    "unrelated-acp-default",
 	})
 	if err != nil {
@@ -670,7 +670,7 @@ func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 			ctx := context.Background()
 			stack, activeSession := newLocalStateTestStack(t)
 			profile, err := stack.connectTestModel(ModelConfig{
-				Provider: "ollama", API: providers.APIOllama, Model: "delete-committed-" + stage,
+				Provider: "ollama", API: model.APIOllama, Model: "delete-committed-" + stage,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -720,7 +720,7 @@ func TestDeleteModelRollsForwardAfterCommittedConfigWriteFault(t *testing.T) {
 func TestDeleteModelRollsBackAfterPreCommitConfigWriteFault(t *testing.T) {
 	ctx := context.Background()
 	stack := newLocalStateTestHost(t)
-	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "delete-precommit"})
+	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "delete-precommit"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +746,7 @@ func TestDeleteModelRemovesSystemBoundProfile(t *testing.T) {
 	ctx := context.Background()
 	stack := newLocalStateTestHost(t)
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "system-bound-model",
+		Provider: "ollama", API: model.APIOllama, Model: "system-bound-model",
 		ReasoningMode: "effort", ReasoningLevels: []string{"high"}, ReasoningEffort: "high",
 	})
 	if err != nil {
@@ -775,7 +775,7 @@ func TestDeleteModelRemovesSystemBoundProfile(t *testing.T) {
 func TestDeleteModelPersistsCanonicalDeletionForFutureActivation(t *testing.T) {
 	ctx := context.Background()
 	stack := newLocalStateTestHost(t)
-	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "delete-rollback-model"})
+	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "delete-rollback-model"})
 	if err != nil {
 		t.Fatal(err)
 	}

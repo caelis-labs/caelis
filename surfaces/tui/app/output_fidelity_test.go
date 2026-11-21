@@ -15,7 +15,7 @@ import (
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
-const structuredFinalMessageForFidelityTest = "# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
+const structuredFinalMessageForFidelityTest = "{\"agent\":\"reviewer\"}\n\n# 完成\n\n已创建文件。\n\n---\n\n### 结果\n\n- 第一项\n- 第二项\n\n| 文件 | 状态 |\n| --- | --- |\n| `hello.go` | 好 |\n\n```go\nfmt.Println(\"你好\")\n```\n\n创建文件\n\n> **结果**"
 
 func TestCanonicalSpawnFinalCompletesOriginalRowWithoutInjectingTaskWaitOutput(t *testing.T) {
 	t.Parallel()

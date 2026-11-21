@@ -29,7 +29,7 @@ func TestToolAvailabilityPreservesHistoryAcrossProviderProtocols(t *testing.T) {
 				case "xai":
 					value, err = xAIResponsesRequestFromModel(req, "test-model", 100)
 				case "responses":
-					value, err = newOpenAIResponses(Config{API: APIOpenAI, Model: "test-model"}, "token").buildRequest(req)
+					value, err = newOpenAIResponses(Config{API: model.APIOpenAI, Model: "test-model"}, "token").buildRequest(req)
 				default:
 					captured := make(chan map[string]any, 1)
 					server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

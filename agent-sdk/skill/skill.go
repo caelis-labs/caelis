@@ -35,6 +35,7 @@ type Bundle struct {
 }
 
 type DiscoverRequest struct {
+	// Dirs selects regular discovery roots. Nil uses the scanner's defaults.
 	Dirs          []string
 	WorkspaceDir  string
 	PluginBundles []PluginBundle

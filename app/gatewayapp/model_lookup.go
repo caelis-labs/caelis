@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/internal/version"
 )
 
 type modelLookup struct {
@@ -217,7 +218,9 @@ func resolveModelFromConfig(
 	if err != nil {
 		return kernelimpl.ModelResolution{}, err
 	}
-	resolved, err := modelconfig.BuildModel(cfg, fallbackContextWindow, contextWindow)
+	resolved, err := modelconfig.BuildModel(cfg, modelconfig.ModelBuildOptions{
+		ClientVersion: version.String(), FallbackContextWindow: fallbackContextWindow, OverrideContextWindow: contextWindow,
+	})
 	if err != nil {
 		return kernelimpl.ModelResolution{}, err
 	}

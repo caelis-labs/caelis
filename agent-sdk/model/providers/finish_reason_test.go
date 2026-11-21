@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -151,7 +152,7 @@ func TestOpenAIResponsesJSONFinishReasonEvidence(t *testing.T) {
 				_, _ = fmt.Fprint(w, tc.wire)
 			}))
 			defer server.Close()
-			final, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, APIOpenAIResponses), &model.Request{
+			final, _, _, err := collectOpenAICodexTestResponse(newOpenAIResponsesTestLLM(server, model.APIOpenAIResponses), &model.Request{
 				Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 			})
 			if err != nil {

@@ -85,7 +85,6 @@ func (l *SessionServiceLoader) LoadSession(
 	}
 
 	if cb != nil {
-		spawnReplay := newSpawnReplayProjector(loaded.Events)
 		for _, event := range loaded.Events {
 			if event == nil {
 				continue
@@ -95,7 +94,7 @@ func (l *SessionServiceLoader) LoadSession(
 				return acpsdk.LoadSessionResponse{}, err
 			}
 			for _, notification := range notifications {
-				notification = spawnReplay.normalize(event, notification)
+				notification = normalizeSpawnReplay(event, notification)
 				if err := cb.SessionUpdate(ctx, notification); err != nil {
 					return acpsdk.LoadSessionResponse{}, err
 				}

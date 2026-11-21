@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 // RemoteModel describes one model discovered from provider list APIs.
@@ -31,7 +33,7 @@ func DiscoverModels(ctx context.Context, cfg Config) ([]RemoteModel, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("providers: context is required")
 	}
-	if cfg.API == APIMiniMax {
+	if cfg.API == model.APIMiniMax {
 		cfg = withMiniMaxDefaults(cfg)
 	}
 	token, err := resolveToken(cfg.Auth)
@@ -49,13 +51,13 @@ func DiscoverModels(ctx context.Context, cfg Config) ([]RemoteModel, error) {
 		client = &clone
 	}
 	switch cfg.API {
-	case APIOpenAI, APIOpenAIResponses, APIOpenAICompatible, APIOpenRouter, APIDeepSeek, APIMimo, APIVolcengine, APIVolcengineCoding:
+	case model.APIOpenAI, model.APIOpenAIResponses, model.APIOpenAICompatible, model.APIOpenRouter, model.APIDeepSeek, model.APIMimo, model.APIVolcengine, model.APIVolcengineCoding:
 		return discoverOpenAIModels(ctx, client, cfg, token)
-	case APIGemini:
+	case model.APIGemini:
 		return discoverGeminiModels(ctx, client, cfg, token)
-	case APIAnthropic, APIAnthropicCompatible, APIMiniMax:
+	case model.APIAnthropic, model.APIAnthropicCompatible, model.APIMiniMax:
 		return discoverAnthropicModels(ctx, client, cfg, token)
-	case APIOllama:
+	case model.APIOllama:
 		return discoverOllamaModels(ctx, client, cfg)
 	default:
 		return nil, fmt.Errorf("providers: unsupported api type %q for list_models", cfg.API)
@@ -68,7 +70,7 @@ func discoverOpenAIModels(ctx context.Context, client *http.Client, cfg Config, 
 	if err != nil {
 		return nil, err
 	}
-	applyDefaultAttributionHeaders(req, cfg.API)
+	setUserAgent(req, cfg.UserAgent)
 	applyDefaultAuthHeader(req, cfg, token, false)
 	applyConfiguredHeaders(req, cfg.Headers)
 	resp, err := client.Do(req)
@@ -88,8 +90,7 @@ func discoverOpenAIModels(ctx context.Context, client *http.Client, cfg Config, 
 				Effort string `json:"effort"`
 			} `json:"supported_reasoning_levels"`
 			Modalities struct {
-				Input  []string `json:"input"`
-				Output []string `json:"output"`
+				Input []string `json:"input"`
 			} `json:"modalities"`
 			ContextWindow       any `json:"context_window"`
 			MaxOutputTokens     any `json:"max_output_tokens"`
@@ -188,8 +189,8 @@ func discoverGeminiModels(ctx context.Context, client *http.Client, cfg Config, 
 		if err != nil {
 			return nil, err
 		}
-		applyDefaultAttributionHeaders(req, APIGemini)
-		if cfg.Auth.Type == AuthAPIKey || cfg.Auth.Type == "" {
+		setUserAgent(req, cfg.UserAgent)
+		if cfg.Auth.Type == model.AuthAPIKey || cfg.Auth.Type == "" {
 			req.Header.Set("x-goog-api-key", token)
 		} else if cfg.Auth.Type != "" {
 			applyDefaultAuthHeader(req, cfg, token, true)
@@ -243,7 +244,7 @@ func discoverAnthropicModels(ctx context.Context, client *http.Client, cfg Confi
 	if err != nil {
 		return nil, err
 	}
-	applyDefaultAttributionHeaders(req, cfg.API)
+	setUserAgent(req, cfg.UserAgent)
 	applyDefaultAuthHeader(req, cfg, token, false)
 	applyConfiguredHeaders(req, cfg.Headers)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -297,7 +298,7 @@ func discoverOllamaModels(ctx context.Context, client *http.Client, cfg Config) 
 	if err != nil {
 		return nil, err
 	}
-	applyDefaultAttributionHeaders(req, APIOllama)
+	setUserAgent(req, cfg.UserAgent)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -311,10 +312,8 @@ func discoverOllamaModels(ctx context.Context, client *http.Client, cfg Config) 
 			Name    string `json:"name"`
 			Model   string `json:"model"`
 			Details struct {
-				Family          string   `json:"family"`
-				Families        []string `json:"families"`
-				ParameterSize   string   `json:"parameter_size"`
-				QuantizationLvl string   `json:"quantization_level"`
+				Family        string `json:"family"`
+				ParameterSize string `json:"parameter_size"`
 			} `json:"details"`
 		} `json:"models"`
 	}
@@ -361,13 +360,13 @@ func applyDefaultAuthHeader(req *http.Request, cfg Config, token string, geminiB
 	}
 
 	switch cfg.API {
-	case APIGemini:
+	case model.APIGemini:
 		if geminiBearerOnly {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		return
-	case APIAnthropic, APIAnthropicCompatible, APIMiniMax:
-		if auth.Type == AuthOAuthToken || auth.Type == AuthBearerToken {
+	case model.APIAnthropic, model.APIAnthropicCompatible, model.APIMiniMax:
+		if auth.Type == model.AuthOAuthToken || auth.Type == model.AuthBearerToken {
 			req.Header.Set("Authorization", "Bearer "+token)
 			return
 		}
