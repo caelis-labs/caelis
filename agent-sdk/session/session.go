@@ -194,7 +194,7 @@ func ValidateMetadata(metadata map[string]any) error {
 }
 
 func validateJSONMap(scope string, value map[string]any) error {
-	if err := jsonvalue.ValidateMap(value); err != nil {
+	if err := jsonvalue.Validate(value); err != nil {
 		return &JSONValueError{Scope: scope, Err: err}
 	}
 	return nil
