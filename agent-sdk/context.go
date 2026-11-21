@@ -22,12 +22,6 @@ type Events interface {
 	At(int) *session.Event
 }
 
-// ReadonlyState exposes immutable session state snapshots.
-type ReadonlyState interface {
-	Lookup(string) (any, bool)
-	Snapshot() map[string]any
-}
-
 // SubmissionKind identifies one runtime submission path.
 type SubmissionKind string
 
@@ -273,15 +267,12 @@ type SubagentSpawnContext struct {
 	Completion delegation.CompletionSink `json:"-"`
 }
 
-// Context exposes immutable invocation state derived from persisted events and
-// runtime overlays.
+// Context exposes the Session and event history for one Agent invocation.
 type Context interface {
 	context.Context
 	Session() session.Session
 	Events() Events
-	ReadonlyState() ReadonlyState
 	DrainSubmissions() []Submission
-	Overlay() bool
 }
 
 // Agent is the runtime execution unit.
@@ -306,7 +297,6 @@ type AgentSpec struct {
 	// ResolveModelRequest optionally replaces model-facing configuration at
 	// every unsent request boundary. Runtime authority and policy remain fixed.
 	ResolveModelRequest       ModelRequestResolver `json:"-"`
-	SubagentRunner            SubagentRunner       `json:"-"`
 	Request                   ModelRequestOptions
 	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
 	Metadata                  map[string]any     `json:"metadata,omitempty"`
@@ -365,9 +355,7 @@ type ContextSpec struct {
 	Context          context.Context
 	Session          session.Session
 	Events           []*session.Event
-	State            map[string]any
 	DrainSubmissions func() []Submission
-	Overlay          bool
 	// InputReady optionally observes queued input without consuming it. The
 	// callback must support concurrent calls; see InputReady for signal semantics.
 	InputReady func() <-chan struct{}
@@ -386,9 +374,7 @@ func NewContext(spec ContextSpec) Context {
 		Context:          ctx,
 		session:          session.CloneSession(spec.Session),
 		events:           NewEvents(spec.Events),
-		state:            NewReadonlyState(spec.State),
 		drainSubmissions: spec.DrainSubmissions,
-		overlay:          spec.Overlay,
 	}
 }
 
@@ -399,11 +385,6 @@ func NewEvents(events []*session.Event) Events {
 		return eventSlice{}
 	}
 	return eventSlice{events: session.CloneEvents(events)}
-}
-
-// NewReadonlyState wraps one state snapshot as one readonly view.
-func NewReadonlyState(values map[string]any) ReadonlyState {
-	return readonlyStateSnapshot{values: jsonvalue.CloneMap(values)}
 }
 
 type eventSlice struct {
@@ -431,26 +412,11 @@ func (e eventSlice) At(i int) *session.Event {
 	return session.CloneEvent(e.events[i])
 }
 
-type readonlyStateSnapshot struct {
-	values map[string]any
-}
-
-func (s readonlyStateSnapshot) Lookup(key string) (any, bool) {
-	value, ok := s.values[key]
-	return jsonvalue.Clone(value), ok
-}
-
-func (s readonlyStateSnapshot) Snapshot() map[string]any {
-	return jsonvalue.CloneMap(s.values)
-}
-
 type contextSnapshot struct {
 	context.Context
 	session          session.Session
 	events           Events
-	state            ReadonlyState
 	drainSubmissions func() []Submission
-	overlay          bool
 }
 
 func (c *contextSnapshot) Session() session.Session {
@@ -461,19 +427,11 @@ func (c *contextSnapshot) Events() Events {
 	return c.events
 }
 
-func (c *contextSnapshot) ReadonlyState() ReadonlyState {
-	return c.state
-}
-
 func (c *contextSnapshot) DrainSubmissions() []Submission {
 	if c == nil || c.drainSubmissions == nil {
 		return nil
 	}
 	return CloneSubmissions(c.drainSubmissions())
-}
-
-func (c *contextSnapshot) Overlay() bool {
-	return c != nil && c.overlay
 }
 
 // CloneSubmission copies one submission before queueing or fan-out.

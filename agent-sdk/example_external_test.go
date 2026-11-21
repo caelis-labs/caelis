@@ -18,7 +18,6 @@ func ExampleNewContext() {
 			Message:    &message,
 			Text:       "hello",
 		}},
-		State: map[string]any{"mode": "default"},
 	})
 
 	for event := range ctx.Events().All() {
