@@ -179,7 +179,7 @@ func filterPromptVisibleEvents(events []*session.Event) []*session.Event {
 		if !session.IsCanonicalHistoryEvent(event) {
 			continue
 		}
-		out = append(out, session.CloneEvent(event))
+		out = append(out, event)
 	}
 	return out
 }

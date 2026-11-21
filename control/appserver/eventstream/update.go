@@ -61,7 +61,7 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	}
 	var target Update
 	switch probe.SessionUpdate {
-	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
+	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought, UpdateCompact:
 		target = &ContentChunk{}
 	case UpdateToolCall:
 		target = &ToolCall{}

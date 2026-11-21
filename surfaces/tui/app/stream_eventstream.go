@@ -85,10 +85,8 @@ const (
 	compactNoticeSourceTransient
 )
 
-// suppressPairedCompactNotice folds the durable compact projection and the
-// Runtime's transient success notice into one TUI row. Each unmatched signal
-// is still rendered, so SDK-only streams and repeated compactions remain
-// visible once per actual compaction.
+// suppressPairedCompactNotice folds the two live projections of one checkpoint.
+// Legacy notices without a checkpoint ID pair in Turn order.
 func (m *Model) suppressPairedCompactNotice(env eventstream.Envelope) bool {
 	if m == nil || (env.Scope != "" && env.Scope != eventstream.ScopeMain) {
 		return false
@@ -96,8 +94,15 @@ func (m *Model) suppressPairedCompactNotice(env eventstream.Envelope) bool {
 	source := compactNoticeSource(0)
 	switch {
 	case env.Kind == eventstream.KindSessionUpdate && eventstream.UpdateType(env.Update) == eventstream.UpdateCompact:
+		if m.duplicateCompactCheckpoint(env.EventID) {
+			return true
+		}
 		source = compactNoticeSourceCanonical
-	case env.Kind == eventstream.KindNotice && strings.TrimSpace(env.Notice) == transcript.CompactNoticeLabel:
+	case env.Kind == eventstream.KindNotice && (env.NoticeKind == eventstream.NoticeKindCompact ||
+		strings.TrimSpace(env.Notice) == transcript.CompactNoticeLabel):
+		if env.NoticeKind == eventstream.NoticeKindCompact && env.EventID != "" {
+			return m.duplicateCompactCheckpoint(env.EventID)
+		}
 		source = compactNoticeSourceTransient
 	default:
 		return false
@@ -118,12 +123,34 @@ func (m *Model) suppressPairedCompactNotice(env eventstream.Envelope) bool {
 		}
 		m.compactNoticePair.canonicalUnmatched++
 	case compactNoticeSourceTransient:
+		if env.Position != nil && env.Position.Transient != nil {
+			pos := *env.Position.Transient
+			last := m.compactNoticePair.lastTransient
+			if pos.Generation == last.Generation && pos.Sequence <= last.Sequence {
+				return true
+			}
+			m.compactNoticePair.lastTransient = pos
+		}
 		if m.compactNoticePair.canonicalUnmatched > 0 {
 			m.compactNoticePair.canonicalUnmatched--
 			return true
 		}
 		m.compactNoticePair.transientUnmatched++
 	}
+	return false
+}
+
+func (m *Model) duplicateCompactCheckpoint(id string) bool {
+	if id == "" {
+		return false
+	}
+	if _, seen := m.seenCompactCheckpoints[id]; seen {
+		return true
+	}
+	if m.seenCompactCheckpoints == nil {
+		m.seenCompactCheckpoints = make(map[string]struct{})
+	}
+	m.seenCompactCheckpoints[id] = struct{}{}
 	return false
 }
 

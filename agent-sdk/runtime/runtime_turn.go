@@ -112,7 +112,7 @@ func (r *Runtime) runWithOverflowRecovery(
 		}
 		var adopted *asyncCompactAdoptedError
 		if errors.As(err, &adopted) {
-			sink.publishEvent(normalizeEvent(activeSession, turnID, buildCompactNoticeEvent(activeSession, turnID, r.now())))
+			r.publishCompactCompletion(sink, adopted.checkpoint)
 			continue
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
@@ -192,8 +192,7 @@ func (r *Runtime) runAttempt(
 	}
 	if invocation.LiveCompact != nil {
 		observeSequence(invocation.LiveCompact)
-		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
-		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
+		r.publishCompactNotice(sink, invocation.LiveCompact)
 	}
 
 	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, invocation.State, runID, turnID, req, toolStepSequence)

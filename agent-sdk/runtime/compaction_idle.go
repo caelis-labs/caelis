@@ -342,7 +342,7 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	}
 	l := &autoCompactGatedLLM{runtime: j.runtime, sessionRef: c.source.Session.SessionRef, inner: c.llm, requestAuthority: j.authority}
 	adopted, err := j.runtime.adoptCompactionCandidate(ctx, l, c, "", appendCheckpoint)
-	if !adopted && (errors.Is(err, session.ErrIdleCompactionRevoked) || errors.Is(err, context.Canceled) || errors.Is(err, errSessionWriteBusy)) {
+	if adopted == nil && (errors.Is(err, session.ErrIdleCompactionRevoked) || errors.Is(err, context.Canceled) || errors.Is(err, errSessionWriteBusy)) {
 		j.keepReadyCandidate()
 	}
 	return err
@@ -416,10 +416,10 @@ func (j *IdleCompactionJob) Close() {
 	}
 }
 
-func (l *autoCompactGatedLLM) adoptReadyIdleCandidate(ctx context.Context, req *model.Request) (bool, error) {
+func (l *autoCompactGatedLLM) adoptReadyIdleCandidate(ctx context.Context, req *model.Request) (*session.Event, error) {
 	r := l.runtime
 	if !r.compaction.Idle.Enabled {
-		return false, nil
+		return nil, nil
 	}
 	key := compactionSessionKey(l.sessionRef)
 	r.idleCandidateMu.Lock()
@@ -429,16 +429,16 @@ func (l *autoCompactGatedLLM) adoptReadyIdleCandidate(ctx context.Context, req *
 	}
 	r.idleCandidateMu.Unlock()
 	if candidate == nil {
-		return false, nil
+		return nil, nil
 	}
 	job := candidate.job
 	age := r.now().Sub(candidate.readyAt)
 	if age < 0 || age > 120*time.Second || l.requestAuthority == nil || job.epoch != l.requestAuthority.epoch || !sameCompactionModel(job.llm, l.inner) {
-		return false, nil
+		return nil, nil
 	}
 	hash, err := asyncRequestFingerprint(req)
 	if err != nil || hash != job.requestHash {
-		return false, err
+		return nil, err
 	}
 	job.guard = session.RuntimeMutationGuard(ctx)
 	return r.adoptAsyncCompaction(ctx, l, job)

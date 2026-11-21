@@ -40,6 +40,7 @@ func (m *Model) resetConversationView() {
 	m.runningHintTracker.endTurn()
 	m.runningActivity = runningActivityState{}
 	m.compactNoticePair = compactNoticePairState{}
+	m.seenCompactCheckpoints = nil
 	m.subagentOutputOverlay = nil
 	m.workspace.childFocused = false
 	m.workspace.lastCallID = ""
