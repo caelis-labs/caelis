@@ -75,7 +75,7 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 				}
 			}))
 			defer server.Close()
-			cfg := Config{Alias: "test", API: api, Provider: "gateway", Model: "deepseek/deepseek-flash", BaseURL: server.URL, HTTPClient: server.Client(), ImageInput: true, MaxOutputTok: 1024,
+			cfg := Config{API: api, Provider: "gateway", Model: "deepseek/deepseek-flash", BaseURL: server.URL, HTTPClient: server.Client(), ImageInput: true, MaxOutputTok: 1024,
 				Auth: AuthConfig{Type: AuthAPIKey, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}
 			if api == APIDeepSeek {
 				cfg.BaseURL += "/anthropic"
@@ -83,11 +83,7 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 			if api == APIOpenAICodex || api == APIXAIResponses {
 				cfg.Auth.Type = AuthOAuthToken
 			}
-			factory := NewFactory()
-			if err := factory.Register(cfg); err != nil {
-				t.Fatal(err)
-			}
-			llm, err := factory.NewByAlias("test")
+			llm, err := New(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,15 +142,11 @@ func TestFactoryDoesNotRetryPermanentImageHTTPFailures(t *testing.T) {
 					_, _ = fmt.Fprint(w, `{"error":{"code":400,"type":"invalid_request_error","status":"INVALID_ARGUMENT","message":"You have uploaded an unsupported image"}}`)
 				}))
 				defer server.Close()
-				factory := NewFactory()
-				cfg := Config{Alias: "test", API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}
+				cfg := Config{API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}
 				if api == APIOpenAICodex || api == APIXAIResponses {
 					cfg.Auth.Type = AuthOAuthToken
 				}
-				if err := factory.Register(cfg); err != nil {
-					t.Fatal(err)
-				}
-				llm, err := factory.NewByAlias("test")
+				llm, err := New(cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -185,11 +177,7 @@ func TestFactoryDoesNotRetryPermanentImageResponsesEvents(t *testing.T) {
 					_, _ = fmt.Fprintf(w, "data: %s\n\n", event)
 				}))
 				defer server.Close()
-				factory := NewFactory()
-				if err := factory.Register(Config{Alias: "test", API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Type: AuthOAuthToken, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}); err != nil {
-					t.Fatal(err)
-				}
-				llm, err := factory.NewByAlias("test")
+				llm, err := New(Config{API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Type: AuthOAuthToken, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
 				if err != nil {
 					t.Fatal(err)
 				}

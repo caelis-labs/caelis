@@ -19,17 +19,17 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 )
 
-func TestOpenAIResponsesFactoryRoutesOfficialAndGenericToResponses(t *testing.T) {
+func TestNewRoutesOfficialAndGenericToOpenAIResponses(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name    string
-		alias   string
+		name string
+
 		api     APIType
 		wantAPI string
 	}{
-		{name: "official openai", alias: "openai/gpt-test", api: APIOpenAI, wantAPI: "openai"},
-		{name: "generic openai_responses", alias: "acme/gpt-test", api: APIOpenAIResponses, wantAPI: "openai_responses"},
+		{name: "official openai", api: APIOpenAI, wantAPI: "openai"},
+		{name: "generic openai_responses", api: APIOpenAIResponses, wantAPI: "openai_responses"},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,21 +41,17 @@ func TestOpenAIResponsesFactoryRoutesOfficialAndGenericToResponses(t *testing.T)
 			}))
 			defer server.Close()
 
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias:      tc.alias,
+			llm, err := New(Config{
+
 				Provider:   "openai",
 				API:        tc.api,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
 				Auth:       AuthConfig{Type: AuthAPIKey, Token: "sk-test"},
-			}); err != nil {
-				t.Fatalf("Register() error = %v", err)
-			}
-			llm, err := factory.NewByAlias(tc.alias)
+			})
 			if err != nil {
-				t.Fatalf("NewByAlias() error = %v", err)
+				t.Fatalf("New() error = %v", err)
 			}
 			caps, ok := model.CapabilitiesOf(llm)
 			if !ok || !caps.ToolCalls || !caps.Streaming || !caps.StructuredOutput || !caps.ParallelToolCalls || !caps.ReasoningContinuation || caps.HostedTools {
@@ -84,21 +80,17 @@ func TestOpenAIResponsesCompatibleFactoryStaysChatCompletions(t *testing.T) {
 	}))
 	defer server.Close()
 
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias:      "compat/gpt-test",
+	llm, err := New(Config{
+
 		Provider:   "openai-compatible",
 		API:        APIOpenAICompatible,
 		Model:      "gpt-test",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Auth:       AuthConfig{Type: AuthAPIKey, Token: "sk-test"},
-	}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	llm, err := factory.NewByAlias("compat/gpt-test")
+	})
 	if err != nil {
-		t.Fatalf("NewByAlias() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},

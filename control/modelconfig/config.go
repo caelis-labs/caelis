@@ -27,10 +27,7 @@ type Config struct {
 	Model              string            `json:"model,omitempty"`
 	BaseURL            string            `json:"base_url,omitempty"`
 	HTTPClient         *http.Client      `json:"-"`
-	// CredentialPath is transient Host wiring for providers whose SDK runtime
-	// reads a provider-owned credential file. It is never persisted.
-	CredentialPath string `json:"-"`
-	Token          string `json:"token,omitempty"`
+	Token              string            `json:"token,omitempty"`
 	// CredentialRef identifies a Control-owned credential without persisting
 	// the credential material in the model profile.
 	CredentialRef string `json:"credential_ref,omitempty"`

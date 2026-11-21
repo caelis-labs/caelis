@@ -129,7 +129,6 @@ func configuredModelGeneration(raw ModelConfig) ModelConfig {
 	config.DefaultReasoningEffort = ""
 	config = normalizeModelConfig(config)
 	config.HTTPClient = nil
-	config.CredentialPath = ""
 	config.Token = ""
 	config.PersistToken = false
 	return config

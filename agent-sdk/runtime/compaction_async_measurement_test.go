@@ -130,15 +130,11 @@ func TestAsyncCompactionLiveProvider(t *testing.T) {
 	if key == "" {
 		t.Skip("DEEPSEEK_API_KEY is unavailable")
 	}
-	factory := providers.NewFactory()
-	if err := factory.Register(providers.Config{
-		Alias: "async-live", Provider: "deepseek", API: providers.APIDeepSeek, Model: "deepseek-flash",
+	provider, err := providers.New(providers.Config{
+		Provider: "deepseek", API: providers.APIDeepSeek, Model: "deepseek-flash",
 		BaseURL: "https://api.deepseek.com/anthropic", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: key},
-		Timeout: 45 * time.Second, MaxOutputTok: 1200, ContextWindowTokens: 10000, ReasoningEffort: "none",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	provider, err := factory.NewByAlias("async-live")
+		Timeout: 45 * time.Second, MaxOutputTok: 1200, ContextWindowTokens: 10000,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

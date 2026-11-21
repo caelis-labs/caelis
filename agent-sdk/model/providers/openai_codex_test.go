@@ -90,21 +90,17 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 
 	client := server.Client()
 	client.Transport = openAICodexTestAuthTransport{base: client.Transport}
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias:      "codex/gpt-5.4",
+	llm, err := New(Config{
+
 		Provider:   "openai-codex",
 		API:        APIOpenAICodex,
 		Model:      "gpt-5.4",
 		BaseURL:    server.URL,
 		HTTPClient: client,
 		Auth:       AuthConfig{Type: AuthOAuthToken},
-	}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	llm, err := factory.NewByAlias("codex/gpt-5.4")
+	})
 	if err != nil {
-		t.Fatalf("NewByAlias() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	user := model.NewMessage(
@@ -419,9 +415,8 @@ func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
 			}))
 			defer server.Close()
 
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias:      "codex/retry-test",
+			llm, err := New(Config{
+
 				Provider:   "openai-codex",
 				API:        APIOpenAICodex,
 				Model:      "gpt-test",
@@ -435,12 +430,9 @@ func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
 					RateLimitBaseDelay:  time.Nanosecond,
 					RateLimitMaxDelay:   time.Nanosecond,
 				},
-			}); err != nil {
-				t.Fatalf("Register() error = %v", err)
-			}
-			llm, err := factory.NewByAlias("codex/retry-test")
+			})
 			if err != nil {
-				t.Fatalf("NewByAlias() error = %v", err)
+				t.Fatalf("New() error = %v", err)
 			}
 
 			response, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
@@ -503,9 +495,8 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 			}))
 			defer server.Close()
 
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias:      "codex/permanent-error",
+			llm, err := New(Config{
+
 				Provider:   "openai-codex",
 				API:        APIOpenAICodex,
 				Model:      "gpt-test",
@@ -519,12 +510,9 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 					RateLimitBaseDelay:  time.Nanosecond,
 					RateLimitMaxDelay:   time.Nanosecond,
 				},
-			}); err != nil {
-				t.Fatalf("Register() error = %v", err)
-			}
-			llm, err := factory.NewByAlias("codex/permanent-error")
+			})
 			if err != nil {
-				t.Fatalf("NewByAlias() error = %v", err)
+				t.Fatalf("New() error = %v", err)
 			}
 
 			_, _, _, err = collectOpenAICodexTestResponse(llm, &model.Request{
@@ -544,12 +532,8 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {
 	t.Parallel()
 
-	factory := NewFactory()
-	if err := factory.Register(Config{Alias: "codex", API: APIOpenAICodex, Model: "gpt-test"}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if _, err := factory.NewByAlias("codex"); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
-		t.Fatalf("NewByAlias() error = %v", err)
+	if _, err := New(Config{API: APIOpenAICodex, Model: "gpt-test"}); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
+		t.Fatalf("New() error = %v", err)
 	}
 }
 

@@ -70,9 +70,7 @@ func TestOllamaRegisterAndCreate(t *testing.T) {
 	}))
 	defer server.Close()
 
-	factory := NewFactory()
 	cfg := Config{
-		Alias:      "ollama/qwen2.5:7b",
 		Provider:   "ollama",
 		API:        APIOllama,
 		Model:      "qwen2.5:7b",
@@ -82,10 +80,7 @@ func TestOllamaRegisterAndCreate(t *testing.T) {
 			Type: AuthNone,
 		},
 	}
-	if err := factory.Register(cfg); err != nil {
-		t.Fatalf("register ollama config: %v", err)
-	}
-	llm, err := factory.NewByAlias("ollama/qwen2.5:7b")
+	llm, err := New(cfg)
 	if err != nil {
 		t.Fatalf("create ollama LLM: %v", err)
 	}
@@ -169,9 +164,7 @@ func TestOllamaStructuredOutputRequest(t *testing.T) {
 }
 
 func TestOllamaAuthNoneAllowsEmptyToken(t *testing.T) {
-	factory := NewFactory()
 	cfg := Config{
-		Alias:    "ollama/test-model",
 		Provider: "ollama",
 		API:      APIOllama,
 		Model:    "test-model",
@@ -180,13 +173,9 @@ func TestOllamaAuthNoneAllowsEmptyToken(t *testing.T) {
 			Type: AuthNone,
 		},
 	}
-	if err := factory.Register(cfg); err != nil {
-		t.Fatalf("register should succeed with AuthNone: %v", err)
-	}
-	// NewByAlias should not fail due to empty token.
-	llm, err := factory.NewByAlias("ollama/test-model")
+	llm, err := New(cfg)
 	if err != nil {
-		t.Fatalf("NewByAlias should not fail with AuthNone and empty token: %v", err)
+		t.Fatalf("New should not fail with AuthNone and empty token: %v", err)
 	}
 	if llm == nil {
 		t.Fatal("expected non-nil LLM")

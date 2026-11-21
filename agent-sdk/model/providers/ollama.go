@@ -91,7 +91,7 @@ type ollamaChatResponse struct {
 // newOllama returns a native Ollama /api/chat client.
 func newOllama(cfg Config, token string) model.LLM {
 	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
-		(len(cfg.ReasoningLevels) > 0 || len(cfg.SupportedReasoningEfforts) > 0) {
+		len(cfg.ReasoningLevels) > 0 {
 		// Explicit levels retain the compatible boolean control contract.
 		cfg.ReasoningMode = "toggle"
 	}

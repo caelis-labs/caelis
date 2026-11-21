@@ -100,9 +100,8 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias: "xai/grok-4.5", Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
+	llm, err := New(Config{
+		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768, ContextWindowTokens: 500000,
 		Auth: AuthConfig{Type: AuthOAuthToken},
 		Headers: map[string]string{
@@ -127,10 +126,7 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 			"X-XAI-Token-Auth":         "spoofed-token-mode",
 			"X-Custom-Safe":            "preserved",
 		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("xai/grok-4.5")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,14 +244,10 @@ func TestXAIResponsesFactoryRequiresOAuthClient(t *testing.T) {
 		{name: "missing client", auth: AuthOAuthToken, want: "authenticated http client"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias: "grok", API: APIXAIResponses, Model: "grok-4.5", Auth: AuthConfig{Type: tc.auth},
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := factory.NewByAlias("grok"); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("NewByAlias() error = %v, want %q", err, tc.want)
+			if _, err := New(Config{
+				API: APIXAIResponses, Model: "grok-4.5", Auth: AuthConfig{Type: tc.auth},
+			}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New() error = %v, want %q", err, tc.want)
 			}
 		})
 	}

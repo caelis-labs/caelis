@@ -746,9 +746,8 @@ func TestExpiredRefreshIsTerminalThroughProviderRetryLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	factory := providers.NewFactory()
-	if err := factory.Register(providers.Config{
-		Alias:      "codex",
+	llm, err := providers.New(providers.Config{
+
 		Provider:   "openai-codex",
 		API:        providers.APIOpenAICodex,
 		Model:      "gpt-test",
@@ -756,10 +755,7 @@ func TestExpiredRefreshIsTerminalThroughProviderRetryLayer(t *testing.T) {
 		HTTPClient: client,
 		Auth:       providers.AuthConfig{Type: providers.AuthOAuthToken},
 		Retry:      model.RetryConfig{MaxRetries: 3, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("codex")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

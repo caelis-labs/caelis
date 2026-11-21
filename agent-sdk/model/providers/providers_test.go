@@ -68,38 +68,10 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 	}
 }
 
-func TestNewByAliasRequiresRegistration(t *testing.T) {
-	factory := NewFactory()
-	if _, err := factory.NewByAlias("deepseek/deepseek-v4-flash"); err == nil {
-		t.Fatalf("expected unknown alias error without registration")
-	}
-
-	cfg := Config{
-		Alias:               "deepseek/deepseek-v4-flash",
-		Provider:            "deepseek",
-		API:                 APIDeepSeek,
-		Model:               "deepseek-v4-flash",
-		BaseURL:             "https://api.deepseek.com/v1",
-		ContextWindowTokens: 64000,
-		Auth: AuthConfig{
-			Type:  AuthAPIKey,
-			Token: "secret",
-		},
-	}
-	if err := factory.Register(cfg); err != nil {
-		t.Fatalf("register provider config: %v", err)
-	}
-	if _, err := factory.NewByAlias(cfg.Alias); err != nil {
-		t.Fatalf("NewByAlias(registered alias) error = %v", err)
-	}
-}
-
-func TestFactoryRequiresTokenFromConfig(t *testing.T) {
+func TestNewRequiresTokenFromConfig(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "env-token-should-be-ignored")
 
-	factory := NewFactory()
 	cfg := Config{
-		Alias:    "openai/gpt-4o-mini",
 		Provider: "openai",
 		API:      APIOpenAI,
 		Model:    "gpt-4o-mini",
@@ -108,10 +80,7 @@ func TestFactoryRequiresTokenFromConfig(t *testing.T) {
 			Type: AuthAPIKey,
 		},
 	}
-	if err := factory.Register(cfg); err != nil {
-		t.Fatalf("register provider config: %v", err)
-	}
-	_, err := factory.NewByAlias(cfg.Alias)
+	_, err := New(cfg)
 	if err == nil {
 		t.Fatalf("expected missing token error")
 	}
