@@ -230,6 +230,26 @@ func TestJSExecCanonicalCursorCommitsOnlyAdvancement(t *testing.T) {
 	assertSubagentSagaModelRoundTrip(t, store, active.SessionRef)
 }
 
+func TestJSExecCanonicalCursorDoesNotRewriteReceiptMetadata(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	tasks := &taskRuntime{store: sessionfile.NewTaskStore(store)}
+	meta := map[string]any{"runtime": map[string]any{
+		"binding": map[string]any{"task_result": true},
+		"task":    map[string]any{"kind": string(taskapi.KindCodeMode)},
+	}}
+	event := &session.Event{
+		Type: session.EventTypeToolResult,
+		Tool: &session.EventTool{Name: codemode.ToolName},
+		Meta: map[string]any{"caelis": meta},
+	}
+	if err := tasks.syncCanonicalToolResult(t.Context(), active.SessionRef, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := meta["version"]; found {
+		t.Fatal("cursor read inserted a version into the original receipt")
+	}
+}
+
 type failCodeModeInitialStore struct {
 	taskapi.Store
 	failure error

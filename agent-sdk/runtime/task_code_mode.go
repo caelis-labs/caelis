@@ -308,8 +308,8 @@ func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRe
 // Canonical delivery advances the existing Task frontier without replacing its
 // original selected result or producer state with an observation envelope.
 func (tm *taskRuntime) syncCanonicalCodeModeCursor(ctx context.Context, ref session.SessionRef, event *session.Event) error {
-	id := taskRuntimeMetaString(event.Meta, "task", "task_id")
-	section := toolbinding.RuntimeSection(event.Meta, "task")
+	section := taskRuntimeMetaReadSection(event.Meta, "task")
+	id := taskStringValue(section["task_id"])
 	cursor, ok := taskInt64Value(section["model_output_cursor"])
 	if !ok || cursor < 0 {
 		return nil
