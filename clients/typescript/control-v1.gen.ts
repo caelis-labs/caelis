@@ -536,6 +536,7 @@ export interface CommandResource {
 export interface CommandResult {
   acp_connect?: ACPConnectReceipt;
   background_grant?: SessionBackgroundGrant;
+  checkpoint_id?: string;
   configuration?: SessionConfiguration;
   detail?: string;
   error_code?: ErrorCode;

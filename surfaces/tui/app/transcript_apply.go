@@ -126,6 +126,10 @@ func (m *Model) applyTranscriptEvents(events []TranscriptEvent, reconnectReplay 
 		if m.subagentOutputEventKey(event) != "" {
 			continue
 		}
+		if reconnectReplay && event.Kind == TranscriptEventNotice && event.Scope == ACPProjectionMain &&
+			event.NoticeKind == transcript.NoticeKindCompact && m.duplicateCompactCheckpoint(event.SourceEventID) {
+			continue
+		}
 		model, cmd := m.applyTranscriptEvent(event, reconnectReplay)
 		if next, ok := model.(*Model); ok {
 			m = next

@@ -866,9 +866,9 @@ func (s *fakeService) ResumeSession(context.Context, string) (SessionSnapshot, e
 func (s *fakeService) ListSessions(context.Context, int) ([]ResumeCandidate, error) {
 	return nil, nil
 }
-func (s *fakeService) Compact(context.Context) (bool, error) {
+func (s *fakeService) Compact(context.Context) (CompactResult, error) {
 	s.compacted = true
-	return !s.compactNoop, nil
+	return CompactResult{Compacted: !s.compactNoop}, nil
 }
 
 type routerReconnect struct{ state appserver.SessionState }

@@ -247,6 +247,18 @@ func TestComputeUsageSnapshotForModelKeepsRecordedPrefixAcrossCompact(t *testing
 	}
 }
 
+func TestProviderSnapshotGroupStopsAtCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	usage := map[string]any{"prompt_tokens": 500, "model": "fixture", "provider": "fixture"}
+	retained := &session.Event{ID: "retained", Seq: 2, Meta: usage}
+	fresh := &session.Event{ID: "fresh", Seq: 4, Meta: usage}
+	snapshot, ok := latestProviderTokenSnapshotUsing([]*session.Event{retained, fresh}, 3, nil)
+	if !ok || snapshot.BaselineTokens != 500 || snapshot.EventID != fresh.ID || snapshot.DeltaStartIndex != 1 {
+		t.Fatalf("equal usage amounts grouped across the checkpoint: %+v", snapshot)
+	}
+}
+
 func TestComputeUsageSnapshotForModelDoesNotReuseDifferentModelRequestPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -565,6 +577,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 		[]*session.Event{assistant},
 		258400,
 		CompactionConfig{},
+		0,
 		func(snapshot providerTokenSnapshot) bool {
 			return providerSnapshotCompatibleWithLLM(snapshot, modelIdentity)
 		},

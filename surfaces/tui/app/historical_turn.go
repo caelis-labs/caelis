@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -205,6 +206,10 @@ func historicalTurnEvents(events []SubagentEvent) []SubagentEvent {
 			}
 		case SESemanticBoundary:
 			out = append(out, ev)
+		case SENotice:
+			if ev.NoticeKind == transcript.NoticeKindCompact {
+				out = append(out, ev)
+			}
 		}
 	}
 	return out
@@ -220,6 +225,10 @@ func historicalTurnEventsRowHint(events []SubagentEvent, width int) int {
 			rows += historicalNarrativeRowHint(ev.Text, prefix, width)
 		case SEUserInput:
 			rows += historicalNarrativeRowHint(ev.Text, userNarrativePrefix, width)
+		case SENotice:
+			if ev.NoticeKind == transcript.NoticeKindCompact {
+				rows++
+			}
 		}
 	}
 	return rows

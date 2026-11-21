@@ -4,6 +4,7 @@ package tuiapp
 // anchoring then relocates both the top row and selection after layout changes.
 func (m *Model) prependSessionHistory(older *Model) {
 	m.doc = prependHistoryDocument(older.doc, m.doc)
+	m.seenCompactCheckpoints = mergeHistoryMap(m.seenCompactCheckpoints, older.seenCompactCheckpoints)
 	m.mainAnchorBlockIDs = mergeHistoryMap(m.mainAnchorBlockIDs, older.mainAnchorBlockIDs)
 	m.participantTurnIDs = mergeHistoryMap(m.participantTurnIDs, older.participantTurnIDs)
 	for callID, earlier := range older.subagentOutputViews {

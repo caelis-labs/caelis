@@ -46,19 +46,28 @@ func buildCompactActivityEvent(activeSession session.Session, turnID string, occ
 	})
 }
 
-func buildCompactNoticeEvent(activeSession session.Session, turnID string, occurredAt time.Time) *session.Event {
-	scope := defaultScope(activeSession, turnID)
+func (r *Runtime) publishCompactCompletion(sink *runner, checkpoint *session.Event) {
+	sink.publishEvent(checkpoint)
+	r.publishCompactNotice(sink, checkpoint)
+}
+
+func (r *Runtime) publishCompactNotice(sink *runner, checkpoint *session.Event) {
+	if sink == nil || checkpoint == nil {
+		return
+	}
+	// Keep the SDK's live success notice. Its source identity lets a Surface
+	// fold it with this exact checkpoint across live and replay deliveries.
 	event := &session.Event{
-		Type:  session.EventTypeNotice,
-		Time:  occurredAt,
-		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
-		Scope: &scope,
+		ID:        checkpoint.ID,
+		SessionID: checkpoint.SessionID,
+		Type:      session.EventTypeNotice,
+		Time:      r.now(),
+		Actor:     session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+		Scope:     checkpoint.Scope,
 	}
-	event = session.MarkNotice(event, "notice", display.CompactNoticeLabel)
-	if event != nil && event.Notice != nil {
-		event.Notice.Kind = session.EventNoticeKindCompact
-	}
-	return event
+	session.MarkNotice(event, "notice", display.CompactNoticeLabel)
+	event.Notice.Kind = session.EventNoticeKindCompact
+	sink.publishEvent(event)
 }
 
 func buildCompactFailureNoticeEvent(activeSession session.Session, turnID string, occurredAt time.Time, cause error) *session.Event {
