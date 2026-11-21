@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -54,7 +55,7 @@ func restoredTaskFixture() *task.Entry {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
 	entry.Metadata["child_activity_id"] = "a"
 	entry.Metadata["session_id"] = "child"
-	entry.Spec = map[string]any{"target": delegation.Target{Selector: "helper", Placement: delegation.Placement{Kind: delegation.PlacementAgent, Agent: "helper"}}}
+	entry.Spec = map[string]any{"target": delegation.Target{Selector: "helper", Placement: placement.Placement{Kind: placement.KindAgent, Agent: "helper"}}}
 	return entry
 }
 

@@ -76,7 +76,7 @@ func testControllerSpawn(t *testing.T, recoverController bool) {
 		t.Fatal(ctx.Err())
 	}
 	frozen := mustSealPlacement(t, placement.Placement{Kind: placement.KindAgent, ProfileID: "acp:child:model", Agent: "child", Model: "child", ConfigFingerprint: "config", ReasoningEffort: "none", SessionConfigValues: map[string]string{"service_tier": "priority"}})
-	base := spawn.NewWithTargets([]delegation.Agent{{Name: "helper"}}, map[string]spawn.Target{"helper": {Selector: "helper", Placement: frozen}})
+	base := spawn.NewWithTargets([]delegation.Agent{{Name: "helper"}}, map[string]delegation.Target{"helper": {Selector: "helper", Placement: frozen}})
 	call := tool.Call{ID: "external-spawn", Name: spawn.ToolName, Input: []byte(`{"agent":"helper","prompt":"work"}`)}
 	stale := "old-epoch"
 	if recoverController {

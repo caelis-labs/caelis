@@ -276,14 +276,14 @@ func (c *applicationChildren) tools(ctx context.Context) ([]tool.Tool, error) {
 		return nil, err
 	}
 	agents := make([]delegation.Agent, 0, len(handles))
-	targets := make(map[string]spawn.Target, len(handles))
+	targets := make(map[string]delegation.Target, len(handles))
 	for _, handle := range handles {
 		frozen, err := c.placement(ctx, agentbinding.Handle(handle))
 		if err != nil {
 			return nil, err
 		}
 		agents = append(agents, delegation.Agent{Name: handle, Description: "Independent child using this Application profile"})
-		targets[handle] = spawn.Target{Selector: handle, Placement: frozen}
+		targets[handle] = delegation.Target{Selector: handle, Placement: frozen}
 	}
 	return append(c.leaseTools(result), spawn.NewWithTargets(agents, targets).WithAdmission(func(ctx context.Context) error {
 		_, err := c.source(ctx)

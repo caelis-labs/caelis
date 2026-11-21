@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -176,7 +175,7 @@ func TestTeamChildPreparationUsesMaterializedCredentials(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: spawn.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
+				agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: sdkdelegation.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
 				if err != nil {
 					t.Fatal(err)
 				}

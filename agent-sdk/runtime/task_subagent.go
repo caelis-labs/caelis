@@ -12,6 +12,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -559,8 +560,8 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		agent := taskSpecString(entry.Spec, "agent")
 		target = delegation.Target{
 			Selector: agent,
-			Placement: delegation.Placement{
-				Kind:  delegation.PlacementAgent,
+			Placement: placement.Placement{
+				Kind:  placement.KindAgent,
 				Agent: firstNonEmpty(taskSpecString(entry.Spec, "target_agent"), agent),
 			},
 		}

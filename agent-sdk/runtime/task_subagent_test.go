@@ -1647,11 +1647,11 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 	targetTool := runtimeSpawnTool{
 		base: spawn.NewWithTargets(
 			[]delegation.Agent{{Name: "self"}, {Name: "orbit"}},
-			map[string]spawn.Target{
+			map[string]delegation.Target{
 				"orbit": {
 					Selector: "orbit",
-					Placement: mustSealPlacement(t, delegation.Placement{
-						Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high", ConfigFingerprint: "config-v1",
+					Placement: mustSealPlacement(t, placement.Placement{
+						Kind: placement.KindModel, Model: "provider/model", ReasoningEffort: "high", ConfigFingerprint: "config-v1",
 					}),
 				},
 			},

@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -1578,8 +1579,8 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	}
 	durableTarget := delegation.Target{
 		Selector: "orbit",
-		Placement: mustSealPlacement(t, delegation.Placement{
-			Kind: delegation.PlacementModel, Model: "provider/model", ReasoningEffort: "high",
+		Placement: mustSealPlacement(t, placement.Placement{
+			Kind: placement.KindModel, Model: "provider/model", ReasoningEffort: "high",
 			ConfigFingerprint: "config-v1",
 		}),
 	}

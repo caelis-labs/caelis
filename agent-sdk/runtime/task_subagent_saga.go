@@ -13,6 +13,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -591,7 +592,7 @@ func newSubagentTaskFromSpawn(
 
 func delegationTargetRequiresPlacementRunner(target delegation.Target) bool {
 	target = delegation.NormalizeTarget(target)
-	return target.Placement.Kind == delegation.PlacementModel ||
+	return target.Placement.Kind == placement.KindModel ||
 		target.Placement.ConfigFingerprint != "" || target.Placement.Fingerprint != ""
 }
 

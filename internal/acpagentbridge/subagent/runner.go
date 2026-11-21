@@ -15,6 +15,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -479,9 +480,9 @@ func markSpawnNotStartedAfterCleanup(setupErr error, cleanupErr error) error {
 }
 
 func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (AgentConfig, error) {
-	placement := delegation.NormalizePlacement(req.Target.Placement)
-	switch placement.Kind {
-	case delegation.PlacementModel:
+	frozen := placement.Normalize(req.Target.Placement)
+	switch frozen.Kind {
+	case placement.KindModel:
 		if r.placementResolver == nil {
 			return AgentConfig{}, fmt.Errorf("model placement resolution is unavailable")
 		}
@@ -494,8 +495,8 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 			return AgentConfig{}, fmt.Errorf("model placement resolved an invalid Agent configuration")
 		}
 		return cfg, nil
-	case delegation.PlacementAgent:
-		if placement.ConfigFingerprint != "" {
+	case placement.KindAgent:
+		if frozen.ConfigFingerprint != "" {
 			if r.placementResolver == nil {
 				return AgentConfig{}, fmt.Errorf("configured placement resolution is unavailable")
 			}
@@ -509,11 +510,11 @@ func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnCon
 			}
 			return cfg, nil
 		}
-		return r.registry.Resolve(strings.TrimSpace(placement.Agent))
+		return r.registry.Resolve(strings.TrimSpace(frozen.Agent))
 	case "":
 		return AgentConfig{}, fmt.Errorf("subagent placement is required")
 	default:
-		return AgentConfig{}, fmt.Errorf("unsupported subagent placement kind %q", placement.Kind)
+		return AgentConfig{}, fmt.Errorf("unsupported subagent placement kind %q", frozen.Kind)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -154,8 +155,8 @@ func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
 	}
 	got, err := runner.resolveSpawnConfig(context.Background(), tasksubagent.SpawnContext{}, delegation.TargetRequest{Target: delegation.Target{
 		Selector: "orbit",
-		Placement: delegation.Placement{
-			Kind: delegation.PlacementModel, Model: "provider/model", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
+		Placement: placement.Placement{
+			Kind: placement.KindModel, Model: "provider/model", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
 		},
 	}})
 	if err != nil {
@@ -182,8 +183,8 @@ func TestRunnerResolvesConfiguredPlacementToHostedAdapter(t *testing.T) {
 	}
 	got, err := runner.resolveSpawnConfig(context.Background(), tasksubagent.SpawnContext{}, delegation.TargetRequest{Target: delegation.Target{
 		Selector: "codex-demo",
-		Placement: delegation.Placement{
-			Kind: delegation.PlacementAgent, Agent: "codex", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
+		Placement: placement.Placement{
+			Kind: placement.KindAgent, Agent: "codex", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
 		},
 	}})
 	if err != nil {
