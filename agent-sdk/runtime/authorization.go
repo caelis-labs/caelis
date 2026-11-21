@@ -18,7 +18,6 @@ type PolicyConsentWriter func(context.Context, string, session.AuthorizationScop
 
 type authorizationFlight struct {
 	scope    session.AuthorizationScope
-	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
 	waiters  int
@@ -199,7 +198,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 			cancel = func() { continuation.cancel(context.Canceled) }
 			finish = func() { scope.complete(id, continuation, nil) }
 		}
-		flight = &authorizationFlight{scope: a.Scope, ctx: work, cancel: cancel, done: make(chan struct{})}
+		flight = &authorizationFlight{scope: a.Scope, cancel: cancel, done: make(chan struct{})}
 		if r.authorizationFlights == nil {
 			r.authorizationFlights = map[string]*authorizationFlight{}
 		}

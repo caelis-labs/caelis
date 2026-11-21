@@ -42,7 +42,7 @@ func TestWindowsSessionStoreRootLockBlocksAcrossProcesses(t *testing.T) {
 
 	acquired := make(chan error, 1)
 	go func() {
-		file, err := lockSessionStoreRoot(context.Background(), root, storeRootLockExclusive)
+		file, err := lockSessionStoreRoot(context.Background(), root)
 		if err == nil {
 			err = unlockSessionStoreRoot(file)
 		}
@@ -78,7 +78,7 @@ func TestWindowsSessionStoreRootLockHelper(t *testing.T) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	file, err := lockSessionStoreRoot(context.Background(), root, storeRootLockExclusive)
+	file, err := lockSessionStoreRoot(context.Background(), root)
 	if err != nil {
 		t.Fatalf("lockSessionStoreRoot() error = %v", err)
 	}

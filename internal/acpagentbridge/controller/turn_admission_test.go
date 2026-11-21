@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -120,9 +121,9 @@ func TestManagerRunTurnBusyPreservesPendingContext(t *testing.T) {
 	}
 	manager := &Manager{controllers: map[string]*controllerRun{"session-a": run}}
 	if _, err := manager.RunTurn(context.Background(), controller.TurnRequest{
-		SessionRef: session.SessionRef{SessionID: "session-a"},
-		TurnID:     "turn-2",
-		Input:      "do not consume context",
+		SessionRef:   session.SessionRef{SessionID: "session-a"},
+		TurnID:       "turn-2",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "do not consume context"}},
 	}); err == nil || !strings.Contains(err.Error(), "turn in progress") {
 		t.Fatalf("RunTurn() overlap error = %v, want turn-in-progress rejection", err)
 	}
@@ -186,11 +187,11 @@ func TestManagerDeactivateCancelsInFlightControllerTurn(t *testing.T) {
 
 	started := make(chan struct{}, 1)
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-blocking",
-		Input:      "wait for shutdown",
-		Stream:     true,
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-blocking",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "wait for shutdown"}},
+		Stream:       true,
 		Observer: agent.SourceEventObserverFunc(func(context.Context, agent.SourceEvent) error {
 			select {
 			case started <- struct{}{}:

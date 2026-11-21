@@ -193,7 +193,7 @@ func (noProgressRecoveryCompactor) CompactOnOverflow(context.Context, compact.Re
 }
 
 func (noProgressRecoveryCompactor) Force(_ context.Context, req compact.Request, trigger string) (compact.Result, error) {
-	event := buildCompactEvent(req.Session, "CONTEXT CHECKPOINT\n\nNo source progress.", compact.CompactEventData{
+	event := buildCompactEvent(req.Session, "CONTEXT CHECKPOINT\n\nNo source progress.", session.CheckpointData{
 		ContractVersion: compact.CompactContractVersion,
 		Generator:       "test_no_progress",
 		Trigger:         strings.TrimSpace(trigger),

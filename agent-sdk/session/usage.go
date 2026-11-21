@@ -270,44 +270,6 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 	return usage
 }
 
-// NormalizeUsageForDisplay converts provider raw usage into the status-table
-// display contract. Reasoning is treated as an output-token breakdown, so it is
-// not added to Total unless CompletionTokens is absent.
-func NormalizeUsageForDisplay(usage UsageSnapshot, provider string) UsageSnapshot {
-	if providerSeparatesCachedInputForSnapshot(provider, usage) && usage.CachedInputTokens > 0 {
-		usage.PromptTokens += usage.CachedInputTokens
-	}
-	usage.CacheReadAccounting = model.CacheReadIncluded
-	minimum := usage.PromptTokens + usage.CompletionTokens
-	if usage.CompletionTokens == 0 {
-		minimum += usage.ReasoningTokens
-	}
-	if usage.TotalTokens < minimum {
-		usage.TotalTokens = minimum
-	}
-	return usage
-}
-
-func normalizedProviderKey(provider string) string {
-	return strings.ToLower(strings.TrimSpace(strings.ReplaceAll(provider, "_", "-")))
-}
-
-func providerSeparatesCachedInputForSnapshot(provider string, usage UsageSnapshot) bool {
-	switch usage.CacheReadAccounting {
-	case model.CacheReadIncluded:
-		return false
-	case model.CacheReadSeparate:
-		return true
-	}
-	if model.ProviderSeparatesCachedInput(provider) {
-		return true
-	}
-	if normalizedProviderKey(provider) != "deepseek" || usage.CachedInputTokens <= 0 {
-		return false
-	}
-	return usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens
-}
-
 func semanticUsageMetadata(event *Event) map[string]any {
 	if event == nil {
 		return nil

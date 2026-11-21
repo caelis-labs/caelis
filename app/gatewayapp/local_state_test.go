@@ -1266,7 +1266,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	if !ok {
 		t.Fatal("missing compact event after auto compact")
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok || data.SourceEventCount == 0 {
 		t.Fatalf("auto compact event missing compact metadata: meta=%+v", compactEvent.Meta)
 	}
@@ -1394,7 +1394,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if !ok {
 		t.Fatal("missing compact event after manual compact")
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("manual compact event missing structured metadata: meta=%+v", compactEvent.Meta)
 	}
@@ -1448,7 +1448,7 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 			},
 		},
 		Meta: map[string]any{
-			compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{
+			session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{
 				ContractVersion: compact.CompactContractVersion,
 			}),
 		},

@@ -178,7 +178,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 	if strings.TrimSpace(compactText) == "" {
 		return compact.Result{}, errors.New("agent-sdk/runtime: compaction produced no checkpoint")
 	}
-	data := compact.CompactEventData{
+	data := session.CheckpointData{
 		Revision:             baseData.Revision + 1,
 		ContractVersion:      compact.CompactContractVersion,
 		SummarizedThroughID:  lastEventID(delta),
@@ -195,7 +195,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 	if compactEvent.Meta == nil {
 		compactEvent.Meta = map[string]any{}
 	}
-	compactEvent.Meta[compact.MetaKeyCompact] = compact.CompactEventDataValue(data)
+	compactEvent.Meta[session.CheckpointMetadataKey] = session.CheckpointDataValue(data)
 	return compact.Result{
 		Compacted:    true,
 		CompactText:  compactText,

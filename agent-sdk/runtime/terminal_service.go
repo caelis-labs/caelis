@@ -187,17 +187,4 @@ func terminalCommandSnapshotLocked(task *commandTask, status sandbox.SessionStat
 	return terminal.CloneSnapshot(snapshot)
 }
 
-func terminalSnapshotFromTaskSnapshot(snapshot taskapi.Snapshot) terminal.Snapshot {
-	result := terminal.Snapshot{
-		Ref:   terminal.Ref{SessionID: snapshot.Ref.SessionID, TaskID: snapshot.Ref.TaskID, TerminalID: snapshot.Ref.TerminalID},
-		State: string(snapshot.State), Running: snapshot.Running, SupportsInput: snapshot.SupportsInput,
-		StartedAt: snapshot.CreatedAt, UpdatedAt: snapshot.UpdatedAt,
-	}
-	result.FinalResult = firstNonBlankTaskOutput(taskRawStringValue(snapshot.Result["result"]), noOutputPlaceholder)
-	if code, ok := parseIntArgValue(snapshot.Result["exit_code"]); ok {
-		result.ExitCode = &code
-	}
-	return result
-}
-
 var _ terminal.Controller = (*terminalService)(nil)

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -24,7 +23,6 @@ type compactionRecovery struct {
 }
 
 type compactionFailureError struct {
-	phase string
 	cause error
 }
 
@@ -40,16 +38,6 @@ func (e *compactionFailureError) Unwrap() error {
 		return nil
 	}
 	return e.cause
-}
-
-func wrapCompactionFailure(phase string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &compactionFailureError{
-		phase: strings.TrimSpace(phase),
-		cause: err,
-	}
 }
 
 func compactionRecoveryFromError(err error) (compactionRecovery, bool) {

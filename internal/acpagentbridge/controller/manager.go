@@ -401,7 +401,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: agent %q does not support image prompts", run.agent)
 	}
 
-	prompt := buildPromptParts(req.Input, req.ContentParts)
+	prompt := buildPromptParts("", req.ContentParts)
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(turnCtx, cancel, req.Observer)
 	if err := run.beginTurn(req, handle); err != nil {

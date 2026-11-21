@@ -60,8 +60,7 @@ func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
 	})
 	var phase *agent.HookError
 	var processing *ProcessingError
-	actual, actualErr := EffectResult(r, err)
-	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "invalid-content" || !errors.As(err, &processing) || actualErr != nil || calls != 1 || len(actual.Content) != 1 || strings.Contains(string(actual.Content[0].(tool.Text)), "known committed business value") {
+	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "invalid-content" || !errors.As(err, &processing) || EffectError(err) != nil || calls != 1 || len(r.Content) != 1 || strings.Contains(string(r.Content[0].(tool.Text)), "known committed business value") {
 		t.Fatalf("known effect lost: calls=%d result=%+v err=%v", calls, r, err)
 	}
 }
@@ -74,9 +73,9 @@ func TestInvokeCannotSuppressProducerFailure(t *testing.T) {
 				return r, nil
 			}}}}
 			calls := 0
-			r, err := InvokeTool(WithRun(t.Context(), hooks, agent.HookContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) { calls++; return tool.Result{}, cause })
+			_, err := InvokeTool(WithRun(t.Context(), hooks, agent.HookContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) { calls++; return tool.Result{}, cause })
 			var phase *agent.HookError
-			_, effectErr := EffectResult(r, err)
+			effectErr := EffectError(err)
 			if !errors.Is(err, cause) || !errors.As(err, &phase) || phase.Name != "suppress" || !errors.Is(effectErr, cause) || calls != 1 {
 				t.Fatalf("producer failure suppressed: calls=%d err=%v effectErr=%v", calls, err, effectErr)
 			}

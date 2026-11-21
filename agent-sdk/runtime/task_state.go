@@ -144,7 +144,6 @@ type commandOutputState struct {
 	checkpoint commandOutputCheckpoint
 	resume     commandOutputCheckpoint
 
-	live     bool
 	callback bool
 	exact    bool
 
@@ -336,8 +335,6 @@ type runtimeToolContext struct {
 	mode              string
 	approvalMode      string
 	approvalRequester agent.ApprovalRequester
-	runID             string
-	turnID            string
 	inputSender       agent.AgentInputSender
 }
 

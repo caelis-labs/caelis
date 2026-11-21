@@ -24,7 +24,7 @@ func (s *Store) ValidateMutationGuard(ctx context.Context, ref session.SessionRe
 		return err
 	}
 	defer s.mu.Unlock()
-	return s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
+	return s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -39,7 +39,7 @@ func (s *Store) SessionFence(ctx context.Context, ref session.SessionRef) (sessi
 	}
 	defer s.mu.Unlock()
 	var out session.SessionFence
-	err := s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -72,7 +72,7 @@ func (s *Store) acquireSessionFence(ctx context.Context, req session.AcquireSess
 	}
 	defer s.mu.Unlock()
 	var out session.SessionFence
-	err := s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -119,7 +119,7 @@ func (s *Store) ReleaseSessionFence(ctx context.Context, req session.ReleaseSess
 		return err
 	}
 	defer s.mu.Unlock()
-	return s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
+	return s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err

@@ -90,7 +90,6 @@ func (r *Runtime) runWithOverflowRecovery(
 	turnID string,
 	req agent.RunRequest,
 	pendingInputs []*session.Event,
-	batch *[]*session.Event,
 	sink *runner,
 ) (runErr error) {
 	if r.compaction.Enabled && r.compaction.Async.Enabled {
@@ -104,24 +103,19 @@ func (r *Runtime) runWithOverflowRecovery(
 	// provider-local call ID cannot collide with a prior successful execution.
 	toolStepSequence := &atomic.Uint64{}
 	for {
-		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInputs, sink, &toolFactOrdinal, toolStepSequence)
+		inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInputs, sink, &toolFactOrdinal, toolStepSequence)
 		if inputPersisted {
 			pendingInputs = nil
 		}
 		if err == nil {
-			*batch = append(*batch, attemptBatch...)
 			return nil
 		}
 		var adopted *asyncCompactAdoptedError
 		if errors.As(err, &adopted) {
-			*batch = append(*batch, attemptBatch...)
-			if sink != nil {
-				sink.publishEvent(normalizeEvent(activeSession, turnID, buildCompactNoticeEvent(activeSession, turnID, r.now())))
-			}
+			sink.publishEvent(normalizeEvent(activeSession, turnID, buildCompactNoticeEvent(activeSession, turnID, r.now())))
 			continue
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
-			*batch = append(*batch, attemptBatch...)
 			if err := asyncScope(ctx).beforeRecovery(); err != nil {
 				if recovery.decision.Release != nil {
 					recovery.decision.Release()
@@ -141,7 +135,6 @@ func (r *Runtime) runWithOverflowRecovery(
 			}
 			continue
 		}
-		*batch = append(*batch, attemptBatch...)
 		return err
 	}
 }
@@ -157,116 +150,111 @@ func (r *Runtime) runAttempt(
 	sink *runner,
 	toolFactOrdinal *uint64,
 	toolStepSequence *atomic.Uint64,
-) ([]*session.Event, bool, bool, error) {
+) (bool, error) {
 	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, turnID, req, pendingInputs, sink)
 	if err != nil {
 		var compactErr *compactionFailureError
 		if errors.As(err, &compactErr) {
 			r.publishCompactFailureNotice(activeSession, turnID, sink, compactErr)
 		}
-		return nil, false, false, err
+		return false, err
 	}
 
 	ctx = mcpdiscovery.WithEvents(ctx, invocation.SourceEvents)
-	if sink != nil {
-		ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
-	}
+	ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
 	var source *requestsource.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled || len(r.hooks.ModelPrepare) > 0 {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)
 	}
-	batch := make([]*session.Event, 0, 3)
+	var throughSeq, visibleCount uint64
+	observeSequence := func(event *session.Event) {
+		if !session.IsMainInvocationVisibleEvent(event) {
+			return
+		}
+		visibleCount++
+		seq := event.Seq
+		if seq == 0 {
+			// Match the sequence fallback for legacy, unnumbered events.
+			seq = visibleCount
+		}
+		throughSeq = max(throughSeq, seq)
+	}
 	persistedInputs, appendErr := r.appendInputEvents(ctx, ref, pendingInputs)
 	if appendErr != nil {
-		return nil, false, false, appendErr
+		return false, appendErr
 	}
 	source.Append(persistedInputs...)
 	inputPersisted := len(persistedInputs) > 0
 	for _, persisted := range persistedInputs {
-		batch = append(batch, persisted)
+		observeSequence(persisted)
 		invocation.PromptEvents = append(invocation.PromptEvents, session.CloneEvent(persisted))
-		if sink != nil {
-			sink.publishEvent(persisted)
-		}
+		sink.publishEvent(persisted)
 	}
 	if invocation.LiveCompact != nil {
-		batch = append(batch, session.CloneEvent(invocation.LiveCompact))
-		if sink != nil {
-			notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
-			sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
-		}
+		observeSequence(invocation.LiveCompact)
+		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
+		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
 	}
 
 	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, invocation.State, runID, turnID, req, toolStepSequence)
 	if err != nil {
-		return batch, false, inputPersisted, err
+		return inputPersisted, err
 	}
-	var drainSubmissions func() []agent.Submission
-	var inputReady func() <-chan struct{}
-	if sink != nil {
-		drainSubmissions = sink.drainSubmissions
-		inputReady = sink.inputReadySignal
-	}
-	runCtx := agent.NewContext(agent.ContextSpec{
+	baseCtx := agent.NewContext(agent.ContextSpec{
 		Context:          ctx,
 		Session:          activeSession,
 		Events:           invocation.PromptEvents,
 		State:            invocation.State,
-		DrainSubmissions: drainSubmissions,
-		InputReady:       inputReady,
+		DrainSubmissions: sink.drainSubmissions,
+		InputReady:       sink.inputReadySignal,
 	})
 
-	emitted := false
 	var pendingCalls []*session.Event
 	pendingCount := 0
-	if sink != nil {
-		runCtx = &localInputContext{Context: runCtx, runner: sink,
-			contextSource: func() (agent.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
-			contextEdit: func(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
-				events, err := r.commitContextEdit(ctx, ref, turnID, runID, logical, name, edit, source.Events(), validate)
-				if err != nil {
-					return nil, err
-				}
-				source.Append(events...)
-				for _, e := range events {
-					batch = append(batch, e)
-					sink.publishEvent(e)
-				}
-				return compact.PromptEventsFromLatestCompact(source.Events()), nil
-			}, commit: func(submission agent.Submission) ([]model.Message, error) {
-				events, err := buildSteeringInputEvents(activeSession, turnID, submission)
-				if err != nil {
-					return nil, err
-				}
-				events, err = r.prepareHookInputs(ctx, events)
-				if err != nil {
-					return nil, err
-				}
-				persisted, err := r.appendInputEvents(ctx, ref, events)
-				if err != nil {
-					return nil, err
-				}
-				source.Append(persisted...)
-				messages := make([]model.Message, 0, len(persisted))
-				for _, event := range persisted {
-					batch = append(batch, event)
-					sink.publishEvent(event)
-					messages = append(messages, *event.Message)
-				}
-				emitted = emitted || len(persisted) > 0
-				return messages, nil
-			}}
-	}
+	runCtx := &localInputContext{Context: baseCtx, runner: sink,
+		contextSource: func() (agent.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
+		contextEdit: func(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+			events, err := r.commitContextEdit(ctx, ref, turnID, runID, logical, name, edit, source.Events(), validate)
+			if err != nil {
+				return nil, err
+			}
+			source.Append(events...)
+			for _, e := range events {
+				observeSequence(e)
+				sink.publishEvent(e)
+			}
+			return compact.PromptEventsFromLatestCompact(source.Events()), nil
+		}, commit: func(submission agent.Submission) ([]model.Message, error) {
+			events, err := buildSteeringInputEvents(activeSession, turnID, submission)
+			if err != nil {
+				return nil, err
+			}
+			events, err = r.prepareHookInputs(ctx, events)
+			if err != nil {
+				return nil, err
+			}
+			persisted, err := r.appendInputEvents(ctx, ref, events)
+			if err != nil {
+				return nil, err
+			}
+			source.Append(persisted...)
+			messages := make([]model.Message, 0, len(persisted))
+			for _, event := range persisted {
+				observeSequence(event)
+				sink.publishEvent(event)
+				messages = append(messages, *event.Message)
+			}
+			return messages, nil
+		}}
 	for event, runErr := range activeAgent.Run(runCtx) {
 		if runErr != nil {
-			return batch, emitted, inputPersisted, runErr
+			return inputPersisted, runErr
 		}
 		if event == nil {
 			continue
 		}
-		emitted = true
 		normalized := normalizeEvent(activeSession, turnID, event)
-		if toolFactOrdinal != nil && scopeRuntimeToolFactIdentity(normalized, runID, turnID, *toolFactOrdinal+1) {
+		if scopeRuntimeToolFactIdentity(normalized, runID, turnID, *toolFactOrdinal+1) {
 			(*toolFactOrdinal)++
 		}
 		group := []*session.Event{normalized}
@@ -276,7 +264,7 @@ func (r *Runtime) runAttempt(
 				pendingCount = len(normalized.Message.ToolCalls())
 			}
 			if normalized.Type != session.EventTypeToolCall || normalized.Tool == nil {
-				return batch, emitted, inputPersisted, errors.New("incomplete frozen tool batch")
+				return inputPersisted, errors.New("incomplete frozen tool batch")
 			}
 			pendingCalls = append(pendingCalls, normalized)
 			if len(pendingCalls) < pendingCount {
@@ -284,7 +272,7 @@ func (r *Runtime) runAttempt(
 			}
 			group, err = r.appendToolCallBatch(ctx, ref, pendingCalls)
 			if err != nil {
-				return batch, emitted, inputPersisted, err
+				return inputPersisted, err
 			}
 			pendingCalls = nil
 			pendingCount = 0
@@ -294,37 +282,31 @@ func (r *Runtime) runAttempt(
 			if !batchCommitted && runtimeAgentEventShouldPersist(normalized) {
 				normalized, err = r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, normalized)
 				if err != nil {
-					return batch, emitted, inputPersisted, err
+					return inputPersisted, err
 				}
 				if session.IsCanonicalHistoryEvent(normalized) {
 					_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
 				}
 			}
 			source.Append(normalized)
-			batch = append(batch, session.CloneEvent(normalized))
-			if sink != nil {
-				sink.publishEvent(normalized)
-			}
+			observeSequence(normalized)
+			sink.publishEvent(normalized)
 			if planEvent, handled, planErr := r.handlePlanEvent(ctx, ref, turnID, normalized); planErr != nil {
-				return batch, emitted, inputPersisted, planErr
+				return inputPersisted, planErr
 			} else if handled {
-				batch = append(batch, session.CloneEvent(planEvent))
-				if sink != nil {
-					sink.publishEvent(planEvent)
-				}
+				observeSequence(planEvent)
+				sink.publishEvent(planEvent)
 			}
 		}
 	}
 	if pendingCount > 0 {
-		return batch, emitted, inputPersisted, errors.New("incomplete frozen tool batch")
+		return inputPersisted, errors.New("incomplete frozen tool batch")
 	}
 	if err := ctx.Err(); err != nil {
-		return batch, emitted, inputPersisted, err
+		return inputPersisted, err
 	}
-	if err := r.updateCompactionUsageFromBatch(ctx, ref, batch); err != nil {
-		return batch, emitted, inputPersisted, err
-	}
-	return batch, emitted, inputPersisted, nil
+	r.advanceCompactionRequest(ref, throughSeq)
+	return inputPersisted, nil
 }
 
 // runtimeAgentEventShouldPersist keeps semantic history and Agent-owned

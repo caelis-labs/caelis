@@ -53,8 +53,8 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			return err
 		}
 		event.Tool.Result = &full
-		effect, effectErr := hookrun.EffectResult(full, callErr)
-		event.Tool.Outcome = session.ToolOutcome(codeModeOutcome(effect, effectErr))
+		effectErr := hookrun.EffectError(callErr)
+		event.Tool.Outcome = session.ToolOutcome(codeModeOutcome(effectErr))
 		observation := toolbinding.Observed(ctx)
 		if event.Tool.Outcome == session.ToolOutcomeSucceeded {
 			event.Tool.Status = "completed"

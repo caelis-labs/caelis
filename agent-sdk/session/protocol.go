@@ -135,11 +135,6 @@ type ProtocolPlanEntry struct {
 	Priority string `json:"priority,omitempty"`
 }
 
-// ProtocolPlan is the ACP-compatible plan replacement payload.
-type ProtocolPlan struct {
-	Entries []ProtocolPlanEntry `json:"entries,omitempty"`
-}
-
 // ProtocolApprovalOption is one standard ACP permission option.
 type ProtocolApprovalOption struct {
 	ID   string `json:"id,omitempty"`

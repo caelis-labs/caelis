@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func buildCompactEvent(activeSession session.Session, compactText string, data compact.CompactEventData) *session.Event {
+func buildCompactEvent(activeSession session.Session, compactText string, data session.CheckpointData) *session.Event {
 	message := model.NewTextMessage(model.RoleUser, normalizeCompactMarkdown(compactText))
 	scope := defaultScope(activeSession, "")
 	return &session.Event{
@@ -28,7 +28,7 @@ func buildCompactEvent(activeSession session.Session, compactText string, data c
 			},
 		},
 		Meta: map[string]any{
-			compact.MetaKeyCompact: compact.CompactEventDataValue(data),
+			session.CheckpointMetadataKey: session.CheckpointDataValue(data),
 		},
 	}
 }

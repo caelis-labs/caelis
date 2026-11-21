@@ -293,75 +293,28 @@ func stableToolFactIdentity(event *session.Event) string {
 	return strings.TrimSpace(event.Tool.ID)
 }
 
+// planEntriesFromEvent consumes the built-in Plan tool's observation.
+// Tool results may be transformed for the model without granting plan authority.
 func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
-	if event == nil {
+	if event == nil || event.Type != session.EventTypeToolResult || event.Tool == nil ||
+		event.Tool.Name != plan.ToolName || event.Tool.Outcome != session.ToolOutcomeSucceeded {
 		return nil, "", false
 	}
-	name := strings.TrimSpace(planToolNameFromEvent(event))
-	if name == "" {
-		if message, ok := session.ModelMessageOf(event); ok {
-			results := message.ToolResults()
-			if len(results) > 0 {
-				name = strings.TrimSpace(results[0].Name)
-			}
-		}
-	}
-	if name == "" && event.Message != nil {
-		if results := event.Message.ToolResults(); len(results) > 0 {
-			name = strings.TrimSpace(results[0].Name)
-		}
-	}
-	if name != plan.ToolName {
+	observed, _ := nestedValue(event.Meta, "caelis", "runtime", "tool").(map[string]any)
+	rawEntries, present := observed["entries"]
+	if observed["updated"] != true || !present {
 		return nil, "", false
 	}
-
-	payload := map[string]any{}
-	if toolPayload := session.EventToolProjection(event); toolPayload != nil && len(toolPayload.Output) > 0 {
-		payload = session.CloneState(toolPayload.Output)
+	data, err := json.Marshal(rawEntries)
+	if err != nil {
+		return nil, "", false
 	}
-	if len(payload) == 0 {
-		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
-			payload = session.CloneState(update.RawOutput)
-		}
+	var entries []plan.Entry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, "", false
 	}
-	if len(payload) == 0 {
-		message, ok := session.ModelMessageOf(event)
-		if !ok {
-			if event.Message != nil {
-				message = *event.Message
-				ok = true
-			}
-		}
-		if ok {
-			results := message.ToolResults()
-			if len(results) == 0 {
-				return nil, "", false
-			}
-			result := results[0]
-			if len(result.Content) > 0 && result.Content[0].Kind == model.PartKindJSON && result.Content[0].JSON != nil {
-				_ = json.Unmarshal(result.Content[0].JSONValue(), &payload)
-			}
-		}
-	}
-	entries := planEntriesFromAny(payload["entries"])
-	explanation := strings.TrimSpace(stringValue(payload["explanation"]))
-	if len(entries) == 0 {
-		entries = planEntriesFromAny(nestedValue(event.Meta, "caelis", "runtime", "tool", "entries"))
-	}
-	if explanation == "" {
-		explanation = nestedString(event.Meta, "caelis", "runtime", "tool", "explanation")
-	}
-	return entries, explanation, true
-}
-
-func planToolNameFromEvent(event *session.Event) string {
-	return session.CanonicalToolName(event, nil)
-}
-
-func nestedString(values map[string]any, path ...string) string {
-	current := nestedValue(values, path...)
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
+	explanation, _ := observed["explanation"].(string)
+	return entries, strings.TrimSpace(explanation), true
 }
 
 func nestedValue(values map[string]any, path ...string) any {
@@ -374,38 +327,6 @@ func nestedValue(values map[string]any, path ...string) any {
 		current = mapped[key]
 	}
 	return current
-}
-
-func planEntriesFromAny(raw any) []plan.Entry {
-	if raw == nil {
-		return nil
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var rows []struct {
-		Content string `json:"content"`
-		Status  string `json:"status"`
-	}
-	if err := json.Unmarshal(data, &rows); err != nil {
-		return nil
-	}
-	entries := make([]plan.Entry, 0, len(rows))
-	for _, row := range rows {
-		content := row.Content
-		status := row.Status
-		content = strings.TrimSpace(content)
-		status = strings.TrimSpace(status)
-		if content == "" || status == "" {
-			continue
-		}
-		entries = append(entries, plan.Entry{
-			Content: content,
-			Status:  plan.Status(status),
-		})
-	}
-	return entries
 }
 
 func entriesToPlanPayload(entries []plan.Entry) []session.EventPlanEntry {
@@ -435,14 +356,4 @@ func entriesToState(entries []plan.Entry) []map[string]any {
 		})
 	}
 	return out
-}
-
-func stringValue(value any) string {
-	if value == nil {
-		return ""
-	}
-	if text, ok := value.(string); ok {
-		return text
-	}
-	return fmt.Sprint(value)
 }

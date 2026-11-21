@@ -315,10 +315,6 @@ func (r *runner) finish() {
 	})
 }
 
-func isInterruptedError(ctx context.Context, err error) bool {
-	return errorcode.Is(err, errorcode.Interrupted) || isCancellationError(ctx, err)
-}
-
 func isCancellationError(ctx context.Context, err error) bool {
 	return errors.Is(err, context.Canceled) ||
 		(ctx != nil && errors.Is(ctx.Err(), context.Canceled)) ||

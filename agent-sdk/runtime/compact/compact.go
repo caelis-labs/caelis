@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	MetaKeyCompact         = "compact"
 	CompactContractVersion = 1
 	CompactNoticeLabel     = display.CompactNoticeLabel
 	CompactFailureLabel    = display.CompactFailureNoticeLabel
@@ -37,7 +36,6 @@ type UsageSnapshot struct {
 
 type Request struct {
 	Session       session.Session
-	SessionRef    session.SessionRef
 	Events        []*session.Event
 	PendingEvents []*session.Event
 	Model         model.LLM
@@ -79,9 +77,6 @@ type ForceEngine interface {
 	Force(context.Context, Request, string) (Result, error)
 }
 
-// CompactEventData is the canonical Session checkpoint contract.
-type CompactEventData = session.CheckpointData
-
 type ContextWindowProvider interface {
 	ContextWindowTokens() int
 }
@@ -96,18 +91,8 @@ func IsCompactEvent(event *session.Event) bool {
 	if event.Meta == nil {
 		return false
 	}
-	_, ok := event.Meta[MetaKeyCompact]
+	_, ok := event.Meta[session.CheckpointMetadataKey]
 	return ok
-}
-
-// CompactEventDataFromEvent decodes canonical checkpoint coverage.
-func CompactEventDataFromEvent(event *session.Event) (CompactEventData, bool) {
-	return session.CheckpointDataFromEvent(event)
-}
-
-// CompactEventDataValue encodes checkpoint counters without floating-point loss.
-func CompactEventDataValue(in CompactEventData) map[string]any {
-	return session.CheckpointDataValue(in)
 }
 
 func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
@@ -119,7 +104,7 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 	if index < 0 {
 		return session.CloneEvents(visible)
 	}
-	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
+	if data, ok := session.CheckpointDataFromEvent(visible[index]); ok {
 		out := make([]*session.Event, 0, len(visible[index:]))
 		if data.Purpose == session.CheckpointReplacement {
 			for i, m := range data.ReplacementMessages {
@@ -147,13 +132,13 @@ func EventsAfterLatestCompact(events []*session.Event) []*session.Event {
 	if index < 0 {
 		return session.CloneEvents(visible)
 	}
-	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
+	if data, ok := session.CheckpointDataFromEvent(visible[index]); ok {
 		return eventsAfterCheckpointCoverage(visible, index, data)
 	}
 	return nonCompactEvents(visible[index+1:])
 }
 
-func eventsAfterCheckpointCoverage(events []*session.Event, checkpointIndex int, data CompactEventData) []*session.Event {
+func eventsAfterCheckpointCoverage(events []*session.Event, checkpointIndex int, data session.CheckpointData) []*session.Event {
 	if (data.ContractVersion != CompactContractVersion && data.ContractVersion != 2) || data.SummarizedThroughSeq == 0 {
 		return nonCompactEvents(events[checkpointIndex+1:])
 	}
@@ -180,16 +165,16 @@ func nonCompactEvents(events []*session.Event) []*session.Event {
 	return out
 }
 
-func LatestCompactEvent(events []*session.Event) (*session.Event, CompactEventData, bool) {
+func LatestCompactEvent(events []*session.Event) (*session.Event, session.CheckpointData, bool) {
 	visible := filterPromptVisibleEvents(events)
 	if len(visible) == 0 {
-		return nil, CompactEventData{}, false
+		return nil, session.CheckpointData{}, false
 	}
 	index := lastCompactIndex(visible)
 	if index < 0 {
-		return nil, CompactEventData{}, false
+		return nil, session.CheckpointData{}, false
 	}
-	data, _ := CompactEventDataFromEvent(visible[index])
+	data, _ := session.CheckpointDataFromEvent(visible[index])
 	return session.CloneEvent(visible[index]), data, true
 }
 
@@ -212,7 +197,7 @@ func lastCompactIndex(events []*session.Event) int {
 		if !IsCompactEvent(event) {
 			continue
 		}
-		data, ok := CompactEventDataFromEvent(event)
+		data, ok := session.CheckpointDataFromEvent(event)
 		if !ok || (data.ContractVersion != CompactContractVersion && data.ContractVersion != 2) || data.SummarizedThroughSeq == 0 {
 			legacyIndex = i
 			continue

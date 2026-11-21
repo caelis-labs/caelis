@@ -12,6 +12,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -177,7 +178,7 @@ func TestControllerReconnectPublishesBindingBeforeCollaboration(t *testing.T) {
 			ctx = session.ContextWithRuntimeFence(ctx, fence)
 			commitErr := errors.New("binding persistence failed")
 			failCommit := tc.failCommit
-			req := controller.TurnRequest{SessionRef: active.SessionRef, Session: active, TurnID: "turn", Input: "continue", Context: agent.ContextTransfer{Summary: "DELTA-CONTEXT"}, FreshContext: agent.ContextTransfer{Summary: "FULL-CONTEXT"}, ContextSyncSeq: 4,
+			req := controller.TurnRequest{SessionRef: active.SessionRef, Session: active, TurnID: "turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "continue"}}, Context: agent.ContextTransfer{Summary: "DELTA-CONTEXT"}, FreshContext: agent.ContextTransfer{Summary: "FULL-CONTEXT"}, ContextSyncSeq: 4,
 				CommitBinding: func(commitCtx context.Context) error {
 					live, _, err := manager.ActiveControllerBinding(commitCtx, active.SessionRef)
 					if err != nil {

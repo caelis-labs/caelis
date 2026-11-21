@@ -44,7 +44,7 @@ func (s *Store) pendingApprovalSessionRefs(ctx context.Context) ([]session.Sessi
 	}
 	defer s.mu.Unlock()
 	var out []session.SessionRef
-	err := s.withRootReadLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		list, err := s.listFromSessionIndex(session.ListSessionsRequest{})
 		if err != nil {
 			return err
@@ -73,7 +73,7 @@ func (s *Store) pendingApprovalsForSession(ctx context.Context, ref session.Sess
 	}
 	defer s.mu.Unlock()
 	var out []session.PendingApproval
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -131,7 +131,7 @@ func (s *Store) SettlePendingApproval(
 	defer s.mu.Unlock()
 
 	var out session.SettlePendingApprovalResult
-	err = s.withRootWriteLockContext(ctx, func() error {
+	err = s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err

@@ -34,7 +34,7 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 }
 
 func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob, turnID string, appendCheckpoint checkpointAppender) (bool, error) {
-	data, ok := compact.CompactEventDataFromEvent(job.result.CompactEvent)
+	data, ok := session.CheckpointDataFromEvent(job.result.CompactEvent)
 	delta := compactableEvents(mainInvocationEvents(job.source.Events))
 	_, baseData, _ := compact.LatestCompactEvent(job.source.Events)
 	if !job.result.Compacted || !ok || data.ContractVersion != compact.CompactContractVersion ||

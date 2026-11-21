@@ -340,8 +340,10 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		if a.resolveModelRequest != nil {
 			request.Instructions = model.CloneParts(a.instructions)
+		} else if a.systemPrompt != "" {
+			request.Instructions = []model.Part{model.NewTextPart(a.systemPrompt)}
 		} else {
-			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
+			request.Instructions = []model.Part{}
 		}
 		if invalidAttempts > 0 {
 			// The rejected envelope never entered Session or tool dispatch.
@@ -484,8 +486,9 @@ func (a *Agent) drainFinalSubmissions(ctx agent.Context, messages *[]model.Messa
 
 func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, messages *[]model.Message, yield func(*session.Event) bool) (bool, error) {
 	accepted := false
+	committer, hasCommitter := ctx.(runtimeinput.SubmissionCommitter)
 	for _, submission := range drained {
-		if committer, ok := ctx.(runtimeinput.SubmissionCommitter); ok && (len(submission.Inputs) > 0 || isModelInputSubmission(submission)) {
+		if hasCommitter && (len(submission.Inputs) > 0 || isModelInputSubmission(submission)) {
 			committed, err := committer.CommitSubmission(submission)
 			if err != nil {
 				return accepted, err
@@ -495,20 +498,7 @@ func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, 
 			continue
 		}
 		if len(submission.Inputs) > 0 {
-			if err := agent.ValidateSubmissionInputs(submission); err != nil {
-				return accepted, err
-			}
-			committer, ok := ctx.(runtimeinput.BatchCommitter)
-			if !ok {
-				return accepted, fmt.Errorf("Agent communication batch requires Runtime safe-point persistence")
-			}
-			committed, err := committer.CommitAgentInputBatch(submission.Inputs)
-			if err != nil {
-				return accepted, err
-			}
-			*messages = append(*messages, committed...)
-			accepted = accepted || len(committed) > 0
-			continue
+			return accepted, errors.New("Agent communication batch requires Runtime safe-point persistence")
 		}
 		if !isModelInputSubmission(submission) {
 			continue
@@ -538,14 +528,6 @@ func isModelInputSubmission(sub agent.Submission) bool {
 	default:
 		return false
 	}
-}
-
-func instructionsFromContext(_ agent.Context, systemPrompt string) []model.Part {
-	out := make([]model.Part, 0, 1)
-	if strings.TrimSpace(systemPrompt) != "" {
-		out = append(out, model.NewTextPart(strings.TrimSpace(systemPrompt)))
-	}
-	return out
 }
 
 // Metadata returns one stable agent metadata map for upstream assembly.

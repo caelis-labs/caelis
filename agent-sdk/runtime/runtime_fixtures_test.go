@@ -556,7 +556,7 @@ func tmap(key string, value any) map[string]any {
 }
 
 func testConfigWithACPForwarder(cfg Config) Config {
-	if cfg.ControllerEventForwarder == nil && requiresControllerForwarder(cfg) {
+	if cfg.ControllerEventForwarder == nil && cfg.Controllers != nil {
 		cfg.ControllerEventForwarder = testControllerForwarder{sessions: cfg.Sessions}
 	}
 	if cfg.ControllerContextRouter == nil && (cfg.Controllers != nil || cfg.Subagents != nil) {

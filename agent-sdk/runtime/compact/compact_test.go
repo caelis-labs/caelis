@@ -1,92 +1,10 @@
 package compact
 
 import (
-	"encoding/json"
-	"math"
-	"strconv"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
-
-func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
-	data := CompactEventData{
-		Revision:             3,
-		ContractVersion:      CompactContractVersion,
-		SummarizedThroughID:  "event-9",
-		SummarizedThroughSeq: 9,
-		Generator:            "model_markdown",
-		Trigger:              "manual",
-		SourceEventCount:     8,
-		TotalTokens:          100,
-		ContextWindowTokens:  1000,
-		DiscoveredTools:      []string{"mcp__calendar__demo__create_event", "mcp__calendar__demo__create_event", ""},
-	}
-	value := CompactEventDataValue(data)
-	event := &session.Event{
-		Type: session.EventTypeCompact,
-		Meta: map[string]any{MetaKeyCompact: value},
-	}
-
-	got, ok := CompactEventDataFromEvent(event)
-	if !ok {
-		t.Fatal("CompactEventDataFromEvent() ok = false")
-	}
-	if got.ContractVersion != CompactContractVersion || got.SourceEventCount != 8 {
-		t.Fatalf("contract/source metadata = %d/%d, want %d/8", got.ContractVersion, got.SourceEventCount, CompactContractVersion)
-	}
-	if len(got.DiscoveredTools) != 1 || got.DiscoveredTools[0] != "mcp__calendar__demo__create_event" {
-		t.Fatalf("discovered tools = %v, want normalized MCP tool", got.DiscoveredTools)
-	}
-}
-
-func TestCompactEventDataPreservesExactDistinctToolNames(t *testing.T) {
-	t.Parallel()
-
-	value := CompactEventDataValue(CompactEventData{
-		ContractVersion: CompactContractVersion,
-		DiscoveredTools: []string{"Search", "SEARCH", "Search"},
-	})
-	event := &session.Event{Type: session.EventTypeCompact, Meta: map[string]any{MetaKeyCompact: value}}
-	got, ok := CompactEventDataFromEvent(event)
-	if !ok {
-		t.Fatal("CompactEventDataFromEvent() ok = false")
-	}
-	if len(got.DiscoveredTools) != 2 || got.DiscoveredTools[0] != "Search" || got.DiscoveredTools[1] != "SEARCH" {
-		t.Fatalf("discovered tools = %v, want exact [Search SEARCH]", got.DiscoveredTools)
-	}
-}
-
-func TestCompactEventSequencePersistsAsExactDecimalString(t *testing.T) {
-	for _, sequence := range []uint64{
-		9007199254740991,
-		9007199254740992,
-		9007199254740993,
-		math.MaxUint64,
-	} {
-		sequence := sequence
-		t.Run(strconv.FormatUint(sequence, 10), func(t *testing.T) {
-			before := session.Event{
-				Type: session.EventTypeCompact,
-				Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
-					ContractVersion: CompactContractVersion, SummarizedThroughSeq: sequence,
-				})},
-			}
-			raw, err := json.Marshal(before)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var after session.Event
-			if err := json.Unmarshal(raw, &after); err != nil {
-				t.Fatal(err)
-			}
-			got, ok := CompactEventDataFromEvent(&after)
-			if !ok || got.SummarizedThroughSeq != sequence {
-				t.Fatalf("CompactEventDataFromEvent() = %#v, %v; want sequence %d", got, ok, sequence)
-			}
-		})
-	}
-}
 
 func TestPromptEventsFromLatestCompactUsesPureTextPromptEvent(t *testing.T) {
 	compactText := "CONTEXT CHECKPOINT\n\n## Current Objective\n- continue from compact"
@@ -95,7 +13,7 @@ func TestPromptEventsFromLatestCompactUsesPureTextPromptEvent(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Text:       compactText,
 		Meta: map[string]any{
-			MetaKeyCompact: CompactEventDataValue(CompactEventData{
+			session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{
 				ContractVersion: CompactContractVersion,
 				Generator:       "model_markdown",
 			}),
@@ -135,7 +53,7 @@ func TestEventsAfterLatestCompactDoesNotInjectPromptReplacement(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Text:       compactText,
 		Meta: map[string]any{
-			MetaKeyCompact: CompactEventDataValue(CompactEventData{
+			session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{
 				ContractVersion: CompactContractVersion,
 				Generator:       "model_markdown",
 			}),
@@ -162,7 +80,7 @@ func TestPromptEventsFromLatestCompactIgnoresLegacyReplacementHistory(t *testing
 		Visibility: session.VisibilityCanonical,
 		Text:       "CONTEXT CHECKPOINT\nnew compact text",
 		Meta: map[string]any{
-			MetaKeyCompact: map[string]any{
+			session.CheckpointMetadataKey: map[string]any{
 				"contract_version": CompactContractVersion,
 				"replacement_history": []map[string]any{{
 					"text": "legacy retained instruction",
@@ -190,7 +108,7 @@ func TestPromptEventsFromLatestCompactIgnoresLegacyRetainedInputs(t *testing.T) 
 		Visibility: session.VisibilityCanonical,
 		Text:       compactText,
 		Meta: map[string]any{
-			MetaKeyCompact: map[string]any{
+			session.CheckpointMetadataKey: map[string]any{
 				"contract_version":     CompactContractVersion,
 				"retained_user_inputs": []string{"legacy user constraint", "legacy user constraint", ""},
 			},
@@ -215,7 +133,7 @@ func TestPromptEventsSelectsValidCheckpointWithHighestCoveredSeq(t *testing.T) {
 			Type:       session.EventTypeCompact,
 			Visibility: session.VisibilityCanonical,
 			Text:       text,
-			Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+			Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{
 				ContractVersion:      CompactContractVersion,
 				SummarizedThroughSeq: covered,
 			})},
@@ -247,7 +165,7 @@ func TestPromptEventsKeepCoveredSequenceSuccessorStoredBeforeCheckpoint(t *testi
 		Type:       session.EventTypeCompact,
 		Visibility: session.VisibilityCanonical,
 		Text:       "summary through sequence 10",
-		Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+		Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{
 			ContractVersion:      CompactContractVersion,
 			SummarizedThroughSeq: 10,
 		})},

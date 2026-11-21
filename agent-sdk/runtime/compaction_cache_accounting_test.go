@@ -103,15 +103,11 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 				if err := json.Unmarshal(raw, measured); err != nil {
 					t.Fatal(err)
 				}
-				display := session.NormalizeUsageForDisplay(*measured, route.provider)
-				if display.PromptTokens != wantPrompt || display.TotalTokens != wantPrompt+50 || display.CachedInputTokens != cached || display.CacheWriteTokens != written {
-					t.Errorf("display=%+v want prompt=%d", display, wantPrompt)
+				if measured.PromptTokens != usage.PromptTokens || measured.TotalTokens != wantPrompt+50 || measured.CachedInputTokens != cached || measured.CacheWriteTokens != written || measured.CacheReadAccounting != usage.CacheReadAccounting {
+					t.Errorf("usage after Session round trip=%+v, provider usage=%+v", measured, usage)
 				}
 				if anthropic && (measured.CachedInputTokensReported != (phase != "missing") || measured.CacheWriteTokensReported != (phase != "missing")) {
 					t.Fatalf("cache presence changed: %+v", measured)
-				}
-				if again := session.NormalizeUsageForDisplay(display, route.provider); again != display {
-					t.Fatalf("display normalization counted cache twice: %+v", again)
 				}
 			})
 		}

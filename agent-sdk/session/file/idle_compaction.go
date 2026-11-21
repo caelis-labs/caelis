@@ -32,7 +32,7 @@ func (s *Store) idleTransaction(ctx context.Context, ref session.SessionRef, upd
 	}
 	defer s.mu.Unlock()
 	var result *session.Event
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -182,7 +182,7 @@ func (s priorHostFenceService) RecoverCompactionReceipts(ctx context.Context, re
 		return err
 	}
 	defer store.mu.Unlock()
-	return store.withRootWriteLockContext(ctx, func() error {
+	return store.withRootLockContext(ctx, func() error {
 		doc, err := store.readDocumentForRef(ref)
 		if err != nil {
 			return err

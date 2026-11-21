@@ -25,14 +25,3 @@ func AppendSender(message model.Message, actor session.ActorRef) (model.Message,
 	}
 	return out, nil
 }
-
-// Prompt converts a plain prompt plus typed content into provider-visible
-// content followed by trusted sender identity.
-func Prompt(input string, parts []model.ContentPart, actor session.ActorRef) (string, []model.ContentPart, error) {
-	message := model.MessageFromTextAndContentParts(model.RoleUser, input, parts)
-	prepared, err := AppendSender(message, actor)
-	if err != nil {
-		return "", nil, err
-	}
-	return "", model.ContentPartsFromParts(prepared.Parts), nil
-}

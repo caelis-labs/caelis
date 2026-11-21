@@ -55,7 +55,6 @@ func (r *Runtime) prepareInvocationContext(
 	compactCtx := records.context(r.withCompactActivity(r.compactionRequestContext(ctx), loaded.Session, turnID, sink))
 	result, err := r.compactor.Prepare(compactCtx, compact.Request{
 		Session:          loaded.Session,
-		SessionRef:       ref,
 		Events:           events,
 		PendingEvents:    pendingEventsForCompaction(pendingInputs),
 		Model:            req.AgentSpec.Model,
@@ -65,12 +64,12 @@ func (r *Runtime) prepareInvocationContext(
 	})
 	err = errors.Join(err, r.persistCompactionInvocations(ctx, &loaded.Session, turnID, records))
 	if err != nil {
-		return invocationContext{}, wrapCompactionFailure("prepare", err)
+		return invocationContext{}, &compactionFailureError{cause: err}
 	}
 	if result.Compacted && result.CompactEvent != nil {
 		persisted, appendErr := r.persistCompactionArtifacts(ctx, &loaded.Session, loaded, turnID, result)
 		if appendErr != nil {
-			return invocationContext{}, wrapCompactionFailure("persist", appendErr)
+			return invocationContext{}, &compactionFailureError{cause: appendErr}
 		}
 		sourceEvents := append(session.CloneEvents(events), persisted)
 		return invocationContext{
@@ -113,7 +112,6 @@ type CompactResult struct {
 	Session   session.Session
 	Compacted bool
 	Event     *session.Event
-	Usage     compact.UsageSnapshot
 }
 
 func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResult, error) {
@@ -157,7 +155,6 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		var compactErr error
 		result, compactErr = forceCompactor.Force(callCtx, compact.Request{
 			Session:          activeSession,
-			SessionRef:       ref,
 			Events:           events,
 			Model:            req.Model,
 			ServiceTier:      req.ServiceTier,
@@ -186,7 +183,6 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 	out := CompactResult{
 		Session:   activeSession,
 		Compacted: persisted != nil,
-		Usage:     result.Usage,
 	}
 	if persisted != nil {
 		out.Event = persisted
@@ -196,11 +192,6 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		}
 	}
 	return out, nil
-}
-
-func (r *Runtime) updateCompactionUsageFromBatch(_ context.Context, ref session.SessionRef, events []*session.Event) error {
-	r.advanceCompactionRequest(ref, session.LastEventSeq(mainInvocationEvents(events)))
-	return nil
 }
 
 func (r *Runtime) compactAfterOverflow(
@@ -224,7 +215,6 @@ func (r *Runtime) compactAfterOverflow(
 		}
 		return r.compactor.CompactOnOverflow(compactCtx, compact.Request{
 			Session:          current,
-			SessionRef:       ref,
 			Events:           sourceEvents,
 			PendingEvents:    pendingEvents,
 			Model:            req.AgentSpec.Model,
@@ -307,7 +297,6 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 		}
 		return forceCompactor.Force(compactCtx, compact.Request{
 			Session:          current,
-			SessionRef:       ref,
 			Events:           events,
 			Model:            decision.Model,
 			ServiceTier:      serviceTier,
@@ -382,7 +371,7 @@ func compactionProgressFromEvent(event *session.Event) compactionProgress {
 	progress := compactionProgress{
 		eventID: strings.TrimSpace(event.ID),
 	}
-	if data, ok := compact.CompactEventDataFromEvent(event); ok {
+	if data, ok := session.CheckpointDataFromEvent(event); ok {
 		progress.hasCompactData = true
 		progress.sourceEventCount = data.SourceEventCount
 		progress.summarizedThroughID = strings.TrimSpace(data.SummarizedThroughID)
