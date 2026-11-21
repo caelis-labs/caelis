@@ -131,25 +131,8 @@ func IsCommandExit(err error) bool {
 	return errors.As(err, &exitErr)
 }
 
-func NormalizeSandboxPermissionFailure(result CommandResult, err error) (CommandResult, error) {
-	// Command execution failures must preserve their original stdout/stderr/error
-	// text so agents can identify the concrete denied path and recover with a
-	// narrower command, cache override, or explicit escalation request.
-	return result, err
-}
-
-func NormalizeSandboxPermissionResult(result CommandResult) CommandResult {
-	return result
-}
-
-func NormalizeSandboxPermissionError(err error) error {
-	return err
-}
-
-func NormalizeSandboxPermissionOutput(stream string, data []byte) []byte {
-	return data
-}
-
+// SandboxPermissionDetail classifies a failed sandbox command for diagnostics.
+// The command result and its original output remain authoritative.
 func SandboxPermissionDetail(result CommandResult, err error) (string, bool) {
 	if !isSandboxExecutionResult(result) || !sandboxCommandFailed(result, err) {
 		return "", false

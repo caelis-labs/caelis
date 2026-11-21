@@ -201,28 +201,6 @@ func TestFuncRunnerClonesRequestBeforeInvoke(t *testing.T) {
 	}
 }
 
-func TestNormalizeSandboxPermissionFailurePreservesCommandDiagnostics(t *testing.T) {
-	t.Parallel()
-
-	deniedPath := "/sandbox-denied-home/.gitconfig"
-	raw := "错误：无法锁定配置文件 " + deniedPath + ": 只读文件系统"
-	result, err := NormalizeSandboxPermissionFailure(CommandResult{
-		Stderr:   raw,
-		ExitCode: 1,
-		Route:    RouteSandbox,
-		Backend:  BackendBwrap,
-	}, errors.New("tool: bwrap sandbox command failed: exit status 255; stderr="+raw))
-	if err == nil {
-		t.Fatal("NormalizeSandboxPermissionFailure() error = nil, want command error")
-	}
-	if !strings.Contains(result.Stderr, deniedPath) || !strings.Contains(err.Error(), deniedPath) {
-		t.Fatalf("normalized output lost command diagnostics: stderr=%q err=%q", result.Stderr, err.Error())
-	}
-	if result.Stderr != raw {
-		t.Fatalf("stderr = %q, want raw command stderr %q", result.Stderr, raw)
-	}
-}
-
 func TestCloneSessionStatusNormalizesSessionRef(t *testing.T) {
 	t.Parallel()
 

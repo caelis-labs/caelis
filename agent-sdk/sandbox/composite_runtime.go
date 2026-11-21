@@ -46,11 +46,7 @@ func (r *compositeRuntime) Run(ctx context.Context, req CommandRequest) (Command
 		}
 		return result, fmt.Errorf("ports/sandbox: %s", HostExecutionRequiresApprovalMessage)
 	}
-	result, err := runtime.Run(ctx, req)
-	if !ConstraintsRequestExplicitHost(constraints) {
-		return NormalizeSandboxPermissionFailure(result, err)
-	}
-	return result, err
+	return runtime.Run(ctx, req)
 }
 
 func (r *compositeRuntime) Start(ctx context.Context, req CommandRequest) (Session, error) {
