@@ -593,12 +593,9 @@ func (r testContextRouter) ControllerContext(ctx context.Context, req controller
 	return controller.ContextRoute{Context: contextTransfer, FreshContext: freshContext, SyncSeq: checkpoint}, nil
 }
 
-func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (controller.ContextRoute, error) {
-	contextTransfer, checkpoint, err := r.contextTransfer(ctx, req.SessionRef, req.Binding.ContextSyncSeq, "")
-	if err != nil {
-		return controller.ContextRoute{}, err
-	}
-	return controller.ContextRoute{Context: contextTransfer, SyncSeq: checkpoint}, nil
+func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (agent.ContextTransfer, error) {
+	transfer, _, err := r.contextTransfer(ctx, req.SessionRef, req.SinceSeq, "")
+	return transfer, err
 }
 
 func (r testContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (uint64, error) {

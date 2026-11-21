@@ -86,7 +86,6 @@ type HandoffRequest struct {
 	Agent          string                `json:"agent,omitempty"`
 	Placement      placement.Placement   `json:"placement,omitzero"`
 	Source         string                `json:"source,omitempty"`
-	Reason         string                `json:"reason,omitempty"`
 	Context        agent.ContextTransfer `json:"context,omitempty"`
 	FreshContext   agent.ContextTransfer `json:"fresh_context,omitempty"`
 	ContextSyncSeq uint64                `json:"context_sync_seq,omitempty"`
@@ -104,26 +103,23 @@ type ContextRoute struct {
 // one controller endpoint should receive. Runtime executes the returned route
 // but does not decide context-routing policy.
 type ControllerContextRequest struct {
-	SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
-	Session       session.Session           `json:"session,omitempty"`
-	Controller    session.ControllerBinding `json:"controller,omitempty"`
-	SinceSeq      uint64                    `json:"since_seq,omitempty"`
-	ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
+	SessionRef    session.SessionRef `json:"session_ref,omitempty"`
+	SinceSeq      uint64             `json:"since_seq,omitempty"`
+	ExcludeTurnID string             `json:"exclude_turn_id,omitempty"`
 }
 
 // ParticipantContextRequest asks Control to select canonical background
 // context for one attached participant prompt.
 type ParticipantContextRequest struct {
-	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
-	Session    session.Session            `json:"session,omitempty"`
-	Binding    session.ParticipantBinding `json:"binding,omitempty"`
+	SessionRef session.SessionRef `json:"session_ref,omitempty"`
+	SinceSeq   uint64             `json:"since_seq,omitempty"`
 }
 
 // ContextRouter owns endpoint context-routing policy. Implementations belong
 // to the host Control layer; Runtime only consumes their neutral routes.
 type ContextRouter interface {
 	ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
-	ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
+	ParticipantContext(context.Context, ParticipantContextRequest) (agent.ContextTransfer, error)
 	Checkpoint(context.Context, session.SessionRef, string) (uint64, error)
 }
 
@@ -287,10 +283,8 @@ func NormalizeHandoffRequest(in HandoffRequest) HandoffRequest {
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Placement = placement.Normalize(in.Placement)
 	out.Source = strings.TrimSpace(in.Source)
-	out.Reason = strings.TrimSpace(in.Reason)
 	out.Context = agent.CloneContextTransfer(in.Context)
 	out.FreshContext = agent.CloneContextTransfer(in.FreshContext)
-	out.ContextSyncSeq = in.ContextSyncSeq
 	return out
 }
 

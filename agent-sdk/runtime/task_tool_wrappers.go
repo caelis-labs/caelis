@@ -459,7 +459,7 @@ func (t runtimeSpawnTool) resolveDelegatedSpawnContext(ctx context.Context) (age
 	if t.runtime == nil || t.runtime.controllerContextRouter == nil {
 		return agent.ContextTransfer{}, true
 	}
-	transfer, _, err := t.runtime.buildDelegatedSpawnPromptContext(ctx, t.session, t.sessionRef)
+	transfer, err := t.runtime.buildParticipantPromptContext(ctx, t.sessionRef, 0)
 	if err != nil {
 		return agent.ContextTransfer{}, true
 	}

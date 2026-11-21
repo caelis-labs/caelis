@@ -71,8 +71,6 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	}
 	route, err := router.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef: activeSession.SessionRef,
-		Session:    activeSession,
-		Controller: session.ControllerBinding{Kind: session.ControllerKindACP, Label: "old", ContextSyncSeq: 4},
 	})
 	if err != nil {
 		t.Fatalf("ControllerContext() error = %v", err)
@@ -110,18 +108,14 @@ func TestContextRouterAllowsEmptyCanonicalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	route, err := router.ParticipantContext(ctx, controller.ParticipantContextRequest{
+	transfer, err := router.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: activeSession.SessionRef,
-		Session:    activeSession,
-		Binding: session.ParticipantBinding{
-			ID: "spawn", Label: "spawn", ContextSyncSeq: 0,
-		},
 	})
 	if err != nil {
 		t.Fatalf("ParticipantContext(empty history) error = %v", err)
 	}
-	if route.SyncSeq != 0 || !agent.ContextTransferEmpty(route.Context) || !agent.ContextTransferEmpty(route.FreshContext) {
-		t.Fatalf("empty history route = %#v, want empty transfer without error", route)
+	if !agent.ContextTransferEmpty(transfer) {
+		t.Fatalf("empty history transfer = %#v, want empty transfer without error", transfer)
 	}
 }
 
@@ -182,7 +176,6 @@ func TestControllerContextIncludesFullBootstrapAlongsideResumeDelta(t *testing.T
 	}
 	route, err := router.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef: activeSession.SessionRef,
-		Session:    activeSession,
 		SinceSeq:   2,
 	})
 	if err != nil {

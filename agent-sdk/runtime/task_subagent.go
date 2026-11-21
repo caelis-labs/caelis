@@ -10,10 +10,8 @@ import (
 	"strings"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -40,43 +38,6 @@ func resolveSpawnAgent(session session.Session, requested string) (string, error
 		return "self", nil
 	}
 	return requested, nil
-}
-
-func (r *Runtime) buildDelegatedSpawnPromptContext(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-) (agent.ContextTransfer, uint64, error) {
-	return r.buildParticipantPromptContext(ctx, activeSession, ref, session.ParticipantBinding{
-		ID:             "spawn",
-		Label:          "spawn",
-		ContextSyncSeq: 0,
-	})
-}
-
-func (r *Runtime) buildSideSubagentPromptContext(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	target string,
-	sinceSeq uint64,
-) (agent.ContextTransfer, uint64, error) {
-	if r == nil || r.controllerContextRouter == nil {
-		return agent.ContextTransfer{}, 0, fmt.Errorf("controller context routing is unavailable")
-	}
-	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
-		SessionRef: session.NormalizeSessionRef(ref),
-		Session:    session.CloneSession(activeSession),
-		Binding: session.ParticipantBinding{
-			ID:             strings.TrimSpace(target),
-			Label:          strings.TrimSpace(target),
-			ContextSyncSeq: sinceSeq,
-		},
-	})
-	if err != nil {
-		return agent.ContextTransfer{}, 0, err
-	}
-	return agent.CloneContextTransfer(route.Context), route.SyncSeq, nil
 }
 
 func isSideSubagentTask(task *subagentTask) bool {
@@ -168,7 +129,7 @@ func (r *Runtime) StartSubagentWithOptions(
 			approvalMode = string(r.currentApprovalMode(state))
 		}
 	}
-	contextTransfer, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), 0)
+	contextTransfer, err := r.buildParticipantPromptContext(ctx, ref, 0)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}

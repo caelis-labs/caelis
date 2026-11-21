@@ -404,7 +404,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	if !claimed {
 		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: participant %q already has a prompt in progress", strings.TrimSpace(binding.ID))
 	}
-	contextTransfer, _, err := r.buildParticipantPromptContext(ctx, activeSession, ref, binding)
+	contextTransfer, err := r.buildParticipantPromptContext(ctx, ref, binding.ContextSyncSeq)
 	if err != nil {
 		releasePrompt()
 		return agent.RunResult{}, err
