@@ -97,14 +97,13 @@ type taskBatchControlItem struct {
 	Handle       string
 	Snapshot     taskapi.Snapshot
 	Err          error
-	OK           bool
 	ActualWaitMS int
 }
 
-func taskBatchControlToolResult(ctx context.Context, items []taskBatchControlItem, action string, actualWaitMS int) (tool.Result, error) {
+func taskBatchControlToolResult(items []taskBatchControlItem, action string, actualWaitMS int) (tool.Result, error) {
 	payload := taskBatchControlPayload(items, action, actualWaitMS)
 	result := tool.Result{}
-	failed := taskBatchHasError(items)
+	failed := taskBatchErrorCount(items) > 0
 	if action != "cancel" {
 		for i, item := range items {
 			if item.Err != nil || item.Snapshot.Kind != taskapi.KindCodeMode {
@@ -247,10 +246,6 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, actual
 		out["actual_wait_time_ms"] = actualWaitMS
 	}
 	return out
-}
-
-func taskBatchHasError(items []taskBatchControlItem) bool {
-	return taskBatchErrorCount(items) > 0
 }
 
 func taskBatchErrorCount(items []taskBatchControlItem) int {

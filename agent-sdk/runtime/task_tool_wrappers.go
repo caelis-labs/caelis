@@ -776,7 +776,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return t.callBatchTaskWaitAny(ctx, handles, yield)
 	}
 	if len(handles) > 1 {
-		return t.callBatchTaskControl(ctx, normalizedAction, handles, input)
+		return t.callBatchTaskCancel(ctx, handles)
 	}
 	identity, err := t.resolveJobHandle(ctx, handles[0])
 	if err != nil {
@@ -818,7 +818,7 @@ func durationMillis(value time.Duration) int {
 	return int(value / time.Millisecond)
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, action string, handles []string, input string) (tool.Result, error) {
+func (t runtimeTaskTool) callBatchTaskCancel(ctx context.Context, handles []string) (tool.Result, error) {
 	items := make([]taskBatchControlItem, 0, len(handles))
 	for _, handle := range handles {
 		identity, resolveErr := t.resolveJobHandle(ctx, handle)
@@ -829,23 +829,22 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, action string
 
 		req := taskapi.ControlRequest{
 			TaskID:    identity.taskID,
-			Input:     input,
 			Principal: session.ActorKindTool,
 			Source:    "agent_tool",
 		}
-		snapshot, err := t.callTaskControl(ctx, action, req)
+		snapshot, err := t.tasks.Cancel(ctx, t.sessionRef, req)
 
 		if err != nil {
 			items = append(items, taskBatchControlItem{Handle: handle, Err: err})
 			continue
 		}
 
-		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true})
+		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot})
 	}
 
-	result, resultErr := taskBatchControlToolResult(ctx, items, action, 0)
+	result, resultErr := taskBatchControlToolResult(items, "cancel", 0)
 	observation := toolbinding.Observed(ctx)
-	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, action, input, 0, 0, items)
+	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "cancel", 0, 0, items)
 	return result, resultErr
 }
 
@@ -910,7 +909,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []str
 			waited := outcomes[item.handle]
 			if waited.err == nil {
 
-				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: waited.snapshot, OK: true, ActualWaitMS: waited.waitMS}
+				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: waited.snapshot, ActualWaitMS: waited.waitMS}
 				continue
 			}
 			if winner.handle == "" || !errors.Is(waited.err, context.Canceled) {
@@ -921,7 +920,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []str
 				TaskID: item.identity.taskID, Principal: session.ActorKindTool, Source: "agent_tool",
 			})
 
-			itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: snapshot, OK: err == nil, Err: err}
+			itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: snapshot, Err: err}
 		}
 	}
 	items := make([]taskBatchControlItem, 0, len(handles))
@@ -929,9 +928,9 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []str
 		items = append(items, itemsByHandle[handle])
 	}
 	actualWaitMS := durationMillis(time.Since(started))
-	result, resultErr := taskBatchControlToolResult(ctx, items, "wait", actualWaitMS)
+	result, resultErr := taskBatchControlToolResult(items, "wait", actualWaitMS)
 	observation := toolbinding.Observed(ctx)
-	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "wait", "", yield, actualWaitMS, items)
+	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "wait", yield, actualWaitMS, items)
 	return result, resultErr
 }
 
@@ -987,7 +986,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	return out
 }
 
-func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yield time.Duration, actualWaitMS int, items []taskBatchControlItem) map[string]any {
+func taskBatchToolResultEventMeta(existing map[string]any, action string, yield time.Duration, actualWaitMS int, items []taskBatchControlItem) map[string]any {
 	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -1007,9 +1006,6 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		toolMeta["effective_yield_time_ms"] = durationMillis(yield)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
 	}
-	if strings.EqualFold(strings.TrimSpace(action), "write") {
-		toolMeta["input"] = strings.TrimSpace(input)
-	}
 	taskMeta := toolbinding.RuntimeSection(out, "task")
 	taskMeta["handles"] = taskBatchVisibleHandles(items)
 	taskMeta["count"] = len(items)
@@ -1026,7 +1022,7 @@ func taskBatchVisibleHandles(items []taskBatchControlItem) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		handle := strings.TrimSpace(item.Handle)
-		if handle == "" && item.OK {
+		if handle == "" && item.Err == nil {
 			handle = taskPublicHandle(item.Snapshot)
 		}
 		if handle != "" {
@@ -1039,7 +1035,7 @@ func taskBatchVisibleHandles(items []taskBatchControlItem) []string {
 func commonTaskBatchKind(items []taskBatchControlItem) (taskapi.Kind, bool) {
 	var kind taskapi.Kind
 	for _, item := range items {
-		if !item.OK {
+		if item.Err != nil {
 			continue
 		}
 		if strings.TrimSpace(string(item.Snapshot.Kind)) == "" {

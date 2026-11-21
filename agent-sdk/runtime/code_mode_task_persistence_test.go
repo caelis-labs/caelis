@@ -482,7 +482,7 @@ func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := taskBatchControlToolResult(ctx, []taskBatchControlItem{{Snapshot: first}, {Snapshot: second}}, "wait", 0)
+	batch, err := taskBatchControlToolResult([]taskBatchControlItem{{Snapshot: first}, {Snapshot: second}}, "wait", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
