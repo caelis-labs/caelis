@@ -201,7 +201,7 @@ func TestAsyncCompactionLiveProvider(t *testing.T) {
 				t.Fatal(err)
 			}
 			if event != nil && event.Response != nil && event.TurnComplete {
-				measurement.Answer = event.Response.Message.TextContent()
+				measurement.Answer = event.Message.TextContent()
 				measurement.Usage = event.Usage
 			}
 		}

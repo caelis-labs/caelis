@@ -815,7 +815,7 @@ func TestOpenAICodexRequestPreservesEmptyToolProperties(t *testing.T) {
 
 func TestOpenAICompatStrictToolsPreserveEmptyProperties(t *testing.T) {
 	schema := map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}, "additionalProperties": false}
-	tools := fromKernelTools([]model.ToolDefinition{{Name: "no_args", Parameters: schema, Strict: true}}, true)
+	tools := fromKernelTools([]model.FunctionToolSpec{{Name: "no_args", Parameters: schema, Strict: true}}, true)
 	raw, err := json.Marshal(tools)
 	if err != nil {
 		t.Fatal(err)

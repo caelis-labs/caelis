@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
-	"maps"
 	"strings"
 	"sync"
 
@@ -249,24 +248,12 @@ func cloneStreamEvent(in *model.StreamEvent) *model.StreamEvent {
 	out := *in
 	if in.PartDelta != nil {
 		part := *in.PartDelta
-		part.ProviderDetails = maps.Clone(in.PartDelta.ProviderDetails)
-		if in.PartDelta.Replay != nil {
-			replay := *in.PartDelta.Replay
-			part.Replay = &replay
-		}
 		out.PartDelta = &part
-	}
-	if in.Message != nil {
-		message := model.CloneMessage(*in.Message)
-		out.Message = &message
 	}
 	if in.Response != nil {
 		response := *in.Response
-		response.Message = model.CloneMessage(in.Response.Message)
+		response.Message = model.CloneMessage(in.Message)
 		out.Response = &response
-	}
-	if len(in.RawProviderEvent) > 0 {
-		out.RawProviderEvent = append([]byte(nil), in.RawProviderEvent...)
 	}
 	return &out
 }

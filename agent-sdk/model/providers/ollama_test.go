@@ -99,7 +99,7 @@ func TestOllamaRegisterAndCreate(t *testing.T) {
 			t.Fatalf("generate error: %v", err)
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			gotText = resp.Response.Message.TextContent()
+			gotText = resp.Message.TextContent()
 			gotUsage = resp.Usage
 		}
 	}

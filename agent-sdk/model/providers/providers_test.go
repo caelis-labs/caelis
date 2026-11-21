@@ -130,7 +130,7 @@ func TestGeminiStream_DoesNotApplyRequestTimeout(t *testing.T) {
 			continue
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			finalText = resp.Response.Message.TextContent()
+			finalText = resp.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -197,7 +197,7 @@ func TestAnthropicSDKStream_DoesNotApplyRequestTimeout(t *testing.T) {
 			continue
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {
-			finalText = event.Response.Message.TextContent()
+			finalText = event.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -306,8 +306,8 @@ func TestGeminiStream_EmitsReasoningChunks(t *testing.T) {
 			reasoningChunks = append(reasoningChunks, strings.TrimSpace(resp.PartDelta.TextDelta))
 		}
 		if resp.Response != nil && resp.TurnComplete {
-			finalReasoning = strings.TrimSpace(resp.Response.Message.ReasoningText())
-			finalText = strings.TrimSpace(resp.Response.Message.TextContent())
+			finalReasoning = strings.TrimSpace(resp.Message.ReasoningText())
+			finalText = strings.TrimSpace(resp.Message.TextContent())
 		}
 	}
 	if strings.Join(reasoningChunks, "|") != "think-1|think-2" {
@@ -918,8 +918,8 @@ func TestDeepSeekProviderExecutedWebSearchPOC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Generate() replay call error = %v", err)
 		}
-		if event != nil && event.Response != nil && event.Response.Message.TextContent() != "continued" {
-			t.Fatalf("replay text = %q, want continued", event.Response.Message.TextContent())
+		if event != nil && event.Response != nil && event.Message.TextContent() != "continued" {
+			t.Fatalf("replay text = %q, want continued", event.Message.TextContent())
 		}
 	}
 	if calls != 2 {
@@ -1037,7 +1037,7 @@ func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
 }
 
 func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
-	closedTool := model.ToolDefinition{
+	closedTool := model.FunctionToolSpec{
 		Name:        "lookup",
 		Description: "lookup closed schema",
 		Strict:      true,
@@ -1091,7 +1091,7 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tools := fromKernelTools([]model.ToolDefinition{closedTool}, tc.llm.options.StrictFunctionTools)
+			tools := fromKernelTools([]model.FunctionToolSpec{closedTool}, tc.llm.options.StrictFunctionTools)
 			if len(tools) != 1 {
 				t.Fatalf("tools len = %d, want 1", len(tools))
 			}
@@ -2166,8 +2166,8 @@ func TestAnthropicHeaderKeyDisablesEnvironmentDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Generate() error = %v", err)
 		}
-		if event != nil && event.Response != nil && event.Response.Message.TextContent() != "ok" {
-			t.Fatalf("response text = %q, want ok", event.Response.Message.TextContent())
+		if event != nil && event.Response != nil && event.Message.TextContent() != "ok" {
+			t.Fatalf("response text = %q, want ok", event.Message.TextContent())
 		}
 	}
 }
