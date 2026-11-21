@@ -23,7 +23,7 @@ func toolProgressEvent(call model.ToolCall, result tool.Result, extraMeta ...map
 func toolEvent(call model.ToolCall, result tool.Result, err error, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
-		Tool: toolEventPayload(call, "", mustObject(call.Args), nil, nil),
+		Tool: toolEventPayload(call, "", mustObject(call.Args)),
 	}
 	applyToolResultPresentation(event, call, result, err, message, statusOverride, extraMeta...)
 	full, _ := tool.CloneResult(result, nil)
@@ -304,40 +304,11 @@ func toolReservedNamespaceCollisionEventMeta(collision bool) map[string]any {
 	}
 }
 
-func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any, rawOutput map[string]any, content []session.EventToolContent) *session.EventTool {
-	payload := &session.EventTool{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(call.Name),
-		Status:  strings.TrimSpace(status),
-		Input:   session.CloneState(rawInput),
-		Output:  session.CloneState(rawOutput),
-		Content: cloneEventToolContent(content),
+func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any) *session.EventTool {
+	return &session.EventTool{
+		ID:     strings.TrimSpace(call.ID),
+		Name:   strings.TrimSpace(call.Name),
+		Status: strings.TrimSpace(status),
+		Input:  session.CloneState(rawInput),
 	}
-	return payload
-}
-
-func cloneEventToolContent(in []session.EventToolContent) []session.EventToolContent {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]session.EventToolContent, 0, len(in))
-	for _, item := range in {
-		var oldText *string
-		if item.OldText != nil {
-			value := *item.OldText
-			oldText = &value
-		}
-		out = append(out, session.EventToolContent{
-			Type:       strings.TrimSpace(item.Type),
-			Text:       item.Text,
-			TerminalID: strings.TrimSpace(item.TerminalID),
-			Path:       strings.TrimSpace(item.Path),
-			OldText:    oldText,
-			NewText:    item.NewText,
-			Changes:    session.CloneProtocolDiffChanges(item.Changes),
-			Patch:      session.CloneProtocolDiffPatch(item.Patch),
-			Meta:       session.CloneState(item.Meta),
-		})
-	}
-	return out
 }
