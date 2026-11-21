@@ -286,7 +286,7 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 			t.Fatalf("Generate() error = %v", err)
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {
-			finalText = event.Response.Message.TextContent()
+			finalText = event.Message.TextContent()
 		}
 	}
 	if finalText != "ok" {

@@ -746,20 +746,10 @@ func estimateToolSpecTokens(spec model.ToolSpec) int {
 		total += estimateTextTokens(spec.Function.Description)
 		total += estimateAnyTokens(spec.Function.Parameters)
 	}
-	if spec.ProviderDefined != nil {
-		total += estimateTextTokens(spec.ProviderDefined.Name)
-		total += estimateTextTokens(spec.ProviderDefined.Provider)
-		total += estimateRawMessageMapTokens(spec.ProviderDefined.ProviderDetails)
-	}
 	if spec.ProviderExecuted != nil {
 		total += estimateTextTokens(spec.ProviderExecuted.Name)
 		total += estimateTextTokens(spec.ProviderExecuted.Provider)
 		total += estimateRawMessageMapTokens(spec.ProviderExecuted.ProviderDetails)
-	}
-	if spec.MCP != nil {
-		total += estimateTextTokens(spec.MCP.Name)
-		total += estimateTextTokens(spec.MCP.Server)
-		total += estimateTextTokens(spec.MCP.Tool)
 	}
 	if total > 0 {
 		return total

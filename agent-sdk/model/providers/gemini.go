@@ -465,7 +465,7 @@ func geminiStreamPartDelta(part model.Part) *model.PartDelta {
 		if part.ToolUse == nil {
 			return nil
 		}
-		return &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: string(part.ToolUse.Input)}
+		return &model.PartDelta{Kind: model.PartKindToolUse}
 	default:
 		return nil
 	}

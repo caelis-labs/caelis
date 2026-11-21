@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 )
 
 func (g *Gateway) HandoffController(ctx context.Context, req HandoffControllerRequest) (session.Session, error) {
@@ -24,7 +25,7 @@ func (g *Gateway) HandoffController(ctx context.Context, req HandoffControllerRe
 	if err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err := g.control.HandoffController(ctx, agent.HandoffControllerRequest{
+	activeSession, err := g.control.HandoffController(ctx, controlplane.HandoffControllerRequest{
 		SessionRef:              ref,
 		ExpectedRevision:        req.ExpectedRevision,
 		ExpectedControllerEpoch: strings.TrimSpace(req.ExpectedControllerEpoch),

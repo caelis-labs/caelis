@@ -91,7 +91,7 @@ type ollamaChatResponse struct {
 // newOllama returns a native Ollama /api/chat client.
 func newOllama(cfg Config, token string) model.LLM {
 	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
-		(len(cfg.ReasoningLevels) > 0 || len(cfg.SupportedReasoningEfforts) > 0) {
+		len(cfg.ReasoningLevels) > 0 {
 		// Explicit levels retain the compatible boolean control contract.
 		cfg.ReasoningMode = "toggle"
 	}
@@ -271,9 +271,9 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 					return err
 				}
 				acc.toolCalls = append(acc.toolCalls, calls...)
-				for _, call := range calls {
+				for range calls {
 					if !yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
-						PartDelta: &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: call.Args}}, nil) {
+						PartDelta: &model.PartDelta{Kind: model.PartKindToolUse}}, nil) {
 						stopped = true
 						return errStopSSE
 					}

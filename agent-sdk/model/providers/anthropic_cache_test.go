@@ -122,11 +122,7 @@ func TestAnthropicFactoryCachePolicy(t *testing.T) {
 				body, _ = io.ReadAll(req.Body)
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}`)), Request: req}, nil
 			})
-			factory := NewFactory()
-			if err := factory.Register(Config{Alias: "cache-route", API: api, Provider: string(api), Model: "claude-sonnet-4-6", Auth: AuthConfig{Type: AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}}); err != nil {
-				t.Fatal(err)
-			}
-			llm, err := factory.NewByAlias("cache-route")
+			llm, err := New(Config{API: api, Provider: string(api), Model: "claude-sonnet-4-6", Auth: AuthConfig{Type: AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}})
 			if err != nil {
 				t.Fatal(err)
 			}

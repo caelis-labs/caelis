@@ -86,9 +86,9 @@ func TestDiscoverySkipsMalformedSkillsAndRecoversAfterRepair(t *testing.T) {
 		if err := os.WriteFile(path, []byte(broken), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		metas, err := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: []string{root}})
-		if err != nil || len(metas) != 1 || metas[0].Name != "good" {
-			t.Fatalf("discovery = %+v, %v", metas, err)
+		metas := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: []string{root}})
+		if len(metas) != 1 || metas[0].Name != "good" {
+			t.Fatalf("discovery = %+v", metas)
 		}
 		if _, err := DiscoverRootMeta(bad); err == nil {
 			t.Fatal("explicit metadata read accepted malformed Skill")
@@ -98,9 +98,9 @@ func TestDiscoverySkipsMalformedSkillsAndRecoversAfterRepair(t *testing.T) {
 		}
 	}
 	writeSkillForDiscoveryTest(t, bad, "bad", "repaired")
-	metas, err := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: []string{root}})
-	if err != nil || len(metas) != 2 {
-		t.Fatalf("discovery after repair = %+v, %v", metas, err)
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: []string{root}})
+	if len(metas) != 2 {
+		t.Fatalf("discovery after repair = %+v", metas)
 	}
 }
 
@@ -114,9 +114,9 @@ func TestPluginDiscoverySkipsMalformedSibling(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bad, "SKILL.md"), []byte("---\nname: [invalid\n---\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	metas, err := DiscoverPluginBundleMeta([]skill.PluginBundle{{Plugin: "demo", Namespace: "demo", Root: root, Enabled: true}})
-	if err != nil || len(metas) != 1 || metas[0].Name != "demo:good" {
-		t.Fatalf("plugin discovery = %+v, %v", metas, err)
+	metas := DiscoverPluginBundleMeta([]skill.PluginBundle{{Plugin: "demo", Namespace: "demo", Root: root, Enabled: true}})
+	if len(metas) != 1 || metas[0].Name != "demo:good" {
+		t.Fatalf("plugin discovery = %+v", metas)
 	}
 }
 
@@ -139,7 +139,7 @@ func TestDiscoverMetaIncludesPluginSkillsNamespacedAndSuppressesLegacyCopy(t *te
 		t.Fatalf("write legacy copy: %v", err)
 	}
 
-	metas, err := DiscoverMetaRequest(skill.DiscoverRequest{
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{
 		Dirs: []string{regularRoot},
 		PluginBundles: []skill.PluginBundle{{
 			Plugin:    "superpowers",
@@ -148,9 +148,6 @@ func TestDiscoverMetaIncludesPluginSkillsNamespacedAndSuppressesLegacyCopy(t *te
 			Enabled:   true,
 		}},
 	})
-	if err != nil {
-		t.Fatalf("DiscoverMetaRequest() error = %v", err)
-	}
 	if metaByNameForDiscoveryTest(metas, "ordinary").Source != skill.SourceRegular {
 		t.Fatalf("ordinary skill missing from %#v", metas)
 	}
@@ -161,7 +158,7 @@ func TestDiscoverMetaIncludesPluginSkillsNamespacedAndSuppressesLegacyCopy(t *te
 		t.Fatalf("legacy regular plugin copy leaked as %#v", got)
 	}
 
-	copies, err := DiscoverLegacyPluginCopies(skill.DiscoverRequest{
+	copies := DiscoverLegacyPluginCopies(skill.DiscoverRequest{
 		Dirs: []string{regularRoot},
 		PluginBundles: []skill.PluginBundle{{
 			Plugin:    "superpowers",
@@ -170,9 +167,6 @@ func TestDiscoverMetaIncludesPluginSkillsNamespacedAndSuppressesLegacyCopy(t *te
 			Enabled:   true,
 		}},
 	})
-	if err != nil {
-		t.Fatalf("DiscoverLegacyPluginCopies() error = %v", err)
-	}
 	if len(copies) != 1 || copies[0].Path != filepath.Join(legacyCopy, "SKILL.md") {
 		t.Fatalf("legacy copies = %#v, want copied plan skill", copies)
 	}
@@ -196,7 +190,7 @@ func TestDiscoverMetaSuppressesDisabledPluginSkillCopies(t *testing.T) {
 		t.Fatalf("write legacy copy: %v", err)
 	}
 
-	metas, err := DiscoverMetaRequest(skill.DiscoverRequest{
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{
 		Dirs: []string{regularRoot},
 		PluginBundles: []skill.PluginBundle{{
 			Plugin:    "disabled-plugin",
@@ -205,9 +199,6 @@ func TestDiscoverMetaSuppressesDisabledPluginSkillCopies(t *testing.T) {
 			Enabled:   false,
 		}},
 	})
-	if err != nil {
-		t.Fatalf("DiscoverMetaRequest() error = %v", err)
-	}
 	if len(metas) != 0 {
 		t.Fatalf("metas = %#v, want disabled plugin skill and legacy copy hidden", metas)
 	}
@@ -268,11 +259,11 @@ func writeSkillForDiscoveryTest(t *testing.T, dir string, name string, descripti
 	}
 }
 
-func metaByNameForDiscoveryTest(metas []Meta, name string) Meta {
+func metaByNameForDiscoveryTest(metas []skill.Meta, name string) skill.Meta {
 	for _, meta := range metas {
 		if meta.Name == name {
 			return meta
 		}
 	}
-	return Meta{}
+	return skill.Meta{}
 }

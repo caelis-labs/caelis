@@ -309,7 +309,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 				if tc.ID != "" || tc.Function.Name != "" || tc.Function.Arguments != "" {
 					if !yield(&model.StreamEvent{
 						Type:      model.StreamEventPartDelta,
-						PartDelta: &model.PartDelta{Index: tc.Index, Kind: model.PartKindToolUse, InputDelta: tc.Function.Arguments},
+						PartDelta: &model.PartDelta{Index: tc.Index, Kind: model.PartKindToolUse},
 					}, nil) {
 						stopped = true
 						return errStopSSE

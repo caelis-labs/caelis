@@ -58,7 +58,7 @@ type openAICompatCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 
-func fromKernelTools(tools []model.ToolDefinition, strictFunctionTools bool) []openAICompatTool {
+func fromKernelTools(tools []model.FunctionToolSpec, strictFunctionTools bool) []openAICompatTool {
 	out := make([]openAICompatTool, 0, len(tools))
 	for _, t := range tools {
 		parameters := t.Parameters

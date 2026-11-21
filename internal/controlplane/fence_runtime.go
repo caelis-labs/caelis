@@ -129,14 +129,6 @@ func (r *FencedRuntime) runWithFence(ctx context.Context, ref session.SessionRef
 		r.completeFencedExecution(execution)
 		return result, finishErr
 	}
-	if _, ok := result.Handle.(agent.RunnerCompletionWaiter); !ok {
-		cancel()
-		closeErr := result.Handle.Close()
-		return agent.RunResult{}, errors.Join(
-			fmt.Errorf("controlplane: fenced runtime runner requires a completion waiter; execution fence retained"),
-			closeErr,
-		)
-	}
 	return r.wrapLiveHandle(result, ref, func(inner agent.Runner, onFinish func()) agent.Runner {
 		wrapped := newFencedRunner(inner, guard, cancel, r.diagnostics, func() {
 			onFinish()
@@ -530,8 +522,7 @@ func (r *fencedRunner) waitForProducer(ctx context.Context) (bool, error) {
 	r.quiesceOnce.Do(func() {
 		started := r.diagnostics.started()
 		go func() {
-			waiter := r.inner.(agent.RunnerCompletionWaiter)
-			r.quiesceErr = waiter.WaitCompletion(context.Background())
+			r.quiesceErr = r.inner.WaitCompletion(context.Background())
 			// A normal Turn lifetime is not a slow wait. Record this phase only
 			// when completion proof fails; otherwise every model Turn would emit
 			// a warning merely for doing useful work.

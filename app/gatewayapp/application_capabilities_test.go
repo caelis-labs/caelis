@@ -45,8 +45,8 @@ func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 	if !strings.Contains(metadata, "selected") || strings.Contains(metadata, "SELECTED_BODY_MARKER") || strings.Contains(metadata, "ambient") {
 		t.Fatalf("root metadata includes unselected Skill or body: %s", metadata)
 	}
-	meta, matched := catalog.ResolveBool("selected")
-	if !matched {
+	meta, status := catalog.Resolve("selected")
+	if status != skill.ResolveMatched {
 		t.Fatal("selected root was not discovered")
 	}
 	loaded, err := (skillfs.Loader{}).Load(context.Background(), skill.RefFromMeta(meta))

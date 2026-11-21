@@ -7,11 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-// Factory builds model providers from alias configs.
-type Factory struct {
-	configs map[string]Config
-}
-
 var supportedAPITypes = map[APIType]struct{}{
 	APIOpenAI:              {},
 	APIOpenAIResponses:     {},
@@ -28,35 +23,6 @@ var supportedAPITypes = map[APIType]struct{}{
 	APIVolcengineCoding:    {},
 	APIXAIResponses:        {},
 	APIOllama:              {},
-}
-
-// NewFactory returns an empty provider factory.
-func NewFactory() *Factory {
-	return &Factory{configs: map[string]Config{}}
-}
-
-// Register adds or overwrites one alias config.
-func (f *Factory) Register(cfg Config) error {
-	if f == nil {
-		return fmt.Errorf("providers: factory is nil")
-	}
-	alias := strings.ToLower(strings.TrimSpace(cfg.Alias))
-	if alias == "" {
-		return fmt.Errorf("providers: alias is required")
-	}
-	if !isSupportedAPIType(cfg.API) {
-		return fmt.Errorf("providers: unsupported api type %q", cfg.API)
-	}
-	authType := strings.TrimSpace(string(cfg.Auth.Type))
-	if authType != "" && cfg.Auth.Type != AuthAPIKey && cfg.Auth.Type != AuthBearerToken && cfg.Auth.Type != AuthOAuthToken && cfg.Auth.Type != AuthNone {
-		return fmt.Errorf("providers: unsupported auth type %q", cfg.Auth.Type)
-	}
-	if cfg.Auth.Type == "" {
-		cfg.Auth.Type = defaultAuthType(cfg.API)
-	}
-	cfg.Alias = alias
-	f.configs[alias] = cfg
-	return nil
 }
 
 func isSupportedAPIType(api APIType) bool {
@@ -77,18 +43,20 @@ func defaultAuthType(api APIType) AuthType {
 	}
 }
 
-// NewByAlias creates a model provider by alias.
-func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
-	if f == nil {
-		return nil, fmt.Errorf("providers: factory is nil")
+// New constructs a model from resolved provider configuration. Model alias
+// lookup and credential selection belong to the caller.
+func New(cfg Config) (model.LLM, error) {
+	if !isSupportedAPIType(cfg.API) {
+		return nil, fmt.Errorf("providers: unsupported api type %q", cfg.API)
 	}
-	alias = strings.ToLower(strings.TrimSpace(alias))
-	if alias == "" {
-		return nil, fmt.Errorf("providers: model alias is required")
-	}
-	cfg, ok := f.configs[alias]
-	if !ok {
-		return nil, fmt.Errorf("providers: unknown model alias %q", alias)
+	switch cfg.Auth.Type {
+	case "":
+		cfg.Auth.Type = defaultAuthType(cfg.API)
+	case AuthAPIKey, AuthBearerToken, AuthOAuthToken, AuthNone:
+	default:
+		if strings.TrimSpace(string(cfg.Auth.Type)) != "" {
+			return nil, fmt.Errorf("providers: unsupported auth type %q", cfg.Auth.Type)
+		}
 	}
 	if cfg.API == APIOpenAICodex || cfg.API == APIXAIResponses {
 		if cfg.Auth.Type != AuthOAuthToken {

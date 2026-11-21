@@ -30,18 +30,9 @@ func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T)
 	if got["agent"] != "codex" || got["prompt"] != "inspect repo" || got["task_id"] != "task-1" {
 		t.Fatalf("SpawnDisplayInputForResult() = %#v", got)
 	}
-	normalized := NormalizeSpawnDisplayRawMap(output)
+	normalized := normalizeSpawnDisplayRawMap(output)
 	if normalized["text"] != "running" {
 		t.Fatalf("text remainder = %#v", normalized["text"])
-	}
-}
-
-func TestCleanSubagentFinalOutput(t *testing.T) {
-	raw := "### Done\n- `hello.txt` **created**\n| File | State |\n| --- | --- |\n| `hello.txt` | **ok** |"
-	got := CleanSubagentFinalOutput(raw)
-	want := raw
-	if got != want {
-		t.Fatalf("CleanSubagentFinalOutput() = %q, want %q", got, want)
 	}
 }
 
@@ -120,8 +111,8 @@ func TestWebFetchSummaryShowsURLOnly(t *testing.T) {
 }
 
 func TestWebDisplayArgs(t *testing.T) {
-	if got := WebSearchDisplayArg(map[string]any{"query": "Does DeepSeek API provide a native search tool for agents?"}); got != `"Does DeepSeek API provide a native search tool for agents?"` {
-		t.Fatalf("WebSearchDisplayArg() = %q", got)
+	if got := webSearchDisplayArg(map[string]any{"query": "Does DeepSeek API provide a native search tool for agents?"}); got != `"Does DeepSeek API provide a native search tool for agents?"` {
+		t.Fatalf("webSearchDisplayArg() = %q", got)
 	}
 	if got := WebFetchDisplayArg(map[string]any{"url": "https://api-docs.deepseek.com/guides/claude_code"}); got != "https://api-docs.deepseek.com/guides/claude_code" {
 		t.Fatalf("WebFetchDisplayArg() = %q", got)

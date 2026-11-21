@@ -32,11 +32,7 @@ data: [DONE]
 			transport := compactionTerminalTransport(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.wire)), Request: req}, nil
 			})
-			factory := providers.NewFactory()
-			if err := factory.Register(providers.Config{Alias: "stream", Model: "fixture", API: tc.api, BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthNone}, HTTPClient: &http.Client{Transport: transport}}); err != nil {
-				t.Fatal(err)
-			}
-			llm, err := factory.NewByAlias("stream")
+			llm, err := providers.New(providers.Config{Model: "fixture", API: tc.api, BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthNone}, HTTPClient: &http.Client{Transport: transport}})
 			if err != nil {
 				t.Fatal(err)
 			}

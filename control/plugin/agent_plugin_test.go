@@ -141,9 +141,9 @@ func TestAgentPluginSkipsOneInvalidSkillWithoutHidingOtherSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
-	if err != nil || len(metas) != 1 || metas[0].Name != "example:good" {
-		t.Fatalf("standard Skills = %+v, %v", metas, err)
+	metas := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+	if len(metas) != 1 || metas[0].Name != "example:good" {
+		t.Fatalf("standard Skills = %+v", metas)
 	}
 }
 
@@ -165,9 +165,9 @@ func TestAgentPluginSkillDescriptionUnicodeCharacterBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
-			if err != nil || len(metas) != tc.want {
-				t.Fatalf("%d Chinese characters: Skills = %+v, %v; want %d", tc.characters, metas, err, tc.want)
+			metas := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+			if len(metas) != tc.want {
+				t.Fatalf("%d Chinese characters: Skills = %+v; want %d", tc.characters, metas, tc.want)
 			}
 		})
 	}
@@ -189,9 +189,9 @@ func TestAgentPluginSkillYAMLFrontmatterThroughContributions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
-			if err != nil || len(metas) != 1 || metas[0].Name != "example:example" || metas[0].Description != tc.description {
-				t.Fatalf("YAML metadata = %+v, %v; want %q", metas, err, tc.description)
+			metas := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+			if len(metas) != 1 || metas[0].Name != "example:example" || metas[0].Description != tc.description {
+				t.Fatalf("YAML metadata = %+v; want %q", metas, tc.description)
 			}
 		})
 	}
@@ -226,9 +226,9 @@ func TestAgentPluginSkillSymlinkBoundaryIsPackageRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
-	if err != nil || len(metas) != 2 || metas[0].Name != "example:deploy" || metas[1].Name != "example:linked" {
-		t.Fatalf("package symlink boundary = %+v, %v", metas, err)
+	metas := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+	if len(metas) != 2 || metas[0].Name != "example:deploy" || metas[1].Name != "example:linked" {
+		t.Fatalf("package symlink boundary = %+v", metas)
 	}
 }
 

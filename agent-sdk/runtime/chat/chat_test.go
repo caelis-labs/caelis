@@ -4160,11 +4160,8 @@ func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Se
 
 		if call <= 8 {
 			if !yield(&model.StreamEvent{
-				Type: model.StreamEventPartDelta,
-				PartDelta: &model.PartDelta{
-					Kind:       model.PartKindToolUse,
-					InputDelta: `{"value":`,
-				},
+				Type:      model.StreamEventPartDelta,
+				PartDelta: &model.PartDelta{Kind: model.PartKindToolUse},
 			}, nil) {
 				return
 			}

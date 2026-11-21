@@ -94,15 +94,11 @@ func TestXAIResponsesSearchWebUsesHostedToolAndPreservesProviderResults(t *testi
 
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias: "xai/grok-4.5", Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
+	llm, err := New(Config{
+		Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768,
 		Auth: AuthConfig{Type: AuthOAuthToken},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("xai/grok-4.5")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

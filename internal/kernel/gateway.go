@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/control/plugin"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 )
 
 type Config struct {
@@ -23,7 +24,7 @@ type Config struct {
 	TurnStartGate TurnStartGate
 	// Control is injected by the product host; Gateway does not infer
 	// orchestration authority from the execution Runtime.
-	Control       agent.SessionControlPlane
+	Control       controlplane.SessionControlPlane
 	Resolver      TurnResolver
 	RequestPolicy RequestPolicy
 	// ExecutionValidator is injected by Control to validate the final assembled
@@ -47,7 +48,7 @@ type Gateway struct {
 	sessions             session.Service
 	runtime              agent.Runtime
 	turnStartGate        TurnStartGate
-	control              agent.SessionControlPlane
+	control              controlplane.SessionControlPlane
 	resolver             TurnResolver
 	request              RequestPolicy
 	executionValidator   ExecutionRequirementsValidator

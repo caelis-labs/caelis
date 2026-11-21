@@ -49,11 +49,7 @@ func TestCompactionProviderTerminalNeverRetriesOrFallsBack(t *testing.T) {
 						}
 						return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
 					})
-					factory := providers.NewFactory()
-					if err := factory.Register(providers.Config{Alias: "terminal", API: api, Provider: string(api), Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}); err != nil {
-						t.Fatal(err)
-					}
-					llm, err := factory.NewByAlias("terminal")
+					llm, err := providers.New(providers.Config{API: api, Provider: string(api), Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}, Retry: model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}})
 					if err != nil {
 						t.Fatal(err)
 					}

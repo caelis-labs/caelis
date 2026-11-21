@@ -8,7 +8,7 @@ import (
 )
 
 func SpawnFullDisplayArgs(raw map[string]any) string {
-	raw = NormalizeSpawnDisplayRawMap(raw)
+	raw = normalizeSpawnDisplayRawMap(raw)
 	prompt := strings.Join(strings.Fields(NormalizeDisplayArg(MapString(raw, "prompt"))), " ")
 	agent := strings.TrimSpace(MapString(raw, "agent"))
 	target := spawnDisplayTarget(raw, agent)
@@ -53,8 +53,8 @@ func spawnDisplayHandle(value string) string {
 }
 
 func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
-	output = NormalizeSpawnDisplayRawMap(output)
-	merged := NormalizeSpawnDisplayRawMap(input)
+	output = normalizeSpawnDisplayRawMap(output)
+	merged := normalizeSpawnDisplayRawMap(input)
 	if merged == nil {
 		merged = map[string]any{}
 	}
@@ -69,7 +69,7 @@ func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map
 	return merged
 }
 
-func NormalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
+func normalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
 		return jsonvalue.CloneMap(raw)
 	}

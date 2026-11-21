@@ -204,7 +204,6 @@ func (r *Runtime) runAttempt(
 		Context:          ctx,
 		Session:          activeSession,
 		Events:           invocation.PromptEvents,
-		State:            invocation.State,
 		DrainSubmissions: sink.drainSubmissions,
 		InputReady:       sink.inputReadySignal,
 	})

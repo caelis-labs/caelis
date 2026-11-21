@@ -59,7 +59,7 @@ func CommandTaskFinalText(state string, result map[string]any) string {
 	); text != "" {
 		return text
 	}
-	if text := MergedTerminalOutput(mapText(result, "stdout"), mapText(result, "stderr")); text != "" {
+	if text := mergedTerminalOutput(mapText(result, "stdout"), mapText(result, "stderr")); text != "" {
 		return text
 	}
 	if strings.EqualFold(strings.TrimSpace(state), "failed") {
@@ -95,7 +95,7 @@ func SubagentTaskFinalText(state string, result map[string]any) string {
 	return SubagentTaskOutputText(result)
 }
 
-func MergedTerminalOutput(stdout string, stderr string) string {
+func mergedTerminalOutput(stdout string, stderr string) string {
 	if strings.TrimSpace(stdout) == "" {
 		stdout = ""
 	}
