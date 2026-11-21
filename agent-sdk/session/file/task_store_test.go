@@ -717,6 +717,51 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 	}
 }
 
+func TestTaskStoreScopedReadsVerifyOwningSession(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	ref := taskSessionRef("session")
+	ref.WorkspaceKey = "workspace"
+	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	if err := store.Upsert(t.Context(), &task.Entry{
+		TaskID: "task-original", Session: ref, Handle: "reviewer", State: task.StateCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reopened := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+
+	for _, tt := range []struct {
+		name string
+		ref  session.SessionRef
+	}{
+		{"app", session.SessionRef{SessionID: ref.SessionID, AppName: "another-app"}},
+		{"user", session.SessionRef{SessionID: ref.SessionID, UserID: "another-user"}},
+		{"workspace", session.SessionRef{SessionID: ref.SessionID, WorkspaceKey: "another-workspace"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			list, err := reopened.ListSession(t.Context(), tt.ref)
+			if err != nil || len(list) != 0 {
+				t.Errorf("ListSession = %v, %v, want no entries in mismatched scope", list, err)
+			}
+			entry, err := reopened.GetSessionTaskByHandle(t.Context(), tt.ref, "reviewer")
+			if err == nil || entry != nil {
+				t.Errorf("GetSessionTaskByHandle = %v, %v, want not found", entry, err)
+			}
+		})
+	}
+	for _, scope := range []session.SessionRef{ref, {SessionID: ref.SessionID}} {
+		entries, err := reopened.ListSession(t.Context(), scope)
+		if err != nil || len(entries) != 1 || entries[0].TaskID != "task-original" {
+			t.Errorf("ListSession = %v, %v, want original task", entries, err)
+		}
+		entry, err := reopened.GetSessionTaskByHandle(t.Context(), scope, "reviewer")
+		if err != nil || entry == nil || entry.TaskID != "task-original" {
+			t.Errorf("GetSessionTaskByHandle = %v, %v, want original task", entry, err)
+		}
+	}
+}
+
 func TestTaskStoreRejectsDuplicateSessionHandle(t *testing.T) {
 	t.Parallel()
 

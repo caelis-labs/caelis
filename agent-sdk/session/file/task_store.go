@@ -507,7 +507,10 @@ func (s *Store) listTaskIndex(ref session.SessionRef) ([]*taskapi.Entry, error) 
 	}
 	defer db.Close()
 
-	rows, err := db.Query(taskIndexSelectSQL()+` WHERE session_id = ? ORDER BY updated_at_ns DESC, task_id ASC`, strings.TrimSpace(ref.SessionID))
+	rows, err := db.Query(
+		taskIndexSelectSQL()+taskIndexSessionScope+` ORDER BY updated_at_ns DESC, task_id ASC`,
+		ref.SessionID, ref.AppName, ref.UserID, ref.WorkspaceKey,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: list task index: %w", err)
 	}
@@ -535,9 +538,8 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle strin
 	defer db.Close()
 
 	rows, err := db.Query(
-		taskIndexSelectSQL()+` WHERE session_id = ? AND handle = ? ORDER BY updated_at_ns DESC, task_id ASC LIMIT 2`,
-		strings.TrimSpace(ref.SessionID),
-		taskapi.NormalizeHandle(handle),
+		taskIndexSelectSQL()+taskIndexSessionScope+` AND handle = ?5 ORDER BY updated_at_ns DESC, task_id ASC LIMIT 2`,
+		ref.SessionID, ref.AppName, ref.UserID, ref.WorkspaceKey, handle,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: lookup task handle: %w", err)
@@ -564,6 +566,11 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle strin
 		return nil, fmt.Errorf("agent-sdk/session/file: task handle %q is ambiguous", handle)
 	}
 }
+
+const taskIndexSessionScope = ` WHERE session_id = ?1
+	AND (?2 = '' OR app_name = ?2)
+	AND (?3 = '' OR user_id = ?3)
+	AND (?4 = '' OR workspace_key = ?4)`
 
 func taskIndexSelectSQL() string {
 	return `SELECT
