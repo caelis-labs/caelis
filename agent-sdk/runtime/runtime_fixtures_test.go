@@ -1390,57 +1390,62 @@ func (m *denyCommandRuntimeModel) Generate(context.Context, *model.Request) iter
 }
 
 type approveEscalatedCommandRuntimeModel struct {
-	t         *testing.T
 	calls     int
 	command   string
-	onPending func()
+	handle    string
+	onPending func(context.Context, string) error
 }
 
 func (m *approveEscalatedCommandRuntimeModel) Name() string { return "approve-escalated-command" }
 
-func (m *approveEscalatedCommandRuntimeModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	m.calls++
-	callIndex := m.calls
-	handle := ""
-	state := taskapi.StateCompleted
-	if callIndex > 1 {
-		handle = mustFindTaskHandle(m.t, req)
-		state = mustFindTaskState(m.t, req, handle)
-		if callIndex == 2 && m.onPending != nil {
-			m.onPending()
-		}
-	}
+func (m *approveEscalatedCommandRuntimeModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
-		if callIndex == 1 {
-			yield(&model.StreamEvent{
-				Type: model.StreamEventTurnDone,
-				Response: &model.Response{
-					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "command-approve-1",
-						Name: shell.RunCommandToolName,
-						Args: string(mustJSONRaw(map[string]any{
-							"command":             m.command,
-							"workdir":             ".",
-							"yield_time_ms":       shellCompletionYieldMillisForTest(200),
-							"sandbox_permissions": "require_escalated",
-							"justification":       "Do you want to run this command outside the sandbox?",
-						})),
-					}}, ""),
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					FinishReason: model.FinishReasonToolCalls,
-				},
-			}, nil)
+		const commandID, waitID = "command-approve-1", "approval-wait-2"
+		m.calls++
+		var message model.Message
+		reason := model.FinishReasonToolCalls
+		switch m.calls {
+		case 1:
+			message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID: commandID, Name: shell.RunCommandToolName,
+				Args: string(mustJSONRaw(map[string]any{
+					"command":             m.command,
+					"workdir":             ".",
+					"yield_time_ms":       shellCompletionYieldMillisForTest(200),
+					"sandbox_permissions": "require_escalated",
+					"justification":       "Do you want to run this command outside the sandbox?",
+				})),
+			}}, "")
+		case 2:
+			handle, err := latestApprovalTaskHandle(req, commandID, taskapi.StateWaitingApproval)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			m.handle = handle
+			if err := m.onPending(ctx, handle); err != nil {
+				yield(nil, err)
+				return
+			}
+			message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+				ID: waitID, Name: tasktool.ToolName,
+				Args: string(mustJSONRaw(map[string]any{"action": "wait", "handle": handle})),
+			}}, "")
+		case 3:
+			handle, err := latestApprovalTaskHandle(req, waitID, taskapi.StateCompleted)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			if handle != m.handle {
+				yield(nil, fmt.Errorf("completed command handle = %q, want %q", handle, m.handle))
+				return
+			}
+			message = model.NewTextMessage(model.RoleAssistant, "done")
+			reason = model.FinishReasonStop
+		default:
+			yield(nil, fmt.Errorf("unexpected approval model step %d", m.calls))
 			return
-		}
-		message := model.NewTextMessage(model.RoleAssistant, "done")
-		reason := model.FinishReasonStop
-		if taskStateRunning(state) {
-			message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: fmt.Sprintf("approval-wait-%d", callIndex), Name: tasktool.ToolName, Args: string(mustJSONRaw(map[string]any{"action": "wait", "handle": handle}))}}, "")
-			reason = model.FinishReasonToolCalls
-		} else if state != taskapi.StateCompleted {
-			m.t.Fatalf("approved command Task state = %q, want completed", state)
 		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
@@ -1453,6 +1458,31 @@ func (m *approveEscalatedCommandRuntimeModel) Generate(_ context.Context, req *m
 			},
 		}, nil)
 	}
+}
+
+func latestApprovalTaskHandle(req *model.Request, callID string, state taskapi.State) (string, error) {
+	if len(req.Messages) == 0 {
+		return "", fmt.Errorf("missing latest result for %q", callID)
+	}
+	results := req.Messages[len(req.Messages)-1].ToolResults()
+	if len(results) != 1 || results[0].ToolUseID != callID || len(results[0].Content) != 1 {
+		return "", fmt.Errorf("latest result for %q: %+v", callID, results)
+	}
+	payload := results[0].Content[0].JSONValue()
+	if results[0].IsError {
+		return "", fmt.Errorf("latest result for %q is an error: %s", callID, payload)
+	}
+	var receipt struct {
+		Handle string
+		State  taskapi.State
+	}
+	if err := json.Unmarshal(payload, &receipt); err != nil {
+		return "", fmt.Errorf("decode latest result for %q: %w", callID, err)
+	}
+	if receipt.Handle == "" || receipt.State != state {
+		return "", fmt.Errorf("latest result for %q = %+v, want a Task handle in state %q", callID, receipt, state)
+	}
+	return receipt.Handle, nil
 }
 
 func shellQuoteForTest(value string) string {

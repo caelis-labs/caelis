@@ -3090,7 +3090,15 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testing.T) {
 	t.Parallel()
 
-	sessions, activeSession := newTestSessionService(t, "sess-policy-approval")
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "test", UserID: "user-1", Workspace: session.WorkspaceRef{CWD: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sandboxPolicy := sandbox.PolicySnapshot{
 		Route:            sandbox.RouteSandbox,
 		Backend:          sandbox.BackendSeatbelt,
@@ -3098,7 +3106,8 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		ReadOnlySubpaths: []string{".git"},
 	}
 	runtime, err := New(Config{
-		Sessions: sessions,
+		Sessions:  sessions,
+		TaskStore: sessionfile.NewTaskStore(sessions),
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
@@ -3117,21 +3126,48 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	// Keep approval pending until the model observes the yielded Task. Run
 	// completion alone must not stand in for this command's completion.
 	approve := make(chan struct{})
-	testModel := &approveEscalatedCommandRuntimeModel{t: t, command: shellWriteFileForTest(target, "approved\n"), onPending: func() { close(approve) }}
+	testModel := &approveEscalatedCommandRuntimeModel{
+		command: shellWriteFileForTest(target, "approved\n"),
+		onPending: func(ctx context.Context, handle string) error {
+			identity, err := runtime.tasks.resolveTaskHandle(ctx, activeSession.SessionRef, handle)
+			if err != nil {
+				return err
+			}
+			close(approve)
+			// Settle the command through a user observation before the model
+			// waits on the original handle, exercising terminal Task readback.
+			snapshot, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, taskapi.ControlRequest{
+				TaskID: identity.taskID, Yield: 5 * time.Second, Principal: session.ActorKindUser,
+			})
+			if err != nil {
+				return err
+			}
+			if snapshot.State != taskapi.StateCompleted || snapshot.Handle != handle {
+				return fmt.Errorf("user observed command Task %q in state %q, want %q completed", snapshot.Handle, snapshot.State, handle)
+			}
+			runtime.tasks.mu.RLock()
+			live := runtime.tasks.tasks[identity.taskID] != nil
+			runtime.tasks.mu.RUnlock()
+			if live {
+				return fmt.Errorf("completed command Task %q is still in the live directory", handle)
+			}
+			return nil
+		},
+	}
 	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
-			t.Fatalf("RunState() during approval error = %v", err)
+			return agent.ApprovalResponse{}, fmt.Errorf("RunState during approval: %w", err)
 		}
 		if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || req.OperationTaskID == "" {
-			t.Fatalf("run state during command approval = %+v, want running with a Task-owned approval", state)
+			return agent.ApprovalResponse{}, fmt.Errorf("run state during command approval = %+v, want running with a Task-owned approval", state)
 		}
 		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
-			t.Fatalf("approval request = %+v, want RUN_COMMAND tool call", req.Approval)
+			return agent.ApprovalResponse{}, fmt.Errorf("approval request = %+v, want RunCommand tool call", req.Approval)
 		}
 		got, ok := req.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
 		if !ok || !reflect.DeepEqual(got, sandboxPolicy) {
-			t.Fatalf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
+			return agent.ApprovalResponse{}, fmt.Errorf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
 		}
 		budget, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -3149,7 +3185,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 			Approved: true,
 		}, nil
 	})
-	result, err := runtime.Run(context.Background(), agent.RunRequest{
+	result, err := runtime.Run(ctx, agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
 		Input:             "write inside workspace",
 		ApprovalRequester: requester,
@@ -3162,8 +3198,12 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+	defer result.Handle.Cancel()
+	if err := result.Handle.WaitCompletion(ctx); err != nil {
 		t.Fatalf("runner error = %v", err)
+	}
+	if testModel.calls != 3 {
+		t.Fatalf("model requests = %d, want command, wait, and final response", testModel.calls)
 	}
 
 	data, err := os.ReadFile(target)
@@ -3173,7 +3213,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	if got := strings.TrimSpace(string(data)); got != "approved" {
 		t.Fatalf("written content = %q, want %q", got, "approved")
 	}
-	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	state, err := runtime.RunState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("RunState() error = %v", err)
 	}
