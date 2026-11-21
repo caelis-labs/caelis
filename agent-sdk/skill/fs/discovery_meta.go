@@ -141,7 +141,7 @@ func scanRegularSkillDirs(dirs []string, include func(skill.Meta, string) bool) 
 }
 
 func discoveryDirs(dirs []string, workspaceDir string) []string {
-	if len(dirs) == 0 {
+	if dirs == nil {
 		return DefaultDiscoveryDirs(workspaceDir)
 	}
 	return dirs

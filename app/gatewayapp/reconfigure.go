@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -378,7 +377,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		if err := ctx.Err(); err != nil {
 			return skill.Catalog{}, err
 		}
-		metas := skillfs.DiscoverMetaRequest(skill.DiscoverRequest{
+		metas := skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{
 			Dirs: plan.SkillDirs, WorkspaceDir: s.workspace.CWD, PluginBundles: runtimeCfg.PluginSkills,
 		})
 		return skill.NewCatalog(metas), nil
