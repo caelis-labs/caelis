@@ -18,7 +18,6 @@ type autoCompactDecision struct {
 	Reason           string
 	Kind             compactionRecoveryKind
 	Usage            compact.UsageSnapshot
-	RequestTokens    int
 	Model            model.LLM
 	Request          *model.Request
 	SourceThroughSeq uint64
@@ -255,7 +254,6 @@ func (r *Runtime) autoCompactDecisionBeforeModelRequest(
 	decision.Reason = modelRequestWatermarkReason(trigger.Reason)
 	decision.Kind = compactionRecoveryKindWatermark
 	decision.Usage = view.usage
-	decision.RequestTokens = view.requestTokens
 	decision.Request = model.CloneRequest(req)
 	return decision, nil
 }
@@ -285,7 +283,6 @@ func (r *Runtime) autoCompactDecisionAfterModelRequestFailure(
 		Reason:           "model_request_retry_exhausted_high_water",
 		Kind:             compactionRecoveryKindRetryExhausted,
 		Usage:            view.usage,
-		RequestTokens:    view.requestTokens,
 		Model:            llm,
 		Request:          model.CloneRequest(req),
 		SourceThroughSeq: view.sourceThroughSeq,
@@ -294,7 +291,6 @@ func (r *Runtime) autoCompactDecisionAfterModelRequestFailure(
 
 type autoCompactModelRequestView struct {
 	usage            compact.UsageSnapshot
-	requestTokens    int
 	sourceThroughSeq uint64
 	eligible         bool
 }
@@ -321,24 +317,11 @@ func (r *Runtime) autoCompactModelRequestView(
 	if len(delta) == 0 {
 		return autoCompactModelRequestView{sourceThroughSeq: session.LastEventSeq(events)}, true, nil
 	}
-	usage, requestTokens, prefixChanged := usageForModelRequestDetails(events, llm, req, r.compaction)
-	if !prefixChanged && !autoCompactGateHasModelProgress(delta) {
-		return autoCompactModelRequestView{
-			usage: usage, requestTokens: requestTokens,
-			sourceThroughSeq: session.LastEventSeq(events),
-		}, true, nil
-	}
-	if usage.EffectiveInputBudget <= 0 {
-		return autoCompactModelRequestView{
-			usage: usage, requestTokens: requestTokens,
-			sourceThroughSeq: session.LastEventSeq(events),
-		}, true, nil
-	}
+	usage, prefixChanged := usageForModelRequest(events, llm, req, r.compaction)
 	return autoCompactModelRequestView{
 		usage:            usage,
-		requestTokens:    requestTokens,
 		sourceThroughSeq: session.LastEventSeq(events),
-		eligible:         true,
+		eligible:         usage.EffectiveInputBudget > 0 && (prefixChanged || autoCompactGateHasModelProgress(delta)),
 	}, true, nil
 }
 

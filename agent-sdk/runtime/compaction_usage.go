@@ -576,27 +576,26 @@ func EvaluateModelRequestBudget(llm model.LLM, req *model.Request, cfg Compactio
 	}
 }
 
-func usageForModelRequestDetails(
+func usageForModelRequest(
 	events []*session.Event,
 	llm model.LLM,
 	req *model.Request,
 	cfg CompactionConfig,
-) (compact.UsageSnapshot, int, bool) {
+) (compact.UsageSnapshot, bool) {
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
 	usage, providerSnapshot, hasProviderSnapshot := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, func(snapshot providerTokenSnapshot) bool {
 		return providerSnapshotCompatibleWithLLM(snapshot, llm)
 	})
-	return usageWithModelRequestEstimateDetails(usage, providerSnapshot, hasProviderSnapshot, req)
+	return usageWithModelRequestEstimate(usage, providerSnapshot, hasProviderSnapshot, req)
 }
 
-func usageWithModelRequestEstimateDetails(
+func usageWithModelRequestEstimate(
 	usage compact.UsageSnapshot,
 	providerSnapshot providerTokenSnapshot,
 	hasProviderSnapshot bool,
 	req *model.Request,
-) (compact.UsageSnapshot, int, bool) {
-	requestTokens := estimateModelRequestTokens(req)
+) (compact.UsageSnapshot, bool) {
 	// Provider prompt usage is authoritative for the request shape already
 	// accepted by that provider. When runtime-controlled prefix assembly changes,
 	// reconcile only that local delta; messages and attachments remain covered
@@ -614,15 +613,15 @@ func usageWithModelRequestEstimateDetails(
 				0,
 			)
 		}
-		return usage, requestTokens, prefixChanged
+		return usage, prefixChanged
 	}
-	if requestTokens > usage.TotalTokens {
+	if requestTokens := estimateModelRequestTokens(req); requestTokens > usage.TotalTokens {
 		usage.TotalTokens = requestTokens
 		if usage.Source == "" {
 			usage.Source = compact.UsageSourceEstimated
 		}
 	}
-	return usage, requestTokens, false
+	return usage, false
 }
 
 func estimateModelRequestTokens(req *model.Request) int {

@@ -234,29 +234,14 @@ func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []
 	})
 }
 
-// ComputeUsageSnapshotForModel projects reporting usage using only a provider
-// baseline produced by the named model. Incomplete or mismatched identities
-// fail closed to the local prompt estimate.
-func ComputeUsageSnapshotForModel(
-	events []*session.Event,
-	pendingEvents []*session.Event,
-	contextWindow int,
-	cfg CompactionConfig,
-	provider string,
-	modelName string,
-) compact.UsageSnapshot {
-	return computeUsageSnapshotForModel(events, pendingEvents, contextWindow, cfg, provider, modelName, estimatePromptEventTokens)
-}
-
 func computeUsageSnapshotForModel(
-	events, pendingEvents []*session.Event,
+	events []*session.Event,
 	contextWindow int,
 	cfg CompactionConfig,
 	provider, modelName string,
 	estimate func(*session.Event) int,
 ) compact.UsageSnapshot {
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
-	promptEvents = promptEventsWithPending(promptEvents, pendingEvents)
 	// When a provider omits usage, prefer the prefix recorded from the actual
 	// last model-visible request over the static assembly fallback. This reuses
 	// the request-boundary fingerprint path and avoids reconstructing ToolSearch

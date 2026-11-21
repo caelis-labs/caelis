@@ -175,7 +175,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	if !ok || window.ContextWindowTokens() <= 0 {
 		return nil, nil
 	}
-	usage, _, _ := usageForModelRequestDetails(events, snapshot.model, snapshot.request, r.compaction)
+	usage, _ := usageForModelRequest(events, snapshot.model, snapshot.request, r.compaction)
 	if float64(usage.TotalTokens) < .5*float64(window.ContextWindowTokens()) || evaluateWatermark(usage, r.compaction).ShouldCompact {
 		return nil, nil
 	}

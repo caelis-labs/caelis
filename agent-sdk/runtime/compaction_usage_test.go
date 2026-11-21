@@ -145,13 +145,13 @@ func TestComputeUsageSnapshotForModelIgnoresNewerDifferentModelBaseline(t *testi
 		assistantEvent("guardian-usage", "deepseek", "guardian", 25_941),
 	}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 
 	if got.Source != compact.UsageSourceProvider || got.AsOfEventID != "main-usage" {
@@ -188,13 +188,13 @@ func TestComputeUsageSnapshotForModelUsesRecordedRequestPrefixWithoutProviderUsa
 		},
 	}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{EstimatedPromptPrefixTokens: 12_345},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 
 	if got.Source != compact.UsageSourceEstimated {
@@ -234,13 +234,13 @@ func TestComputeUsageSnapshotForModelKeepsRecordedPrefixAcrossCompact(t *testing
 		},
 	}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{EstimatedPromptPrefixTokens: 12_345},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 	if got.EstimatedPrefixTokens != 777 {
 		t.Fatalf("estimated prefix = %d, want last request prefix 777 across compact", got.EstimatedPrefixTokens)
@@ -263,13 +263,13 @@ func TestComputeUsageSnapshotForModelDoesNotReuseDifferentModelRequestPrefix(t *
 		},
 	}}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{EstimatedPromptPrefixTokens: 321},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 	if got.EstimatedPrefixTokens != 321 {
 		t.Fatalf("estimated prefix = %d, want static fallback 321", got.EstimatedPrefixTokens)
@@ -501,7 +501,7 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 	user.ID = "u1"
 	fresh := userTextEvent("fresh post-snapshot event")
 	fresh.ID = "u2"
-	usage, requestTokens, _ := usageForModelRequestDetails([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
+	usage, _ := usageForModelRequest([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
 		staticModel:  staticModel{text: "ok"},
 		providerName: "openai-codex",
 		modelName:    "gpt-5.6-sol",
@@ -509,6 +509,7 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 		DefaultContextWindowTokens: 1000,
 	})
 
+	requestTokens := estimateModelRequestTokens(req)
 	if requestTokens <= 11 {
 		t.Fatalf("request tokens = %d, want larger than provider baseline", requestTokens)
 	}
@@ -569,7 +570,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 		},
 	)
 
-	usage, requestTokens, prefixChanged := usageForModelRequestDetails(
+	usage, prefixChanged := usageForModelRequest(
 		[]*session.Event{assistant},
 		modelIdentity,
 		currentRequest,
@@ -583,7 +584,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 	if usage.TotalTokens != want {
 		t.Fatalf("usage total = %d, want provider total plus prefix delta %d", usage.TotalTokens, want)
 	}
-	if requestTokens < prefixusage.EstimatedImageMediaTokens {
+	if requestTokens := estimateModelRequestTokens(currentRequest); requestTokens < prefixusage.EstimatedImageMediaTokens {
 		t.Fatalf("request estimate = %d, want bounded attachment budget retained for estimated-only paths", requestTokens)
 	}
 }

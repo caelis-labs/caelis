@@ -189,7 +189,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) || !asyncToolPairsComplete(compact.PromptEventsFromLatestCompact(events)) {
 		return false, nil
 	}
-	usage, _, _ := usageForModelRequestDetails(events, l.inner, req, r.compaction)
+	usage, _ := usageForModelRequest(events, l.inner, req, r.compaction)
 	ratio := r.compaction.Async.StartRatio
 	if ratio == 0 {
 		ratio = .65
