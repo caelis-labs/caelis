@@ -50,16 +50,54 @@ and dynamic registrations, then read every relevant call site.
 
 For each candidate:
 
-1. Separate production consumers from tests, examples, generated artifacts,
-   documentation, and ambiguous runtime discovery paths.
-2. Name the current semantic owner and the desired owner. Explain the failure,
-   duplicated authority, or credible extension cost caused by the current form.
-3. Calculate net reduction: code, API, state, tests, and prose removed minus new
-   glue. A forwarding wrapper or package move with equal complexity is not a win.
-4. State behavior or compatibility given up and why that trade remains valid.
-5. Reject or downgrade the idea when a production caller exists, a maintained
-   contract still justifies it, the change only improves tree aesthetics, or
-   unrelated churn overwhelms the reduction.
+1. Follow each live route from registration and dispatch to its observable
+   consumers. Include indirect registrations, external SDK contracts, and old
+   wire or durable readers. Record uncertain consumers as unresolved.
+2. Name the current and proposed owner. Compare inputs, defaults, identity,
+   authority, lifetime, ordering, and observable output before calling two
+   paths equivalent. In particular, compare frozen declarations with live
+   admission, business results with model and display projections, and effect
+   execution with observation. Share a decoder only as far as its callers
+   agree, preserving distinctions such as absent, invalid, and explicit zero.
+3. Account for deleted branches, state, API, tests, and prose against new glue.
+   A live consumer supports consolidation when it can use the surviving owner
+   with the same contract. Removal needs evidence that the behavior has no
+   supported consumer or that its retirement is authorized. Defer when a
+   maintained contract, unresolved consumer, or integration cost outweighs
+   the reduction.
+
+## Verify An Authorized Change Before Merge
+
+For each affected contract, pick an observation at the production entry point
+and identify what a wrong deletion would break. Capture the baseline and use
+the same probe after the change. Select focused coverage for the affected cases:
+
+- Admission, refresh, or scheduling. Exercise a replaced or revoked target,
+  callback name precedence, or the ordered and concurrent sequences that must
+  still work. Check actual dispatch counts and order as well as returned results.
+- Results or compatibility. Follow representative success, error, and legacy
+  data to the affected readers. Where relevant, check durable/model round trips
+  and rendered output, including mixed content, redaction, and combined status.
+- Model-facing instructions or generated examples. Check the assembled prompt
+  budget alongside the behavioral guidance, and execute advertised syntax
+  through the real adapter when it changes.
+
+Use [caelis-validate-change](../caelis-validate-change/SKILL.md) for gate
+selection. Check that evidence covers the final diff against the intended base,
+including fixes and integration changes. In a PR, check the final head, the
+base used for integration, required checks, and review findings. Reverify any
+affected evidence when the code or integration base moves.
+
+## Learn From Review And Repair
+
+Compare the initial diff, review or failing check, corrective diff, and the
+regression evidence. Identify the assumption or missing observation that let
+the change through. A fix belongs in the owning code and test. Update this
+skill when requested and the evidence exposes a reusable decision or
+verification gap. Tighten an existing rule where possible, then try it on a
+real candidate to see whether it changes the selection or the evidence.
+Keep case history in the PR or Git. Reuse an existing gate for recurring
+validation, and keep fixture repairs and one-off environment workarounds local.
 
 ## Report
 
