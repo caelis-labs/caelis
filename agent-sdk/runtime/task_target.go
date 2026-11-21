@@ -104,11 +104,9 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 		tm.mu.RUnlock()
 		return taskControlIdentity{taskID: lookupID, kind: taskapi.KindSubagent}, nil
 	}
-	for taskID, script := range tm.codeTasks {
-		if script != nil && script.sessionRef.SessionID == ref.SessionID && (taskID == lookupID || script.handle == lookupID) {
-			tm.mu.RUnlock()
-			return taskControlIdentity{taskID: taskID, kind: taskapi.KindCodeMode}, nil
-		}
+	if script := tm.codeTasks[lookupID]; script != nil && script.sessionRef.SessionID == ref.SessionID {
+		tm.mu.RUnlock()
+		return taskControlIdentity{taskID: lookupID, kind: taskapi.KindCodeMode}, nil
 	}
 	tm.mu.RUnlock()
 	if tm.store == nil {

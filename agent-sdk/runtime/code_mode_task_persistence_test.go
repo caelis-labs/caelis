@@ -25,6 +25,34 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
+func TestCodeModeTaskHandleResolvesOnlyAtHandleBoundary(t *testing.T) {
+	active := session.SessionRef{SessionID: "session"}
+	tasks := newTaskRuntime(nil, nil)
+	tasks.codeTasks = map[string]*codeModeTask{
+		"task-id": {
+			sessionRef: active,
+			handle:     "script",
+			entry: &taskapi.Entry{
+				TaskID: "task-id", Handle: "script", Session: active,
+				Kind: taskapi.KindCodeMode, State: taskapi.StateCompleted,
+			},
+		},
+	}
+	req := taskapi.ControlRequest{TaskID: "script", Principal: session.ActorKindUser}
+	if _, err := tasks.Read(t.Context(), active, req); err == nil {
+		t.Fatal("TaskID lookup accepted a public handle")
+	}
+	identity, err := tasks.resolveTaskHandle(t.Context(), active, "@script")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.TaskID = identity.taskID
+	snapshot, err := tasks.Read(t.Context(), active, req)
+	if err != nil || snapshot.Ref.TaskID != "task-id" || snapshot.Handle != "script" {
+		t.Fatalf("Read(resolved TaskID) = %#v, %v, want original script task", snapshot, err)
+	}
+}
+
 func TestLegacyScriptReceiptAllowsNextEffectAndModelStep(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	_, err := sessionfile.NewTaskStore(store).Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{
