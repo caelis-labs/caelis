@@ -40,8 +40,8 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		if declaration, ok := one.(*codemode.Tool); ok && declaration.Name == codemode.ToolName {
 			hasCodeMode = true
 		}
-		switch {
-		case isBuiltinRunCommandTool(one):
+		switch one.(type) {
+		case *shell.RunCommandTool:
 			hasCommand = true
 			if runtime, ok := sandboxRuntimeFromTool(one); ok {
 				r.tasks.registerSandboxRuntime(runtime)
@@ -52,7 +52,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
-		case isBuiltinSpawnTool(one):
+		case spawn.Tool, *spawn.Tool:
 			resolver, _ := one.(spawn.Resolver)
 			out = append(out, runtimeSpawnTool{
 				runtime:      r,
@@ -66,14 +66,14 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				approvalMode: strings.TrimSpace(toolCtx.approvalMode),
 				approval:     toolCtx.approvalRequester,
 			})
-		case isBuiltinTaskTool(one):
+		case tasktool.Tool, *tasktool.Tool:
 			hasTask = true
 			out = append(out, runtimeTaskTool{
 				base:       one,
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
-		case isBuiltinSendMessageTool(one):
+		case sendmessage.Tool, *sendmessage.Tool:
 			out = append(out, runtimeSendMessageTool{
 				base: one, runtime: r, session: session.CloneSession(activeSession),
 				sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.inputSender,
@@ -91,38 +91,6 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 	}
 
 	return out
-}
-
-func isBuiltinRunCommandTool(candidate tool.Tool) bool {
-	_, ok := candidate.(*shell.RunCommandTool)
-	return ok
-}
-
-func isBuiltinSpawnTool(candidate tool.Tool) bool {
-	switch candidate.(type) {
-	case spawn.Tool, *spawn.Tool:
-		return true
-	default:
-		return false
-	}
-}
-
-func isBuiltinTaskTool(candidate tool.Tool) bool {
-	switch candidate.(type) {
-	case tasktool.Tool, *tasktool.Tool:
-		return true
-	default:
-		return false
-	}
-}
-
-func isBuiltinSendMessageTool(candidate tool.Tool) bool {
-	switch candidate.(type) {
-	case sendmessage.Tool, *sendmessage.Tool:
-		return true
-	default:
-		return false
-	}
 }
 
 type runtimeSendMessageTool struct {
@@ -448,7 +416,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	}
 	payload := map[string]any{"handle": snapshot.Handle, "state": snapshot.State}
 	payload["supports_steering"] = taskSpecBool(snapshot.Metadata, "supports_steering")
-	if spawnContextUnsupported(snapshot) {
+	if taskSpecBool(snapshot.Metadata, "context_unsupported") {
 		payload["system_hint"] = spawnContextUnsupportedHint
 	}
 	result, _ := taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
@@ -464,10 +432,6 @@ func (t runtimeSpawnTool) resolveDelegatedSpawnContext(ctx context.Context) (age
 		return agent.ContextTransfer{}, true
 	}
 	return transfer, false
-}
-
-func spawnContextUnsupported(snapshot taskapi.Snapshot) bool {
-	return taskSpecBool(snapshot.Metadata, "context_unsupported")
 }
 
 const spawnContextUnsupportedHint = "Current host does not support parent context transfer; the child received only the spawn prompt."

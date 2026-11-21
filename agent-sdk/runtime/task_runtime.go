@@ -416,7 +416,7 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 }
 
 func taskPublicHandle(snapshot taskapi.Snapshot) string {
-	return normalizeTaskHandle(firstNonEmpty(snapshot.Handle, taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"]), strings.TrimSpace(snapshot.Ref.TaskID)))
+	return taskapi.NormalizeHandle(firstNonEmpty(snapshot.Handle, taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"]), strings.TrimSpace(snapshot.Ref.TaskID)))
 }
 
 func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entry) error {

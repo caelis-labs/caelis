@@ -18,11 +18,7 @@ func subagentTerminalID(taskID string) string {
 	return "subagent-" + taskID
 }
 
-func (tm *taskRuntime) reserveTaskHandle(ctx context.Context, activeSession session.Session, ref session.SessionRef, kind taskapi.Kind, hint string) (string, error) {
-	return tm.reserveTaskHandleValue(ctx, activeSession, ref, kind, hint, "")
-}
-
-func (tm *taskRuntime) reserveTaskHandleValue(ctx context.Context, activeSession session.Session, ref session.SessionRef, kind taskapi.Kind, hint string, requested string) (string, error) {
+func (tm *taskRuntime) reserveTaskHandle(ctx context.Context, activeSession session.Session, ref session.SessionRef, kind taskapi.Kind, hint string, requested string) (string, error) {
 	used := subagentHandlesFromSession(activeSession)
 	sessionID := strings.TrimSpace(ref.SessionID)
 	if tm.store != nil && sessionID != "" {
@@ -35,7 +31,7 @@ func (tm *taskRuntime) reserveTaskHandleValue(ctx context.Context, activeSession
 				continue
 			}
 			handle := firstNonEmpty(entry.Handle, taskStringValue(entry.Result["handle"]), taskStringValue(entry.Metadata["handle"]), taskSpecString(entry.Spec, "handle"))
-			if normalized := normalizeTaskHandle(handle); normalized != "" {
+			if normalized := taskapi.NormalizeHandle(handle); normalized != "" {
 				used[normalized] = struct{}{}
 			}
 		}
@@ -46,23 +42,29 @@ func (tm *taskRuntime) reserveTaskHandleValue(ctx context.Context, activeSession
 		if task == nil || strings.TrimSpace(task.sessionRef.SessionID) != sessionID {
 			continue
 		}
-		if normalized := normalizeTaskHandle(task.handle); normalized != "" {
-			used[normalized] = struct{}{}
+		task.mu.Lock()
+		handle := taskapi.NormalizeHandle(task.handle)
+		task.mu.Unlock()
+		if handle != "" {
+			used[handle] = struct{}{}
 		}
 	}
 	for _, task := range tm.subagents {
 		if task == nil || strings.TrimSpace(task.sessionRef.SessionID) != sessionID {
 			continue
 		}
-		for _, handle := range []string{task.handle, taskStringValue(task.metadata["handle"]), taskStringValue(task.result["handle"])} {
-			if normalized := normalizeTaskHandle(handle); normalized != "" {
+		task.mu.Lock()
+		handles := []string{task.handle, taskStringValue(task.metadata["handle"]), taskStringValue(task.result["handle"])}
+		task.mu.Unlock()
+		for _, handle := range handles {
+			if normalized := taskapi.NormalizeHandle(handle); normalized != "" {
 				used[normalized] = struct{}{}
 			}
 		}
 	}
 	if sessionID != "" {
 		for handle := range tm.handles[sessionID] {
-			if normalized := normalizeTaskHandle(handle); normalized != "" {
+			if normalized := taskapi.NormalizeHandle(handle); normalized != "" {
 				used[normalized] = struct{}{}
 			}
 		}
@@ -100,7 +102,7 @@ func allocateTaskHandle(used map[string]struct{}, kind taskapi.Kind, hint string
 
 func (tm *taskRuntime) rememberTaskHandleLocked(sessionID string, handle string) {
 	sessionID = strings.TrimSpace(sessionID)
-	handle = normalizeTaskHandle(handle)
+	handle = taskapi.NormalizeHandle(handle)
 	if sessionID == "" || handle == "" {
 		return
 	}
@@ -124,7 +126,7 @@ func (tm *taskRuntime) forgetTaskHandle(sessionID string, handle string) {
 
 func (tm *taskRuntime) forgetTaskHandleLocked(sessionID string, handle string) {
 	sessionID = strings.TrimSpace(sessionID)
-	handle = normalizeTaskHandle(handle)
+	handle = taskapi.NormalizeHandle(handle)
 	if sessionID == "" || handle == "" || tm.handles == nil {
 		return
 	}
@@ -137,14 +139,10 @@ func (tm *taskRuntime) forgetTaskHandleLocked(sessionID string, handle string) {
 func subagentHandlesFromSession(activeSession session.Session) map[string]struct{} {
 	used := map[string]struct{}{}
 	for _, participant := range activeSession.Participants {
-		handle := normalizeTaskHandle(participant.Label)
+		handle := taskapi.NormalizeHandle(participant.Label)
 		if handle != "" {
 			used[handle] = struct{}{}
 		}
 	}
 	return used
-}
-
-func normalizeTaskHandle(value string) string {
-	return taskapi.NormalizeHandle(value)
 }

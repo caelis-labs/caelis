@@ -31,11 +31,13 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 	handle := strings.TrimSpace(task.handle)
 	if handle == "" {
 		var err error
-		handle, err = tm.reserveTaskHandle(ctx, activeSession, task.sessionRef, taskapi.KindSubagent, task.agent)
+		handle, err = tm.reserveTaskHandle(ctx, activeSession, task.sessionRef, taskapi.KindSubagent, task.agent, "")
 		if err != nil {
 			return err
 		}
+		task.mu.Lock()
 		task.handle = handle
+		task.mu.Unlock()
 	}
 	mention := "@" + strings.TrimPrefix(handle, "@")
 	role := subagentParticipantRole(task)

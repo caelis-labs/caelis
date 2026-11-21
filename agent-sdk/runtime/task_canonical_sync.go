@@ -416,7 +416,7 @@ func addCanonicalTaskMatchKey(keys map[string]bool, kind taskapi.Kind, value str
 	}
 	keys[value] = true
 	if kind == taskapi.KindSubagent {
-		if handle := normalizeTaskHandle(value); handle != "" {
+		if handle := taskapi.NormalizeHandle(value); handle != "" {
 			keys[handle] = true
 		}
 	}
@@ -431,7 +431,7 @@ func canonicalTaskMatchKeyExists(keys map[string]bool, kind taskapi.Kind, value 
 		return true
 	}
 	if kind == taskapi.KindSubagent {
-		return keys[normalizeTaskHandle(value)]
+		return keys[taskapi.NormalizeHandle(value)]
 	}
 	return false
 }

@@ -74,7 +74,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 			return taskSnapshotToolResult(ctx, codeModeSnapshot(existing))
 		}
 	}
-	handle, err := tm.reserveTaskHandle(ctx, owner.active, owner.ref, taskapi.KindCodeMode, "script")
+	handle, err := tm.reserveTaskHandle(ctx, owner.active, owner.ref, taskapi.KindCodeMode, "script", "")
 	if err != nil {
 		release()
 		return tool.Result{}, err

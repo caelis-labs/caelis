@@ -133,7 +133,7 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 // Session-scoped public Handle into the TaskID consumed by Runtime internals.
 // No low-level Task lookup may fall back between the two identity domains.
 func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.SessionRef, rawHandle string) (taskControlIdentity, error) {
-	handle := normalizeTaskHandle(rawHandle)
+	handle := taskapi.NormalizeHandle(rawHandle)
 	ref = session.NormalizeSessionRef(ref)
 	if handle == "" {
 		return taskControlIdentity{}, fmt.Errorf("task handle is required")
@@ -147,7 +147,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		// Directory locking protects membership; approval refresh mutates the
 		// command's public identity under the command lock.
 		command.mu.Lock()
-		matches := strings.TrimSpace(command.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) && normalizeTaskHandle(command.handle) == handle
+		matches := strings.TrimSpace(command.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) && taskapi.NormalizeHandle(command.handle) == handle
 		command.mu.Unlock()
 		if !matches {
 			continue
@@ -156,7 +156,13 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		break
 	}
 	for taskID, subagent := range tm.subagents {
-		if subagent == nil || strings.TrimSpace(subagent.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(subagent.handle) != handle {
+		if subagent == nil || strings.TrimSpace(subagent.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
+			continue
+		}
+		subagent.mu.Lock()
+		matches := taskapi.NormalizeHandle(subagent.handle) == handle
+		subagent.mu.Unlock()
+		if !matches {
 			continue
 		}
 		if matched.taskID != "" && matched.taskID != taskID {
@@ -166,7 +172,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindSubagent}
 	}
 	for taskID, script := range tm.codeTasks {
-		if script != nil && script.sessionRef.SessionID == ref.SessionID && normalizeTaskHandle(script.handle) == handle {
+		if script != nil && script.sessionRef.SessionID == ref.SessionID && taskapi.NormalizeHandle(script.handle) == handle {
 			matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindCodeMode}
 			break
 		}
@@ -179,7 +185,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		return taskControlIdentity{}, fmt.Errorf("task handle %q not found", handle)
 	}
 	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, handle)
-	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(entry.Handle) != handle {
+	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || taskapi.NormalizeHandle(entry.Handle) != handle {
 		return taskControlIdentity{}, fmt.Errorf("task handle %q not found", handle)
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil

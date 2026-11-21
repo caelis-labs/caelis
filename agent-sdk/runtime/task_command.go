@@ -131,7 +131,7 @@ func (tm *taskRuntime) prepareCommandClaimed(ctx context.Context, activeSession 
 	} else if ok {
 		return existing, false, nil
 	}
-	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindCommand, "command")
+	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindCommand, "command", "")
 	if err != nil {
 		return nil, false, err
 	}
