@@ -112,7 +112,7 @@ func (r *Runtime) runWithOverflowRecovery(
 		}
 		var adopted *asyncCompactAdoptedError
 		if errors.As(err, &adopted) {
-			sink.publishEvent(normalizeEvent(activeSession, turnID, buildCompactNoticeEvent(activeSession, turnID, r.now())))
+			r.publishCompactCompletion(sink, adopted.checkpoint)
 			continue
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
@@ -179,6 +179,12 @@ func (r *Runtime) runAttempt(
 		}
 		throughSeq = max(throughSeq, seq)
 	}
+	// Publish the confirmed checkpoint before appending pending input. The
+	// companion notice still follows the user echo.
+	if invocation.LiveCompact != nil {
+		observeSequence(invocation.LiveCompact)
+		sink.publishEvent(invocation.LiveCompact)
+	}
 	persistedInputs, appendErr := r.appendInputEvents(ctx, ref, pendingInputs)
 	if appendErr != nil {
 		return false, appendErr
@@ -191,9 +197,7 @@ func (r *Runtime) runAttempt(
 		sink.publishEvent(persisted)
 	}
 	if invocation.LiveCompact != nil {
-		observeSequence(invocation.LiveCompact)
-		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
-		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
+		r.publishCompactNotice(sink, invocation.LiveCompact)
 	}
 
 	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, invocation.State, runID, turnID, req, toolStepSequence)

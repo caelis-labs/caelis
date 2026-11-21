@@ -12,16 +12,17 @@ import (
 )
 
 func snapshotUsageWithResolvedWindow(promptEvents []*session.Event, window int, cfg CompactionConfig) compact.UsageSnapshot {
-	return snapshotUsageWithResolvedWindowUsing(promptEvents, window, cfg, nil)
+	return snapshotUsageWithResolvedWindowUsing(promptEvents, window, cfg, 0, nil)
 }
 
 func snapshotUsageWithResolvedWindowUsing(
 	promptEvents []*session.Event,
 	window int,
 	cfg CompactionConfig,
+	checkpointSeq uint64,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
 ) compact.UsageSnapshot {
-	usage, _, _ := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, useProviderSnapshot)
+	usage, _, _ := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, checkpointSeq, useProviderSnapshot)
 	return usage
 }
 
@@ -29,15 +30,17 @@ func snapshotUsageWithResolvedWindowDetails(
 	promptEvents []*session.Event,
 	window int,
 	cfg CompactionConfig,
+	checkpointSeq uint64,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
 ) (compact.UsageSnapshot, providerTokenSnapshot, bool) {
-	return snapshotUsageWithResolvedWindowDetailsUsing(promptEvents, window, cfg, useProviderSnapshot, estimatePromptEventTokens)
+	return snapshotUsageWithResolvedWindowDetailsUsing(promptEvents, window, cfg, checkpointSeq, useProviderSnapshot, estimatePromptEventTokens)
 }
 
 func snapshotUsageWithResolvedWindowDetailsUsing(
 	promptEvents []*session.Event,
 	window int,
 	cfg CompactionConfig,
+	checkpointSeq uint64,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
 	estimate func(*session.Event) int,
 ) (compact.UsageSnapshot, providerTokenSnapshot, bool) {
@@ -54,7 +57,7 @@ func snapshotUsageWithResolvedWindowDetailsUsing(
 	prefix := 0
 	asOfEventID := ""
 	source := compact.UsageSourceEstimated
-	providerSnapshot, hasProviderSnapshot := latestProviderTokenSnapshotUsing(promptEvents, useProviderSnapshot)
+	providerSnapshot, hasProviderSnapshot := latestProviderTokenSnapshotUsing(promptEvents, checkpointSeq, useProviderSnapshot)
 	if hasProviderSnapshot {
 		total = providerSnapshot.BaselineTokens
 		for _, event := range promptEvents[providerSnapshot.DeltaStartIndex:] {
@@ -119,6 +122,7 @@ type providerTokenSnapshot struct {
 
 func latestProviderTokenSnapshotUsing(
 	events []*session.Event,
+	checkpointSeq uint64,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
 ) (providerTokenSnapshot, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
@@ -126,12 +130,17 @@ func latestProviderTokenSnapshotUsing(
 		if event == nil || len(event.Meta) == 0 {
 			continue
 		}
+		// Retained tail facts can report usage for the old prefix. Select
+		// the baseline and its group only from after checkpoint commit.
+		if checkpointSeq > 0 && event.Seq <= checkpointSeq {
+			continue
+		}
 		meta := event.Meta
 		baseline, includeSnapshotGroup, ok := providerPromptBaselineTokens(meta)
 		if !ok || baseline <= 0 {
 			continue
 		}
-		start := providerSnapshotGroupStart(events, i)
+		start := providerSnapshotGroupStart(events, i, checkpointSeq)
 		deltaStart := start
 		if !includeSnapshotGroup {
 			deltaStart = i + 1
@@ -274,7 +283,7 @@ func firstPositiveIntFromAny(values ...any) int {
 	return 0
 }
 
-func providerSnapshotGroupStart(events []*session.Event, end int) int {
+func providerSnapshotGroupStart(events []*session.Event, end int, checkpointSeq uint64) int {
 	if end < 0 || end >= len(events) {
 		return end
 	}
@@ -285,7 +294,7 @@ func providerSnapshotGroupStart(events []*session.Event, end int) int {
 	start := end
 	for start > 0 {
 		prev := events[start-1]
-		if prev == nil || providerSnapshotSignature(prev) != target {
+		if prev == nil || (checkpointSeq > 0 && prev.Seq <= checkpointSeq) || providerSnapshotSignature(prev) != target {
 			break
 		}
 		start--
@@ -584,10 +593,18 @@ func usageForModelRequest(
 ) (compact.UsageSnapshot, bool) {
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
-	usage, providerSnapshot, hasProviderSnapshot := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, func(snapshot providerTokenSnapshot) bool {
+	usage, providerSnapshot, hasProviderSnapshot := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, usageCheckpointSeq(events), func(snapshot providerTokenSnapshot) bool {
 		return providerSnapshotCompatibleWithLLM(snapshot, llm)
 	})
 	return usageWithModelRequestEstimate(usage, providerSnapshot, hasProviderSnapshot, req)
+}
+
+func usageCheckpointSeq(events []*session.Event) uint64 {
+	checkpoint, _, _ := compact.LatestCompactEvent(events)
+	if checkpoint == nil {
+		return 0
+	}
+	return checkpoint.Seq
 }
 
 func usageWithModelRequestEstimate(

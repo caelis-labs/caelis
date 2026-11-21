@@ -71,19 +71,24 @@ func TestProjectReplayEventsKeepsControlSelectedThoughtChunks(t *testing.T) {
 	}
 }
 
-func TestProjectReplayEventsSkipsCompactNotice(t *testing.T) {
+func TestProjectReplayEventsKeepsCanonicalCheckpoint(t *testing.T) {
 	t.Parallel()
 
-	events := ProjectReplayEvents([]eventstream.Envelope{{
-		Kind: eventstream.KindSessionUpdate,
+	checkpoint := eventstream.Envelope{
+		Kind:     eventstream.KindSessionUpdate,
+		EventID:  "checkpoint-1",
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateCompact,
 			Content:       eventstream.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
 		},
 		Final: true,
-	}}, nil)
-	if len(events) != 0 {
-		t.Fatalf("events = %#v, want compact notice skipped during replay", events)
+	}
+	transient := eventstream.Envelope{Kind: eventstream.KindNotice, EventID: checkpoint.EventID, NoticeKind: eventstream.NoticeKindCompact, Notice: CompactNoticeLabel}
+	events := ProjectReplayEvents([]eventstream.Envelope{checkpoint, transient}, nil)
+	if len(events) != 1 || events[0].NoticeKind != NoticeKindCompact ||
+		events[0].SourceEventID != checkpoint.EventID || events[0].Text != CompactNoticeLabel {
+		t.Fatalf("replay events = %#v, want one notice from the durable checkpoint", events)
 	}
 }
 

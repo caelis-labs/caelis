@@ -82,7 +82,7 @@ func (s *asyncCompactScope) drain() error {
 	return nil
 }
 
-type asyncCompactAdoptedError struct{}
+type asyncCompactAdoptedError struct{ checkpoint *session.Event }
 
 func (*asyncCompactAdoptedError) Error() string {
 	return "runtime: rebuild after durable async compaction"
@@ -90,16 +90,16 @@ func (*asyncCompactAdoptedError) Error() string {
 
 // A pre-dispatch boundary can adopt a checkpoint and ask the Run loop to
 // rebuild from durable history. Launch only after actual attempt admission.
-func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *model.Request, hard, dispatch bool) (bool, error) {
+func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *model.Request, hard, dispatch bool) (*session.Event, error) {
 	r := l.runtime
 	s := asyncScope(ctx)
 	if !r.compaction.Async.Enabled || s == nil {
-		return false, nil
+		return nil, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return nil, err
 	}
 	epoch := "static"
 	if l.requestAuthority != nil {
@@ -107,7 +107,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	}
 	requestHash, err := asyncRequestFingerprint(req)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if job := s.job; job != nil && !dispatch {
 		if job.epoch != epoch || job.requestHash != requestHash || !sameCompactionModel(job.llm, l.inner) {
@@ -117,12 +117,12 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 		select {
 		case <-job.done:
 			if job.receiptErr != nil {
-				return false, job.receiptErr
+				return nil, job.receiptErr
 			}
 			if !job.discarded && job.err == nil {
 				job.discarded = true // exactly one adoption attempt
 				adopted, err := r.adoptAsyncCompaction(ctx, l, job)
-				if err != nil || adopted {
+				if err != nil || adopted != nil {
 					return adopted, err
 				}
 			}
@@ -137,43 +137,43 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 			s.job.cancel()
 			<-s.job.done
 			if s.job.receiptErr != nil {
-				return false, s.job.receiptErr
+				return nil, s.job.receiptErr
 			}
 		}
-		return false, nil
+		return nil, nil
 	}
 	if !dispatch || s.job != nil || req.Source == nil || !compactionPrefixSafe(req.Messages) {
-		return false, nil
+		return nil, nil
 	}
 	messagesHash, err := requestsource.Fingerprint(req.Messages)
 	if err != nil || messagesHash != req.Source.MessagesHash {
-		return false, nil
+		return nil, nil
 	}
 	if l.requestAuthority != nil && l.requestAuthority.validate == nil {
-		return false, nil
+		return nil, nil
 	}
 	provider, modelName := compactionModelIdentity(l.inner)
 	if provider == "" || modelName == "" {
-		return false, nil
+		return nil, nil
 	}
 	guard := session.RuntimeMutationGuard(ctx)
 	if guard.Authority != session.MutationAuthorityRuntime || guard.FenceID == "" || epoch == "" {
-		return false, nil
+		return nil, nil
 	}
 	validator, ok := r.sessions.(session.MutationGuardValidator)
 	if !ok {
-		return false, nil
+		return nil, nil
 	}
 	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, guard); err != nil {
-		return false, err
+		return nil, err
 	}
 	windowProvider, ok := l.inner.(compact.ContextWindowProvider)
 	if !ok || windowProvider.ContextWindowTokens() <= 0 {
-		return false, nil
+		return nil, nil
 	}
 	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: l.sessionRef})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	events := mainInvocationEvents(loaded.Events)
 	cut := 0
@@ -183,11 +183,11 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	events = events[:cut]
 	prefix, err := requestsource.Fingerprint(events)
 	if err != nil || prefix != req.Source.SourcePrefixHash || session.LastEventSeq(events) != req.Source.SourceThroughSeq {
-		return false, nil
+		return nil, nil
 	}
 	delta := compact.EventsAfterLatestCompact(events)
 	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) || !asyncToolPairsComplete(compact.PromptEventsFromLatestCompact(events)) {
-		return false, nil
+		return nil, nil
 	}
 	usage, _ := usageForModelRequest(events, l.inner, req, r.compaction)
 	ratio := r.compaction.Async.StartRatio
@@ -198,12 +198,12 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	probe := usage
 	probe.TotalTokens = int(threshold) + 1
 	if !(ratio > 0 && ratio < 1) || evaluateWatermark(probe, r.compaction).ShouldCompact || float64(usage.TotalTokens) < threshold {
-		return false, nil
+		return nil, nil
 	}
 	frozen := model.CloneRequest(req)
 	frozenHash, err := requestsource.Fingerprint(frozen)
 	if err != nil {
-		return false, nil
+		return nil, nil
 	}
 	coverage := compact.Coverage{
 		SourceThroughSeq:     req.Source.SourceThroughSeq,
@@ -246,7 +246,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 		active := loaded.Session
 		job.receiptErr = r.persistCompactionInvocations(jobCtx, &active, lifecycleScopeFromContext(s.ctx).turnID, records)
 	}()
-	return false, nil
+	return nil, nil
 }
 
 func (s *asyncCompactScope) beforeRecovery() error {

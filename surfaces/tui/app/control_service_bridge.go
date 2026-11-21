@@ -684,7 +684,7 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 			continue
 		}
 		if event.Kind == eventstream.KindNotice {
-			sendControlSlashNotice(send, event.Notice)
+			sendControlSlashNotice(send, event)
 			continue
 		}
 		send(event)

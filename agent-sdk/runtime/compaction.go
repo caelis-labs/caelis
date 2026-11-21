@@ -226,11 +226,8 @@ func classifyCompactionFailure(err error) string {
 
 func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []*session.Event) compact.UsageSnapshot {
 	window := resolveContextWindowTokens(req.Model, c.cfg.DefaultContextWindowTokens)
-	if req.Model == nil {
-		return snapshotUsageWithResolvedWindow(promptEvents, window, c.cfg)
-	}
-	return snapshotUsageWithResolvedWindowUsing(promptEvents, window, c.cfg, func(snapshot providerTokenSnapshot) bool {
-		return providerSnapshotCompatibleWithLLM(snapshot, req.Model)
+	return snapshotUsageWithResolvedWindowUsing(promptEvents, window, c.cfg, usageCheckpointSeq(req.Events), func(snapshot providerTokenSnapshot) bool {
+		return req.Model == nil || providerSnapshotCompatibleWithLLM(snapshot, req.Model)
 	})
 }
 
@@ -253,6 +250,7 @@ func computeUsageSnapshotForModel(
 		promptEvents,
 		contextWindow,
 		cfg,
+		usageCheckpointSeq(events),
 		func(snapshot providerTokenSnapshot) bool {
 			return providerSnapshotCompatibleWithIdentity(snapshot, provider, modelName)
 		},

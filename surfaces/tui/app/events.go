@@ -32,8 +32,10 @@ type SlashCommandResultMsg struct {
 // SlashNoticeMsg carries non-tabular Slash command output. Placement chooses
 // hint chrome versus transcript feedback or requested content.
 type SlashNoticeMsg struct {
-	Text      string
-	Placement SlashNoticePlacement
+	Text         string
+	Placement    SlashNoticePlacement
+	SessionID    string
+	CheckpointID string
 }
 
 type SetStatusMsg struct {

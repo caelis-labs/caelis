@@ -25,7 +25,8 @@ func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Ev
 	}
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
-		if eventstream.UpdateType(env.Update) == eventstream.UpdateCompact {
+		if eventstream.UpdateType(env.Update) == eventstream.UpdateCompact &&
+			(env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryCanonical) {
 			return nil
 		}
 	case eventstream.KindAgentCommunication, eventstream.KindLifecycle, eventstream.KindParticipant, eventstream.KindApprovalReview:

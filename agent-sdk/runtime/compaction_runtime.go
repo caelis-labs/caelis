@@ -349,10 +349,7 @@ func (r *Runtime) compactAndNotify(
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
 		return compactionProgress{}, false, err
 	}
-	if sink != nil {
-		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
-		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
-	}
+	r.publishCompactCompletion(sink, persisted)
 	return compactionProgressFromEvent(persisted), true, nil
 }
 

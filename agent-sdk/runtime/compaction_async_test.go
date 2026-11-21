@@ -333,7 +333,7 @@ func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	if admissions != 4 {
 		t.Fatalf("adoption fabricated request admission: %d", admissions)
 	}
-	gauge, ok := latestProviderTokenSnapshotUsing(mainInvocationEvents(loaded.Events), nil)
+	gauge, ok := latestProviderTokenSnapshotUsing(mainInvocationEvents(loaded.Events), 0, nil)
 	if !ok || gauge.BaselineTokens != 500 {
 		t.Fatalf("foreground gauge mixed background usage: %+v", gauge)
 	}
@@ -639,6 +639,89 @@ func TestAsyncCompactionPendingHardGateCancelsThenFallsBack(t *testing.T) {
 	}
 }
 
+func TestAsyncCompactionBudgetAfterAdoption(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		largeTail bool
+	}{
+		{name: "old provider usage"},
+		{name: "large retained tool input", largeTail: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAsyncHarness(t, "")
+			run := h.run(t)
+			next := h.startCandidate(t)
+			second := asyncToolResponse("second")
+			second.response.Usage = model.Usage{Reported: true, PromptTokens: 9_100, CompletionTokens: 5, TotalTokens: 9_105}
+			if test.largeTail {
+				args, err := json.Marshal(map[string]string{"detail": strings.Repeat("retained input with detail ", 1500)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				second.response.Message.Parts = []model.Part{model.NewToolUsePart("second", "work", args)}
+			}
+			h.llm.responses <- second
+			receiveSnapshotValue(t, h.secondTool)
+			h.completeCandidate(t, next.scope)
+			close(h.releaseSecond)
+
+			wantTrigger := "async_candidate"
+			select {
+			case req := <-h.llm.background:
+				if !test.largeTail {
+					t.Fatal("old provider usage triggered a second compaction")
+				}
+				checkpoint, _, _ := compact.LatestCompactEvent(h.load(t).Events)
+				if checkpoint == nil || checkpoint.ID != next.scope.job.id {
+					t.Fatalf("ready candidate was not adopted before synchronous recovery: %+v", checkpoint)
+				}
+				if !strings.Contains(asyncMessagesText(req.Messages), "CONTEXT CHECKPOINT") {
+					t.Fatal("synchronous recovery did not use the newly committed checkpoint")
+				}
+				assembled := model.CloneRequest(req)
+				assembled.Messages = assembled.Messages[:len(assembled.Messages)-1]
+				usage, _ := usageForModelRequest(mainInvocationEvents(h.load(t).Events), h.llm, assembled, h.rt.compaction)
+				if usage.Source != compact.UsageSourceEstimated || !evaluateWatermark(usage, h.rt.compaction).ShouldCompact {
+					t.Fatalf("large tail should exceed the budget on its own: %+v", usage)
+				}
+				h.llm.summaries <- asyncTextResponse(asyncFixtureSummary+" Second checkpoint.", 5_000)
+				receiveSnapshotValue(t, h.llm.foreground)
+				wantTrigger = "model_request_context_limit"
+			case nextRequest := <-h.llm.foreground:
+				if test.largeTail {
+					t.Fatal("large retained input reached the provider without recovery")
+				}
+				events := mainInvocationEvents(h.load(t).Events)
+				usage, _ := usageForModelRequest(events, h.llm, nextRequest.request, h.rt.compaction)
+				if usage.Source != compact.UsageSourceEstimated || usage.TotalTokens >= 1_000 {
+					t.Fatalf("post-checkpoint budget = %+v", usage)
+				}
+				gauge := computeUsageSnapshotForModel(events, h.llm.ContextWindowTokens(), h.rt.compaction,
+					h.llm.ProviderName(), h.llm.Name(), estimatePromptEventTokens)
+				if gauge.Source != compact.UsageSourceEstimated || gauge.TotalTokens >= 1_000 {
+					t.Fatalf("post-checkpoint gauge = %+v", gauge)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("neither ordinary dispatch nor synchronous recovery reached the model")
+			}
+			h.llm.responses <- asyncTextResponse("fixture complete", 500)
+			if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			events := h.load(t).Events
+			_, data, _ := compact.LatestCompactEvent(events)
+			if data.Trigger != wantTrigger || h.effects.Load() != 2 {
+				t.Fatalf("checkpoint trigger = %q, want %q; effects = %d", data.Trigger, wantTrigger, h.effects.Load())
+			}
+			usage := computeUsageSnapshotForModel(events, h.llm.ContextWindowTokens(), h.rt.compaction,
+				h.llm.ProviderName(), h.llm.Name(), estimatePromptEventTokens)
+			if usage.Source != compact.UsageSourceProvider || usage.TotalTokens >= 1_000 {
+				t.Fatalf("fresh provider usage did not become the context baseline: %+v", usage)
+			}
+		})
+	}
+}
+
 func TestAsyncCompactionRejectsLostFence(t *testing.T) {
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
@@ -650,7 +733,7 @@ func TestAsyncCompactionRejectsLostFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := &autoCompactGatedLLM{runtime: h.rt, inner: h.llm, sessionRef: h.active.SessionRef}
-	if adopted, err := h.rt.adoptAsyncCompaction(h.ctx, l, next.scope.job); adopted || !errors.Is(err, session.ErrFenceConflict) {
+	if adopted, err := h.rt.adoptAsyncCompaction(h.ctx, l, next.scope.job); adopted != nil || !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("adopted=%v error=%v", adopted, err)
 	}
 	h.llm.responses <- asyncTextResponse("done", 500)
@@ -772,7 +855,7 @@ func TestAsyncCompactionCoverageContractCannotAdvanceOrRegress(t *testing.T) {
 		changed := data
 		mutation(&changed)
 		next.scope.job.result.CompactEvent = buildCompactEvent(h.active, asyncFixtureSummary, changed)
-		if adopted, err := h.rt.adoptAsyncCompaction(h.ctx, l, next.scope.job); adopted || err != nil {
+		if adopted, err := h.rt.adoptAsyncCompaction(h.ctx, l, next.scope.job); adopted != nil || err != nil {
 			t.Fatalf("bad coverage adopted=%v err=%v", adopted, err)
 		}
 	}

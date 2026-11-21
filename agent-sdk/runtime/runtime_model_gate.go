@@ -115,8 +115,8 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 		if adopted, err := l.adoptReadyIdleCandidate(ctx, req); err != nil {
 			yield(nil, err)
 			return
-		} else if adopted {
-			yield(nil, &asyncCompactAdoptedError{})
+		} else if adopted != nil {
+			yield(nil, &asyncCompactAdoptedError{checkpoint: adopted})
 			return
 		}
 		decision, err := l.runtime.autoCompactDecisionBeforeModelRequest(ctx, l.sessionRef, l.inner, req)
@@ -128,8 +128,8 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 		if adopted, asyncErr := l.asyncCompactionBoundary(ctx, req, hard, false); asyncErr != nil {
 			yield(nil, asyncErr)
 			return
-		} else if adopted {
-			yield(nil, &asyncCompactAdoptedError{})
+		} else if adopted != nil {
+			yield(nil, &asyncCompactAdoptedError{checkpoint: adopted})
 			return
 		}
 		if hard {

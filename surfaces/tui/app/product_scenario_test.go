@@ -123,14 +123,22 @@ func runCompactionProductScenario(
 	if notice < 0 {
 		return evalharness.ProductObservation{}, fmt.Errorf("Runtime emitted no %s notice: %#v", noticeKind, runtimeRun.LiveEvents)
 	}
-	compact := slices.IndexFunc(runtimeRun.DurableEvents, func(event *session.Event) bool {
+	durableCompact := slices.IndexFunc(runtimeRun.DurableEvents, func(event *session.Event) bool {
 		return session.EventTypeOf(event) == session.EventTypeCompact
 	})
-	if outcome == evalharness.ContextCompactionSuccess && compact < 0 {
+	compact := slices.IndexFunc(runtimeRun.LiveEvents, func(event *session.Event) bool {
+		return session.EventTypeOf(event) == session.EventTypeCompact
+	})
+	if outcome == evalharness.ContextCompactionSuccess && durableCompact < 0 {
 		return evalharness.ProductObservation{}, fmt.Errorf("Runtime persisted no context checkpoint: %#v", runtimeRun.DurableEvents)
 	}
-	if outcome == evalharness.ContextCompactionFailure && compact >= 0 {
-		return evalharness.ProductObservation{}, fmt.Errorf("failed Runtime compaction persisted a checkpoint: %#v", runtimeRun.DurableEvents[compact])
+	if outcome == evalharness.ContextCompactionSuccess && (compact <= activity || compact >= notice ||
+		runtimeRun.LiveEvents[compact].ID != runtimeRun.DurableEvents[durableCompact].ID ||
+		runtimeRun.LiveEvents[compact].Seq != runtimeRun.DurableEvents[durableCompact].Seq) {
+		return evalharness.ProductObservation{}, fmt.Errorf("Runtime did not publish the committed checkpoint before success notice")
+	}
+	if outcome == evalharness.ContextCompactionFailure && (durableCompact >= 0 || compact >= 0) {
+		return evalharness.ProductObservation{}, fmt.Errorf("failed Runtime compaction produced a checkpoint")
 	}
 
 	started := make(chan struct{}, 1)
@@ -236,7 +244,13 @@ func runCompactionProductScenario(
 
 	switch outcome {
 	case evalharness.ContextCompactionSuccess:
-		if err := project(runtimeRun.DurableEvents[compact]); err != nil {
+		if err := project(runtimeRun.LiveEvents[compact]); err != nil {
+			return observation, err
+		}
+		if _, err := waitForProductScreen(ctx, terminal, func(screen string) bool {
+			return strings.Count(screen, transcript.CompactNoticeLabel) == 1 &&
+				!strings.Contains(screen, "Compacting context")
+		}); err != nil {
 			return observation, err
 		}
 		if err := project(runtimeRun.LiveEvents[notice]); err != nil {

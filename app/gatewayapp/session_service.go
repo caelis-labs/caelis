@@ -16,27 +16,27 @@ import (
 
 // compactSession forces a model-backed checkpoint compaction for the given
 // session.
-func (s *runtimeComposition) compactSession(ctx context.Context, ref session.SessionRef, expectedRevision *uint64) (session.Session, error) {
+func (s *runtimeComposition) compactSession(ctx context.Context, ref session.SessionRef, expectedRevision *uint64) (sdkruntime.CompactResult, error) {
 	if s == nil {
-		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
+		return sdkruntime.CompactResult{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
 	gw := s.gateway
 	s.mu.RUnlock()
 	if gw == nil {
-		return session.Session{}, fmt.Errorf("gatewayapp: resolver is unavailable")
+		return sdkruntime.CompactResult{}, fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
 	request := sdkruntime.CompactRequest{SessionRef: ref, ExpectedRevision: expectedRevision, Trigger: "manual"}
 	resolved, err := gw.ResolveCompaction(ctx, ref)
 	if err != nil {
-		return session.Session{}, err
+		return sdkruntime.CompactResult{}, err
 	}
 	spec := resolved.RunRequest.AgentSpec
 	request.Model, request.ServiceTier = spec.Model, spec.Request.ServiceTier
 	if spec.ResolveModelRequest != nil {
 		snapshot, err := spec.ResolveModelRequest(ctx)
 		if err != nil {
-			return session.Session{}, err
+			return sdkruntime.CompactResult{}, err
 		}
 		if snapshot.Release != nil {
 			defer snapshot.Release()
@@ -49,7 +49,7 @@ func (s *runtimeComposition) compactSession(ctx context.Context, ref session.Ses
 		compacted, compactErr = engine.Compact(runCtx, request)
 		return compactErr
 	})
-	return compacted.Session, err
+	return compacted, err
 }
 
 // withPlaced runs a synchronous Control operation inside the production

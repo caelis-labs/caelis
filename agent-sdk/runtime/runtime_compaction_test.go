@@ -108,11 +108,13 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	if userIndex < 0 || userIndex > noticeIndex {
 		t.Fatalf("runner event order = %#v, want user echo before compact notice", runEvents)
 	}
-	if slices.ContainsFunc(runEvents, func(event *session.Event) bool {
+	checkpointIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		return event != nil && event.Type == session.EventTypeCompact
-	}) {
-		t.Fatalf("runner events = %#v, did not want durable compact checkpoint in live stream", runEvents)
+	})
+	if checkpointIndex <= activityIndex || checkpointIndex >= userIndex {
+		t.Fatalf("live checkpoint index = %d, want after compact start %d and before user echo %d", checkpointIndex, activityIndex, userIndex)
 	}
+	liveCheckpoint := runEvents[checkpointIndex]
 
 	if testModel.compactionCalls != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", testModel.compactionCalls)
@@ -140,6 +142,11 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 			t.Fatalf("transient compact activity was persisted: %+v", event)
 		}
 		if event != nil && event.Type == session.EventTypeCompact {
+			if liveCheckpoint.ID != event.ID || liveCheckpoint.Seq != event.Seq || liveCheckpoint.Visibility != session.VisibilityCanonical ||
+				runEvents[noticeIndex].ID != event.ID {
+				t.Fatalf("live checkpoint %s/%d and notice %s must identify committed checkpoint %s/%d",
+					liveCheckpoint.ID, liveCheckpoint.Seq, runEvents[noticeIndex].ID, event.ID, event.Seq)
+			}
 			if strings.TrimSpace(event.IdempotencyKey) == "" {
 				t.Fatalf("compact event has no stable retry identity: %+v", event)
 			}
