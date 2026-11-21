@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -629,4 +630,37 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 	if payload["state"] != "cancelled" || approvals != 0 || backend.startCalls() != 0 {
 		t.Fatalf("late admission = %#v, approvals=%d starts=%d", payload, approvals, backend.startCalls())
 	}
+}
+
+func TestTaskContinuationJoinClosesAdmissionBeforeWaiting(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := newTaskContinuationScope()
+		ctx := t.Context()
+		first, err := scope.register(ctx, "original", 0, taskContinuationOrdinary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := make(chan error, 1)
+		go func() {
+			joined <- scope.join()
+		}()
+		synctest.Wait()
+		late, lateErr := scope.register(ctx, "late", 0, taskContinuationOrdinary)
+		if late != nil {
+			scope.complete("late", late, nil)
+		}
+		select {
+		case err := <-joined:
+			scope.complete("original", first, nil)
+			t.Fatalf("Run completed before the original continuation: %v", err)
+		default:
+		}
+		scope.complete("original", first, nil)
+		if err := <-joined; err != nil {
+			t.Fatal(err)
+		}
+		if !errorcode.Is(lateErr, errorcode.FailedPrecondition) {
+			t.Fatalf("late registration error = %v, want closed admission", lateErr)
+		}
+	})
 }
