@@ -94,16 +94,15 @@ func (s *Store) RepairWorkspaceKeys(
 			if len(repairs) == 0 {
 				return nil
 			}
-			if err := s.validateWorkspaceKeyRepairs(repairs); err != nil {
-				return err
-			}
-			if err := s.writeWorkspaceKeyRepairMarker(ctx, repairs); err != nil {
-				return err
-			}
 		}
 
 		if err := s.validateWorkspaceKeyRepairs(repairs); err != nil {
 			return err
+		}
+		if len(pending) == 0 {
+			if err := s.writeWorkspaceKeyRepairMarker(ctx, repairs); err != nil {
+				return err
+			}
 		}
 		for _, repair := range repairs {
 			changed, err := s.repairSessionWorkspaceKey(ctx, repair)
