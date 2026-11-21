@@ -8,9 +8,9 @@ import (
 )
 
 // ContextUsageProjection retains context metadata and exact local token
-// estimates for an append-only canonical history. It uses the same checkpoint,
-// provider baseline and fallback calculation as ComputeUsageSnapshotForModel,
-// without retaining transcript payloads. Rebuild it when its source is replaced.
+// estimates for an append-only canonical history. It retains checkpoint and
+// provider usage evidence without retaining transcript payloads. Rebuild it
+// when its source is replaced.
 // The owner serializes Append and Snapshot; the projection owns no durable truth.
 type ContextUsageProjection struct {
 	events []*session.Event
@@ -50,7 +50,7 @@ func (p *ContextUsageProjection) Append(events []*session.Event) {
 // Changing model/window/prefix inputs reuses the source estimates, not a stale
 // result for the previously selected model.
 func (p *ContextUsageProjection) Snapshot(contextWindow int, cfg CompactionConfig, provider, modelName string) compact.UsageSnapshot {
-	return computeUsageSnapshotForModel(p.events, nil, contextWindow, cfg, provider, modelName, func(event *session.Event) int {
+	return computeUsageSnapshotForModel(p.events, contextWindow, cfg, provider, modelName, func(event *session.Event) int {
 		if event != nil && event.Seq > 0 {
 			return p.tokens[event.Seq]
 		}

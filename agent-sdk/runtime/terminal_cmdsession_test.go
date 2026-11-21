@@ -119,7 +119,7 @@ func TestTerminalReadPublishesCommandExitOnlyAfterOutputCompletes(t *testing.T) 
 	t.Cleanup(runner.close)
 
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
-	terminals := newTerminalService(tm)
+	terminals := &terminalService{tasks: tm}
 	sandboxRuntime := runnerruntime.New(runnerruntime.Config{
 		Backend: sandbox.BackendHost,
 		Runner:  runner,

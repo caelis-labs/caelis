@@ -127,14 +127,10 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func shouldPersistEvent(event *session.Event) bool {
-	return event != nil && !session.IsTransient(event)
-}
-
 func persistedEvents(events []*session.Event) []*session.Event {
 	out := make([]*session.Event, 0, len(events))
 	for _, event := range events {
-		if !shouldPersistEvent(event) {
+		if event == nil || session.IsTransient(event) {
 			continue
 		}
 		out = append(out, session.CloneEvent(event))

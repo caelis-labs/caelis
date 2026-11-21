@@ -263,31 +263,22 @@ func (s *Store) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	result, err := s.AppendEventWithOutcome(ctx, req)
-	return result.Event, err
-}
-
-func (s *Store) AppendEventWithOutcome(
-	ctx context.Context,
-	req session.AppendEventRequest,
-) (session.AppendEventResult, error) {
 	event := req.Event
 	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
+		return nil, session.ErrInvalidEvent
 	}
 	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
 	if err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	defer s.mu.Unlock()
 
 	var out *session.Event
-	var appended bool
 	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
@@ -301,21 +292,17 @@ func (s *Store) AppendEventWithOutcome(
 		if err != nil {
 			return err
 		}
-		normalized := tx.Prepared.Events[0]
-		if !tx.Changed {
-			out = session.CloneEvent(normalized)
-			return nil
+		if tx.Changed {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
+				return err
+			}
 		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
-			return err
-		}
-		out = session.CloneEvent(normalized)
-		appended = true
+		out = session.CloneEvent(tx.Prepared.Events[0])
 		return nil
 	}); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
-	return session.AppendEventResult{Event: out, Appended: appended}, nil
+	return out, nil
 }
 
 func (s *Store) prepareAppendTransactionForDocument(
@@ -376,7 +363,7 @@ func (s *Store) prepareAppendTransactionForDocument(
 		}
 		doc.PendingApprovals = pendingApprovalsFromEvents(existingEvents)
 	}
-	applyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
+	session.ApplyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
 	if tx.RecordTransaction {
 		if doc.AppliedTransactions == nil {
 			doc.AppliedTransactions = map[string]bool{}
@@ -593,10 +580,6 @@ func (s *Store) BindController(
 	ctx context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(ctx, req)
-}
-
-func (s *Store) bindControllerRequest(ctx context.Context, req session.BindControllerRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
@@ -683,10 +666,6 @@ func (s *Store) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(ctx, req)
-}
-
-func (s *Store) putParticipantRequest(ctx context.Context, req session.PutParticipantRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
@@ -805,10 +784,6 @@ func (s *Store) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(ctx, req)
-}
-
-func (s *Store) removeParticipantRequest(ctx context.Context, req session.RemoveParticipantRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
@@ -936,45 +911,6 @@ func (s *Store) SnapshotState(
 		return nil, err
 	}
 	return out, nil
-}
-
-func (s *Store) ReplaceState(
-	ctx context.Context,
-	req session.ReplaceStateRequest,
-) (session.Session, error) {
-	if err := session.ValidateState(req.State); err != nil {
-		return session.Session{}, err
-	}
-	if err := s.mu.LockContext(ctx); err != nil {
-		return session.Session{}, err
-	}
-	defer s.mu.Unlock()
-
-	var out session.Session
-	err := s.withRootLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
-			return err
-		}
-		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
-			return err
-		}
-		doc.State = cloneState(req.State)
-		doc.Session.Revision++
-		doc.Session.UpdatedAt = s.now()
-		out = session.CloneSession(doc.Session)
-		if err := s.writeDocument(ctx, doc); err != nil {
-			if documentWriteCommitted(err) {
-				return &session.CommittedError{Err: err}
-			}
-			return err
-		}
-		return nil
-	})
-	return out, err
 }
 
 func (s *Store) UpdateState(

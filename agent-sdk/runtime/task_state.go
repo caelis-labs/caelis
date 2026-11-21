@@ -168,7 +168,6 @@ type commandTask struct {
 	title         string
 	createdAt     time.Time
 	revision      uint64
-	lease         taskapi.Lease
 
 	outputReadMu sync.Mutex
 	mu           sync.Mutex
@@ -202,7 +201,6 @@ type subagentTask struct {
 	approvalMode string
 	createdAt    time.Time
 	revision     uint64
-	lease        taskapi.Lease
 
 	// activityApplyMu serializes producer completion with concurrent Task
 	// lifecycle updates without covering Task-store I/O.

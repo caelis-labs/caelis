@@ -589,9 +589,7 @@ func (s staticSessionService) RemoveParticipant(context.Context, session.RemoveP
 func (s staticSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return cloneMap(s.state), nil
 }
-func (s staticSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
-	return s.session, nil
-}
+
 func (s staticSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
 	return s.session, nil
 }
@@ -611,7 +609,6 @@ type recordingSessionService struct {
 	sessionResult      session.Session
 	eventsResult       []*session.Event
 	appendReqs         []session.AppendEventRequest
-	appendOutcomes     []bool
 	snapshotErr        error
 	startErr           error
 	loadErr            error
@@ -653,16 +650,6 @@ func (s *recordingSessionService) Session(_ context.Context, ref session.Session
 func (s *recordingSessionService) AppendEvent(_ context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	s.appendReqs = append(s.appendReqs, req)
 	return storedTestEvent(req), nil
-}
-
-func (s *recordingSessionService) AppendEventWithOutcome(ctx context.Context, req session.AppendEventRequest) (session.AppendEventResult, error) {
-	event, err := s.AppendEvent(ctx, req)
-	appended := true
-	if len(s.appendOutcomes) > 0 {
-		appended = s.appendOutcomes[0]
-		s.appendOutcomes = s.appendOutcomes[1:]
-	}
-	return session.AppendEventResult{Event: event, Appended: appended}, err
 }
 
 func storedTestEvent(req session.AppendEventRequest) *session.Event {
@@ -716,10 +703,6 @@ func (s *recordingSessionService) SnapshotState(context.Context, session.Session
 		return nil, s.snapshotErr
 	}
 	return map[string]any{}, nil
-}
-
-func (s *recordingSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
-	return s.sessionResult, nil
 }
 
 func (s *recordingSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {

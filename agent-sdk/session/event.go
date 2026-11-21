@@ -276,7 +276,7 @@ func NoticeOf(event *Event) (EventNotice, bool) {
 		out.Level = strings.TrimSpace(strings.ToLower(out.Level))
 		out.Text = strings.TrimSpace(out.Text)
 		out.Kind = strings.TrimSpace(out.Kind)
-		out.Meta = cloneProtocolAnyMap(out.Meta)
+		out.Meta = CloneState(out.Meta)
 		if out.Level != "" && out.Text != "" {
 			return out, true
 		}

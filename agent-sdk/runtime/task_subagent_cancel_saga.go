@@ -162,7 +162,6 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	}
 	task.mu.Lock()
 	task.revision = entry.Revision
-	task.lease = taskapi.CloneLease(entry.Lease)
 	task.state = entry.State
 	task.running = entry.Running
 	task.result = session.CloneState(entry.Result)

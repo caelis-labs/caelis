@@ -57,7 +57,6 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 	}
 	task.metadata = mergedMetadata
 	task.revision = current.Revision
-	task.lease = taskapi.CloneLease(current.Lease)
 	rebased := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	task.activityApplyMu.Unlock()

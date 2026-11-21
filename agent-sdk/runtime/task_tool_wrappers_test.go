@@ -191,7 +191,7 @@ func TestRuntimeExplicitSDKSendMessageSurvivesWorkspaceWritePolicy(t *testing.T)
 	runtime := &Runtime{policies: registry, defaultPolicyMode: presets.ModeWorkspaceWrite}
 	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{Tools: []tool.Tool{sendmessage.New()}}, runtimeToolContext{inputSender: sender})
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
-		ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef,
+		ctx: context.Background(),
 	})
 	if len(wrapped) != 1 {
 		t.Fatalf("wrapped tools = %d, want only SendMessage", len(wrapped))

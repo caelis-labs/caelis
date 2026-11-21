@@ -26,7 +26,7 @@ type idleCompactionCoordinator struct {
 }
 type idleCompactionJob interface {
 	Fresh() bool
-	Run(context.Context, session.IdleCompactionWindow) (bool, error)
+	Run(context.Context, session.IdleCompactionWindow) error
 	FlushAccounting(context.Context) error
 	Close()
 }
@@ -128,7 +128,7 @@ func (c *idleCompactionCoordinator) run(work *idleCompactionWork) {
 	default:
 		return
 	}
-	_, err = work.job.Run(work.ctx, window)
+	err = work.job.Run(work.ctx, window)
 	<-slot
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, session.ErrIdleCompactionRevoked) {
 		c.report("run", err)

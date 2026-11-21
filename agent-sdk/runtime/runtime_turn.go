@@ -65,7 +65,7 @@ func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Sessi
 	concrete := spec.Tools
 	spec.Tools = r.wrapToolsForDispatch(ref, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
-		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
+		ctx: ctx, requester: requester, runtime: r, runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)
 	return ownCodeModeProducers(ctx, concrete, wrapToolResults(concrete, spec.Tools))
@@ -151,7 +151,7 @@ func (r *Runtime) runAttempt(
 	toolFactOrdinal *uint64,
 	toolStepSequence *atomic.Uint64,
 ) (bool, error) {
-	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, turnID, req, pendingInputs, sink)
+	invocation, err := r.prepareInvocationContext(ctx, ref, turnID, req, pendingInputs, sink)
 	if err != nil {
 		var compactErr *compactionFailureError
 		if errors.As(err, &compactErr) {

@@ -30,7 +30,7 @@ func TestAsyncCompactionDynamicMissingParentValidateDisablesSpeculation(t *testi
 		t.Fatal("async scope absent")
 	}
 	next.scope.mu.Lock()
-	started := next.scope.started
+	started := next.scope.job != nil
 	next.scope.mu.Unlock()
 	if started {
 		t.Fatal("Runtime-only guards enabled speculation without embedding validation")

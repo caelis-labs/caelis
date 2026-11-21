@@ -83,7 +83,7 @@ func (s pagedRecoveryStore) Session(ctx context.Context, ref session.SessionRef)
 func (s pagedRecoveryStore) SettlePendingApproval(
 	ctx context.Context,
 	req session.SettlePendingApprovalRequest,
-) (session.SettlePendingApprovalResult, error) {
+) error {
 	return s.store.SettlePendingApproval(ctx, req)
 }
 

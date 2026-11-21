@@ -56,7 +56,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		yield = time.Duration(*args.Yield) * time.Millisecond
 	}
 	execution := tool.InvocationFromContext(ctx)
-	taskID, err := commandTaskID(owner.ref, "code-mode/"+execution.TurnID+"/"+execution.ItemID+"/"+call.ID)
+	taskID, err := taskIDForOperation(owner.ref, "code-mode/"+execution.TurnID+"/"+execution.ItemID+"/"+call.ID)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -74,7 +74,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 			return taskSnapshotToolResult(ctx, codeModeSnapshot(existing))
 		}
 	}
-	handle, err := tm.reserveTaskHandle(ctx, owner.active, owner.ref, taskapi.KindCodeMode, "script")
+	handle, err := tm.reserveTaskHandle(ctx, owner.active, owner.ref, taskapi.KindCodeMode, "script", "")
 	if err != nil {
 		release()
 		return tool.Result{}, err
@@ -308,8 +308,8 @@ func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRe
 // Canonical delivery advances the existing Task frontier without replacing its
 // original selected result or producer state with an observation envelope.
 func (tm *taskRuntime) syncCanonicalCodeModeCursor(ctx context.Context, ref session.SessionRef, event *session.Event) error {
-	id := taskRuntimeMetaString(event.Meta, "task", "task_id")
-	section := toolbinding.RuntimeSection(event.Meta, "task")
+	section := taskRuntimeMetaReadSection(event.Meta, "task")
+	id := taskStringValue(section["task_id"])
 	cursor, ok := taskInt64Value(section["model_output_cursor"])
 	if !ok || cursor < 0 {
 		return nil

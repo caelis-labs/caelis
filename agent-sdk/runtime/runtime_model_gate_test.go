@@ -92,8 +92,8 @@ func TestAutoCompactDecisionBeforeModelRequestUsesRequestEstimate(t *testing.T) 
 	if decision.Kind != compactionRecoveryKindWatermark {
 		t.Fatalf("kind = %q, want %q", decision.Kind, compactionRecoveryKindWatermark)
 	}
-	if decision.RequestTokens == 0 || decision.Usage.TotalTokens < decision.RequestTokens {
-		t.Fatalf("decision usage/request = %+v/%d, want request estimate included", decision.Usage, decision.RequestTokens)
+	if requestTokens := estimateModelRequestTokens(req); requestTokens == 0 || decision.Usage.TotalTokens < requestTokens {
+		t.Fatalf("decision usage/request = %+v/%d, want request estimate included", decision.Usage, requestTokens)
 	}
 }
 
@@ -147,8 +147,8 @@ func TestAutoCompactDecisionBeforeModelRequestKeepsProviderUsageAuthoritativeFor
 	if view.usage.TotalTokens >= 100000 {
 		t.Fatalf("provider usage total = %d, want production-shaped baseline below 100k", view.usage.TotalTokens)
 	}
-	if view.requestTokens >= 50000 {
-		t.Fatalf("bounded three-image request estimate = %d, want below 50k", view.requestTokens)
+	if requestTokens := estimateModelRequestTokens(req); requestTokens >= 50000 {
+		t.Fatalf("bounded three-image request estimate = %d, want below 50k", requestTokens)
 	}
 }
 

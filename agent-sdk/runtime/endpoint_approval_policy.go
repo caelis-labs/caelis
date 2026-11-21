@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
@@ -41,7 +40,7 @@ func (r *Runtime) resolveEndpointApprovalByPolicy(
 	modeName string,
 	request agent.ApprovalRequest,
 ) (agent.ApprovalResponse, bool, error) {
-	modeName = normalizePolicyMode(modeName)
+	modeName = presets.NormalizeModeName(modeName)
 	if modeName != presets.ModeDangerFullAccess {
 		return agent.ApprovalResponse{}, false, nil
 	}
@@ -52,15 +51,11 @@ func (r *Runtime) resolveEndpointApprovalByPolicy(
 	if _, _, err := r.lookupPolicyMode(ctx, modeName); err != nil {
 		return agent.ApprovalResponse{}, true, err
 	}
-	response, err := endpointPolicyApprovalResponse(request.Approval, true, "")
+	response, err := approveEndpointPermission(request.Approval)
 	return response, true, err
 }
 
-func endpointPolicyApprovalResponse(
-	payload *session.ProtocolApproval,
-	approved bool,
-	reason string,
-) (agent.ApprovalResponse, error) {
+func approveEndpointPermission(payload *session.ProtocolApproval) (agent.ApprovalResponse, error) {
 	options := make([]approval.Option, 0)
 	if payload != nil {
 		options = make([]approval.Option, 0, len(payload.Options))
@@ -71,10 +66,7 @@ func endpointPolicyApprovalResponse(
 	if err := approval.ValidateACPOptions(options); err != nil {
 		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: invalid endpoint permission options: %w", err)
 	}
-	decision := approval.OptionDecisionDeny
-	if approved {
-		decision = approval.OptionDecisionAllow
-	}
+	decision := approval.OptionDecisionAllow
 	optionID, ok, err := approval.StrictOptionIDForDecision(options, decision)
 	if err != nil {
 		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: resolve endpoint permission option: %w", err)
@@ -83,10 +75,9 @@ func endpointPolicyApprovalResponse(
 		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: endpoint permission has no %s option", decision)
 	}
 	resolved := approval.ReviewResult{
-		Outcome:   string(approval.StatusSelected),
-		OptionID:  optionID,
-		Approved:  approved,
-		Rationale: strings.TrimSpace(reason),
+		Outcome:  string(approval.StatusSelected),
+		OptionID: optionID,
+		Approved: true,
 	}
 	response := approval.RuntimeResponseFromFinalReview(resolved)
 	return response, nil

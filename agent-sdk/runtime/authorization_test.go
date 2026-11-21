@@ -151,7 +151,7 @@ func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.
 	if err := permit.consume(t.Context()); err == nil {
 		t.Fatal("revoked queued operation was admitted")
 	}
-	if err := r.checkAuthorization(t.Context(), active, a); err == nil {
+	if _, err := r.checkAuthorization(t.Context(), active, a); err == nil {
 		t.Fatal("late approval was current")
 	}
 	// The fact can be reloaded without recreating an execution owner.

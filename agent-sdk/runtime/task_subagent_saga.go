@@ -105,7 +105,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	if runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent execution is required")
 	}
-	taskID, err := subagentSpawnTaskID(ref, req.SpawnID)
+	taskID, err := taskIDForOperation(ref, req.SpawnID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -309,7 +309,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		}
 		return tm.resumeExistingSpawn(ctx, existing, spawnID, runner)
 	}
-	handle, err := tm.reserveTaskHandleValue(ctx, activeSession, ref, taskapi.KindSubagent, target.Selector, strings.TrimSpace(req.Handle))
+	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindSubagent, target.Selector, strings.TrimSpace(req.Handle))
 	if err != nil {
 		return spawnBeginOutcome{}, err
 	}

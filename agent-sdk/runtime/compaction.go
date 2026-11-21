@@ -63,9 +63,9 @@ func (c *codexStyleCompactor) Prepare(ctx context.Context, req compact.Request) 
 	if !c.cfg.Enabled || req.Model == nil {
 		return result, nil
 	}
-	decision, err := c.decide(ctx, result.Usage, req)
-	if err != nil || !decision.ShouldCompact {
-		return result, err
+	decision := c.decide(result.Usage, req)
+	if !decision.ShouldCompact {
+		return result, nil
 	}
 	compacted, err := c.compact(ctx, req, decision.Reason)
 	if err != nil {
@@ -83,7 +83,7 @@ func (c *codexStyleCompactor) Force(ctx context.Context, req compact.Request, tr
 		PromptEvents: promptEvents,
 		Usage:        c.snapshotUsage(req, promptEventsWithPending(promptEvents, req.PendingEvents)),
 	}
-	if compactableEventCount(req.Events) == 0 {
+	if len(compact.EventsAfterLatestCompact(req.Events)) == 0 {
 		return result, nil
 	}
 	if req.Model == nil {
@@ -110,14 +110,14 @@ func (c *codexStyleCompactor) CompactOnOverflow(ctx context.Context, req compact
 	return c.compact(ctx, req, "overflow_recovery")
 }
 
-func (c *codexStyleCompactor) decide(_ context.Context, usage compact.UsageSnapshot, req compact.Request) (compact.TriggerDecision, error) {
+func (c *codexStyleCompactor) decide(usage compact.UsageSnapshot, req compact.Request) compact.TriggerDecision {
 	if usage.EffectiveInputBudget <= 0 || req.Model == nil {
-		return compact.TriggerDecision{}, nil
+		return compact.TriggerDecision{}
 	}
-	if compactableEventCount(req.Events) == 0 {
-		return compact.TriggerDecision{}, nil
+	if len(compact.EventsAfterLatestCompact(req.Events)) == 0 {
+		return compact.TriggerDecision{}
 	}
-	return evaluateWatermark(usage, c.cfg), nil
+	return evaluateWatermark(usage, c.cfg)
 }
 
 func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, trigger string) (compact.Result, error) {
@@ -126,7 +126,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 	}
 	baseEvent, baseData, _ := compact.LatestCompactEvent(req.Events)
 	baseText := stripRuntimeContinuity(eventTextForCompaction(baseEvent))
-	delta := compactableEvents(req.Events)
+	delta := compact.EventsAfterLatestCompact(req.Events)
 	if len(delta) == 0 {
 		promptEvents := compact.PromptEventsFromLatestCompact(req.Events)
 		return compact.Result{
@@ -234,29 +234,14 @@ func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []
 	})
 }
 
-// ComputeUsageSnapshotForModel projects reporting usage using only a provider
-// baseline produced by the named model. Incomplete or mismatched identities
-// fail closed to the local prompt estimate.
-func ComputeUsageSnapshotForModel(
-	events []*session.Event,
-	pendingEvents []*session.Event,
-	contextWindow int,
-	cfg CompactionConfig,
-	provider string,
-	modelName string,
-) compact.UsageSnapshot {
-	return computeUsageSnapshotForModel(events, pendingEvents, contextWindow, cfg, provider, modelName, estimatePromptEventTokens)
-}
-
 func computeUsageSnapshotForModel(
-	events, pendingEvents []*session.Event,
+	events []*session.Event,
 	contextWindow int,
 	cfg CompactionConfig,
 	provider, modelName string,
 	estimate func(*session.Event) int,
 ) compact.UsageSnapshot {
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
-	promptEvents = promptEventsWithPending(promptEvents, pendingEvents)
 	// When a provider omits usage, prefer the prefix recorded from the actual
 	// last model-visible request over the static assembly fallback. This reuses
 	// the request-boundary fingerprint path and avoids reconstructing ToolSearch

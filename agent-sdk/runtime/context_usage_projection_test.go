@@ -38,7 +38,7 @@ func TestContextUsageProjectionMatchesFullHistoryAtEveryCut(t *testing.T) {
 		}
 		for _, name := range []string{"one", "two", "unobserved"} {
 			cfg := CompactionConfig{EstimatedPromptPrefixTokens: 11}
-			want := ComputeUsageSnapshotForModel(canonical, nil, 128000, cfg, "fixture", name)
+			want := computeUsageSnapshotForModel(canonical, 128000, cfg, "fixture", name, estimatePromptEventTokens)
 			if got := projection.Snapshot(128000, cfg, "fixture", name); !reflect.DeepEqual(got, want) {
 				t.Fatalf("cut=%d model=%s projected=%+v full=%+v", event.Seq, name, got, want)
 			}

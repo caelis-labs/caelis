@@ -69,7 +69,7 @@ func coverageRequest(t *testing.T, llm *coverageModel) compact.Request {
 
 func bindCoverage(t *testing.T, req *compact.Request) {
 	t.Helper()
-	delta := compactableEvents(req.Events)
+	delta := compact.EventsAfterLatestCompact(req.Events)
 	req.Coverage = &compact.Coverage{
 		SourceThroughSeq: session.LastEventSeq(req.Events), SummarizedThroughSeq: session.LastEventSeq(delta),
 		SummarizedThroughID: lastEventID(delta), SourceEventCount: len(delta),

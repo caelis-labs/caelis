@@ -19,23 +19,9 @@ type modelRequestAuthority struct {
 	validate      func(context.Context) (func(), error)
 	deferredTools toolset.Source
 	resolveIdle   agent.ModelRequestResolver
-	// Runtime guards protect synchronous commits even without a parent guard.
-	// They cannot establish the embedding authority required for speculation.
-	canSpeculate bool
-	mu           sync.Mutex
-	refs         int
-	release      func()
-}
-
-// Capture the embedding owner's current request validator and retain its
-// provider/configuration snapshot through generation and adoption.
-func (r *Runtime) captureRequestAuthority(parent *modelRequestAuthority) *modelRequestAuthority {
-	if parent == nil {
-		return nil
-	}
-	snapshot := agent.ModelRequestSnapshot{Revision: parent.epoch, Validate: parent.validate}
-	return &modelRequestAuthority{epoch: snapshot.Revision, validate: snapshot.Validate,
-		admit: parent.admit, deferredTools: parent.deferredTools, resolveIdle: parent.resolveIdle, canSpeculate: parent.validate != nil, refs: 1, release: parent.retain()}
+	mu            sync.Mutex
+	refs          int
+	release       func()
 }
 
 func (a *modelRequestAuthority) retain() func() {

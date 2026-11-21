@@ -107,10 +107,10 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 			})
 			return err
 		},
-		"replace_state": func(ctx context.Context) error {
-			_, err := store.ReplaceState(ctx, session.ReplaceStateRequest{
+		"update_state": func(ctx context.Context) error {
+			_, err := store.UpdateState(ctx, session.UpdateStateRequest{
 				SessionRef: active.SessionRef,
-				State:      map[string]any{"should": "cancel"},
+				Update:     func(map[string]any) (map[string]any, error) { return map[string]any{"should": "cancel"}, nil },
 			})
 			return err
 		},

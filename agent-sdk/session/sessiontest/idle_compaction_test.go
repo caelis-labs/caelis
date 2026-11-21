@@ -193,16 +193,11 @@ func TestIdleCompactionStoreContract(t *testing.T) {
 					t.Fatal(err)
 				}
 				f.store = f.reopen()
-				event, err := f.store.FinalizeCompactionReceipt(t.Context(), ticket)
-				if err != nil {
+				if err := f.store.FinalizeCompactionReceipt(t.Context(), ticket); err != nil {
 					t.Fatal(err)
 				}
-				if session.IsMainInvocationVisibleEvent(event) || session.IsClientReplayEvent(event) || !session.IsModelInvocationReceipt(event) {
-					t.Fatalf("receipt escaped journal: %+v", event)
-				}
-				again, err := f.store.FinalizeCompactionReceipt(t.Context(), ticket)
-				if err != nil || again.Seq != event.Seq {
-					t.Fatalf("receipt replay=%+v %v", again, err)
+				if err := f.store.FinalizeCompactionReceipt(t.Context(), ticket); err != nil {
+					t.Fatalf("receipt replay: %v", err)
 				}
 				loaded, err := f.store.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: f.active.SessionRef, IncludeTransient: true})
 				if err != nil {
@@ -212,6 +207,9 @@ func TestIdleCompactionStoreContract(t *testing.T) {
 				for _, e := range loaded.Events {
 					if session.IsModelInvocationReceipt(e) {
 						count++
+						if e.ID != "attempt" || e.Seq == 0 || session.IsMainInvocationVisibleEvent(e) || session.IsClientReplayEvent(e) {
+							t.Fatalf("unexpected durable receipt: %+v", e)
+						}
 					}
 				}
 				if count != 1 {

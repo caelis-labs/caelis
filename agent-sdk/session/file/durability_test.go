@@ -95,7 +95,7 @@ func TestAppendEventLogDurabilityRollback(t *testing.T) {
 			syncDirectory: func(string) error { return nil },
 		}
 
-		if _, err := store.appendEventLogTransaction(documentPath, []*session.Event{durabilityTestEvent("event-2", 2)}); !errors.Is(err, fault) {
+		if err := store.appendEventLogTransaction(documentPath, []*session.Event{durabilityTestEvent("event-2", 2)}); !errors.Is(err, fault) {
 			t.Fatalf("appendEventLogTransaction() error = %v, want %v", err, fault)
 		}
 		if syncCalls != 2 {
@@ -121,7 +121,7 @@ func TestAppendEventLogDurabilityRollback(t *testing.T) {
 			},
 		}
 
-		_, err := store.appendEventLogTransaction(documentPath, []*session.Event{durabilityTestEvent("event-2", 2)})
+		err := store.appendEventLogTransaction(documentPath, []*session.Event{durabilityTestEvent("event-2", 2)})
 		if !errors.Is(err, fault) || !errors.Is(err, rollbackFault) {
 			t.Fatalf("appendEventLogTransaction() error = %v, want %v and %v", err, fault, rollbackFault)
 		}

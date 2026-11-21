@@ -18,10 +18,6 @@ type terminalService struct {
 	tasks *taskRuntime
 }
 
-func newTerminalService(tasks *taskRuntime) *terminalService {
-	return &terminalService{tasks: tasks}
-}
-
 func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
 	ref = terminal.NormalizeRef(ref)
 	task, err := s.resolveTerminalCommand(ctx, ref)
@@ -109,10 +105,11 @@ func (s *terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
 	if err != nil {
 		return err
 	}
-	if task.session == nil {
+	commandSession := task.observableCommandSession()
+	if commandSession == nil {
 		return fmt.Errorf("command Task has no live sandbox Session")
 	}
-	return task.session.Terminate(ctx)
+	return commandSession.Terminate(ctx)
 }
 
 func (s *terminalService) Release(ctx context.Context, ref terminal.Ref) error {
@@ -120,15 +117,16 @@ func (s *terminalService) Release(ctx context.Context, ref terminal.Ref) error {
 	if err != nil {
 		return err
 	}
-	if task.session == nil {
+	commandSession := task.observableCommandSession()
+	if commandSession == nil {
 		return nil
 	}
-	status, err := task.session.Status(ctx)
+	status, err := commandSession.Status(ctx)
 	if err != nil {
 		return err
 	}
 	if status.Running {
-		return task.session.Terminate(ctx)
+		return commandSession.Terminate(ctx)
 	}
 	return nil
 }

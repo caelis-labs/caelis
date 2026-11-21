@@ -27,7 +27,7 @@ func EventTypeOf(event *Event) EventType {
 		return EventTypeLifecycle
 	}
 	if event.Protocol != nil {
-		protocol := CloneEventProtocol(*event.Protocol)
+		protocol := event.Protocol
 		if update := protocol.Update; update != nil {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case string(ProtocolUpdateTypeUserMessage):
@@ -43,6 +43,10 @@ func EventTypeOf(event *Event) EventType {
 			}
 		}
 		switch strings.TrimSpace(protocol.Method) {
+		case "":
+			if protocol.AgentCommunication != nil {
+				return EventTypeContext
+			}
 		case ProtocolMethodParticipantUpdate:
 			return EventTypeParticipant
 		case ProtocolMethodControllerHandoff:

@@ -13,21 +13,20 @@ import (
 )
 
 type codeModeResults struct {
-	mu       sync.Mutex
-	retained int
-	handles  map[string]tool.ContentBlock
-	replies  map[string]codemode.Reply
+	mu         sync.Mutex
+	retained   int
+	handles    map[string]tool.ContentBlock
+	replyParts map[string][]codemode.Part
 }
 
 func newCodeModeResults() *codeModeResults {
-	return &codeModeResults{handles: map[string]tool.ContentBlock{}, replies: map[string]codemode.Reply{}}
+	return &codeModeResults{handles: map[string]tool.ContentBlock{}, replyParts: map[string][]codemode.Part{}}
 }
 
 type codeModeEnvironment struct {
 	generation string
 	engine     codemode.Environment
 	results    *codeModeResults
-	busy       bool
 	cancel     context.CancelFunc
 }
 
@@ -67,12 +66,11 @@ func (r *Runtime) acquireCodeMode(ctx context.Context, ref session.SessionRef, e
 		env = newCodeModeEnvironment(executor)
 		r.codeModeEnvironments[key] = env
 	}
-	if env.busy {
+	if env.cancel != nil {
 		return nil, nil, tool.NewError(tool.ErrorCodeInvalidInput, "JavaScript environment is busy; observe the original Task to completion before the next script, or use reset:true to interrupt the old script")
 	}
 	work, cancel := context.WithCancel(ctx)
 	execution := uuid.NewString()
-	env.busy = true
 	env.cancel = cancel
 	return work, &codeModeExecution{runtime: r, environment: env, state: codemode.ExecutionState{Generation: env.generation, Execution: execution}}, nil
 }
@@ -85,7 +83,6 @@ func (e *codeModeExecution) release() {
 	// Releasing this slot must not cancel that still-finishing producer.
 	e.once.Do(func() {
 		e.runtime.codeModeMu.Lock()
-		e.environment.busy = false
 		e.environment.cancel = nil
 		if e.retire {
 			for key, current := range e.runtime.codeModeEnvironments {

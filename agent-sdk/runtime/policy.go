@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -22,13 +23,11 @@ type sandboxRuntimeProvider interface {
 }
 
 type approvalContext struct {
-	ctx        context.Context
-	requester  agent.ApprovalRequester
-	runtime    *Runtime
-	session    session.Session
-	sessionRef session.SessionRef
-	runID      string
-	turnID     string
+	ctx       context.Context
+	requester agent.ApprovalRequester
+	runtime   *Runtime
+	runID     string
+	turnID    string
 }
 
 type policyWrappedTool struct {
@@ -99,7 +98,7 @@ func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, p
 }
 
 func (r *Runtime) lookupPolicyMode(ctx context.Context, modeName string) (string, policy.Mode, error) {
-	normalized := normalizePolicyMode(modeName)
+	normalized := presets.NormalizeModeName(modeName)
 	if r == nil || r.policies == nil {
 		return normalized, nil, &policy.ProfileError{
 			Profile: normalized,
@@ -237,7 +236,7 @@ func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, 
 		ProducingModel: dispatch.Model,
 		ModelStep:      agent.CloneModelStepRef(dispatch.Step),
 		Approval:       cloneApproval(decision.Approval),
-		Metadata:       mapsClone(decision.Metadata),
+		Metadata:       session.CloneState(decision.Metadata),
 	}
 	if len(request.Approval.Options) == 0 {
 		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
@@ -343,10 +342,6 @@ func cloneApproval(in *session.ProtocolApproval) *session.ProtocolApproval {
 	}
 	out := session.CloneProtocolApproval(*in)
 	return &out
-}
-
-func mapsClone(in map[string]any) map[string]any {
-	return session.CloneState(in)
 }
 
 func firstNonEmpty(values ...string) string {

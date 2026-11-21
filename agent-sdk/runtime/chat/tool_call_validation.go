@@ -102,7 +102,7 @@ func invalidToolCallWarningEvents(message model.Message, err error, includeNarra
 		call = warningToolCall(call, i)
 		out = append(out, session.MarkUIOnly(&session.Event{
 			Type: session.EventTypeToolCall,
-			Tool: toolEventPayload(call, "pending", mustObject(call.Args), nil, nil),
+			Tool: toolEventPayload(call, "pending", mustObject(call.Args)),
 			Meta: toolMeta(call.Name),
 		}))
 		result := tool.Result{

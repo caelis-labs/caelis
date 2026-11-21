@@ -58,10 +58,9 @@ func decodeRetiredJournal(e *Event) error {
 	}
 	if raw := old["tool_execution"]; len(raw) > 0 && string(raw) != "null" {
 		var record struct {
-			ToolCallID string
-			ToolName   string `json:"tool_name"`
-			Status     string `json:"status"`
-			Key        struct {
+			ToolName string `json:"tool_name"`
+			Status   string `json:"status"`
+			Key      struct {
 				ToolCallID string `json:"tool_call_id"`
 			} `json:"key"`
 			Parent *tool.ParentCall `json:"parent"`
@@ -108,7 +107,7 @@ const (
 )
 
 func registerRetiredExecutionSchemas(registry *MigrationRegistry) {
-	_ = registry.Register(schemaRetiredJournal, 0, 1, migrateJournalV0ToV1)
+	_ = registry.Register(schemaRetiredJournal, 0, 1, migrateSchemaFieldV0ToV1)
 	_ = registry.Register(schemaRetiredRun, 0, 1, migrateSchemaFieldV0ToV1)
 	_ = registry.Register(schemaRetiredTool, 0, 1, migrateSchemaFieldV0ToV1)
 	_ = registry.Register(schemaRetiredPause, 0, 1, migrateSchemaFieldV0ToV1)
@@ -182,15 +181,6 @@ func migrateSchemaFieldV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
 	if version == 1 {
 		return append(json.RawMessage(nil), raw...), nil
 	}
-	if object == nil {
-		return nil, fmt.Errorf("retired record must be a JSON object")
-	}
 	object["schema"] = json.RawMessage(`1`)
 	return json.Marshal(object)
-}
-
-// The journal migration owns only its version. Each nested record is validated
-// and migrated independently by migrateJournalJSON, including under v0 events.
-func migrateJournalV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
-	return migrateSchemaFieldV0ToV1(raw)
 }

@@ -12,7 +12,7 @@ func IsTransient(event *Event) bool {
 	return IsUIOnly(event) || IsOverlay(event) || IsNotice(event)
 }
 
-// IsCanonicalHistoryEvent reports whether one event belongs to durable history.
+// IsCanonicalHistoryEvent reports whether an event belongs to canonical history.
 func IsCanonicalHistoryEvent(event *Event) bool {
 	if event == nil {
 		return false
@@ -48,35 +48,11 @@ func IsClientReplayEvent(event *Event) bool {
 	return IsCanonicalHistoryEvent(event) || IsMirror(event)
 }
 
-// IsInvocationVisibleEvent reports whether one event may participate in the
-// current invocation context. Overlay events are transient display overlays, so
-// they are not model-visible even when they mirror otherwise canonical shapes.
-func IsInvocationVisibleEvent(event *Event) bool {
-	if event == nil || IsUIOnly(event) || IsOverlay(event) || IsNotice(event) || IsMirror(event) || IsJournal(event) {
-		return false
-	}
-	return true
-}
-
-// IsSharedDialogueEvent reports whether one event belongs to the public
-// user/final-assistant ledger shared by all agents in the session.
-func IsSharedDialogueEvent(event *Event) bool {
-	if event == nil || !IsCanonicalHistoryEvent(event) {
-		return false
-	}
-	switch EventTypeOf(event) {
-	case EventTypeUser, EventTypeAssistant:
-		return true
-	default:
-		return false
-	}
-}
-
 // IsMainInvocationVisibleEvent reports whether one event belongs to the main
 // controller context. Delegated subagent tool work remains private to its owner,
 // while public user/final assistant dialogue is visible across participants.
 func IsMainInvocationVisibleEvent(event *Event) bool {
-	if !IsInvocationVisibleEvent(event) {
+	if !IsCanonicalHistoryEvent(event) {
 		return false
 	}
 	if EventTypeOf(event) == EventTypeContext {
@@ -91,5 +67,10 @@ func IsMainInvocationVisibleEvent(event *Event) bool {
 	if event.Scope.Participant.Role == ParticipantRoleDelegated {
 		return false
 	}
-	return IsSharedDialogueEvent(event)
+	switch EventTypeOf(event) {
+	case EventTypeUser, EventTypeAssistant:
+		return true
+	default:
+		return false
+	}
 }

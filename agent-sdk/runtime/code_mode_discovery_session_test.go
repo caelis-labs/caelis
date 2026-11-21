@@ -284,7 +284,7 @@ func TestJSExecH1HintPreservesDescriptionsAndStoredSnapshots(t *testing.T) {
 		t.Fatal("changed a historical API snapshot")
 	}
 	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, nil, nil)
-	if err != nil || again != state[codeModeCatalogKey] {
+	if err != nil || again != state[codemode.MetadataCatalog] {
 		t.Fatal("rewrote existing Session guidance")
 	}
 	fresh, another, _ := codeModeStore(t)

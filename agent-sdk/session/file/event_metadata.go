@@ -51,7 +51,7 @@ type eventMetadataDisk struct {
 func (s *Store) EventMetadataPage(ctx context.Context, req session.EventPageRequest) (session.EventMetadataPage, error) {
 	req = session.NormalizeEventPageRequest(req)
 	var out session.EventMetadataPage
-	err := s.withEventMetadata(ctx, req.SessionRef, func(index *eventMetadataIndex, _ string) error {
+	err := s.withEventMetadata(ctx, req.SessionRef, func(index *eventMetadataIndex) error {
 		out.NextSeq = req.AfterSeq
 		start := sort.Search(len(index.Records), func(n int) bool { return index.Records[n].Seq > req.AfterSeq })
 		for _, record := range index.Records[start:] {
@@ -68,27 +68,24 @@ func (s *Store) EventMetadataPage(ctx context.Context, req session.EventPageRequ
 				visible = true
 			}
 			if visible && len(out.Events) >= req.Limit {
-				out.HasMore = true
-				break
+				return nil
 			}
 			out.NextSeq = record.Seq
 			if visible {
 				out.Events = append(out.Events, record.EventMetadata)
 			}
 		}
-		if !out.HasMore {
-			through := index.Tail.Seq
-			if req.ThroughSeq > 0 {
-				through = min(through, req.ThroughSeq)
-			}
-			out.NextSeq = max(out.NextSeq, through)
+		through := index.Tail.Seq
+		if req.ThroughSeq > 0 {
+			through = min(through, req.ThroughSeq)
 		}
+		out.NextSeq = max(out.NextSeq, through)
 		return nil
 	})
 	return out, err
 }
 
-func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, fn func(*eventMetadataIndex, string) error) error {
+func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, fn func(*eventMetadataIndex) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -109,7 +106,7 @@ func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, f
 		if err != nil {
 			return err
 		}
-		return fn(index, eventLogPath(path))
+		return fn(index)
 	})
 }
 
@@ -287,7 +284,7 @@ func eventMetadataFromJSON(raw []byte, path string, line int) (eventMetadataReco
 	event.Approval = header.Approval
 	if header.Schema != session.EventSchemaVersion || header.Type == "" || header.Type == session.EventTypeContext || len(header.Notice) > 0 {
 		var err error
-		event, err = decodeIndexedEvent(raw, path, line)
+		event, err = decodeEventLogRecord(raw, path, line)
 		if err != nil {
 			return eventMetadataRecord{}, err
 		}

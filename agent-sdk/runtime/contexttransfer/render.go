@@ -12,7 +12,9 @@ import (
 const (
 	backgroundStart = `<caelis_background version="1">`
 	backgroundEnd   = `</caelis_background>`
-	currentRequest  = `<caelis_current_request>`
+
+	// CurrentRequestMarker separates the current ACP prompt from its background.
+	CurrentRequestMarker = `<caelis_current_request>`
 )
 
 type renderedSummary struct {
@@ -66,12 +68,6 @@ func ComposeTextPrompt(context agent.ContextTransfer, prompt string) string {
 		return ""
 	}
 	return prompt + "\n\n" + background
-}
-
-// CurrentRequestMarker returns the trusted marker inserted immediately before
-// current ACP prompt parts when a background block is present.
-func CurrentRequestMarker() string {
-	return currentRequest
 }
 
 func executorLabel(turn agent.ContextTurn) string {

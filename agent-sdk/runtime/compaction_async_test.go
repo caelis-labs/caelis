@@ -580,7 +580,7 @@ func TestAsyncCompactionDefaultOffAndThresholds(t *testing.T) {
 			receiveSnapshotValue(t, h.llm.foreground)
 			h.llm.responses <- asyncToolResponse("first")
 			next := receiveSnapshotValue(t, h.llm.foreground)
-			if next.scope != nil && next.scope.started {
+			if next.scope != nil && next.scope.job != nil {
 				t.Fatal("unexpected speculation")
 			}
 			h.llm.responses <- asyncTextResponse("done", 500)

@@ -563,7 +563,6 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 	items := []taskBatchControlItem{
 		{
 			Handle: "failed-child",
-			OK:     true,
 			Snapshot: task.Snapshot{
 				Handle: "failed-child", Kind: task.KindSubagent,
 				State: task.StateFailed, Result: failedResult,
@@ -571,7 +570,6 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 		},
 		{
 			Handle: "unknown-child",
-			OK:     true,
 			Snapshot: task.Snapshot{
 				Handle: "unknown-child", Kind: task.KindSubagent,
 				State: task.StateUnknownOutcome, Result: unknownResult,

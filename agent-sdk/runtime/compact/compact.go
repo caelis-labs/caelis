@@ -5,16 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-const (
-	CompactContractVersion = 1
-	CompactNoticeLabel     = display.CompactNoticeLabel
-	CompactFailureLabel    = display.CompactFailureNoticeLabel
-)
+const CompactContractVersion = 1
 
 type UsageSource string
 
@@ -181,7 +176,7 @@ func LatestCompactEvent(events []*session.Event) (*session.Event, session.Checkp
 func filterPromptVisibleEvents(events []*session.Event) []*session.Event {
 	out := make([]*session.Event, 0, len(events))
 	for _, event := range events {
-		if !session.IsInvocationVisibleEvent(event) {
+		if !session.IsCanonicalHistoryEvent(event) {
 			continue
 		}
 		out = append(out, session.CloneEvent(event))

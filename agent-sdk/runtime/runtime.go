@@ -182,7 +182,7 @@ func New(cfg Config) (*Runtime, error) {
 	if r.defaultPolicyMode == "" {
 		r.defaultPolicyMode = presets.ModeDefault
 	}
-	r.defaultPolicyMode = normalizePolicyMode(r.defaultPolicyMode)
+	r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	if err := validateControllerForwarder(cfg); err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
 	r.tasks.taskCommitted = cfg.TaskCommitted
-	r.terminals = newTerminalService(r.tasks)
+	r.terminals = &terminalService{tasks: r.tasks}
 	return r, nil
 }
 
@@ -244,7 +244,7 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	activeSession, err = r.ensureSessionController(ctx, activeSession)
+	activeSession, err = r.ensureSessionController(ctx, activeSession, session.RuntimeMutationGuard(ctx))
 	if err != nil {
 		return agent.RunResult{}, err
 	}
@@ -418,5 +418,8 @@ func (r *Runtime) nextID(prefix string, custom func() string) string {
 }
 
 func (r *Runtime) now() time.Time {
-	return r.clock()
+	if r != nil && r.clock != nil {
+		return r.clock()
+	}
+	return time.Now()
 }

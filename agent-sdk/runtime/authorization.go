@@ -43,28 +43,28 @@ func (r *Runtime) authorizationEvidence(ctx context.Context, active session.Sess
 	return session.ProjectAuthorizations(active, events), nil
 }
 
-func (r *Runtime) checkAuthorization(ctx context.Context, active session.Session, a *session.ApprovalAuthorization) error {
+func (r *Runtime) checkAuthorization(ctx context.Context, active session.Session, a *session.ApprovalAuthorization) (session.AuthorizationEvidence, error) {
 	if a == nil {
-		return nil
+		return session.AuthorizationEvidence{}, nil
 	}
 	if a.Scope.SessionID != "" {
 		current, err := r.sessions.Session(ctx, active.SessionRef)
 		if err != nil {
-			return err
+			return session.AuthorizationEvidence{}, err
 		}
 		if !a.Scope.MatchesSession(current) {
-			return errors.New("authorization has a different current Session incarnation or workspace")
+			return session.AuthorizationEvidence{}, errors.New("authorization has a different current Session incarnation or workspace")
 		}
 		active = current
 	}
 	evidence, err := r.authorizationEvidence(ctx, active)
 	if err != nil {
-		return err
+		return session.AuthorizationEvidence{}, err
 	}
 	if evidence.Revocations[a.Scope.Key()] != a.Revocation {
-		return errors.New("authorization revoked while call was pending")
+		return session.AuthorizationEvidence{}, errors.New("authorization revoked while call was pending")
 	}
-	return nil
+	return evidence, nil
 }
 
 // RevokeAuthorization appends one revocation fact under the approval owner.
@@ -161,11 +161,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 		return t.resolveApproval(ctx, request)
 	}
 	r.authorizationMu.Lock()
-	if err := r.checkAuthorization(ctx, t.session, a); err != nil {
-		r.authorizationMu.Unlock()
-		return agent.ApprovalResponse{}, err
-	}
-	evidence, err := r.authorizationEvidence(ctx, t.session)
+	evidence, err := r.checkAuthorization(ctx, t.session, a)
 	if err != nil {
 		r.authorizationMu.Unlock()
 		return agent.ApprovalResponse{}, err
@@ -249,7 +245,7 @@ func (p *policyDispatchPermit) consume(ctx context.Context) error {
 	if r != nil {
 		r.authorizationMu.Lock()
 		defer r.authorizationMu.Unlock()
-		if err := r.checkAuthorization(ctx, p.session, p.decision.Authorization); err != nil {
+		if _, err := r.checkAuthorization(ctx, p.session, p.decision.Authorization); err != nil {
 			return err
 		}
 	}

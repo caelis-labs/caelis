@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -57,7 +58,7 @@ func TestRuntimeAllowsRepeatedCompactionRecoveriesInOneRun(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
 			compactNotices++
 		}
 	}

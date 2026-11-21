@@ -52,7 +52,7 @@ func ValidateDurableCoreEvent(event *Event) error {
 	// File readers have already migrated raw JSON before typed decoding. Do
 	// not serialize and decode that complete payload again merely to validate
 	// current schemas; legacy and unsupported versions still use migration.
-	if !eventSchemasCurrent(event) {
+	if event.Schema != EventSchemaVersion {
 		migrated, err := MigrateEvent(*event)
 		if err != nil {
 			return coreEventValidationError(err.Error())
@@ -64,11 +64,6 @@ func ValidateDurableCoreEvent(event *Event) error {
 	}
 	if err := validateCheckpointContract(event); err != nil {
 		return coreEventValidationError(err.Error())
-	}
-	if p := event.ContextEdit; p != nil {
-		if p.Version != 1 || p.SourceStamp == "" || p.SourceThroughSeq == 0 || p.SourceThroughID == "" || p.Hook == "" || p.LogicalRequestID == "" || event.Type != EventTypeContext {
-			return coreEventValidationError("invalid context edit provenance")
-		}
 	}
 	if revoked := event.AuthorizationRevocation; revoked != nil {
 		if revoked.Schema != AuthorizationSchemaVersion {
@@ -130,10 +125,6 @@ func ValidateDurableCoreEvent(event *Event) error {
 		}
 	}
 	return nil
-}
-
-func eventSchemasCurrent(event *Event) bool {
-	return event.Schema == EventSchemaVersion
 }
 
 func validateDurableCoreToolResult(event *Event) error {

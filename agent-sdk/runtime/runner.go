@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -21,7 +20,6 @@ type runner struct {
 	observer      agent.SourceEventObserver
 	observerMu    sync.Mutex
 	ownership     liveContentOwnership
-	finishOnce    sync.Once
 	done          chan struct{}
 	mu            sync.Mutex
 	cancelled     bool
@@ -98,7 +96,7 @@ func (r *runner) submitContext(ctx context.Context, sub agent.Submission) error 
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return errRunnerSubmissionClosed
+		return agent.ErrRunInputClosed
 	}
 	if sub.Kind == agent.SubmissionKindConversation {
 		taskScopeFromContext(r.ctx).revoke(errTaskAuthorizationChanged, false)
@@ -120,25 +118,18 @@ func (r *runner) setSubmissionHandler(ctx context.Context, handler func(context.
 	if r == nil || handler == nil {
 		return errors.New("agent-sdk/runtime: submission handler is required")
 	}
-	dispatcher := newRunnerSubmissionDispatcher(ctx, handler)
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed {
-		r.mu.Unlock()
-		dispatcher.close(errRunnerSubmissionClosed)
-		return errRunnerSubmissionClosed
+		return agent.ErrRunInputClosed
 	}
 	if r.dispatcher != nil {
-		r.mu.Unlock()
-		dispatcher.close(errors.New("agent-sdk/runtime: submission handler is already installed"))
 		return errors.New("agent-sdk/runtime: submission handler is already installed")
 	}
 	if len(r.submissions) != 0 {
-		r.mu.Unlock()
-		dispatcher.close(errors.New("agent-sdk/runtime: submission handler cannot replace queued submissions"))
 		return errors.New("agent-sdk/runtime: submission handler cannot replace queued submissions")
 	}
-	r.dispatcher = dispatcher
-	r.mu.Unlock()
+	r.dispatcher = newRunnerSubmissionDispatcher(ctx, handler)
 	return nil
 }
 
@@ -164,7 +155,7 @@ func (r *runner) drainInput(final bool) []agent.Submission {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := agent.CloneSubmissions(r.submissions)
+	out := r.submissions
 	r.submissions = nil
 	if len(out) > 0 {
 		r.inputReady = make(chan struct{})
@@ -175,15 +166,6 @@ func (r *runner) drainInput(final bool) []agent.Submission {
 	return out
 }
 
-func (r *runner) markClosed() {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	r.closed = true
-	r.mu.Unlock()
-}
-
 func (r *runner) Cancel() agent.CancelResult {
 	r.mu.Lock()
 	if r.cancelled || r.finished {
@@ -191,6 +173,7 @@ func (r *runner) Cancel() agent.CancelResult {
 		return agent.CancelResult{Status: agent.CancelStatusAlreadyCancelled}
 	}
 	r.cancelled = true
+	r.closed = true
 	cancelFn := r.cancelFn
 	cancelHook := r.cancelHook
 	r.mu.Unlock()
@@ -222,15 +205,7 @@ func (r *runner) Close() error {
 	if r == nil {
 		return nil
 	}
-	r.mu.Lock()
-	finished := r.finished
-	r.mu.Unlock()
-	var cancelErr error
-	if !finished {
-		cancelErr = r.Cancel().Err
-	}
-	r.markClosed()
-	return cancelErr
+	return r.Cancel().Err
 }
 
 func (r *runner) WaitCompletion(ctx context.Context) error {
@@ -263,9 +238,7 @@ func (r *runner) publishEvent(event *session.Event) {
 	if r == nil || event == nil {
 		return
 	}
-	r.publishSourceEvent(agent.SourceEvent{
-		Canonical: session.CloneEvent(event),
-	})
+	r.publishSourceEvent(agent.SourceEvent{Canonical: event})
 }
 
 func (r *runner) publishSourceEvent(event agent.SourceEvent) {
@@ -303,20 +276,16 @@ func (r *runner) finish() {
 		return
 	}
 	r.mu.Lock()
+	if r.finished {
+		r.mu.Unlock()
+		return
+	}
 	r.finished = true
 	r.closed = true
 	dispatcher := r.dispatcher
 	r.mu.Unlock()
 	if dispatcher != nil {
-		dispatcher.close(errRunnerSubmissionClosed)
+		dispatcher.close(agent.ErrRunInputClosed)
 	}
-	r.finishOnce.Do(func() {
-		close(r.done)
-	})
-}
-
-func isCancellationError(ctx context.Context, err error) bool {
-	return errors.Is(err, context.Canceled) ||
-		(ctx != nil && errors.Is(ctx.Err(), context.Canceled)) ||
-		errorcode.Is(err, errorcode.Cancelled)
+	close(r.done)
 }

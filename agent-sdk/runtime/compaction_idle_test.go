@@ -92,13 +92,7 @@ func TestIdleCompactionCompletedSourceAndFileReplay(t *testing.T) {
 		t.Fatal("dispatch proof was rewritten")
 	}
 	done := make(chan error, 1)
-	go func() {
-		adopted, err := job.Run(context.Background(), window)
-		if err == nil && !adopted {
-			err = errors.New("candidate not adopted")
-		}
-		done <- err
-	}()
+	go func() { done <- job.Run(context.Background(), window) }()
 	request := receiveSnapshotValue(t, h.llm.background)
 	want := model.CloneRequest(actual)
 	want.Messages = append(want.Messages, model.NewTextMessage(model.RoleAssistant, "final durable answer"), model.NewTextMessage(model.RoleUser, inContextCompactionPrompt))
@@ -188,7 +182,7 @@ func TestIdleCompactionForegroundCancelsCheckpointButKeepsReceipt(t *testing.T) 
 	window := releaseIdleJob(t, h, job)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { _, err := job.Run(ctx, window); done <- err }()
+	go func() { done <- job.Run(ctx, window) }()
 	receiveSnapshotValue(t, h.llm.background)
 	foreground, err := h.store.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: h.active.SessionRef, OwnerID: "fixture-host"})
 	if err != nil {
@@ -243,17 +237,14 @@ func testIdleReadyCandidate(t *testing.T, expired bool) {
 	store := &idleGrantRaceStore{asyncFaultStore: h.store}
 	h.rt.sessions = store
 	done := make(chan error, 1)
-	go func() {
-		adopted, err := job.Run(t.Context(), window)
-		if adopted {
-			err = errors.New("revoked idle grant committed")
-		}
-		done <- err
-	}()
+	go func() { done <- job.Run(t.Context(), window) }()
 	receiveSnapshotValue(t, h.llm.background)
 	h.llm.summaries <- asyncTextResponse(asyncFixtureSummary, 120)
 	if err := receiveSnapshotValue(t, done); !errors.Is(err, session.ErrIdleCompactionRevoked) {
 		t.Fatalf("revocation=%v", err)
+	}
+	if _, _, ok := compact.LatestCompactEvent(h.load(t).Events); ok {
+		t.Fatal("revoked idle grant committed")
 	}
 	job.Close()
 	if len(h.rt.idleCandidates) != 1 {
@@ -303,7 +294,7 @@ func TestIdleCompactionTerminalFailuresPreserveContextAndAccountOnce(t *testing.
 			window := releaseIdleJob(t, h, job)
 			before := mainInvocationEvents(h.load(t).Events)
 			done := make(chan error, 1)
-			go func() { _, err := job.Run(t.Context(), window); done <- err }()
+			go func() { done <- job.Run(t.Context(), window) }()
 			receiveSnapshotValue(t, h.llm.background)
 			response := asyncTextResponse(asyncFixtureSummary, 120)
 			response.response.FinishReason = reason
@@ -349,7 +340,7 @@ func TestIdleCommitDoesNotQueueBehindForegroundWriter(t *testing.T) {
 	defer release()
 	first := sessionWriteTailForTest(&h.rt.sessionWrites, h.active.SessionRef)
 	done := make(chan error, 1)
-	go func() { _, err := job.Run(t.Context(), window); done <- err }()
+	go func() { done <- job.Run(t.Context(), window) }()
 	receiveSnapshotValue(t, h.llm.background)
 	h.llm.summaries <- asyncTextResponse(asyncFixtureSummary, 120)
 	if err := receiveSnapshotValue(t, done); !errors.Is(err, errSessionWriteBusy) {

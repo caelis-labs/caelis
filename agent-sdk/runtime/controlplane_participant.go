@@ -44,7 +44,7 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	if err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err = r.ensureSessionControllerWithGuard(
+	activeSession, err = r.ensureSessionController(
 		ctx,
 		activeSession,
 		session.ControlMutationGuard(session.ControlMutationPurposeParticipant),
@@ -121,7 +121,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	if err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err = r.ensureSessionControllerWithGuard(
+	activeSession, err = r.ensureSessionController(
 		ctx,
 		activeSession,
 		session.ControlMutationGuard(session.ControlMutationPurposeParticipant),
@@ -388,7 +388,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	activeSession, err = r.ensureSessionController(ctx, activeSession)
+	activeSession, err = r.ensureSessionController(ctx, activeSession, session.RuntimeMutationGuard(ctx))
 	if err != nil {
 		return agent.RunResult{}, err
 	}
@@ -702,7 +702,7 @@ func participantPromptUserEvent(
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
 		return nil
 	}
-	label := participantBindingLabel(binding)
+	label := firstNonEmpty(strings.TrimSpace(binding.Label), strings.TrimSpace(binding.AgentName), strings.TrimSpace(binding.ID))
 	meta := map[string]any{}
 	if label != "" {
 		meta["mention"] = label

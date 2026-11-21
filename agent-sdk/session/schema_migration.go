@@ -194,6 +194,9 @@ func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 func rawSchemaVersion(kind SchemaKind, object map[string]json.RawMessage, current int) (int, error) {
+	if object == nil {
+		return 0, &SchemaVersionError{Kind: kind, To: current, Current: current, Detail: "durable record must be a JSON object"}
+	}
 	raw := object["schema"]
 	if len(raw) == 0 || string(raw) == "null" {
 		return 0, nil

@@ -39,3 +39,10 @@ func TestOpaqueCanonicalIDsDoNotAliasDuringRoundTripOrNameResolution(t *testing.
 		}
 	}
 }
+
+func TestEventTypeOfLegacyCommunicationWithoutMethod(t *testing.T) {
+	event := &Event{Protocol: &EventProtocol{AgentCommunication: &ProtocolAgentCommunication{Text: "original"}}}
+	if got := EventTypeOf(event); got != EventTypeContext {
+		t.Fatalf("legacy communication classified as %q, want %q", got, EventTypeContext)
+	}
+}

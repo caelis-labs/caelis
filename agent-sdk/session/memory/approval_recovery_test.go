@@ -50,7 +50,7 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndFenceRel
 		t.Fatal(err)
 	}
 	expectedRevision := stale.Revision
-	result, err := service.SettlePendingApproval(ctx, session.SettlePendingApprovalRequest{
+	err = service.SettlePendingApproval(ctx, session.SettlePendingApprovalRequest{
 		SessionRef: active.SessionRef, ExpectedRevision: &expectedRevision,
 		MutationGuard:          session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		ApprovalRequestID:      stale.Request.ApprovalRequestID,
@@ -64,9 +64,6 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndFenceRel
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if result.Settled || result.Event != nil {
-		t.Fatalf("SettlePendingApproval(stale) = %#v, want no-op", result)
 	}
 	page, err := service.EventsPage(ctx, session.EventPageRequest{
 		SessionRef: active.SessionRef, Visibility: session.EventPageAllDurable,

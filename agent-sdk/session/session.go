@@ -436,13 +436,6 @@ type AppendEventRequest struct {
 	Event            *Event        `json:"event"`
 }
 
-// AppendEventResult distinguishes a newly committed event from an idempotent
-// retry that resolved to the already durable event.
-type AppendEventResult struct {
-	Event    *Event
-	Appended bool
-}
-
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {
@@ -467,15 +460,6 @@ type AppendEventsAndUpdateStateRequest struct {
 	MutationDigest   string
 	Events           []*Event
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
-}
-
-// ReplaceStateRequest replaces one durable Session state snapshot under an
-// explicit revision and mutation-authority fence.
-type ReplaceStateRequest struct {
-	SessionRef       SessionRef
-	ExpectedRevision *uint64
-	MutationGuard    MutationGuard
-	State            map[string]any
 }
 
 // UpdateStateRequest derives one durable Session state snapshot under an
@@ -729,7 +713,6 @@ type StateReader interface {
 // Implementations enforce ExpectedRevision and MutationGuard before commit and
 // return the exact committed Session alongside post-commit reporting errors.
 type StateWriter interface {
-	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
 	UpdateState(context.Context, UpdateStateRequest) (Session, error)
 }
 
