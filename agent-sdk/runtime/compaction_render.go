@@ -79,32 +79,32 @@ func renderCompactionEvent(event *session.Event) string {
 		if session.ActorRefHasIdentity(event.Actor) && event.Actor.Kind != session.ActorKindUser {
 			return renderSystemManagedInputForCompaction(event, text)
 		}
-		return renderCompactionBlock("User Message", compactText(text, 4000))
+		return renderCompactionSourceFrame("user", "User Message", compactText(text, 4000))
 	case session.EventTypeAssistant:
-		return renderCompactionBlock("Assistant Message", compactText(text, 5000))
+		return renderCompactionSourceFrame("assistant", "Assistant Message", compactText(text, 5000))
 	case session.EventTypePlan:
 		return renderPlanEventForCompaction(event, text)
 	case session.EventTypeToolCall:
 		if toolPayload := session.EventToolProjection(event); toolPayload != nil {
-			return renderToolPayloadForCompaction("Tool Call", event, toolPayload.Input, 2000)
+			return renderToolPayloadForCompaction("tool_call", "Tool Call", event, toolPayload.Input, 2000)
 		}
 		if update := session.ProtocolUpdateOf(event); update != nil {
-			return renderToolEventForCompaction("Tool Call", event, update, update.RawInput, 2000)
+			return renderToolEventForCompaction("tool_call", "Tool Call", event, update, update.RawInput, 2000)
 		}
 	case session.EventTypeToolResult:
 		if toolPayload := session.EventToolProjection(event); toolPayload != nil {
-			return renderToolPayloadForCompaction("Tool Result", event, toolPayload.Output, 3500)
+			return renderToolPayloadForCompaction("tool_result", "Tool Result", event, toolPayload.Output, 3500)
 		}
 		if update := session.ProtocolUpdateOf(event); update != nil {
-			return renderToolEventForCompaction("Tool Result", event, update, update.RawOutput, 3500)
+			return renderToolEventForCompaction("tool_result", "Tool Result", event, update, update.RawOutput, 3500)
 		}
-		return renderCompactionBlock("Tool Result", compactText(text, 3500))
+		return renderCompactionSourceFrame("tool_result", "Tool Result", compactText(text, 3500))
 	case session.EventTypeParticipant:
 		if event.Meta != nil {
-			return renderCompactionBlock("Participant Update", compactText(renderCompactionValue(event.Meta, 1600), 1800))
+			return renderCompactionSourceFrame("participant", "Participant Update", compactText(renderCompactionValue(event.Meta, 1600), 1800))
 		}
 	}
-	return renderCompactionBlock("Event", compactText(text, 1800))
+	return renderCompactionSourceFrame("event", "Event", compactText(text, 1800))
 }
 
 func renderSystemManagedInputForCompaction(event *session.Event, text string) string {
@@ -127,14 +127,6 @@ func renderSystemManagedInputForCompaction(event *session.Event, text string) st
 	return strings.Join(frames, "\n")
 }
 
-func renderCompactionBlock(title string, body string) string {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = "Event"
-	}
-	return renderCompactionSourceFrame(compactionSourceForLabel(title), title, strings.TrimSpace(body))
-}
-
 func renderCompactionSourceFrame(source string, label string, payload string) string {
 	frame := compactionSourceFrame{
 		Source:  strings.TrimSpace(source),
@@ -148,26 +140,7 @@ func renderCompactionSourceFrame(source string, label string, payload string) st
 	return compactionSourceFramePrefix + string(raw)
 }
 
-func compactionSourceForLabel(label string) string {
-	switch strings.TrimSpace(label) {
-	case "User Message":
-		return "user"
-	case "Assistant Message":
-		return "assistant"
-	case "Plan Update":
-		return "plan"
-	case "Tool Call":
-		return "tool_call"
-	case "Tool Result":
-		return "tool_result"
-	case "Participant Update":
-		return "participant"
-	default:
-		return "event"
-	}
-}
-
-func renderToolEventForCompaction(kind string, event *session.Event, update *session.ProtocolUpdate, payload map[string]any, limit int) string {
+func renderToolEventForCompaction(source, label string, event *session.Event, update *session.ProtocolUpdate, payload map[string]any, limit int) string {
 	toolName := toolNameForCompaction(event, update)
 	lines := []string{}
 	if toolName != "" {
@@ -191,10 +164,10 @@ func renderToolEventForCompaction(kind string, event *session.Event, update *ses
 	} else if text := eventTextForCompaction(event); text != "" {
 		lines = append(lines, "", compactText(text, limit))
 	}
-	return renderCompactionBlock(kind, strings.Join(lines, "\n"))
+	return renderCompactionSourceFrame(source, label, strings.TrimSpace(strings.Join(lines, "\n")))
 }
 
-func renderToolPayloadForCompaction(kind string, event *session.Event, payload map[string]any, limit int) string {
+func renderToolPayloadForCompaction(source, label string, event *session.Event, payload map[string]any, limit int) string {
 	toolName := toolNameForCompaction(event, nil)
 	lines := []string{}
 	if toolName != "" {
@@ -218,7 +191,7 @@ func renderToolPayloadForCompaction(kind string, event *session.Event, payload m
 	} else if text := eventTextForCompaction(event); text != "" {
 		lines = append(lines, "", compactText(text, limit))
 	}
-	return renderCompactionBlock(kind, strings.Join(lines, "\n"))
+	return renderCompactionSourceFrame(source, label, strings.TrimSpace(strings.Join(lines, "\n")))
 }
 
 func renderCompactionValue(value any, limit int) string {
@@ -357,9 +330,9 @@ func renderPlanEventForCompaction(event *session.Event, fallback string) string 
 		lines = append(lines, fmt.Sprintf("- [%s] %s", status, content))
 	}
 	if len(lines) == 0 {
-		return renderCompactionBlock("Plan Update", "")
+		return renderCompactionSourceFrame("plan", "Plan Update", "")
 	}
-	return renderCompactionBlock("Plan Update", strings.Join(lines, "\n"))
+	return renderCompactionSourceFrame("plan", "Plan Update", strings.TrimSpace(strings.Join(lines, "\n")))
 }
 
 func planEntriesForCompaction(event *session.Event) []session.ProtocolPlanEntry {
