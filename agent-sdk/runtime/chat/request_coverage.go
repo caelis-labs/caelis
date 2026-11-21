@@ -11,6 +11,8 @@ import (
 )
 
 func bindRequestSource(ctx agent.Context, req *model.Request) {
+	// Only this projection can certify the observed Session history.
+	req.Source = nil
 	tracker := requestsource.FromContext(ctx)
 	if tracker == nil {
 		return
@@ -18,8 +20,8 @@ func bindRequestSource(ctx agent.Context, req *model.Request) {
 	events := tracker.Events()
 	// Use the same normalized projection as request history, including origins.
 	// The fingerprint below still binds the complete observed source events.
-	projected := messagesFromEvents(ctx.Session(), compact.PromptEventsFromLatestCompact(events))
-	if !reflect.DeepEqual(req.Messages, projected) {
+	projected, err := messagesFromEventsChecked(ctx.Session(), compact.PromptEventsFromLatestCompact(events))
+	if err != nil || !reflect.DeepEqual(req.Messages, projected) {
 		return
 	}
 	through := session.LastEventSeq(events)

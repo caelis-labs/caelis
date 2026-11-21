@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestRequestCoverageBindsNormalizedHistory(t *testing.T) {
@@ -113,4 +114,36 @@ func TestRequestCoverageBindsOnlyExactTrackerProjection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRequestCoverageRejectsUnverifiedSources(t *testing.T) {
+	t.Run("unprojectable history", func(t *testing.T) {
+		first := persistedToolCallEvent("call", "work", nil)
+		second := session.CloneEvent(first)
+		first.ID, first.Seq = "first", 1
+		second.ID, second.Seq = "second", 2
+		claim := tool.InvocationContext{SessionID: "session", TurnID: "turn", ItemID: "same-occurrence"}
+		first.Tool.Execution = claim
+		second.Tool.Execution = claim
+		events := []*session.Event{first, second}
+		if _, err := session.OrderToolFacts(events); err == nil {
+			t.Fatal("fixture must fail history projection")
+		}
+		base, _ := requestsource.WithTracker(t.Context(), events)
+		ctx := agent.NewContext(agent.ContextSpec{Context: base})
+		req := &model.Request{}
+		bindRequestSource(ctx, req)
+		if req.Source != nil {
+			t.Fatalf("unprojectable tool history bound as empty messages: %+v", req.Source)
+		}
+	})
+
+	t.Run("unverified prefilled source", func(t *testing.T) {
+		ctx := agent.NewContext(agent.ContextSpec{Context: t.Context()})
+		req := &model.Request{Source: &model.RequestSource{SourceThroughSeq: 1}}
+		bindRequestSource(ctx, req)
+		if req.Source != nil {
+			t.Fatalf("source survived without an observed history: %+v", req.Source)
+		}
+	})
 }
