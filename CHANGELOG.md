@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.84.0](https://github.com/caelis-labs/caelis/compare/v0.83.1...v0.84.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sdk:** simplify tool contracts and runtime lifecycle ownership ([#270](https://github.com/caelis-labs/caelis/issues/270))
+* **sdk:** make tool results content-only ([#267](https://github.com/caelis-labs/caelis/issues/267))
+* **sdk:** simplify tool contracts and preserve ordered effects ([#266](https://github.com/caelis-labs/caelis/issues/266))
+* Read structured tool replies via body.data and plain text via body.text. tools.search resolves to a plain result object.
+
+### Features
+
+* expose Desktop World and improve Code Mode discovery ([#269](https://github.com/caelis-labs/caelis/issues/269)) ([5a73f6c](https://github.com/caelis-labs/caelis/commit/5a73f6c36f25dedc54ed5a99fbf7f8064af1a359))
+* simplify Code Mode results and restore ACP command output ([#264](https://github.com/caelis-labs/caelis/issues/264)) ([9059441](https://github.com/caelis-labs/caelis/commit/905944152914ecf7cda1b74986b16a94422fe5bf))
+
+
+### Code Refactoring
+
+* **sdk:** make tool results content-only ([#267](https://github.com/caelis-labs/caelis/issues/267)) ([0c35a29](https://github.com/caelis-labs/caelis/commit/0c35a297d7ad354e7a159647f9b905161e5b7747))
+* **sdk:** simplify tool contracts and preserve ordered effects ([#266](https://github.com/caelis-labs/caelis/issues/266)) ([896d0e9](https://github.com/caelis-labs/caelis/commit/896d0e9cac63e6d6191393999ac064d0bfc7781f))
+* **sdk:** simplify tool contracts and runtime lifecycle ownership ([#270](https://github.com/caelis-labs/caelis/issues/270)) ([d230e7f](https://github.com/caelis-labs/caelis/commit/d230e7ff14bc5337b993db2782e529b113f21a07))
+
 ## [0.83.1](https://github.com/caelis-labs/caelis/compare/v0.83.0...v0.83.1) (2026-11-19)
 
 
