@@ -438,13 +438,17 @@ func toolCallFromEventToolPayload(tool *session.EventTool) eventstream.ToolCall 
 		SessionUpdate: eventstream.UpdateToolCall,
 		ToolCallID:    tool.ID,
 		Name:          stringPtr(tool.Name),
-		Title:         firstNonEmpty(desktopWorldTitle(tool), projectedToolLifecycleTitle(tool.Name, rawInput, tool.Status, tool.Title)),
+		Title:         projectedToolLifecycleTitle(tool.Name, rawInput, tool.Status, tool.Title),
 		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)),
 		Status:        firstNonEmpty(acpToolStatus(tool.Status), eventstream.ToolStatusPending),
 		RawInput:      cloneAnyMapPayload(rawInput),
 		RawOutput:     cloneAnyMapPayload(tool.Output),
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
+	}
+	if method := desktopWorldMethod(tool); method != "" {
+		call.Title = desktopWorldTitle(tool, method)
+		call.Meta = desktopWorldDisplayMeta(method)
 	}
 	return withDisplayTerminal(call, tool.Name, rawInput)
 }
@@ -482,6 +486,16 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 	}
 	if event.Tool != nil {
 		update := toolCallUpdateFromEventToolPayload(event.Tool, event.Meta)
+		if method := desktopWorldMethod(event.Tool); method != "" {
+			update.Title = stringPtr(desktopWorldTitle(event.Tool, method))
+			update.Meta = eventmeta.Merge(update.Meta, desktopWorldDisplayMeta(method))
+			if event.Tool.Parent == nil || event.Tool.Parent.Kind != "code_mode" {
+				if content := desktopWorldReply(event.Tool); len(content) > 0 || len(event.Tool.Content) == 0 {
+					update.Content = content
+				}
+				return update, true, nil
+			}
+		}
 		if len(event.Tool.Content) == 0 {
 			if content := projectedMultimodalToolResultContent(event.Message, event.Tool); len(content) > 0 {
 				update.Content = content
@@ -545,7 +559,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	if len(out.Content) == 0 && !emptyOrchestratedToolResult(tool) && !taskBackedRunningCommandUpdate(tool.Name, tool.Status, meta) {
 		out.Content = projectedToolResultContent(tool.ID, tool.Name, tool.Input, tool.Output, meta, tool.Status)
 	}
-	if title := firstNonEmpty(desktopWorldTitle(tool), projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title)); title != "" {
+	if title := projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title); title != "" {
 		out.Title = stringPtr(title)
 	}
 	if kind := firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)); kind != "" {

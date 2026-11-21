@@ -43,8 +43,12 @@ func projectedMultimodalToolResultContent(message *model.Message, fact *session.
 	if !showParts {
 		return nil
 	}
-	out := make([]eventstream.ToolCallContent, 0, len(results[0].Content))
-	for _, part := range results[0].Content {
+	return projectToolResultParts(results[0].Content)
+}
+
+func projectToolResultParts(parts []model.Part) []eventstream.ToolCallContent {
+	out := make([]eventstream.ToolCallContent, 0, len(parts))
+	for _, part := range parts {
 		var content any
 		switch part.Kind {
 		case model.PartKindText:

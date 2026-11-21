@@ -177,9 +177,13 @@ See [Policy admission](agent-sdk-boundary.md) for the common contract.
 
 The TUI limits MCP output previews by rendered rows, including long single-line
 JSON. Disclosure shows the original output and complete invocation parameters.
-DTW calls show compact action summaries both directly and inside a `js_exec`
-group. The summaries use DTW's dispatch counts and available acknowledgements.
-Disclosure retains the original invocation, including script source.
+Desktop World activity rows show the app or search filters alongside the
+reported result. App searches show the returned count, pagination and coverage
+when supplied. Execution summaries prioritize unknown dispatch and use recorded
+acknowledgements for operation names. Select a top-level execution row to see
+its source while it runs and the result or error when it settles. Code Mode
+calls appear as compact child rows under the script, with invocation arguments
+available on selection.
 
 Control applies the app policy to the configured plugin ID `desktop-world`
 with either server name `dtw` or `desktop-world`. `apps` uses the ordinary

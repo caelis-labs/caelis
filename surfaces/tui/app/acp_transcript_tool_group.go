@@ -33,10 +33,12 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	parents := invocationToolParents(events)
 	var children []SubagentEvent
 	hasChildren := false
+	hasDesktopWorld := false
 	for _, event := range events {
 		if event.Kind == SEToolCall && parents[event.CallID] == root.CallID {
 			// Task controls count as invocations even when their rows are hidden.
 			hasChildren = true
+			hasDesktopWorld = hasDesktopWorld || event.DesktopWorld
 			if !isTaskControlEvent(event) {
 				children = append(children, event)
 			}
@@ -50,11 +52,14 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		title = "• Ran script"
 	}
 	source := sanitizeRenderableText(root.FullArgs)
-	preview := root.Args
-	if root.Title != "" {
-		preview = root.Title
-	} else if source != "" {
-		preview, _ = longCommandDisplayPreview(source, maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1))
+	preview := root.Title
+	// A DTW invocation can embed the desktop script in the outer source too.
+	// Keep the script's normal disclosure, using typed children to select it.
+	if preview == "" && !hasDesktopWorld {
+		preview = root.Args
+		if source != "" {
+			preview, _ = longCommandDisplayPreview(source, maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1))
+		}
 	}
 	sourceExpanded := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(root.CallID)
 	if sourceExpanded && source != "" {
@@ -79,7 +84,7 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		headerText = truncateDisplayCells(headerText, width)
 	}
 	header := renderACPTranscriptHeaderRowMarked(blockID, headerText, width, ctx, foldToken, tone, dim)
-	if !sourceExpanded && source != "" && root.Title == "" && width > displayColumns(title)+1 {
+	if !sourceExpanded && !hasDesktopWorld && source != "" && root.Title == "" && width > displayColumns(title)+1 {
 		initialBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1)
 		finalBudget := maxInt(1, width-displayColumns(title)-1)
 		header.Styled = styleACPTranscriptHeaderWithMark(ctx, title, tone, dim) + " " + styleScriptSourcePreview(ctx, source, initialBudget, finalBudget)
@@ -175,6 +180,9 @@ func renderScriptInvocationRows(blockID string, events []SubagentEvent, width in
 
 func scriptInvocationHeader(events []SubagentEvent, ctx BlockRenderContext, budget int, fullArgs bool) string {
 	ev := events[0]
+	if ev.DesktopWorld {
+		return desktopWorldHeader(ev, budget)
+	}
 	labelEvent := ev
 	labelEvent.Args, labelEvent.DiffSummary = "", ""
 	label := strings.TrimPrefix(standardToolLifecycleHeader(labelEvent, false), "• ")

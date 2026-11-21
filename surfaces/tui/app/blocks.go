@@ -671,7 +671,7 @@ func shouldRenderToolEvent(ev SubagentEvent) bool {
 	if ev.Kind != SEToolCall {
 		return true
 	}
-	if !ev.Done || ev.Err {
+	if !ev.Done || ev.Err || ev.DesktopWorld {
 		return true
 	}
 	if !renderableTextHasContent(ev.Output) || strings.EqualFold(strings.TrimSpace(ev.Output), "completed") {

@@ -107,6 +107,7 @@ type Event struct {
 	ToolNameExplicit    bool
 	ToolKind            string
 	ToolTitle           string
+	ToolDesktopWorld    bool
 	ToolExplorationVerb string
 	ToolArgs            string
 	ToolFullArgs        string

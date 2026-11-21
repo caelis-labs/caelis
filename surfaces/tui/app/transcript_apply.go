@@ -727,6 +727,7 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		MessageTarget:        event.ToolMessageTarget,
 		ToolKind:             event.ToolKind,
 		ToolTitle:            event.ToolTitle,
+		DesktopWorld:         event.ToolDesktopWorld,
 		ExplorationVerb:      event.ToolExplorationVerb,
 		FullArgs:             event.ToolFullArgs,
 		ToolStatus:           event.ToolStatus,
