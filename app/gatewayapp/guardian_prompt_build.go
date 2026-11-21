@@ -38,7 +38,7 @@ func guardianCompactionConfig(llm model.LLM, output *model.OutputSpec, queryTool
 		Instructions: []model.Part{model.NewTextPart(guardianPolicyCore() + "\n\n" + guardianPolicySupplement(queryTools))},
 		Output:       model.CloneOutputSpec(output),
 	}, cfg)
-	cfg.EstimatedPromptPrefixTokens = prefix.Usage.TotalTokens
+	cfg.EstimatedPromptPrefixTokens = prefix.TotalTokens
 	return cfg
 }
 

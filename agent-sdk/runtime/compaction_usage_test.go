@@ -728,17 +728,14 @@ func TestEvaluateModelRequestBudgetUsesOneFullyAssembledRequest(t *testing.T) {
 
 	got := EvaluateModelRequestBudget(nil, req, cfg)
 	wantTokens := estimateModelRequestTokens(req)
-	if got.Usage.TotalTokens != wantTokens {
-		t.Fatalf("TotalTokens = %d, want exact request estimate %d", got.Usage.TotalTokens, wantTokens)
+	if got.TotalTokens != wantTokens {
+		t.Fatalf("TotalTokens = %d, want exact request estimate %d", got.TotalTokens, wantTokens)
 	}
 	wantEffective := resolveEffectiveInputBudget(4_096, 512, 256)
-	if got.Usage.EffectiveInputBudget != wantEffective {
-		t.Fatalf("EffectiveInputBudget = %d, want %d", got.Usage.EffectiveInputBudget, wantEffective)
+	if got.EffectiveInputBudget != wantEffective {
+		t.Fatalf("EffectiveInputBudget = %d, want %d", got.EffectiveInputBudget, wantEffective)
 	}
-	if got.Usage.EstimatedPrefixTokens != 0 {
-		t.Fatalf("EstimatedPrefixTokens = %d, want no separately added prefix", got.Usage.EstimatedPrefixTokens)
-	}
-	if got.Compaction != evaluateWatermark(got.Usage, cfg) {
-		t.Fatalf("Compaction = %#v, want Runtime watermark result %#v", got.Compaction, evaluateWatermark(got.Usage, cfg))
+	if got.EstimatedPrefixTokens != 0 {
+		t.Fatalf("EstimatedPrefixTokens = %d, want no separately added prefix", got.EstimatedPrefixTokens)
 	}
 }
