@@ -93,7 +93,7 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 			compensateErr := r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
 				SessionRef: ref, Session: activeSession,
 				ParticipantID: strings.TrimSpace(binding.ID), DelegationID: strings.TrimSpace(binding.DelegationID),
-				AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration), Source: strings.TrimSpace(req.Source),
+				AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration),
 			})
 			return session.Session{}, errors.Join(err, confirmErr, compensateErr)
 		}
@@ -105,7 +105,7 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	_ = r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
 		SessionRef: ref, Session: activeSession,
 		ParticipantID: strings.TrimSpace(binding.ID), DelegationID: strings.TrimSpace(binding.DelegationID),
-		AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration), Source: strings.TrimSpace(req.Source),
+		AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration),
 	})
 	return session.Session{}, err
 }
@@ -168,7 +168,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	if err := r.controllers.Detach(ctx, controller.DetachRequest{
 		SessionRef: ref, Session: activeSession,
 		ParticipantID: strings.TrimSpace(req.ParticipantID), DelegationID: strings.TrimSpace(binding.DelegationID),
-		AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration), Source: strings.TrimSpace(req.Source),
+		AttachmentGeneration: strings.TrimSpace(binding.AttachmentGeneration),
 	}); err != nil {
 		return session.Session{}, err
 	}
@@ -277,7 +277,7 @@ func (r *Runtime) restoreDetachedParticipant(
 	detachErr := r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
 		SessionRef: ref, Session: latest,
 		ParticipantID: strings.TrimSpace(reattached.ID), DelegationID: strings.TrimSpace(reattached.DelegationID),
-		AttachmentGeneration: strings.TrimSpace(reattached.AttachmentGeneration), Source: strings.TrimSpace(source),
+		AttachmentGeneration: strings.TrimSpace(reattached.AttachmentGeneration),
 	})
 	return errors.Join(persistErr, loadErr, detachErr)
 }
@@ -502,12 +502,11 @@ func (r *Runtime) executeACPParticipantTurn(
 		TurnID:        turnID,
 		ParticipantID: participantID,
 		Input:         strings.TrimSpace(req.Input),
-		DisplayInput:  strings.TrimSpace(req.DisplayInput),
-		DisplayTitle:  strings.TrimSpace(req.DisplayTitle),
-		ContentParts:  req.ContentParts,
-		Context:       contextTransfer,
-		Stream:        req.Stream,
-		Mode:          r.policyMode(agent.AgentSpec{}),
+
+		ContentParts: req.ContentParts,
+		Context:      contextTransfer,
+
+		Mode: r.policyMode(agent.AgentSpec{}),
 		ApprovalRequester: controllerApprovalRequester{
 			runtime:              r,
 			requester:            req.ApprovalRequester,
@@ -635,7 +634,7 @@ func (r *Runtime) ensureACPParticipantRun(
 	detachErr := r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
 		SessionRef: ref, Session: activeSession,
 		ParticipantID: strings.TrimSpace(attached.ID), DelegationID: strings.TrimSpace(attached.DelegationID),
-		AttachmentGeneration: strings.TrimSpace(attached.AttachmentGeneration), Source: strings.TrimSpace(attached.Source),
+		AttachmentGeneration: strings.TrimSpace(attached.AttachmentGeneration),
 	})
 	return session.Session{}, session.ParticipantBinding{}, errors.Join(err, loadErr, detachErr)
 }

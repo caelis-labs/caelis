@@ -73,7 +73,6 @@ type DetachRequest struct {
 	ParticipantID        string             `json:"participant_id,omitempty"`
 	DelegationID         string             `json:"delegation_id,omitempty"`
 	AttachmentGeneration string             `json:"attachment_generation,omitempty"`
-	Source               string             `json:"source,omitempty"`
 }
 
 // HandoffRequest activates one ACP controller for a session.
@@ -143,7 +142,6 @@ type TurnRequest struct {
 	Context           agent.ContextTransfer     `json:"context,omitempty"`
 	FreshContext      agent.ContextTransfer     `json:"fresh_context,omitempty"`
 	ContextSyncSeq    uint64                    `json:"context_sync_seq,omitempty"`
-	Stream            bool                      `json:"stream,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester         `json:"-"`
 	Observer          agent.SourceEventObserver `json:"-"`
@@ -162,11 +160,8 @@ type ParticipantPromptRequest struct {
 	TurnID            string                    `json:"turn_id,omitempty"`
 	ParticipantID     string                    `json:"participant_id,omitempty"`
 	Input             string                    `json:"input,omitempty"`
-	DisplayInput      string                    `json:"display_input,omitempty"`
-	DisplayTitle      string                    `json:"display_title,omitempty"`
 	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
 	Context           agent.ContextTransfer     `json:"context,omitempty"`
-	Stream            bool                      `json:"stream,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester         `json:"-"`
 	Observer          agent.SourceEventObserver `json:"-"`
@@ -180,7 +175,6 @@ type ParticipantSteerRequest struct {
 	TurnID        string              `json:"turn_id,omitempty"`
 	ParticipantID string              `json:"participant_id,omitempty"`
 	Input         string              `json:"input,omitempty"`
-	DisplayInput  string              `json:"display_input,omitempty"`
 	ContentParts  []model.ContentPart `json:"content_parts,omitempty"`
 	Commit        func() error        `json:"-"`
 }
@@ -264,7 +258,6 @@ func NormalizeDetachRequest(in DetachRequest) DetachRequest {
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
 	out.DelegationID = strings.TrimSpace(in.DelegationID)
 	out.AttachmentGeneration = strings.TrimSpace(in.AttachmentGeneration)
-	out.Source = strings.TrimSpace(in.Source)
 	return out
 }
 
@@ -303,7 +296,6 @@ func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantP
 	out.Input = strings.TrimSpace(in.Input)
 	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	out.Context = agent.CloneContextTransfer(in.Context)
-	out.Stream = in.Stream
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out
 }
@@ -316,7 +308,6 @@ func NormalizeParticipantSteerRequest(in ParticipantSteerRequest) ParticipantSte
 	out.TurnID = strings.TrimSpace(in.TurnID)
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
 	out.Input = strings.TrimSpace(in.Input)
-	out.DisplayInput = strings.TrimSpace(in.DisplayInput)
 	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	return out
 }

@@ -1108,10 +1108,8 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	}
 
 	releaseFinal := make(chan struct{})
-	streamSeen := make(chan bool, 1)
 	testController := stubACPController{
 		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
-			streamSeen <- req.Stream
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(session.MarkUIOnly(&session.Event{
@@ -1172,15 +1170,6 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("Run() did not return before ACP final completion")
 	}
-	select {
-	case stream := <-streamSeen:
-		if !stream {
-			t.Fatal("TurnRequest.Stream = false, want true")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("controller did not observe stream request")
-	}
-
 	var sawUser bool
 	var sawChunk bool
 	deadline := time.NewTimer(2 * time.Second)
@@ -1848,17 +1837,16 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 }
 
-func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
+func TestRuntimeACPControllerRegistersSourceObserverForAnyModelStreamOption(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name    string
 		request agent.ModelRequestOptions
-		want    bool
 	}{
-		{name: "default false", request: agent.ModelRequestOptions{}, want: false},
-		{name: "explicit false", request: agent.ModelRequestOptions{Stream: boolPtr(false)}, want: false},
-		{name: "explicit true", request: agent.ModelRequestOptions{Stream: boolPtr(true)}, want: true},
+		{name: "default false", request: agent.ModelRequestOptions{}},
+		{name: "explicit false", request: agent.ModelRequestOptions{Stream: boolPtr(false)}},
+		{name: "explicit true", request: agent.ModelRequestOptions{Stream: boolPtr(true)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1876,10 +1864,10 @@ func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BindController() error = %v", err)
 			}
-			streamSeen := make(chan bool, 1)
+			observerSeen := make(chan bool, 1)
 			testController := stubACPController{
 				runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
-					streamSeen <- req.Stream
+					observerSeen <- req.Observer != nil
 					handle := newTestControllerTurnHandle(nil)
 					handle.finish()
 					return handle, nil
@@ -1906,12 +1894,12 @@ func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
 				t.Fatal(err)
 			}
 			select {
-			case got := <-streamSeen:
-				if got != tc.want {
-					t.Fatalf("controller stream = %v, want %v", got, tc.want)
+			case got := <-observerSeen:
+				if !got {
+					t.Fatal("ACP Turn has no source event observer")
 				}
 			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for controller stream flag")
+				t.Fatal("timed out waiting for ACP Turn observer registration")
 			}
 		})
 	}

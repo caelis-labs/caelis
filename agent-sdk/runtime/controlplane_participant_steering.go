@@ -95,8 +95,8 @@ func (r *Runtime) participantSteeringHandler(
 			TurnID:        turnID,
 			ParticipantID: binding.ID,
 			Input:         submission.Text,
-			DisplayInput:  submission.DisplayInput,
-			ContentParts:  submission.ContentParts,
+
+			ContentParts: submission.ContentParts,
 			Commit: func() error {
 				return r.commitParticipantSteering(
 					producerCtx,

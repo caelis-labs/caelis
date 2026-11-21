@@ -77,13 +77,9 @@ func TestNormalizeParticipantPromptRequestTrimsFields(t *testing.T) {
 		ParticipantID: " participant ",
 		Input:         " input ",
 		Mode:          " mode ",
-		Stream:        true,
 	})
 	if got.SessionRef.SessionID != "sid" || got.TurnID != "turn" || got.ParticipantID != "participant" || got.Input != "input" || got.Mode != "mode" {
 		t.Fatalf("normalized participant prompt = %+v", got)
-	}
-	if !got.Stream {
-		t.Fatal("stream flag should be preserved")
 	}
 }
 
@@ -104,9 +100,8 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 	detach := NormalizeDetachRequest(DetachRequest{
 		SessionRef:    session.SessionRef{SessionID: " sid "},
 		ParticipantID: " pid ",
-		Source:        " source ",
 	})
-	if detach.SessionRef.SessionID != "sid" || detach.ParticipantID != "pid" || detach.Source != "source" {
+	if detach.SessionRef.SessionID != "sid" || detach.ParticipantID != "pid" {
 		t.Fatalf("normalized detach = %+v", detach)
 	}
 

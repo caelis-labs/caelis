@@ -191,7 +191,7 @@ func TestManagerDeactivateCancelsInFlightControllerTurn(t *testing.T) {
 		Session:      parentSession,
 		TurnID:       "turn-blocking",
 		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "wait for shutdown"}},
-		Stream:       true,
+
 		Observer: agent.SourceEventObserverFunc(func(context.Context, agent.SourceEvent) error {
 			select {
 			case started <- struct{}{}:

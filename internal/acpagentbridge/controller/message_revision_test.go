@@ -98,7 +98,7 @@ func TestDraftControllerPreviousTurnRevisionKeepsCanonicalResult(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: id, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "input"}}, Stream: true, Observer: agent.SourceEventObserverFunc(func(ctx context.Context, event agent.SourceEvent) error {
+				turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: id, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "input"}}, Observer: agent.SourceEventObserverFunc(func(ctx context.Context, event agent.SourceEvent) error {
 					if event.Canonical != nil && session.EventText(event.Canonical) == "revised first narrative" {
 						update := session.ProtocolUpdateOf(event.Canonical)
 						oldID := firstID

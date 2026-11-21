@@ -178,11 +178,11 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishEvent(persisted)
 	}
 	turnReq := controller.TurnRequest{
-		SessionRef:        ref,
-		Session:           activeSession,
-		TurnID:            turnID,
-		ContentParts:      controllerInputParts(persistedInputs),
-		Stream:            req.Request.StreamEnabled(false),
+		SessionRef:   ref,
+		Session:      activeSession,
+		TurnID:       turnID,
+		ContentParts: controllerInputParts(persistedInputs),
+
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
 		CommitBinding: func(commitCtx context.Context) error {

@@ -63,7 +63,7 @@ func TestDraftControllerSteeringReceiptWithoutEchoDoesNotCommitOrReleaseOutput(t
 		t.Fatal(err)
 	}
 	sources := make(chan agent.SourceEvent, 64)
-	turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "initial input"}}, Stream: true, Observer: agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
+	turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "initial input"}}, Observer: agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
 		sources <- agent.CloneSourceEvent(event)
 		return nil
 	})})
