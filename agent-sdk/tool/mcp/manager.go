@@ -110,7 +110,7 @@ func formatToolName(serverName, toolName string) string {
 // ctx owns initialization; Close cancels and drains all initialization work.
 func NewManager(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure)) (*Manager, error) {
 	return newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-		return startClientWithCatalog(ctx, spec, nil, true)
+		return startClient(ctx, spec, nil)
 	}, onFailure)
 }
 
@@ -211,14 +211,8 @@ func (m *Manager) borrowClient(ctx context.Context, remote *MCPTool) (func(), er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	server := remote.server
-	if c := server.client.catalog; c != nil {
-		// Catalog invalidation and closure publication both take this lock.
-		c.mu.Lock()
-		defer c.mu.Unlock()
-	} else {
-		server.client.identityMu.Lock()
-		defer server.client.identityMu.Unlock()
-	}
+	server.client.catalog.mu.Lock()
+	defer server.client.catalog.mu.Unlock()
 	if err := m.checkServerReadyLocked(ctx, server); err != nil {
 		return nil, err
 	}
@@ -275,18 +269,6 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 			err = &startupError{Stage: "connection", Err: err}
 		}
 	}
-	var listed []*mcpsdk.Tool
-	if err == nil && client.catalog == nil {
-		listCtx, listCancel := context.WithTimeout(parent, DefaultToolListTimeout)
-		listed, err = client.ListTools(listCtx)
-		if err == nil {
-			err = listCtx.Err()
-		}
-		listCancel()
-		if err != nil {
-			err = client.startupFailure("tools/list", err)
-		}
-	}
 	m.mu.Lock()
 	if m.closed || server.revoked || parent.Err() != nil {
 		m.mu.Unlock()
@@ -297,12 +279,11 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	}
 	server.err = err
 	if err == nil {
-		server.client, server.listed = client, listed
-		server.catalogReady = client.catalog == nil
+		server.client = client
 	}
 	m.rebuildToolsLocked()
 	m.mu.Unlock()
-	if err == nil && client.catalog != nil {
+	if err == nil {
 		refreshErr := m.refreshCatalog(parent, server, false)
 		if refreshErr != nil {
 			refreshErr = client.startupFailure("tools/list", refreshErr)
@@ -310,6 +291,7 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 		m.mu.Lock()
 		if m.closed || server.revoked || parent.Err() != nil {
 			m.mu.Unlock()
+			_ = client.Close()
 			return
 		}
 		server.err = refreshErr
@@ -376,14 +358,9 @@ func (mgr *Manager) rebuildToolsLocked() {
 				continue
 			}
 			name := formatToolName(spec.Name, info.Name)
-			if client.catalog != nil {
-				if mgr.owners == nil {
-					mgr.owners = map[string]string{}
-				}
-				owner := key + "/" + info.Name
-				if pinned := mgr.owners[name]; pinned != "" && pinned != owner {
-					continue
-				}
+			owner := key + "/" + info.Name
+			if pinned := mgr.owners[name]; pinned != "" && pinned != owner {
+				continue
 			}
 			sourceBytes, err := json.Marshal(struct {
 				Server          ServerSpec
@@ -429,9 +406,10 @@ func (mgr *Manager) rebuildToolsLocked() {
 				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: %v", toolLabel, err))
 				continue
 			}
-			if client.catalog != nil {
-				mgr.owners[name] = key + "/" + info.Name
+			if mgr.owners == nil {
+				mgr.owners = map[string]string{}
 			}
+			mgr.owners[name] = owner
 			t := &MCPTool{
 				client:   client,
 				manager:  mgr,
@@ -466,7 +444,7 @@ func (mgr *Manager) rebuildToolsLocked() {
 func (mgr *Manager) awaitingHigherPriorityServer(index int) bool {
 	prefix := ServerToolNamePrefix(mgr.servers[index].spec.Name)
 	for _, earlier := range mgr.servers[:index] {
-		if (earlier.client != nil && (earlier.client.catalog == nil || earlier.catalogReady)) || earlier.err != nil {
+		if (earlier.client != nil && earlier.catalogReady) || earlier.err != nil {
 			continue
 		}
 		earlierPrefix := ServerToolNamePrefix(earlier.spec.Name)

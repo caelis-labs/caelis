@@ -22,7 +22,7 @@ func TestStartupFailureStatusIsBoundedAndStageSpecific(t *testing.T) {
 			t.Fatalf("got %q want %q", got, tc.want)
 		}
 	}
-	_, err := StartClient(t.Context(), ServerSpec{Name: "absent", Command: "/does-not-exist/private-token", WorkDir: t.TempDir()})
+	_, err := startClient(t.Context(), ServerSpec{Name: "absent", Command: "/does-not-exist/private-token", WorkDir: t.TempDir()}, nil)
 	var phase *startupError
 	if !errors.As(err, &phase) || phase.Stage != "transport" {
 		t.Fatalf("phase=%#v", phase)

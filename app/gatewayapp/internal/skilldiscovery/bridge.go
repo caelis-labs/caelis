@@ -30,33 +30,23 @@ func DefaultDiscoveryDirs(workspaceDir string) []string {
 	return out
 }
 
-func DiscoverMeta(dirs []string, workspaceDir string) ([]skill.Meta, error) {
-	return DiscoverMetaRequest(skill.DiscoverRequest{
-		Dirs:         dirs,
-		WorkspaceDir: workspaceDir,
-	})
+// DiscoverMetaRequest discovers Skills using the product's configured system roots.
+func DiscoverMetaRequest(req skill.DiscoverRequest) []skill.Meta {
+	return sdkfs.DiscoverMetaRequest(prepareDiscovery(req))
 }
 
-func DiscoverMetaRequest(req skill.DiscoverRequest) ([]skill.Meta, error) {
+// DiscoverLegacyPluginCopies detects regular copies of plugin Skills for diagnostics.
+func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) []skill.Meta {
+	return sdkfs.DiscoverLegacyPluginCopies(prepareDiscovery(req))
+}
+
+func prepareDiscovery(req skill.DiscoverRequest) skill.DiscoverRequest {
 	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
 	if systemRoot, err := maybeEnsureSystemSkills(dirs); err != nil {
 		dirs = withoutDiscoveryDir(dirs, systemRoot)
 	}
 	req.Dirs = dirs
-	return sdkfs.DiscoverMetaRequest(req)
-}
-
-func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) ([]skill.Meta, error) {
-	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
-	if systemRoot, err := maybeEnsureSystemSkills(dirs); err != nil {
-		dirs = withoutDiscoveryDir(dirs, systemRoot)
-	}
-	req.Dirs = dirs
-	return sdkfs.DiscoverLegacyPluginCopies(req)
-}
-
-func DiscoverPluginBundleMeta(bundles []skill.PluginBundle) ([]skill.Meta, error) {
-	return sdkfs.DiscoverPluginBundleMeta(bundles)
+	return req
 }
 
 func discoveryDirs(dirs []string, workspaceDir string) []string {

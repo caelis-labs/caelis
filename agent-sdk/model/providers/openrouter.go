@@ -12,7 +12,7 @@ func newOpenRouter(cfg Config, token string) *openAICompatLLM {
 	llm.options.StrictFunctionTools = true
 	llm.openRouter = cloneOpenRouterConfig(cfg.OpenRouter)
 	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
-		len(cfg.ReasoningLevels) == 0 && len(cfg.SupportedReasoningEfforts) == 0 {
+		len(cfg.ReasoningLevels) == 0 {
 		llm.options.ApplyReasoning = func(payload *openAICompatRequest, reasoning model.ReasoningConfig) {
 			// No selector is declared: none preserves the endpoint default
 			// instead of sending an unadvertised disable command.

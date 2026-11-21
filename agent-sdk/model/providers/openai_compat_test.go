@@ -119,7 +119,7 @@ func TestOpenAICompatStreamFirstEventTimeoutRetriesBeforeEmission(t *testing.T) 
 			continue
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {
-			finalText = event.Response.Message.TextContent()
+			finalText = event.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -175,7 +175,7 @@ func TestOpenAICompatStream_DoesNotApplyRequestTimeout(t *testing.T) {
 			continue
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			finalText = resp.Response.Message.TextContent()
+			finalText = resp.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -543,7 +543,7 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 			t.Fatalf("expected no generate error, got %v", err)
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			finalReasoning = resp.Response.Message.ReasoningText()
+			finalReasoning = resp.Message.ReasoningText()
 		}
 	}
 	if gotReferer != "https://example.com/app" || gotTitle != "caelis" {
@@ -842,7 +842,7 @@ func TestOpenAICompatNonStream_DefaultDoesNotApplyRequestTimeout(t *testing.T) {
 			continue
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			finalText = resp.Response.Message.TextContent()
+			finalText = resp.Message.TextContent()
 		}
 	}
 	if gotErr != nil {

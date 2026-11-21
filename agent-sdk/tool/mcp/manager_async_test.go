@@ -42,7 +42,7 @@ func asyncTestClient(ctx context.Context, spec ServerSpec, listGate <-chan struc
 		cancel()
 		return nil, err
 	}
-	return &Client{spec: spec, session: session, cancel: cancel, closed: make(chan struct{})}, nil
+	return &Client{spec: spec, session: session, cancel: cancel, closed: make(chan struct{}), catalog: newClientCatalog()}, nil
 }
 
 func TestManagerInitializesServersIndependentlyAndPublishesWholeLists(t *testing.T) {

@@ -15,41 +15,33 @@ import (
 )
 
 func TestManagerConnectionAndFirstListHaveIndependentBudgets(t *testing.T) {
-	for _, refresh := range []bool{false, true} {
-		t.Run(map[bool]string{false: "plain", true: "catalog"}[refresh], func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				began := time.Now()
-				failures := make(chan ServerFailure, 1)
-				mgr, err := newManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "slow-directory"}}, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-					time.Sleep(2 * time.Second)
-					gate := make(chan struct{})
-					go func() {
-						select {
-						case <-time.After(29 * time.Second):
-							close(gate)
-						case <-t.Context().Done():
-						}
-					}()
-					client, err := asyncTestClient(ctx, spec, gate)
-					if err == nil && refresh {
-						client.catalog = newClientCatalog()
-					}
-					return client, err
-				}, func(f ServerFailure) { failures <- f })
-				if err != nil {
-					t.Fatal(err)
+	synctest.Test(t, func(t *testing.T) {
+		began := time.Now()
+		failures := make(chan ServerFailure, 1)
+		mgr, err := newManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "slow-directory"}}, func(ctx context.Context, spec ServerSpec) (*Client, error) {
+			time.Sleep(2 * time.Second)
+			gate := make(chan struct{})
+			go func() {
+				select {
+				case <-time.After(29 * time.Second):
+					close(gate)
+				case <-t.Context().Done():
 				}
-				defer mgr.Close()
-				<-mgr.Initialized()
-				if len(failures) != 0 || len(mgr.Tools()) != 1 {
-					t.Fatalf("directory lost its own budget: failures=%d tools=%d elapsed=%s", len(failures), len(mgr.Tools()), time.Since(began))
-				}
-				if got := time.Since(began); got != 31*time.Second {
-					t.Fatalf("elapsed=%s", got)
-				}
-			})
-		})
-	}
+			}()
+			return asyncTestClient(ctx, spec, gate)
+		}, func(f ServerFailure) { failures <- f })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer mgr.Close()
+		<-mgr.Initialized()
+		if len(failures) != 0 || len(mgr.Tools()) != 1 {
+			t.Fatalf("directory lost its own budget: failures=%d tools=%d elapsed=%s", len(failures), len(mgr.Tools()), time.Since(began))
+		}
+		if got := time.Since(began); got != 31*time.Second {
+			t.Fatalf("elapsed=%s", got)
+		}
+	})
 }
 
 func TestManagerParentDeadlineStillBoundsBothStages(t *testing.T) {
@@ -87,11 +79,7 @@ func TestManagerFirstCatalogListTimeoutHasIndependentPhase(t *testing.T) {
 		failures := make(chan ServerFailure, 1)
 		began := time.Now()
 		mgr, err := newManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "list"}}, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-			client, err := asyncTestClient(ctx, spec, make(chan struct{}))
-			if err == nil {
-				client.catalog = newClientCatalog()
-			}
-			return client, err
+			return asyncTestClient(ctx, spec, make(chan struct{}))
 		}, func(f ServerFailure) { failures <- f })
 		if err != nil {
 			t.Fatal(err)

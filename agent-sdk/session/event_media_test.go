@@ -107,7 +107,7 @@ func TestLegacyToolReceiptRestoresEventFields(t *testing.T) {
 	if err := json.Unmarshal([]byte(old), &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.ID != "original" || event.Outcome != ToolOutcomeFailed || !event.Discovery || event.ResultFormat != "content-v1" || event.Result.Content[0] != tool.Text("old") {
+	if event.ID != "original" || event.Outcome != ToolOutcomeFailed || !event.Discovery || !event.ResultIncludesReceipt || event.Result.Content[0] != tool.Text("old") {
 		t.Fatalf("restored event = %+v", event)
 	}
 	raw, err := json.Marshal(event.Result)

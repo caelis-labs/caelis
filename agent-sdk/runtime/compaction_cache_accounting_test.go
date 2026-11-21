@@ -57,11 +57,7 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 					calls++
 					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
 				})
-				factory := providers.NewFactory()
-				if err := factory.Register(providers.Config{Alias: "fixture", API: route.api, Provider: route.provider, Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}}); err != nil {
-					t.Fatal(err)
-				}
-				llm, err := factory.NewByAlias("fixture")
+				llm, err := providers.New(providers.Config{API: route.api, Provider: route.provider, Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}})
 				if err != nil {
 					t.Fatal(err)
 				}

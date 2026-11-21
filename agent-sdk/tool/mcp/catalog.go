@@ -34,14 +34,12 @@ func (c *clientCatalog) invalidate() {
 
 // checkCatalogReadyLocked checks a current directory entry under Manager.mu.
 func (m *Manager) checkCatalogReadyLocked(ctx context.Context, server *managedServer) error {
-	if c := server.client.catalog; c != nil {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-	}
+	server.client.catalog.mu.Lock()
+	defer server.client.catalog.mu.Unlock()
 	return m.checkServerReadyLocked(ctx, server)
 }
 
-// Requires Manager.mu and the client's catalog lock, when present.
+// Requires Manager.mu and the client's catalog lock.
 func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedServer) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -55,7 +53,7 @@ func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedSer
 	if server.client.closedError() != nil {
 		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
 	}
-	if c := server.client.catalog; c != nil && c.dirty {
+	if server.client.catalog.dirty {
 		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 	}
 	return nil
@@ -83,7 +81,7 @@ func (m *Manager) RefreshTools(ctx context.Context, pluginID, serverName string)
 	m.mu.Lock()
 	var found *managedServer
 	for _, s := range m.servers {
-		if s.spec.PluginID == pluginID && s.spec.Name == serverName && s.client != nil && s.client.catalog != nil {
+		if s.spec.PluginID == pluginID && s.spec.Name == serverName && s.client != nil {
 			found = s
 			break
 		}
@@ -256,16 +254,14 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 			if server.client == nil || server.client.closedError() != nil {
 				return tool.NewError(errorcode.Unavailable, "MCP source is offline")
 			}
-			if server.client.catalog != nil {
-				server.client.catalog.mu.Lock()
-				revoked, dirty := server.client.catalog.revoked, server.client.catalog.dirty
-				server.client.catalog.mu.Unlock()
-				if revoked {
-					return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
-				}
-				if dirty {
-					return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh is required")
-				}
+			server.client.catalog.mu.Lock()
+			revoked, dirty := server.client.catalog.revoked, server.client.catalog.dirty
+			server.client.catalog.mu.Unlock()
+			if revoked {
+				return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+			}
+			if dirty {
+				return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh is required")
 			}
 			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 		}

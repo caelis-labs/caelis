@@ -57,7 +57,7 @@ type Registry interface {
 type ApprovalOption = agent.ApprovalOption
 
 // ApprovalToolCall is the child tool call asking for approval.
-type ApprovalToolCall = agent.SubagentApprovalToolCall
+type ApprovalToolCall = agent.EndpointApprovalToolCall
 
 // ApprovalRequest is one runtime-owned approval bridge payload for a spawned
 // child ACP agent. It is system-controlled and never exposed on the LLM-facing

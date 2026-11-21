@@ -671,7 +671,7 @@ func requireNegotiatedProtocolVersion(t *testing.T, mgr *Manager, pluginID, serv
 func newMCPManagerWithHTTPHandler(ctx context.Context, handler http.Handler, specs []ServerSpec) (*Manager, error) {
 	httpClient := &http.Client{Transport: mcpHandlerRoundTripper{handler: handler}}
 	mgr, err := newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-		return startClientWithHTTPClient(ctx, spec, httpClient)
+		return startClient(ctx, spec, httpClient)
 	}, nil)
 	return awaitTestInitialization(ctx, mgr, err)
 }

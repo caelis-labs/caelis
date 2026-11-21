@@ -299,10 +299,9 @@ func normalizeAccumulatedToolUseInput(acc *anthropic.Message, stop anthropic.Con
 func (l *anthropicSDKLLM) emitStreamingStartBlock(ev anthropic.ContentBlockStartEvent, yield func(*model.StreamEvent, error) bool) bool {
 	switch block := ev.ContentBlock.AsAny().(type) {
 	case anthropic.TextBlock:
-		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindText, block.Text, nil, yield)
+		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindText, block.Text, yield)
 	case anthropic.ThinkingBlock:
-		replay := anthropicReplayMeta(l.provider, strings.TrimSpace(block.Signature))
-		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, block.Thinking, replay, yield)
+		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, block.Thinking, yield)
 	case anthropic.ToolUseBlock:
 		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse}}, nil)
@@ -314,31 +313,22 @@ func (l *anthropicSDKLLM) emitStreamingStartBlock(ev anthropic.ContentBlockStart
 func (l *anthropicSDKLLM) emitStreamingDeltaBlock(ev anthropic.ContentBlockDeltaEvent, yield func(*model.StreamEvent, error) bool) bool {
 	switch delta := ev.Delta.AsAny().(type) {
 	case anthropic.TextDelta:
-		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindText, delta.Text, nil, yield)
+		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindText, delta.Text, yield)
 	case anthropic.ThinkingDelta:
-		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, delta.Thinking, nil, yield)
+		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, delta.Thinking, yield)
 	case anthropic.InputJSONDelta:
 		if delta.PartialJSON == "" {
 			return true
 		}
 		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
-			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse, InputDelta: delta.PartialJSON}}, nil)
-	case anthropic.SignatureDelta:
-		return yield(&model.StreamEvent{
-			Type: model.StreamEventPartDelta,
-			PartDelta: &model.PartDelta{
-				Index:  int(ev.Index),
-				Kind:   model.PartKindReasoning,
-				Replay: anthropicReplayMeta(l.provider, strings.TrimSpace(delta.Signature)),
-			},
-		}, nil)
+			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse}}, nil)
 	default:
 		return true
 	}
 }
 
-func (l *anthropicSDKLLM) emitStreamingTextDelta(index int, kind model.PartKind, text string, replay *model.ReplayMeta, yield func(*model.StreamEvent, error) bool) bool {
-	if text == "" && replay == nil {
+func (l *anthropicSDKLLM) emitStreamingTextDelta(index int, kind model.PartKind, text string, yield func(*model.StreamEvent, error) bool) bool {
+	if text == "" {
 		return true
 	}
 	return yield(&model.StreamEvent{
@@ -347,20 +337,8 @@ func (l *anthropicSDKLLM) emitStreamingTextDelta(index int, kind model.PartKind,
 			Index:     index,
 			Kind:      kind,
 			TextDelta: text,
-			Replay:    replay,
 		},
 	}, nil)
-}
-
-func anthropicReplayMeta(provider string, token string) *model.ReplayMeta {
-	if token == "" {
-		return nil
-	}
-	return &model.ReplayMeta{
-		Provider: provider,
-		Kind:     anthropicReplayKindThinkingSignature,
-		Token:    token,
-	}
 }
 
 func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNewParams, error) {

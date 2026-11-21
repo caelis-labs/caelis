@@ -74,7 +74,7 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 			accumulator.appendArguments(event)
 			if req.Stream && !yield(&model.StreamEvent{
 				Type:      model.StreamEventPartDelta,
-				PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindToolUse, InputDelta: event.Delta},
+				PartDelta: &model.PartDelta{Index: event.OutputIndex, Kind: model.PartKindToolUse},
 			}, nil) {
 				stopped = true
 				return errStopSSE

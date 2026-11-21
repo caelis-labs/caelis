@@ -305,8 +305,8 @@ func (m *guardianDiagnosticModel) Generate(ctx context.Context, req *model.Reque
 					FinishReason:    event.FinishReason,
 					RawFinishReason: event.RawFinishReason,
 					Usage:           event.Usage,
-					TextBytes:       len(event.Response.Message.TextContent()),
-					ReasoningBytes:  len(event.Response.Message.ReasoningText()),
+					TextBytes:       len(event.Message.TextContent()),
+					ReasoningBytes:  len(event.Message.ReasoningText()),
 				})
 				m.mu.Unlock()
 			}

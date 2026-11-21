@@ -267,7 +267,7 @@ func TestGeminiStream_PreservesInterleavedPartOrderForReplay(t *testing.T) {
 			t.Fatalf("expected no stream error, got %v", err)
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			final = resp.Response.Message
+			final = resp.Message
 		}
 	}
 

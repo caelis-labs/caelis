@@ -63,7 +63,8 @@ const (
 )
 
 type aliasIndexEntry struct {
-	indexes []int
+	indexes   []int
+	canonical bool
 }
 
 // Catalog is an immutable snapshot of discovered Skill metadata. It owns
@@ -71,57 +72,37 @@ type aliasIndexEntry struct {
 type Catalog struct {
 	metas   []Meta
 	aliases map[string]aliasIndexEntry
-	lookup  map[string]string
 }
 
-// NewCatalog builds a skill catalog and precomputes canonical and alias lookups.
+// NewCatalog builds a skill catalog and indexes canonical names and aliases.
 // Canonical names always resolve. Local-name aliases resolve only when
 // unambiguous across the catalog.
 func NewCatalog(metas []Meta) Catalog {
 	c := Catalog{
-		metas: make([]Meta, 0, len(metas)),
+		metas:   append([]Meta(nil), metas...),
+		aliases: make(map[string]aliasIndexEntry, len(metas)),
 	}
-	c.metas = append(c.metas, metas...)
-	if len(c.metas) == 0 {
-		return c
-	}
-	c.aliases = make(map[string]aliasIndexEntry, len(c.metas))
-	c.lookup = make(map[string]string, len(c.metas))
-	canonicalKeys := map[string]struct{}{}
 
 	for i, meta := range c.metas {
-		name := strings.TrimSpace(meta.Name)
-		key := skillNameKey(name)
+		key := skillNameKey(meta.Name)
 		if key == "" {
 			continue
 		}
 		if _, exists := c.aliases[key]; !exists {
-			c.aliases[key] = aliasIndexEntry{indexes: []int{i}}
-			c.lookup[key] = name
+			c.aliases[key] = aliasIndexEntry{indexes: []int{i}, canonical: true}
 		}
-		canonicalKeys[key] = struct{}{}
 	}
 
 	for i, meta := range c.metas {
-		canonical := strings.TrimSpace(meta.Name)
-		if canonical == "" {
+		if strings.TrimSpace(meta.Name) == "" {
 			continue
 		}
-		for _, alias := range NameAliases(meta) {
+		for _, alias := range nameAliases(meta) {
 			key := skillNameKey(alias)
-			if key == "" {
-				continue
-			}
-			if _, canonicalKey := canonicalKeys[key]; canonicalKey {
-				continue
-			}
 			entry := c.aliases[key]
-			entry.indexes = appendUniqueIndex(entry.indexes, i)
-			c.aliases[key] = entry
-			if len(entry.indexes) == 1 {
-				c.lookup[key] = canonical
-			} else {
-				delete(c.lookup, key)
+			if !entry.canonical {
+				entry.indexes = append(entry.indexes, i)
+				c.aliases[key] = entry
 			}
 		}
 	}
@@ -139,39 +120,28 @@ func (c Catalog) Metas() []Meta {
 // Resolve resolves a skill reference and distinguishes ambiguity from a
 // missing name so callers can ask users or models to qualify the skill.
 func (c Catalog) Resolve(name string) (Meta, ResolveStatus) {
-	needle := skillNameKey(name)
-	if needle == "" {
+	indexes := c.aliases[skillNameKey(name)].indexes
+	switch len(indexes) {
+	case 0:
 		return Meta{}, ResolveNotFound
-	}
-	entry, ok := c.aliases[needle]
-	if !ok || len(entry.indexes) == 0 {
-		return Meta{}, ResolveNotFound
-	}
-	if len(entry.indexes) > 1 {
+	case 1:
+		return c.metas[indexes[0]], ResolveMatched
+	default:
 		return Meta{}, ResolveAmbiguous
 	}
-	index := entry.indexes[0]
-	if index < 0 || index >= len(c.metas) {
-		return Meta{}, ResolveNotFound
-	}
-	return c.metas[index], ResolveMatched
-}
-
-// ResolveBool resolves a skill reference and reports whether it matched.
-func (c Catalog) ResolveBool(name string) (Meta, bool) {
-	meta, status := c.Resolve(name)
-	return meta, status == ResolveMatched
 }
 
 // NameLookup returns lower-cased user-enterable names mapped to canonical skill
 // names. Ambiguous aliases are omitted.
 func (c Catalog) NameLookup() map[string]string {
-	if len(c.lookup) == 0 {
+	if len(c.aliases) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(c.lookup))
-	for key, value := range c.lookup {
-		out[key] = value
+	out := make(map[string]string, len(c.aliases))
+	for key, entry := range c.aliases {
+		if len(entry.indexes) == 1 {
+			out[key] = strings.TrimSpace(c.metas[entry.indexes[0]].Name)
+		}
 	}
 	return out
 }
@@ -179,19 +149,12 @@ func (c Catalog) NameLookup() map[string]string {
 // MatchingMetas returns every catalog entry matching name by canonical name or
 // alias. It is mainly used to suggest qualified names for ambiguous references.
 func (c Catalog) MatchingMetas(name string) []Meta {
-	needle := skillNameKey(name)
-	if needle == "" {
+	indexes := c.aliases[skillNameKey(name)].indexes
+	if len(indexes) == 0 {
 		return nil
 	}
-	entry, ok := c.aliases[needle]
-	if !ok || len(entry.indexes) == 0 {
-		return nil
-	}
-	out := make([]Meta, 0, len(entry.indexes))
-	for _, index := range entry.indexes {
-		if index < 0 || index >= len(c.metas) {
-			continue
-		}
+	out := make([]Meta, 0, len(indexes))
+	for _, index := range indexes {
 		out = append(out, c.metas[index])
 	}
 	return out
@@ -216,12 +179,17 @@ func MatchesName(meta Meta, name string) bool {
 	if needle == "" {
 		return false
 	}
-	return skillNameKey(meta.Name) == needle || metaAliasMatches(meta, needle)
+	for _, alias := range nameAliases(meta) {
+		if skillNameKey(alias) == needle {
+			return true
+		}
+	}
+	return false
 }
 
-// NameAliases returns the user-enterable aliases for meta, including the
+// nameAliases returns the user-enterable aliases for meta, including the
 // canonical name, local name, and namespace-qualified local names.
-func NameAliases(meta Meta) []string {
+func nameAliases(meta Meta) []string {
 	aliases := make([]string, 0, 4)
 	seen := map[string]struct{}{}
 	add := func(value string) {
@@ -249,42 +217,6 @@ func NameAliases(meta Meta) []string {
 	return aliases
 }
 
-func DisplayName(meta Meta) string {
-	if localName := strings.TrimSpace(meta.LocalName); localName != "" {
-		return localName
-	}
-	return strings.TrimSpace(meta.Name)
-}
-
-func DisplayDetail(meta Meta) string {
-	description := strings.Join(strings.Fields(strings.TrimSpace(meta.Description)), " ")
-	isPlugin := strings.EqualFold(strings.TrimSpace(meta.Source), SourcePlugin) || strings.TrimSpace(meta.PluginID) != "" || strings.TrimSpace(meta.Namespace) != ""
-
-	if isPlugin {
-		source := strings.TrimSpace(meta.PluginID)
-		if source == "" {
-			source = strings.TrimSpace(meta.Namespace)
-		}
-		if description != "" {
-			if source != "" {
-				return source + " · " + description
-			}
-			return description
-		}
-		return source
-	}
-
-	return description
-}
-
-// DisplayKind returns the completion badge label for skill metadata.
-func DisplayKind(meta Meta) string {
-	if strings.EqualFold(strings.TrimSpace(meta.Source), SourcePlugin) || strings.TrimSpace(meta.PluginID) != "" || strings.TrimSpace(meta.Namespace) != "" {
-		return "Plugin"
-	}
-	return "Skill"
-}
-
 func RefFromMeta(meta Meta) Ref {
 	return Ref{
 		Name:      strings.TrimSpace(meta.Name),
@@ -295,30 +227,8 @@ func RefFromMeta(meta Meta) Ref {
 	}
 }
 
-func metaAliasMatches(meta Meta, needle string) bool {
-	for _, alias := range NameAliases(meta) {
-		if skillNameKey(alias) == needle {
-			return true
-		}
-	}
-	return false
-}
-
 func skillNameKey(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
-}
-
-func appendUniqueIndex(values []int, value int) []int {
-	for _, existing := range values {
-		if existing == value {
-			return values
-		}
-	}
-	return append(values, value)
-}
-
-type Discovery interface {
-	Discover(context.Context, DiscoverRequest) ([]Meta, error)
 }
 
 type Loader interface {

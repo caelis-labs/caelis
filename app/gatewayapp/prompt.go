@@ -1,13 +1,11 @@
 package gatewayapp
 
 import (
-	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
 )
 
 type promptConfig = promptassembly.Config
-type SkillMeta = promptassembly.SkillMeta
 type promptResult = promptassembly.Result
 
 func buildSystemPrompt(cfg promptConfig) (string, error) {
@@ -28,22 +26,6 @@ func systemPromptWithoutCollaborationGuidance(prompt string) string {
 
 func systemPromptWithCollaboratorIdentity(prompt, handle, role string) string {
 	return promptassembly.WithCollaboratorIdentity(prompt, handle, role)
-}
-
-func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
-	return promptassembly.DefaultSkillDiscoveryDirs(workspaceDir)
-}
-
-func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return promptassembly.DiscoverSkillMeta(dirs, workspaceDir)
-}
-
-func DiscoverSkillMetaRequest(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return promptassembly.DiscoverSkillMetaRequest(req)
-}
-
-func DiscoverLegacyPluginSkillCopies(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return promptassembly.DiscoverLegacyPluginSkillCopies(req)
 }
 
 func resolvePromptPath(path string) (string, error) {

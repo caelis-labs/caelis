@@ -47,9 +47,9 @@ func testDesktopWorldWholePackagePrecedence(t *testing.T, identity string) {
 		if len(got.Sources) != 1 || got.Sources[0].ID != "desktop-world" || got.Sources[0].Root != selected.Root || len(got.MCPServerSpecs) != 1 || got.MCPServerSpecs[0].PluginID != "desktop-world" || got.MCPServerSpecs[0].Name != identity || got.MCPServerSpecs[0].PackageRoot != selected.Root || len(got.SkillBundles) != 1 || got.SkillBundles[0].PluginRoot != selected.Root {
 			t.Fatalf("package was split or duplicated: %+v", got)
 		}
-		metas, err := fs.DiscoverPluginBundleMeta(got.SkillBundles)
-		if err != nil || len(metas) != 1 || metas[0].Name != "desktop-world:"+identity || metas[0].LocalName != identity || metas[0].PluginID != "desktop-world" || metas[0].Path != filepath.Join(selected.Root, "skills", identity, "SKILL.md") {
-			t.Fatalf("selected Skill identity/root = %+v, %v", metas, err)
+		metas := fs.DiscoverPluginBundleMeta(got.SkillBundles)
+		if len(metas) != 1 || metas[0].Name != "desktop-world:"+identity || metas[0].LocalName != identity || metas[0].PluginID != "desktop-world" || metas[0].Path != filepath.Join(selected.Root, "skills", identity, "SKILL.md") {
+			t.Fatalf("selected Skill identity/root = %+v", metas)
 		}
 	}
 	assertPair(globalOut, global)
@@ -134,9 +134,9 @@ func testDesktopWorldNewestDefaultKeepsWholePackage(t *testing.T, identity strin
 			if spec.PluginID != selected.ID || spec.PackageRoot != selected.Root || spec.PackageVersion != selected.Version || !PathWithinRoot(selected.Root, spec.Command) || bundle.PluginRoot != selected.Root {
 				t.Fatalf("launch/Skill/source mismatch: %+v, %+v, %+v", selected, spec, bundle)
 			}
-			metas, err := fs.DiscoverPluginBundleMeta(got.SkillBundles)
-			if err != nil || len(metas) != 2 || !PathWithinRoot(selected.Root, metas[0].Path) || metas[0].PluginID != "desktop-world" || metas[0].Name != "desktop-world:"+spec.Name || metas[0].LocalName != spec.Name {
-				t.Fatalf("selected Skill catalog = %+v, %v", metas, err)
+			metas := fs.DiscoverPluginBundleMeta(got.SkillBundles)
+			if len(metas) != 2 || !PathWithinRoot(selected.Root, metas[0].Path) || metas[0].PluginID != "desktop-world" || metas[0].Name != "desktop-world:"+spec.Name || metas[0].LocalName != spec.Name {
+				t.Fatalf("selected Skill catalog = %+v", metas)
 			}
 			if !wantBuiltin && spec.Name != identity {
 				t.Fatalf("external service identity = %q, want %q", spec.Name, identity)

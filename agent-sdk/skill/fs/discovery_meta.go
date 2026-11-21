@@ -13,8 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type Meta = skill.Meta
-
 const maxMetaCacheEntries = 512
 
 var metaCache = struct {
@@ -27,7 +25,7 @@ var metaCache = struct {
 
 type metaCacheEntry struct {
 	used uint64
-	meta Meta
+	meta skill.Meta
 	hash string
 }
 
@@ -54,95 +52,67 @@ func DefaultDiscoveryDirs(workspaceDir string) []string {
 	return out
 }
 
-func DiscoverMetaRequest(req skill.DiscoverRequest) ([]Meta, error) {
+// DiscoverMetaRequest collects readable Skill metadata in discovery order.
+// Unreadable roots and invalid entries are skipped.
+func DiscoverMetaRequest(req skill.DiscoverRequest) []skill.Meta {
 	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
-	pluginMetas, suppressedRegular, err := discoverPluginBundleMeta(req.PluginBundles)
-	if err != nil {
-		return nil, err
-	}
+	pluginMetas, suppressedRegular := discoverPluginBundleMeta(req.PluginBundles)
 	seenNames := map[string]struct{}{}
-	out, err := scanRegularSkillDirs(dirs, func(meta Meta, hash string) (Meta, bool, error) {
-		nameKey := strings.ToLower(strings.TrimSpace(meta.Name))
-		if nameKey == "" {
-			return Meta{}, false, nil
-		}
+	out := scanRegularSkillDirs(dirs, func(meta skill.Meta, hash string) bool {
 		if suppressedRegular[skillIdentityKey(meta.Name, hash)] {
-			return Meta{}, false, nil
+			return false
 		}
+		nameKey := strings.ToLower(meta.Name)
 		if _, ok := seenNames[nameKey]; ok {
-			return Meta{}, false, nil
+			return false
 		}
 		seenNames[nameKey] = struct{}{}
-		meta.Source = skill.SourceRegular
-		meta.LocalName = strings.TrimSpace(meta.Name)
-		return meta, true, nil
+		return true
 	})
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, pluginMetas...)
-	return out, nil
+	return append(out, pluginMetas...)
 }
 
 // DiscoverRootMeta reads metadata for one explicitly selected Skill root. It
 // does not scan siblings or load the Skill body into a model prompt.
-func DiscoverRootMeta(root string) (Meta, error) {
+func DiscoverRootMeta(root string) (skill.Meta, error) {
 	resolved, err := ResolvePath(root)
 	if err != nil {
-		return Meta{}, err
+		return skill.Meta{}, err
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return Meta{}, err
+		return skill.Meta{}, err
 	}
 	if !info.IsDir() {
-		return Meta{}, fmt.Errorf("skill root is not a directory: %s", resolved)
+		return skill.Meta{}, fmt.Errorf("skill root is not a directory: %s", resolved)
 	}
 	path := filepath.Join(resolved, "SKILL.md")
 	meta, _, err := parseMetaHashCached(path)
 	if err != nil {
-		return Meta{}, err
+		return skill.Meta{}, err
 	}
 	meta.Source = skill.SourceRegular
-	meta.LocalName = meta.Name
 	return meta, nil
 }
 
-func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) ([]Meta, error) {
+// DiscoverLegacyPluginCopies identifies regular Skills suppressed by matching plugin copies.
+func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) []skill.Meta {
 	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
-	_, suppressedRegular, err := discoverPluginBundleMeta(req.PluginBundles)
-	if err != nil {
-		return nil, err
-	}
+	_, suppressedRegular := discoverPluginBundleMeta(req.PluginBundles)
 	if len(suppressedRegular) == 0 {
-		return nil, nil
+		return nil
 	}
-	return scanRegularSkillDirs(dirs, func(meta Meta, hash string) (Meta, bool, error) {
-		if !suppressedRegular[skillIdentityKey(meta.Name, hash)] {
-			return Meta{}, false, nil
-		}
-		meta.Source = skill.SourceRegular
-		meta.LocalName = strings.TrimSpace(meta.Name)
-		return meta, true, nil
+	return scanRegularSkillDirs(dirs, func(meta skill.Meta, hash string) bool {
+		return suppressedRegular[skillIdentityKey(meta.Name, hash)]
 	})
 }
 
-func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, error)) ([]Meta, error) {
-	var out []Meta
+func scanRegularSkillDirs(dirs []string, include func(skill.Meta, string) bool) []skill.Meta {
+	var out []skill.Meta
 	seenPaths := map[string]struct{}{}
 	for _, dir := range dirs {
 		resolvedDir, err := ResolvePath(dir)
 		if err != nil {
-			continue
-		}
-		info, err := os.Stat(resolvedDir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			continue
-		}
-		if !info.IsDir() {
 			continue
 		}
 		entries, err := os.ReadDir(resolvedDir)
@@ -150,7 +120,7 @@ func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, e
 			continue
 		}
 		for _, entry := range entries {
-			if entry == nil || !entry.IsDir() {
+			if !entry.IsDir() {
 				continue
 			}
 			skillPath := filepath.Join(resolvedDir, entry.Name(), "SKILL.md")
@@ -160,20 +130,14 @@ func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, e
 			}
 			seenPaths[skillPath] = struct{}{}
 			meta, hash, err := parseMetaHashCached(skillPath)
-			if err != nil {
+			if err != nil || !include(meta, hash) {
 				continue
 			}
-			meta, include, err := visit(meta, hash)
-			if err != nil {
-				return nil, err
-			}
-			if !include {
-				continue
-			}
+			meta.Source = skill.SourceRegular
 			out = append(out, meta)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func discoveryDirs(dirs []string, workspaceDir string) []string {
@@ -205,10 +169,10 @@ func ResolvePath(path string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func parseMetaHashCached(path string) (Meta, string, error) {
+func parseMetaHashCached(path string) (skill.Meta, string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return Meta{}, "", err
+		return skill.Meta{}, "", err
 	}
 	// The same path, size, and timestamp can describe different file contents.
 	sum := sha256.Sum256(raw)
@@ -223,9 +187,9 @@ func parseMetaHashCached(path string) (Meta, string, error) {
 		return cached.meta, cached.hash, nil
 	}
 	metaCache.Unlock()
-	meta, err := parseMetaContent(path, raw)
+	meta, _, err := parseSkillContent(path, raw)
 	if err != nil {
-		return Meta{}, "", err
+		return skill.Meta{}, "", err
 	}
 	metaCache.Lock()
 	metaCache.next++
@@ -252,33 +216,33 @@ func pruneMetaCacheLocked() {
 	}
 }
 
-func parseMetaContent(path string, raw []byte) (Meta, error) {
-	meta, _, err := parseSkillContent(path, raw)
-	return meta, err
+type frontMatter struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
 }
 
-func parseSkillContent(path string, raw []byte) (Meta, string, error) {
+func parseSkillContent(path string, raw []byte) (skill.Meta, string, error) {
 	content := normalizeText(string(raw))
 	if content == "" {
-		return Meta{}, "", fmt.Errorf("empty SKILL.md: %s", path)
+		return skill.Meta{}, "", fmt.Errorf("empty SKILL.md: %s", path)
 	}
-	frontMatter, body, err := parseFrontMatter(content)
+	front, body, err := parseFrontMatter(content)
 	if err != nil {
-		return Meta{}, "", fmt.Errorf("invalid skill frontmatter %s: %w", path, err)
+		return skill.Meta{}, "", fmt.Errorf("invalid skill frontmatter %s: %w", path, err)
 	}
 	name := firstNonEmpty(
-		frontMatter["name"],
+		front.Name,
 		firstHeading(body),
 		filepath.Base(filepath.Dir(path)),
 	)
 	description := firstNonEmpty(
-		frontMatter["description"],
+		front.Description,
 		firstParagraph(body),
 	)
 	if name == "" || description == "" {
-		return Meta{}, "", fmt.Errorf("invalid skill metadata: %s", path)
+		return skill.Meta{}, "", fmt.Errorf("invalid skill metadata: %s", path)
 	}
-	return Meta{
+	return skill.Meta{
 		Name:        strings.TrimSpace(name),
 		Description: strings.TrimSpace(description),
 		Path:        path,
@@ -286,10 +250,10 @@ func parseSkillContent(path string, raw []byte) (Meta, string, error) {
 	}, strings.TrimSpace(body), nil
 }
 
-func parseFrontMatter(content string) (map[string]string, string, error) {
+func parseFrontMatter(content string) (frontMatter, string, error) {
 	trimmed := strings.TrimLeft(content, "\n\r\t ")
 	if !strings.HasPrefix(trimmed, "---\n") {
-		return map[string]string{}, content, nil
+		return frontMatter{}, content, nil
 	}
 	rest := strings.TrimPrefix(trimmed, "---\n")
 	idx := strings.Index(rest, "\n---\n")
@@ -297,22 +261,18 @@ func parseFrontMatter(content string) (map[string]string, string, error) {
 		if strings.HasSuffix(rest, "\n---") {
 			idx = len(rest) - len("\n---")
 		} else {
-			return nil, "", fmt.Errorf("unterminated YAML frontmatter")
+			return frontMatter{}, "", fmt.Errorf("unterminated YAML frontmatter")
 		}
 	}
-	front := rest[:idx]
 	body := ""
 	if idx+len("\n---\n") <= len(rest) {
 		body = rest[idx+len("\n---\n"):]
 	}
-	var fields struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
+	var fields frontMatter
+	if err := yaml.Unmarshal([]byte(rest[:idx]), &fields); err != nil {
+		return frontMatter{}, "", err
 	}
-	if err := yaml.Unmarshal([]byte(front), &fields); err != nil {
-		return nil, "", err
-	}
-	return map[string]string{"name": fields.Name, "description": fields.Description}, body, nil
+	return fields, body, nil
 }
 
 func firstHeading(content string) string {

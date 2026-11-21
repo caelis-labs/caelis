@@ -46,19 +46,10 @@ func CloneToolSpecs(in []ToolSpec) []ToolSpec {
 			fn.Parameters = jsonvalue.CloneMap(spec.Function.Parameters)
 			cp.Function = &fn
 		}
-		if spec.ProviderDefined != nil {
-			defined := *spec.ProviderDefined
-			defined.ProviderDetails = cloneRawMessageMap(spec.ProviderDefined.ProviderDetails)
-			cp.ProviderDefined = &defined
-		}
 		if spec.ProviderExecuted != nil {
 			executed := *spec.ProviderExecuted
 			executed.ProviderDetails = cloneRawMessageMap(spec.ProviderExecuted.ProviderDetails)
 			cp.ProviderExecuted = &executed
-		}
-		if spec.MCP != nil {
-			mcp := *spec.MCP
-			cp.MCP = &mcp
 		}
 		out = append(out, cp)
 	}

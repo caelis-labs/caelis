@@ -272,11 +272,32 @@ func scoreSkillMeta(query string, meta skill.Meta, workspace string) (int, bool)
 }
 
 func skillCompletionCandidate(meta skill.Meta) controlprompt.CompletionCandidate {
+	name := strings.TrimSpace(meta.Name)
+	label := strings.TrimSpace(meta.LocalName)
+	if label == "" {
+		label = name
+	}
+	kind := "Skill"
+	detail := strings.Join(strings.Fields(meta.Description), " ")
+	source := strings.TrimSpace(meta.PluginID)
+	if source == "" {
+		source = strings.TrimSpace(meta.Namespace)
+	}
+	if source != "" || strings.EqualFold(strings.TrimSpace(meta.Source), skill.SourcePlugin) {
+		kind = "Plugin"
+		if source != "" {
+			if detail == "" {
+				detail = source
+			} else {
+				detail = source + " · " + detail
+			}
+		}
+	}
 	return controlprompt.CompletionCandidate{
-		Value:   strings.TrimSpace(meta.Name),
-		Display: skill.DisplayName(meta),
-		Kind:    skill.DisplayKind(meta),
-		Detail:  skill.DisplayDetail(meta),
+		Value:   name,
+		Display: label,
+		Kind:    kind,
+		Detail:  detail,
 		Path:    strings.TrimSpace(meta.Path),
 	}
 }

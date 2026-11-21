@@ -86,22 +86,7 @@ func TestNativeMCPAutoReloadIsolatesBrokenFilesAndServersHTTP(t *testing.T) {
 	promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-before", "BASIC")
 	waitAtomicApplicationMCPRunning(t, ctx, host.host, created.SessionID, "documents")
 	if builtinComputerUseSupported() {
-		for {
-			status, err := host.host.SessionMCPStatus(ctx, created.SessionID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if slices.ContainsFunc(status.Servers, func(server sessionprofile.MCPServerStatus) bool {
-				return server.PluginID == "desktop-world" && server.Ready
-			}) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			case <-time.After(15 * time.Millisecond):
-			}
-		}
+		waitBuiltinDesktopWorldMCP(t, ctx, host.host, created.SessionID)
 		promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-baseline", "BASIC")
 	}
 	beforeTools := provider.lastTools()
@@ -216,6 +201,11 @@ func TestApplicationInheritedCapabilitiesAreAdditiveAndReloadHTTP(t *testing.T) 
 	}
 	defer feed.Subscription.Close()
 	promptAtomicCapabilityClient(t, ctx, client, id, "inherit-before", "BASIC")
+	waitAtomicApplicationMCPRunning(t, ctx, client, id, "documents")
+	if builtinComputerUseSupported() {
+		waitBuiltinDesktopWorldMCP(t, ctx, client, id)
+		promptAtomicCapabilityClient(t, ctx, client, id, "inherit-baseline", "BASIC")
+	}
 	before := atomicSystemInstructions(t, provider.lastRequest())
 	beforeTools := provider.lastTools()
 	for _, name := range []string{"host-skill", "workspace-skill", "atomic-skill"} {
@@ -227,7 +217,6 @@ func TestApplicationInheritedCapabilitiesAreAdditiveAndReloadHTTP(t *testing.T) 
 	if got := provider.lastRequest(); !strings.Contains(got, "EXPLICIT_SKILL_BODY") || strings.Contains(got, "DEFAULT_ATOMIC_SKILL_BODY") {
 		t.Fatal("explicit Skill did not take precedence over the inherited Skill")
 	}
-	waitAtomicApplicationMCPRunning(t, ctx, client, id, "documents")
 	verifyDocuments := func(wantInherited bool) {
 		t.Helper()
 		status, err := client.SessionMCPStatus(ctx, id)
@@ -259,8 +248,15 @@ func TestApplicationInheritedCapabilitiesAreAdditiveAndReloadHTTP(t *testing.T) 
 	}
 	writeAtomicSkill(t, filepath.Join(projectSkills, "reload"), "reload-skill", "INHERITED_RELOAD_BODY")
 	promptAtomicCapabilityClient(t, ctx, client, id, "inherit-load-new", "RELOAD_SKILL")
-	if got := provider.lastRequest(); !strings.Contains(got, "INHERITED_RELOAD_BODY") || atomicSystemInstructions(t, got) != before || provider.lastTools() != beforeTools {
-		t.Fatal("live Skill loading or system-prefix stability failed")
+	got := provider.lastRequest()
+	if !strings.Contains(got, "INHERITED_RELOAD_BODY") {
+		t.Fatal("model context lacks the live inherited Skill body")
+	}
+	if atomicSystemInstructions(t, got) != before {
+		t.Fatal("live Skill loading changed the system instructions")
+	}
+	if tools := provider.lastTools(); tools != beforeTools {
+		t.Fatalf("live capability reload changed tool declarations: got %s, want %s", tools, beforeTools)
 	}
 	emptyServers, emptyDirs := []sessionprofile.MCPServer{}, []string{}
 	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(id, sessionprofile.UpdateConfigurationRequest{

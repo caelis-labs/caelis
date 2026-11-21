@@ -29,6 +29,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
@@ -3276,7 +3277,7 @@ type blockingSessionControl struct {
 
 func (c *blockingSessionControl) HandoffController(
 	ctx context.Context,
-	_ agent.HandoffControllerRequest,
+	_ controlplane.HandoffControllerRequest,
 ) (session.Session, error) {
 	close(c.entered)
 	select {

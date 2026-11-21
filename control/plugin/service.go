@@ -438,10 +438,7 @@ func pluginSkillDisplayNames(p InstalledPlugin) []string {
 	if len(bundles) == 0 {
 		return nil
 	}
-	metas, err := skillfs.DiscoverPluginBundleMeta(bundles)
-	if err != nil {
-		return nil
-	}
+	metas := skillfs.DiscoverPluginBundleMeta(bundles)
 	out := make([]string, 0, len(metas))
 	for _, meta := range metas {
 		if name := strings.TrimSpace(meta.Name); name != "" {

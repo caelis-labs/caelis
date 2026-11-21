@@ -124,11 +124,11 @@ func (m *guardianABModel) Generate(ctx context.Context, req *model.Request) iter
 		for e, err := range model.Generate(ctx, m.inner, req) {
 			if e != nil && e.Response != nil {
 				m.mu.Lock()
-				m.observations = append(m.observations, guardianDiagnosticObservation{Effort: req.Reasoning.Effort, FinishReason: e.FinishReason, RawFinishReason: e.RawFinishReason, Usage: e.Usage, TextBytes: len(e.Response.Message.TextContent()), ReasoningBytes: len(e.Response.Message.ReasoningText())})
+				m.observations = append(m.observations, guardianDiagnosticObservation{Effort: req.Reasoning.Effort, FinishReason: e.FinishReason, RawFinishReason: e.RawFinishReason, Usage: e.Usage, TextBytes: len(e.Message.TextContent()), ReasoningBytes: len(e.Message.ReasoningText())})
 				m.mu.Unlock()
 			}
 			if e != nil && e.Response != nil {
-				for _, p := range e.Response.Message.Parts {
+				for _, p := range e.Message.Parts {
 					if p.ToolUse != nil {
 						m.mu2.Lock()
 						m.toolUses++

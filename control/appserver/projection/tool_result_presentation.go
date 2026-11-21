@@ -126,7 +126,7 @@ func projectedToolResultText(profile projectedToolProfile, known bool, input, ou
 	case projectedResultTask:
 		observedStatus := firstNonEmpty(projectedToolString(output["state"]), status)
 		if projectedToolStatusFinal(observedStatus, isErr) {
-			if summary := display.CleanSubagentFinalOutput(projectedToolString(output["final_message"])); summary != "" {
+			if summary := normalizeSubagentFinalOutput(projectedToolString(output["final_message"])); summary != "" {
 				return summary
 			}
 		}
@@ -267,7 +267,7 @@ func projectedSpawnResultText(output map[string]any, status string, isErr bool) 
 		}
 	}
 	if projectedToolStatusFinal(status, isErr) {
-		return display.CleanSubagentFinalOutput(firstNonEmpty(
+		return normalizeSubagentFinalOutput(firstNonEmpty(
 			display.SpawnDisplayTextCandidate(projectedToolString(output["final_message"])),
 			display.SpawnDisplayTextCandidate(projectedToolString(output["finalMessage"])),
 			display.SpawnDisplayTextCandidate(projectedToolString(output["result"])),
@@ -281,6 +281,14 @@ func projectedSpawnResultText(output map[string]any, status string, isErr bool) 
 		projectedSpawnStreamText(projectedToolRawString(output["output_preview"])),
 		projectedSpawnStreamText(projectedToolRawString(output["stderr"])),
 	)
+}
+
+// normalizeSubagentFinalOutput normalizes transport line endings without
+// interpreting the Final Message as display markup. Final Messages are
+// canonical user-visible content, so Markdown structure, blank lines, and
+// repeated text must survive unchanged.
+func normalizeSubagentFinalOutput(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 }
 
 func projectedSpawnStreamText(text string) string {

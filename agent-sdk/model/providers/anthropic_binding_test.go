@@ -100,7 +100,7 @@ func TestPrefixBoundThinkingContinuesAfterPrefixChanges(t *testing.T) {
 							t.Fatal(err)
 						}
 						if event.Response != nil {
-							first = event.Response.Message
+							first = event.Message
 						}
 					}
 					request.Messages = append(request.Messages, first, model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("search_1", "ToolSearch", map[string]any{"tools": []string{"lookup"}}, false)))
@@ -152,7 +152,11 @@ func TestSonnet55ThinkingBindingLeavesOtherModelsUnchanged(t *testing.T) {
 			defer server.Close()
 			llm := newAnthropic(Config{Provider: "anthropic", Model: name, BaseURL: server.URL, HTTPClient: server.Client(), Headers: map[string]string{"Anthropic-Beta": "existing-beta"}}, "synthetic-token")
 			part := model.NewReasoningPart("prior reasoning", model.ReasoningVisibilityVisible)
-			part.Reasoning.Replay = anthropicReplayMeta("anthropic", "unchanged-signature")
+			part.Reasoning.Replay = &model.ReplayMeta{
+				Provider: "anthropic",
+				Kind:     anthropicReplayKindThinkingSignature,
+				Token:    "unchanged-signature",
+			}
 			for _, err := range llm.Generate(context.Background(), &model.Request{
 				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hello"), model.NewMessage(model.RoleAssistant, part, model.NewTextPart("done")), model.NewTextMessage(model.RoleUser, "continue")},
 				Reasoning: model.ReasoningConfig{Effort: "off"},

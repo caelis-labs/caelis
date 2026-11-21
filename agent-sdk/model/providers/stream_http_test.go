@@ -152,9 +152,8 @@ func TestMaintainedResponsesProvidersBoundHeaderAndIdleTimeoutRetries(t *testing
 
 func newTimeoutTestLLM(t *testing.T, api APIType, transport *streamTimeoutTestTransport, timeouts Config) model.LLM {
 	t.Helper()
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias:                       "timeout-test",
+	llm, err := New(Config{
+
 		Provider:                    "test",
 		API:                         api,
 		Model:                       "test-model",
@@ -172,10 +171,7 @@ func newTimeoutTestLLM(t *testing.T, api APIType, transport *streamTimeoutTestTr
 			RateLimitBaseDelay:  time.Nanosecond,
 			RateLimitMaxDelay:   time.Nanosecond,
 		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("timeout-test")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
