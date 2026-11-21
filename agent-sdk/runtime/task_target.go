@@ -251,6 +251,12 @@ func (t commandControlTarget) Wait(ctx context.Context, req taskapi.ControlReque
 }
 
 func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	t.task.mu.Lock()
+	cleanupPending := t.task.startCleanupErr != nil
+	t.task.mu.Unlock()
+	if cleanupPending {
+		return taskapi.Snapshot{}, fmt.Errorf("command task %q does not accept stdin", t.task.handle)
+	}
 	if t.task.approvalWithoutSession() {
 		return taskapi.Snapshot{}, fmt.Errorf("command task %q has not started and does not accept stdin", t.task.handle)
 	}

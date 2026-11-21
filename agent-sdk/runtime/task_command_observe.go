@@ -360,14 +360,28 @@ func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask)
 	return cursor, nil
 }
 
-// reconcileCommandStatus dispatches a sandbox status to one of the two
-// lifecycle owners. It intentionally contains no observation or finalization
-// behavior of its own.
+// reconcileCommandStatus applies a sandbox observation without replacing a
+// startup failure with the result of its cleanup process.
 func (tm *taskRuntime) reconcileCommandStatus(
 	ctx context.Context,
 	task *commandTask,
 	status sandbox.SessionStatus,
 ) (taskapi.Snapshot, error) {
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
+	}
+	task.mu.Lock()
+	startErr := task.startCleanupErr
+	if startErr != nil && status.Running {
+		status.SupportsInput = false
+		snapshot := task.snapshotLocked(status)
+		task.mu.Unlock()
+		return snapshot, nil
+	}
+	task.mu.Unlock()
+	if startErr != nil {
+		return tm.finalizeCommandStartCleanup(ctx, task, status, startErr)
+	}
 	if status.Running {
 		return tm.observeRunningCommand(ctx, task, status)
 	}

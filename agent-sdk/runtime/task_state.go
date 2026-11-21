@@ -173,10 +173,13 @@ type commandTask struct {
 	mu           sync.Mutex
 	state        taskapi.State
 	running      bool
-	output       string
-	outputState  commandOutputState
-	result       map[string]any
-	metadata     map[string]any
+	// A failed start can leave a live Session. Keep the startup cause until
+	// the producer's exit is proven and the failed result is recorded.
+	startCleanupErr error
+	output          string
+	outputState     commandOutputState
+	result          map[string]any
+	metadata        map[string]any
 
 	outputObserver output.Observer
 	outputTerminal bool

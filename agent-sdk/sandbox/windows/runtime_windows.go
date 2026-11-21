@@ -1168,9 +1168,12 @@ type windowsSession struct {
 	waitErr       error
 	finalizing    bool
 	callbacks     int
-	doneClosed    bool
-	startedAt     time.Time
-	updatedAt     time.Time
+	// Output can be finalized by a bounded termination before the root wait
+	// and Job drain finish. Only both together close done.
+	cleanupComplete bool
+	doneClosed      bool
+	startedAt       time.Time
+	updatedAt       time.Time
 }
 
 func (s *windowsSession) Ref() sandbox.SessionRef {
@@ -1184,7 +1187,7 @@ func (s *windowsSession) Terminal() sandbox.TerminalRef {
 func (s *windowsSession) WriteInput(_ context.Context, input []byte) error {
 	s.mu.RLock()
 	writer := s.stdin
-	running := s.running
+	running := s.running && !s.finalizing
 	s.mu.RUnlock()
 	if !running {
 		return fmt.Errorf("impl/sandbox/windows: session %q is not running", s.ref.SessionID)
@@ -1245,8 +1248,8 @@ func (s *windowsSession) statusLocked() sandbox.SessionStatus {
 	return sandbox.SessionStatus{
 		SessionRef:    s.ref,
 		Terminal:      s.terminal,
-		Running:       s.running,
-		SupportsInput: s.supportsInput && s.running,
+		Running:       !s.doneClosed,
+		SupportsInput: s.supportsInput && s.running && !s.finalizing,
 		ExitCode:      s.exitCode,
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
@@ -1279,7 +1282,7 @@ func (s *windowsSession) Result(_ context.Context) (sandbox.CommandResult, error
 		Route:    sandbox.RouteSandbox,
 		Backend:  sandbox.BackendWindows,
 	}
-	if s.running {
+	if !s.doneClosed {
 		return result, fmt.Errorf("impl/sandbox/windows: session %q is still running", s.ref.SessionID)
 	}
 	if s.waitErr != nil {
@@ -1296,10 +1299,10 @@ func (s *windowsSession) Terminate(ctx context.Context) error {
 	cmd := s.cmd
 	ptyProcess := s.conpty
 	atomicProcess := s.jobProcess
-	running := s.running
+	settled := s.doneClosed
 	finalizing := s.finalizing
 	s.mu.RUnlock()
-	if !running || finalizing {
+	if settled || finalizing {
 		return nil
 	}
 	s.cancel()
@@ -1385,14 +1388,18 @@ func (s *windowsSession) waitForExit() {
 		var exitCode int
 		exitCode, err = s.conpty.Wait()
 		s.mu.Lock()
-		s.exitCode = exitCode
+		if s.running && !s.finalizing {
+			s.exitCode = exitCode
+		}
 		s.mu.Unlock()
 	} else if s.jobProcess != nil {
 		jobBacked = true
 		var exitCode int
 		exitCode, err = s.jobProcess.WaitRoot()
 		s.mu.Lock()
-		s.exitCode = exitCode
+		if s.running && !s.finalizing {
+			s.exitCode = exitCode
+		}
 		s.mu.Unlock()
 		s.jobProcess.ClosePipes()
 	} else {
@@ -1463,15 +1470,12 @@ func (s *windowsSession) retryProcessTreeDrain() {
 }
 
 func (s *windowsSession) finalize(err error, forced bool) {
-	selected := false
 	s.finalizeOnce.Do(func() {
-		selected = true
+		s.finalizeOutput(err, forced)
 	})
-	if !selected {
-		<-s.done
-		return
-	}
+}
 
+func (s *windowsSession) finalizeOutput(err error, forced bool) {
 	s.mu.Lock()
 	s.finalizing = true
 	s.mu.Unlock()
@@ -1511,16 +1515,13 @@ func (s *windowsSession) finalize(err error, forced bool) {
 		}
 	}
 	s.mu.Lock()
-	if !s.doneClosed {
-		s.stdoutCursor = stdoutCursor
-		s.stderrCursor = stderrCursor
-		s.running = false
-		s.finalizing = false
-		s.updatedAt = time.Now()
-		s.doneClosed = true
-		close(s.done)
-		s.notifyOutputLocked()
-	}
+	s.stdoutCursor = stdoutCursor
+	s.stderrCursor = stderrCursor
+	s.running = false
+	s.finalizing = false
+	s.updatedAt = time.Now()
+	s.finishIfSettledLocked()
+	s.notifyOutputLocked()
 	s.mu.Unlock()
 }
 
@@ -1529,7 +1530,23 @@ func (s *windowsSession) releaseRuntimeUse() {
 		if s.releaseUse != nil {
 			s.releaseUse()
 		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.cleanupComplete = true
+		if s.finishIfSettledLocked() {
+			s.notifyOutputLocked()
+		}
 	})
+}
+
+func (s *windowsSession) finishIfSettledLocked() bool {
+	if s.doneClosed || s.running || !s.cleanupComplete || s.done == nil {
+		return false
+	}
+	s.doneClosed = true
+	s.updatedAt = time.Now()
+	close(s.done)
+	return true
 }
 
 func (s *windowsSession) forceTerminated(err error) {
@@ -1587,7 +1604,7 @@ func (s *windowsSession) closeOutputReaders() {
 func (s *windowsSession) publishOutput(stream string, cursor int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.doneClosed {
+	if !s.running {
 		return
 	}
 	switch stream {

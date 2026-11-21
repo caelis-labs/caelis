@@ -45,13 +45,16 @@ func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.
 	task.mu.Lock()
 	snapshot := terminalCommandSnapshotLocked(task, status)
 	producerPending := task.running && !taskapi.IsTerminalState(task.state)
+	cleanupPending := task.startCleanupErr != nil
 	task.mu.Unlock()
 	// A yielded Task's durable lifecycle may still say running. Terminal reads
 	// inspect the producer without consuming model output or finalizing the
-	// Task. A non-running producer status is a settled exit: Sessions report it
-	// only after the process exited and its output completed, so it is
-	// authoritative for this point-in-time terminal snapshot.
-	if producerPending && commandSession != nil && !status.Running {
+	// Task. Status reports the process's settled exit independently of the
+	// startup outcome recorded by the Task.
+	if cleanupPending {
+		snapshot.Running = status.Running
+		snapshot.SupportsInput = false
+	} else if producerPending && commandSession != nil && !status.Running {
 		snapshot.Running = false
 		snapshot.SupportsInput = false
 		snapshot.State = string(stateFromStatus(status))
@@ -69,7 +72,7 @@ func (s *terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.
 			return terminal.Snapshot{}, err
 		}
 		task.mu.Lock()
-		settled := taskapi.IsTerminalState(task.state)
+		settled := taskapi.IsTerminalState(task.state) && task.startCleanupErr == nil
 		task.mu.Unlock()
 		if settled {
 			return s.Read(ctx, ref)

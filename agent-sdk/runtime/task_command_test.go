@@ -829,6 +829,10 @@ func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
 			if startErr != nil && final.Result["error"] != startErr.Error() {
 				t.Fatalf("late exit lost startup error: %+v", final.Result)
 			}
+			entry, err = store.Get(t.Context(), got.Ref.TaskID)
+			if err != nil || entry.State != taskapi.StateFailed || entry.Terminal.SessionID != handle.Ref().SessionID {
+				t.Fatalf("persisted late exit = %+v, %v; want startup failure and original identity", entry, err)
+			}
 			if len(lifecycle.events) != 1 || !lifecycle.events[0].Closed || lifecycle.events[0].State != string(taskapi.StateFailed) {
 				t.Fatalf("terminal output = %+v; want one startup failure after exit", lifecycle.events)
 			}

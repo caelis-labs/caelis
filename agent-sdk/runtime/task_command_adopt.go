@@ -84,8 +84,15 @@ func (tm *taskRuntime) commandFromDurableEntry(entry *taskapi.Entry) (*commandTa
 	tm.mu.RUnlock()
 	if current != nil {
 		current.mu.Lock()
-		liveContinuation := current.continuation.live() && current.requestDigest == taskSpecString(entry.Spec, "command_request_digest")
+		sameRequest := current.requestDigest == taskSpecString(entry.Spec, "command_request_digest")
+		// The durable startup result may be terminal while the original
+		// process still needs cleanup. A completed placeholder cannot own it.
+		cleanupPending := sameRequest && current.startCleanupErr != nil
+		liveContinuation := sameRequest && current.continuation.live()
 		current.mu.Unlock()
+		if cleanupPending {
+			return current, nil
+		}
 		if liveContinuation {
 			applyCommandEntry(current, entry)
 			return current, nil

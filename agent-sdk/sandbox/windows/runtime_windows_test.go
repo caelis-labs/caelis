@@ -226,6 +226,7 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 		done:      make(chan struct{}),
 	}
 
+	session.releaseRuntimeUse()
 	session.forceTerminated(waitErr)
 	status, err := session.Wait(context.Background(), time.Second)
 	if err != nil {
@@ -399,6 +400,7 @@ func TestWindowsSessionTerminalObservationIncludesDecoderTail(t *testing.T) {
 		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
 	}
 
+	session.releaseRuntimeUse()
 	forceDone := make(chan struct{})
 	go func() {
 		session.forceTerminated(errors.New("forced after partial output"))
@@ -457,6 +459,7 @@ func TestWindowsSessionConcurrentFinalizersWaitForTerminalPublish(t *testing.T) 
 		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
 	}
 
+	session.releaseRuntimeUse()
 	go session.finalize(normalErr, false)
 	<-tailStarted
 	forceDone := make(chan struct{})
@@ -500,6 +503,7 @@ func TestWindowsSessionTailCallbackCanTerminateWithoutDeadlock(t *testing.T) {
 		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
 	}
 
+	session.releaseRuntimeUse()
 	go session.finalize(nil, false)
 	select {
 	case err := <-callbackDone:

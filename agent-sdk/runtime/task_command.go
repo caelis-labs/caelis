@@ -312,6 +312,10 @@ func (tm *taskRuntime) startClaimedCommand(
 	runningEntry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	if err := tm.persistTaskEntry(ctx, runningEntry); err != nil {
+		task.mu.Lock()
+		task.startCleanupErr = err
+		task.supportsInput = false
+		task.mu.Unlock()
 		status, settled, cleanupErr := terminateFailedCommandStart(ctx, sessionHandle)
 		if !settled {
 			return tm.retainCommandWithUnconfirmedExit(ctx, task, status, err, cleanupErr)
@@ -419,11 +423,15 @@ func (tm *taskRuntime) snapshotExistingCommand(ctx context.Context, task *comman
 	}
 	task.mu.Lock()
 	running := task.running
+	cleanupPending := task.startCleanupErr != nil
 	task.mu.Unlock()
-	if !running {
+	if !running || cleanupPending {
 		status, err := task.session.Status(ctx)
 		if err != nil {
 			return task.snapshotWithoutSession(tm.runtime.now()), err
+		}
+		if cleanupPending {
+			return tm.reconcileCommandStatus(ctx, task, status)
 		}
 		task.mu.Lock()
 		snapshot := task.snapshotLocked(status)
@@ -458,6 +466,7 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 	}
 	task.mu.Lock()
 	task.session = handle
+	task.startCleanupErr = startErr
 	task.ref.SessionID = strings.TrimSpace(handle.Ref().SessionID)
 	task.ref.TerminalID = strings.TrimSpace(handle.Terminal().TerminalID)
 	task.metadata["session_id"] = task.ref.SessionID
@@ -522,9 +531,12 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 	persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
 	task.mu.Lock()
 	task.revision = entry.Revision
+	if persistErr == nil {
+		task.startCleanupErr = nil
+	}
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
-	if persistErr == nil {
+	if persistErr == nil && tm.store != nil {
 		tm.removeCommandTask(task)
 	}
 	return snapshot, persistErr
@@ -596,7 +608,6 @@ func (tm *taskRuntime) retainCommandWithUnconfirmedExit(
 		"state": string(taskapi.StateUnknownOutcome),
 		"error": reason,
 	}
-	task.emitOutputTerminalLocked(taskapi.StateUnknownOutcome, status, false)
 	task.notifyCommandOutputChangeLocked()
 	entry := task.entrySnapshot(now)
 	task.mu.Unlock()
@@ -632,6 +643,12 @@ func (tm *taskRuntime) reconcileCommandWaitError(ctx context.Context, task *comm
 		return fallback, waitErr
 	}
 	status, statusErr := task.session.Status(context.WithoutCancel(ctx))
+	task.mu.Lock()
+	cleanupPending := task.startCleanupErr != nil
+	task.mu.Unlock()
+	if cleanupPending && (statusErr != nil || status.Running) {
+		return fallback, errors.Join(waitErr, statusErr)
+	}
 	if statusErr != nil {
 		snapshot, persistErr := tm.markCommandUnknown(context.WithoutCancel(ctx), task, errors.Join(waitErr, statusErr))
 		return snapshot, errors.Join(waitErr, statusErr, persistErr)

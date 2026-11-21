@@ -232,7 +232,7 @@ func (m *Manager) borrowClient(ctx context.Context, remote *MCPTool) (func(), er
 }
 
 // retireLocked stops admission before waiting for calls which already borrowed
-// the client. A startup that has not published its client cleans up itself.
+// the client. Without an installed client, initialization owns its cleanup.
 func (m *Manager) retireLocked(server *managedServer) {
 	server.revoked = true
 	server.cancel()
@@ -289,7 +289,12 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 			refreshErr = client.startupFailure("tools/list", refreshErr)
 		}
 		m.mu.Lock()
-		if m.closed || server.revoked || parent.Err() != nil {
+		if m.closed || server.revoked {
+			// Retirement or Manager.Close owns the installed client.
+			m.mu.Unlock()
+			return
+		}
+		if parent.Err() != nil {
 			m.mu.Unlock()
 			_ = client.Close()
 			return
