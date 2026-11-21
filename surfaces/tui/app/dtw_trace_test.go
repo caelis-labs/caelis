@@ -20,9 +20,10 @@ func desktopTraceEvents() []*session.Event {
 			ID: id, Name: name, Status: "completed", Parent: parent, Binding: &binding,
 			Input: map[string]any{"app": "fixture.app", "source": "if (false) await app.quit({}); return 42;"},
 			Result: &tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{
-				"execution_id":"dtw-fixture-receipt","result":{"operation":"quit"},
+				"app":"fixture.app","execution_id":"exe_fixture_1","status":"completed",
+				"result":{"operation":"scene.quit","private":"SECRET_OUTPUT"},
 				"effects":{"dispatch":{"dispatched":2,"unknown":1},"interrupted":1,
-				"acknowledgements":[{"call":1,"operation":"typeText","confirmed":{"private":"SECRET_OUTPUT"}}]}}
+				"acknowledgements":[{"call":1,"operation":"scene.click","confirmed":"element_focused"}]}}
 			`)}}},
 		}}
 	}
@@ -38,7 +39,7 @@ func desktopTraceEvents() []*session.Event {
 }
 
 func TestDesktopWorldTraceRendersForNativeAndScriptOnlyFromBoundSource(t *testing.T) {
-	const summary = "dtw__exec · typeText, 2 dispatched, 1 unknown, 1 interrupted · fixture.app"
+	const summary = "dtw__exec · click, 2 dispatched, 1 unknown, 1 interrupted · fixture.app"
 	for _, replay := range []bool{false, true} {
 		m, block := groupedCanonicalModel(t, desktopTraceEvents(), "main", replay)
 		ctx := m.blockRenderContext(110)
@@ -46,8 +47,10 @@ func TestDesktopWorldTraceRendersForNativeAndScriptOnlyFromBoundSource(t *testin
 		if strings.Count(text, summary) != 2 {
 			t.Fatalf("expected compact native and nested summaries (replay=%t):\n%s", replay, text)
 		}
-		if strings.Contains(text, "SECRET_OUTPUT") || strings.Contains(text, "dtw__exec · quit") {
-			t.Fatalf("unobserved code or private receipt leaked into the header:\n%s", text)
+		for _, hidden := range []string{"scene.", "element_focused", "dtw__exec · quit", "SECRET_OUTPUT"} {
+			if strings.Contains(text, hidden) {
+				t.Fatalf("unexpected %q in collapsed trace (replay=%t):\n%s", hidden, replay, text)
+			}
 		}
 		clickScriptToken(t, m, block, ctx, acpToolPanelClickToken("dtw-nested"))
 		if got := joinRenderedPlain(block.Render(ctx)); !strings.Contains(got, "if (false) await app.quit") {

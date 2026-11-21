@@ -66,9 +66,14 @@ func desktopWorldActions(result *tool.Result) string {
 	}
 	var labels []string
 	for _, acknowledgement := range data.Effects.Acknowledgements {
-		switch acknowledgement.Operation {
+		// DTW copies the ledger operation (scene.<method>) into the acknowledgement.
+		method, ok := strings.CutPrefix(acknowledgement.Operation, "scene.")
+		if !ok {
+			continue
+		}
+		switch method {
 		case "click", "setValue", "move", "drag", "typeText", "keypress", "scroll", "focus", "quit":
-			labels = append(labels, acknowledgement.Operation)
+			labels = append(labels, method)
 		}
 		if len(labels) == 3 {
 			break

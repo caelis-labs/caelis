@@ -165,6 +165,55 @@ return {contract:true};`)
 	}
 }
 
+func TestCodeModeSearchRefreshesModelFunctionInCurrentScript(t *testing.T) {
+	source := &changingBindingSource{}
+	makeRemote := func(version, field string) tool.NamedTool {
+		def := fixtureMCPDefinition(version)
+		def.Metadata[mcp.MetadataModelFunction] = true
+		def.Description = "Read docs " + version
+		def.InputSchema = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []string{field},
+			"properties": map[string]any{field: map[string]any{"type": "string"}},
+		}
+		return tool.NamedTool{Def: def, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			if binding := toolbinding.Target(ctx); binding == nil || *binding != mcp.BindingForDefinition(def) {
+				return tool.Result{}, fmt.Errorf("wrong canonical binding for %s: %+v", version, binding)
+			}
+			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: call.Input}}}, nil
+		}}
+	}
+	old := makeRemote("v1", "oldValue")
+	current := makeRemote("v2", "newValue")
+	source.publish(old)
+	publish := tool.NamedTool{Def: tool.Definition{Name: "PublishRefresh", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		source.publish(current)
+		return tool.Result{}, nil
+	}}
+	event, events := runSearchContractResult(t, source, []tool.Tool{old, publish}, `
+if((await docs__read({oldValue:"old"})).data.oldValue!=="old")throw Error("old binding unavailable");
+await PublishRefresh({});
+let stale;
+try { await docs__read({oldValue:"stale"}); } catch (e) { stale=e.code; }
+if(stale!=="stale_revision")throw Error("expected stale binding before search: "+stale);
+const page=await tools.search({query:"docs read"});
+if(page.tools.length!==1||page.tools[0].description!=="Read docs v2")throw Error("directory did not refresh");
+const entry=await tools.search({name:"docs__read"});
+if(entry.input_schema.required[0]!=="newValue")throw Error("schema did not refresh");
+{
+  const docs__read=0;
+  const args={newValue:"current"};
+  const result=await eval(entry.call_path);
+  return {contract:result.data.newValue==="current"};
+}`)
+	result, _ := event.Tool.Output["result"].(map[string]any)
+	if event.Meta[codemode.MetadataScriptCompletion] != "completed" || result["contract"] != true {
+		t.Fatalf("script did not recover from stale binding: %+v", event.Tool.Output)
+	}
+	if binding := codeModeBindings(events)[old.Def.Name]; binding != mcp.BindingForDefinition(current.Def) {
+		t.Fatalf("search did not retain the refreshed binding: %+v", binding)
+	}
+}
+
 func TestCodeModeSearchContractPagination(t *testing.T) {
 	source := &runtimeDeferredSource{}
 	for index := 0; index < 20; index++ {
@@ -214,18 +263,18 @@ func TestCodeModeSearchRanksServicesAndMethodsAndBatchesExactSchemas(t *testing.
 	events := runSearchContract(t, source, []tool.Tool{native}, `
 const query="record service get record";
 const start=await tools.search({query});
-if(start.tools.length!==16 || start.tools[0].name!=="z__target" || start.tools[0].call_path!=="RecordService.getRecord(args)")throw Error("service/method ranking: "+JSON.stringify(start));
+if(start.tools.length!==16 || start.tools[0].name!=="z__target" || start.tools[0].call_path!=="globalThis.RecordService.getRecord(args)")throw Error("service/method ranking: "+JSON.stringify(start));
 const tail=await tools.search({query,after:start.next});
 const joined=[...start.tools,...tail.tools];
 if(joined.length!==18 || new Set(joined.map(t=>t.name)).size!==18 || tail.next!==null)throw Error("ranked pagination lost results");
 if(joined.some(t=>"input_schema" in t || Array.from(t.description).length>161))throw Error("directory was not lightweight");
 const native=await tools.search({query:"get record"});
-if(native.tools[0].name!=="GetRecord" || native.tools[0].call_path!=="GetRecord(args)")throw Error("prefix missing direct syntax");
+if(native.tools[0].name!=="GetRecord" || native.tools[0].call_path!=="globalThis.GetRecord(args)")throw Error("prefix missing direct syntax");
 const batch=await tools.search({names:["unknown","GetRecord","huge__describe","z__target"]});
 const [missing, prefix, huge, remote]=batch.tools;
 if(missing.name!=="unknown"||missing.error_code!=="not_found"||huge.error_code!=="resource_exhausted")throw Error("batch status mismatch");
 if(prefix.entry.input_schema.properties.value.type!=="integer"||remote.entry.input_schema.properties.value.type!=="integer")throw Error("missing exact schema");
-if(prefix.entry.call_path!=="GetRecord(args)"||remote.entry.output_format!=="body")throw Error("schema contract mismatch");
+if(prefix.entry.call_path!=="globalThis.GetRecord(args)"||remote.entry.output_format!=="body")throw Error("schema contract mismatch");
 return {contract:true};`)
 	bindings := codeModeBindings(events)
 	if len(bindings) != 1 || bindings[target.Def.Name] != mcp.BindingForDefinition(target.Def) {

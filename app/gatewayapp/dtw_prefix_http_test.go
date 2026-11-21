@@ -1,6 +1,7 @@
 package gatewayapp_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,18 @@ func TestDTWPrefixMCPHelper(t *testing.T) {
 		t.Fatal("missing fixture identity and audit path")
 	}
 	identity, audit := os.Args[marker+1], os.Args[marker+2]
+	if len(os.Args) > marker+3 {
+		gate := os.Args[marker+3]
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			if _, err := os.Stat(gate); err == nil {
+				break
+			} else if !os.IsNotExist(err) || time.Now().After(deadline) {
+				t.Fatalf("waiting for catalog gate: %v", err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: identity, Version: "1"}, nil)
 	server.AddTool(&mcpsdk.Tool{Name: "apps", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return &mcpsdk.CallToolResult{StructuredContent: map[string]any{"apps": []any{}}}, nil
@@ -128,9 +141,9 @@ const r=await tools.search({names:[%q,"foreign__exec","absent"]});
 const [target,foreign,absent]=r.tools;
 if(target.entry.call_path!==%q||foreign.entry.server!=="foreign"||absent.error_code!=="not_found")throw Error("search route mismatch");
 if(JSON.stringify(target.entry.input_schema.required||[])!==%q)throw Error("input schema mismatch");
-return await %s(%s);`, target, target+"(args)", string(mustDTWJSON(required)), target, input)
+return await %s(%s);`, target, "globalThis."+target+"(args)", string(mustDTWJSON(required)), target, input)
 			if !fixture {
-				script = fmt.Sprintf(`const r=await tools.search({name:%q});if(r.call_path!==%q||r.input_schema.properties.query.type!=="string")throw Error("apps schema");return await %s(%s);`, target, target+"(args)", target, input)
+				script = fmt.Sprintf(`const r=await tools.search({name:%q});if(r.call_path!==%q||r.input_schema.properties.query.type!=="string")throw Error("apps schema");return await %s(%s);`, target, "globalThis."+target+"(args)", target, input)
 			}
 			provider.set(nativeModelTool{Name: target, Input: input}, nativeModelTool{
 				Name: "js_exec", Input: string(mustDTWJSON(map[string]any{"code": script})),
@@ -218,6 +231,152 @@ return await %s(%s);`, target, target+"(args)", string(mustDTWJSON(required)), t
 				t.Fatalf("foreign exec dispatched: %v", err)
 			}
 		})
+	}
+}
+
+func TestApplicationDTWCallbackPrecedenceAfterReadinessHTTP(t *testing.T) {
+	if !builtinComputerUseSupported() {
+		t.Skip("direct DTW tools are only selected on supported native targets")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	provider := &nativeModelScript{}
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
+	defer host.close(t)
+	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
+	client, scope := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
+
+	const serverName = "desktop-world"
+	const target = "desktop_world__exec"
+	const sibling = "desktop_world__apps"
+	gate, audit := filepath.Join(root, "ready"), filepath.Join(root, "audit")
+	bundle := nativeProfilePackageHTTP(t, "0.5.1")
+	profile := applicationHTTPProfile()
+	profile.Tools[0].Name = target
+	profile.Tools[0].ResultFormat = sessionprofile.ResultFormatContentV1
+	profile.Plugins = []sessionprofile.Plugin{{Root: bundle, MCPServers: []sessionprofile.MCPServer{{
+		Name: serverName, Transport: "stdio", Command: os.Args[0], WorkDir: bundle,
+		Args: []string{"-test.run=^TestDTWPrefixMCPHelper$", "--", "dtw-prefix-fixture", serverName, audit, gate},
+	}}}}
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "create-collision"}, Profile: &profile,
+	})
+	if err != nil || created.Outcome != appserver.OutcomeCommitted || created.SessionID == "" {
+		t.Fatalf("CreateSession: %+v, %v", created, err)
+	}
+	sid := created.SessionID
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the same activation resident across the two prompts.
+	defer feed.Subscription.Close()
+	prompt := func(operation string) {
+		t.Helper()
+		result, err := client.Prompt(ctx, appserver.PromptRequest{
+			WriteBase: appserver.WriteBase{SessionID: sid, OperationID: operation}, Input: operation, SourceKind: "user",
+		})
+		if err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
+			t.Fatalf("Prompt %s: %+v, %v", operation, result, err)
+		}
+	}
+	assertDeclarations := func(requests [][]byte, wantApps int) {
+		t.Helper()
+		if len(requests) == 0 {
+			t.Fatal("prompt did not reach the provider")
+		}
+		for _, raw := range requests {
+			var request struct {
+				Tools []struct {
+					Function struct {
+						Name        string
+						Description string
+					}
+				}
+			}
+			if err := json.Unmarshal(raw, &request); err != nil {
+				t.Fatal(err)
+			}
+			counts := map[string]int{}
+			for _, entry := range request.Tools {
+				def := entry.Function
+				counts[def.Name]++
+				if def.Name == target && def.Description != profile.Tools[0].Description {
+					t.Fatalf("provider saw the MCP definition instead of the callback: %+v", def)
+				}
+			}
+			if counts[target] != 1 || counts[sibling] != wantApps {
+				t.Fatalf("provider declarations: %v, want one %s and %d %s", counts, target, wantApps, sibling)
+			}
+		}
+	}
+	prompt("before-readiness")
+	waitApplicationHTTPIdle(t, ctx, client, sid)
+	provider.mu.Lock()
+	beforeRequests := slices.Clone(provider.seen)
+	provider.mu.Unlock()
+	assertDeclarations(beforeRequests, 0)
+	status, err := client.SessionMCPStatus(ctx, sid)
+	if err != nil || len(status.Servers) != 1 || status.Servers[0].Name != serverName || status.Servers[0].Ready {
+		t.Fatalf("expected the selected catalog to be gated: %+v, %v", status, err)
+	}
+	if err := os.WriteFile(gate, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for !status.Servers[0].Ready {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("selected catalog never became ready: %+v", status)
+		case <-time.After(15 * time.Millisecond):
+		}
+		status, err = client.SessionMCPStatus(ctx, sid)
+		if err != nil || len(status.Servers) != 1 || status.Servers[0].Name != serverName {
+			t.Fatalf("selected catalog disappeared: %+v, %v", status, err)
+		}
+	}
+
+	provider.set(nativeModelTool{Name: target, Input: `{"key":"native"}`}, nativeModelTool{
+		Name: "js_exec", Input: string(mustDTWJSON(map[string]string{"code": `
+const entry = await tools.search({name:"desktop_world__exec"});
+if (entry.server || entry.input_schema.properties.key.type !== "string") throw new Error("callback schema shadowed");
+const result = await tools.call("desktop_world__exec", {key:"js"});
+if (result.data.owner !== "application") throw new Error("callback result lost");
+return {verified:"COLLISION_JS_VERIFIED"};`})),
+	})
+	prompt("after-readiness")
+	var turnID string
+	for _, input := range []string{`{"key":"native"}`, `{"key":"js"}`} {
+		calls, err := client.WaitSessionToolCalls(ctx, sid)
+		if err != nil || len(calls) != 1 {
+			t.Fatalf("callback for %s: %+v, %v", input, calls, err)
+		}
+		call := calls[0]
+		if call.Name != target || string(call.Arguments) != input || call.Scope != scope || call.SessionID != sid ||
+			call.ConfigurationRevision != 1 || call.ToolsVersion != profile.ToolsVersion || call.TurnID == "" || (turnID != "" && call.TurnID != turnID) {
+			t.Fatalf("callback identity for %s: %+v", input, call)
+		}
+		turnID = call.TurnID
+		if _, err := client.ClaimSessionToolCall(ctx, sid, call.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.CompleteSessionToolCall(ctx, sid, call.ID, sessionprofile.CallResult{
+			Outcome: "succeeded", ResultFormat: sessionprofile.ResultFormatContentV1,
+			Content: json.RawMessage(`[{"type":"text","text":"application callback"}]`), StructuredContent: map[string]any{"owner": "application"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitApplicationHTTPIdle(t, ctx, client, sid)
+	provider.mu.Lock()
+	after := slices.Clone(provider.seen[len(beforeRequests):])
+	provider.mu.Unlock()
+	assertDeclarations(after, 1)
+	if !bytes.Contains(after[len(after)-1], []byte("COLLISION_JS_VERIFIED")) {
+		t.Fatal("JavaScript did not verify the callback result")
+	}
+	if _, err := os.Stat(audit); !os.IsNotExist(err) {
+		t.Fatalf("colliding MCP exec must not dispatch: %v", err)
 	}
 }
 

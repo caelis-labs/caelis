@@ -13,7 +13,7 @@
   const slice=Function.prototype.call.bind(String.prototype.slice);
   const then=Function.prototype.call.bind(Promise.prototype.then);
   const test=Function.prototype.call.bind(RegExp.prototype.test);
-  const FunctionType=Function, identifier=/^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  const identifier=/^[A-Za-z_$][A-Za-z0-9_$]*$/;
   const has=Function.prototype.call.bind(Set.prototype.has);
   const add=Function.prototype.call.bind(Set.prototype.add);
   const del=Function.prototype.call.bind(Set.prototype.delete);
@@ -200,10 +200,8 @@
   });
   // All entry points delegate to the same validation, RPC, decode and identity
   // path. Null prototypes preserve exact names, including __proto__.
-  function identifierName(name) {
-    if(name==="await" || !test(identifier,name)) return false;
-    try { FunctionType('"use strict";let '+name+';'); return true; }
-    catch (_) { return false; }
+  function property(name) {
+    return test(identifier,name) ? "."+name : "["+stringify(name)+"]";
   }
   function install(names) {
   const tools=assign(create(null),api);
@@ -272,19 +270,14 @@
     }
   }
   preferredPaths=create(null);
-  const identifiers=create(null);
-  function canReference(name) {
-    if(!own(identifiers,name)) identifiers[name]=identifierName(name);
-    return identifiers[name];
-  }
   for(let i=0;i<entries.length;i++) {
     const entry=entries[i], name=entry.name;
-    if((!entry.server||entry.prefix) && own(shortcuts,name) && shortcuts[name]!==null && has(toolGlobals,name) && canReference(name)) {
-      preferredPaths[name]={root:name,target:shortcuts[name],expression:name+"(args)"};
+    // Qualify installed shortcuts so a caller's local binding cannot shadow them.
+    if((!entry.server||entry.prefix) && has(toolGlobals,name) && shortcuts[name]!==null) {
+      preferredPaths[name]={root:name,target:shortcuts[name],expression:"globalThis"+property(name)+"(args)"};
     } else if(entry.server && has(toolGlobals,entry.server) && shortcuts[entry.server]===mcp[entry.server] &&
-      mcp[entry.server][entry.tool]===methods[name] && canReference(entry.server)) {
-      const method=test(identifier,entry.tool) ? "."+entry.tool : "["+stringify(entry.tool)+"]";
-      preferredPaths[name]={root:entry.server,target:mcp[entry.server],expression:entry.server+method+"(args)"};
+      mcp[entry.server][entry.tool]===methods[name]) {
+      preferredPaths[name]={root:entry.server,target:mcp[entry.server],expression:"globalThis"+property(entry.server)+property(entry.tool)+"(args)"};
     }
   }
   define(globals,"tools",{value:tools,configurable:true});
