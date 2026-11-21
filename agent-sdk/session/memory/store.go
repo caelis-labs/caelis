@@ -191,20 +191,12 @@ func (s *Store) ListSessions(
 }
 
 func (s *Store) AppendEvent(
-	ctx context.Context,
-	req session.AppendEventRequest,
-) (*session.Event, error) {
-	result, err := s.AppendEventWithOutcome(ctx, req)
-	return result.Event, err
-}
-
-func (s *Store) AppendEventWithOutcome(
 	_ context.Context,
 	req session.AppendEventRequest,
-) (session.AppendEventResult, error) {
+) (*session.Event, error) {
 	event := req.Event
 	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
+		return nil, session.ErrInvalidEvent
 	}
 
 	s.mu.Lock()
@@ -212,19 +204,19 @@ func (s *Store) AppendEventWithOutcome(
 
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return session.AppendEventResult{}, session.ErrSessionNotFound
+		return nil, session.ErrSessionNotFound
 	}
 	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 
 	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")
 	if err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	normalized := tx.Prepared.Events[0]
 	s.applyAppendTransactionToRecord(record, tx)
-	return session.AppendEventResult{Event: session.CloneEvent(normalized), Appended: tx.Changed}, nil
+	return session.CloneEvent(normalized), nil
 }
 
 // SettlePendingApproval appends one approval settlement only while the exact

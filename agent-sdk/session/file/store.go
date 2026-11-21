@@ -263,31 +263,22 @@ func (s *Store) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	result, err := s.AppendEventWithOutcome(ctx, req)
-	return result.Event, err
-}
-
-func (s *Store) AppendEventWithOutcome(
-	ctx context.Context,
-	req session.AppendEventRequest,
-) (session.AppendEventResult, error) {
 	event := req.Event
 	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
+		return nil, session.ErrInvalidEvent
 	}
 	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
 	if err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	defer s.mu.Unlock()
 
 	var out *session.Event
-	var appended bool
 	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
@@ -301,21 +292,17 @@ func (s *Store) AppendEventWithOutcome(
 		if err != nil {
 			return err
 		}
-		normalized := tx.Prepared.Events[0]
-		if !tx.Changed {
-			out = session.CloneEvent(normalized)
-			return nil
+		if tx.Changed {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
+				return err
+			}
 		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
-			return err
-		}
-		out = session.CloneEvent(normalized)
-		appended = true
+		out = session.CloneEvent(tx.Prepared.Events[0])
 		return nil
 	}); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
-	return session.AppendEventResult{Event: out, Appended: appended}, nil
+	return out, nil
 }
 
 func (s *Store) prepareAppendTransactionForDocument(

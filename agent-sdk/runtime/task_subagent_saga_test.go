@@ -304,11 +304,6 @@ func (s *completionNoticeFailSessionService) AppendEvent(ctx context.Context, re
 	return s.sagaSessionService.AppendEvent(ctx, req)
 }
 
-func (s *completionNoticeFailSessionService) AppendEventWithOutcome(ctx context.Context, req session.AppendEventRequest) (session.AppendEventResult, error) {
-	event, err := s.AppendEvent(ctx, req)
-	return session.AppendEventResult{Event: event, Appended: err == nil}, err
-}
-
 func (s *sagaSessionService) PutParticipantWithEvent(ctx context.Context, req session.PutParticipantWithEventRequest) (session.Session, *session.Event, error) {
 	if s.failParticipant {
 		return session.Session{}, nil, errors.New("forced participant lifecycle failure")

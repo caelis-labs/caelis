@@ -436,13 +436,6 @@ type AppendEventRequest struct {
 	Event            *Event        `json:"event"`
 }
 
-// AppendEventResult distinguishes a newly committed event from an idempotent
-// retry that resolved to the already durable event.
-type AppendEventResult struct {
-	Event    *Event
-	Appended bool
-}
-
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {

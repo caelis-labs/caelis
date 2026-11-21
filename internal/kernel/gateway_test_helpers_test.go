@@ -611,7 +611,6 @@ type recordingSessionService struct {
 	sessionResult      session.Session
 	eventsResult       []*session.Event
 	appendReqs         []session.AppendEventRequest
-	appendOutcomes     []bool
 	snapshotErr        error
 	startErr           error
 	loadErr            error
@@ -653,16 +652,6 @@ func (s *recordingSessionService) Session(_ context.Context, ref session.Session
 func (s *recordingSessionService) AppendEvent(_ context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	s.appendReqs = append(s.appendReqs, req)
 	return storedTestEvent(req), nil
-}
-
-func (s *recordingSessionService) AppendEventWithOutcome(ctx context.Context, req session.AppendEventRequest) (session.AppendEventResult, error) {
-	event, err := s.AppendEvent(ctx, req)
-	appended := true
-	if len(s.appendOutcomes) > 0 {
-		appended = s.appendOutcomes[0]
-		s.appendOutcomes = s.appendOutcomes[1:]
-	}
-	return session.AppendEventResult{Event: event, Appended: appended}, err
 }
 
 func storedTestEvent(req session.AppendEventRequest) *session.Event {
