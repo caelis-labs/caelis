@@ -259,49 +259,6 @@ type SetupCheck struct {
 	Counts    map[string]int    `json:"counts,omitempty"`
 }
 
-// PrepareProgress is an optional, best-effort progress update emitted during a
-// user-triggered sandbox setup step.
-type PrepareProgress struct {
-	Phase   string `json:"phase,omitempty"`
-	Message string `json:"message,omitempty"`
-	Step    int    `json:"step,omitempty"`
-	Total   int    `json:"total,omitempty"`
-	Done    bool   `json:"done,omitempty"`
-	Debug   bool   `json:"debug,omitempty"`
-}
-
-// PrepareProgressFunc receives best-effort setup progress. Implementations must
-// return quickly; slow callbacks can delay setup.
-type PrepareProgressFunc func(PrepareProgress)
-
-type prepareProgressContextKey struct{}
-
-// ContextWithPrepareProgress attaches a setup progress callback to ctx.
-func ContextWithPrepareProgress(ctx context.Context, fn PrepareProgressFunc) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if fn == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, prepareProgressContextKey{}, fn)
-}
-
-// ReportPrepareProgress emits one setup progress update if ctx carries a
-// progress callback.
-func ReportPrepareProgress(ctx context.Context, progress PrepareProgress) {
-	if ctx == nil {
-		return
-	}
-	fn, ok := ctx.Value(prepareProgressContextKey{}).(PrepareProgressFunc)
-	if !ok || fn == nil {
-		return
-	}
-	progress.Phase = strings.TrimSpace(progress.Phase)
-	progress.Message = strings.TrimSpace(progress.Message)
-	fn(progress)
-}
-
 // OutputChunk is one stdout/stderr streaming fragment. Cursor is the
 // cumulative backend byte marker for Stream after all raw bytes represented
 // by Text. Async backends must set it so a consumer can atomically checkpoint

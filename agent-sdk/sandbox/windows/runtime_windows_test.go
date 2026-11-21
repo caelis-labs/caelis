@@ -1227,9 +1227,9 @@ func TestWorkspaceManifestsAreIsolatedAcrossRuntimeInstances(t *testing.T) {
 	if !bytes.Equal(manifestBBefore, manifestBAfter) {
 		t.Fatalf("workspace B manifest changed during workspace A refresh\nbefore=%s\nafter=%s", manifestBBefore, manifestBAfter)
 	}
-	plan := windowsA.cleanupPlan()
-	if containsPath(plan.LegacyPaths, windowsB.manifestPath()) {
-		t.Fatalf("workspace A cleanup paths = %#v, must not include workspace B manifest", plan.LegacyPaths)
+	paths := windowsA.workspaceCleanupPaths()
+	if containsPath(paths, windowsB.manifestPath()) {
+		t.Fatalf("workspace A cleanup paths = %#v, must not include workspace B manifest", paths)
 	}
 }
 
@@ -2737,7 +2737,7 @@ func TestPolicySkipsBroadWritableRootsInsteadOfFailing(t *testing.T) {
 	}
 }
 
-func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
+func TestWorkspaceCleanupIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	rt, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
@@ -2750,21 +2750,18 @@ func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 		t.Fatalf("ensureForRequest() error = %v", err)
 	}
 
-	plan := windowsRT.cleanupPlan()
-	if !containsPath(plan.LegacyPaths, filepath.Dir(windowsRT.manifestPath())) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want current workspace manifest directory", plan.LegacyPaths)
+	paths := windowsRT.workspaceCleanupPaths()
+	if !containsPath(paths, filepath.Dir(windowsRT.manifestPath())) {
+		t.Fatalf("workspace cleanup paths = %#v, want current workspace manifest directory", paths)
 	}
-	if containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-bin")) || containsPath(plan.LegacyPaths, windowsRT.workspaceManifestBase()) {
-		t.Fatalf("cleanup LegacyPaths = %#v, must not delete StateDir-wide or other-workspace state", plan.LegacyPaths)
+	if containsPath(paths, filepath.Join(stateDir, ".sandbox-bin")) || containsPath(paths, windowsRT.workspaceManifestBase()) {
+		t.Fatalf("workspace cleanup paths = %#v, must not delete StateDir-wide or other-workspace state", paths)
 	}
-	if !containsPath(plan.LegacyPaths, filepath.Join(workspace, ".caelis-sandbox")) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want workspace sandbox env dir", plan.LegacyPaths)
+	if !containsPath(paths, filepath.Join(workspace, ".caelis-sandbox")) {
+		t.Fatalf("workspace cleanup paths = %#v, want workspace sandbox env dir", paths)
 	}
-	if !containsPath(plan.LegacyPaths, windowsRT.sandboxEnvRoot(workspace)) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want only current workspace sandbox env", plan.LegacyPaths)
-	}
-	if len(plan.LegacyProtected) == 0 {
-		t.Fatalf("cleanup plan = %+v, want protected legacy artifact reports", plan)
+	if !containsPath(paths, windowsRT.sandboxEnvRoot(workspace)) {
+		t.Fatalf("workspace cleanup paths = %#v, want only current workspace sandbox env", paths)
 	}
 }
 

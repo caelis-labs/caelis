@@ -1746,12 +1746,6 @@ func hashJSON(value any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func stateRootHash(stateRoot string) string {
-	normalized := strings.ToLower(strings.TrimSpace(filepath.Clean(stateRoot)))
-	sum := sha256.Sum256([]byte(normalized))
-	return hex.EncodeToString(sum[:])[:8]
-}
-
 func newID(prefix string) (string, error) {
 	var raw [8]byte
 	if _, err := rand.Read(raw[:]); err != nil {
