@@ -349,6 +349,122 @@ func TestCatalogReconcileRetiresClientAndDrainsBorrowedCall(t *testing.T) {
 	}
 }
 
+func TestCatalogReconcileDrainsBorrowBeforeInitializationReturns(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, nil)
+	entered, releaseCall := make(chan struct{}), make(chan struct{})
+	var releaseCallOnce sync.Once
+	defer releaseCallOnce.Do(func() { close(releaseCall) })
+	server.AddTool(&mcpsdk.Tool{Name: "slow", InputSchema: map[string]any{"type": "object"}}, func(ctx context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		close(entered)
+		select {
+		case <-releaseCall:
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "drained"}}}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	handler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil)
+	var deletes atomic.Int32
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deletes.Add(1)
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(endpoint.Close)
+	mgr, err := NewManager(ctx, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mgr.Close() })
+	parent, stop := context.WithCancel(mgr.ctx)
+	defer stop()
+	managed := &managedServer{spec: ServerSpec{PluginID: "p", Name: "local", URL: endpoint.URL}, cancel: stop}
+	mgr.mu.Lock()
+	mgr.servers = append(mgr.servers, managed)
+	mgr.mu.Unlock()
+	published, finishInit, initDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	startClosing := make(chan struct{})
+	start := func(ctx context.Context, spec ServerSpec) (*Client, error) {
+		client, err := mgr.start(ctx, spec)
+		if err == nil {
+			cancelClient := client.cancel
+			client.cancel = func() {
+				close(startClosing)
+				cancelClient()
+			}
+		}
+		return client, err
+	}
+	var finishOnce sync.Once
+	defer finishOnce.Do(func() { close(finishInit) })
+	mgr.workers.Go(func() {
+		defer close(initDone)
+		mgr.initialize(parent, managed, start, func(ctx context.Context, s *managedServer, force bool) error {
+			err := mgr.refreshCatalog(ctx, s, force)
+			close(published)
+			<-finishInit
+			return err
+		})
+	})
+	await := func(signal <-chan struct{}, description string) {
+		t.Helper()
+		select {
+		case <-signal:
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s", description)
+		}
+	}
+	await(published, "first catalog publication")
+	tools := mgr.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("first catalog did not publish: %v", tools)
+	}
+	remote := tools[0].(*MCPTool)
+	call := tool.Call{Input: []byte(`{}`)}
+	done := make(chan error, 1)
+	go func() {
+		result, err := remote.Call(ctx, call)
+		if err == nil && (len(result.Content) != 1 || result.Content[0] != tool.Text("drained")) {
+			err = fmt.Errorf("unexpected receipt: %+v", result)
+		}
+		done <- err
+	}()
+	await(entered, "borrowed HTTP call")
+	if err := mgr.Reconcile(nil); err != nil {
+		t.Fatal(err)
+	}
+	finishOnce.Do(func() { close(finishInit) })
+	select {
+	case <-initDone:
+	case <-startClosing:
+		t.Fatal("initialization started closing the connection while the HTTP call was borrowed")
+	case <-ctx.Done():
+		t.Fatal("initialization tail did not complete")
+	}
+	if mgr.Tools() != nil || remote.client.closedError() != nil || deletes.Load() != 0 {
+		t.Fatalf("initialization closed a borrowed client: %v, DELETEs=%d", remote.client.closedError(), deletes.Load())
+	}
+	if _, err := remote.Call(ctx, call); errorcode.CodeOf(err) != errorcode.PermissionDenied {
+		t.Fatalf("retired client accepted another call: %v", err)
+	}
+	releaseCallOnce.Do(func() { close(releaseCall) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("borrowed HTTP call did not complete")
+	}
+	await(remote.client.closed, "retired connection closure")
+	if got := deletes.Load(); got != 1 {
+		t.Fatalf("HTTP session DELETEs = %d; want one after drain", got)
+	}
+}
+
 func TestCatalogRefreshAlwaysEnabledAndReconnectDoesNotReviveOldHandles(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, nil)
 	catalogTool(server, "a", "a", nil)

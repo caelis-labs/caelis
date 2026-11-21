@@ -186,7 +186,7 @@ func (m *Manager) reconcile(specs []ServerSpec, initial *sync.WaitGroup) error {
 			if initial != nil {
 				defer initial.Done()
 			}
-			m.initialize(ctx, server, m.start)
+			m.initialize(ctx, server, m.start, m.refreshCatalog)
 		})
 	}
 	for key, server := range current {
@@ -256,7 +256,7 @@ func (m *Manager) retireLocked(server *managedServer) {
 	})
 }
 
-func (m *Manager) initialize(parent context.Context, server *managedServer, start clientStarter) {
+func (m *Manager) initialize(parent context.Context, server *managedServer, start clientStarter, refresh func(context.Context, *managedServer, bool) error) {
 	ctx, cancel := context.WithTimeout(parent, DefaultStartupTimeout)
 	client, err := start(ctx, server.spec)
 	if err == nil {
@@ -284,7 +284,7 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	m.rebuildToolsLocked()
 	m.mu.Unlock()
 	if err == nil {
-		refreshErr := m.refreshCatalog(parent, server, false)
+		refreshErr := refresh(parent, server, false)
 		if refreshErr != nil {
 			refreshErr = client.startupFailure("tools/list", refreshErr)
 		}

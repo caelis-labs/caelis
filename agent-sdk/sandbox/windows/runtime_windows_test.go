@@ -323,23 +323,48 @@ func TestWindowsSessionForcedPublicationDoesNotReleaseRuntimeUseBeforeProcessWai
 	t.Parallel()
 
 	released := make(chan struct{})
+	draining, finishDrain := make(chan struct{}), make(chan struct{})
+	var finishOnce sync.Once
+	defer finishOnce.Do(func() { close(finishDrain) })
 	session := &windowsSession{
-		running:      true,
-		done:         make(chan struct{}),
-		outputSignal: make(chan struct{}),
-		releaseUse:   func() { close(released) },
+		running:       true,
+		supportsInput: true,
+		done:          make(chan struct{}),
+		outputSignal:  make(chan struct{}),
+		releaseUse:    func() { close(released) },
+		drainTree: func(context.Context) error {
+			close(draining)
+			<-finishDrain
+			return nil
+		},
 	}
 	session.forceTerminated(errors.New("forced publication"))
+	go session.retryProcessTreeDrain()
 	select {
+	case <-draining:
+	case <-time.After(time.Second):
+		t.Fatal("late Job drain did not start")
+	}
+	status, err := session.Wait(t.Context(), 10*time.Millisecond)
+	if err != nil || !status.Running || status.SupportsInput {
+		t.Fatalf("Wait before Job cleanup proof = %+v, %v; want pending cleanup with stdin disabled", status, err)
+	}
+	select {
+	case <-session.done:
+		t.Fatal("wait completed before the Job tree drained")
 	case <-released:
-		t.Fatal("runtime use released before the process wait path became quiescent")
+		t.Fatal("runtime use released before the Job tree drained")
 	default:
 	}
-	session.releaseRuntimeUse()
+	finishOnce.Do(func() { close(finishDrain) })
+	status, err = session.Wait(t.Context(), time.Second)
+	if err != nil || status.Running || status.SupportsInput {
+		t.Fatalf("Wait after Job cleanup proof = %+v, %v; want settled exit", status, err)
+	}
 	select {
 	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("runtime use was not released by the process wait path")
+	default:
+		t.Fatal("runtime use was not released before publishing the settled exit")
 	}
 }
 
