@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -313,5 +314,21 @@ func TestResumeCandidateEnrichmentUsesIndexSummaryVerbatim(t *testing.T) {
 		if candidate.SessionID != summary.SessionID || candidate.Title != summary.Title || candidate.Prompt != summary.Title || candidate.Workspace != summary.CWD {
 			t.Fatalf("enrichResumeCandidate(%q) = %#v, want index summary fields", summary.SessionID, candidate)
 		}
+	}
+}
+
+func TestSkillCompletionCandidateUsesCanonicalValueAndPluginLabel(t *testing.T) {
+	candidate := skillCompletionCandidate(skill.Meta{
+		Name: "superpowers:brainstorm", Description: "Generate options.",
+		Source: skill.SourcePlugin, Namespace: "superpowers",
+		PluginID: "superpowers-plugin", LocalName: "brainstorm",
+	})
+	if candidate.Value != "superpowers:brainstorm" || candidate.Display != "brainstorm" ||
+		candidate.Kind != "Plugin" || candidate.Detail != "superpowers-plugin · Generate options." {
+		t.Fatalf("plugin completion = %+v", candidate)
+	}
+	plain := skillCompletionCandidate(skill.Meta{Name: "plain"})
+	if plain.Value != "plain" || plain.Display != "plain" || plain.Kind != "Skill" || plain.Detail != "" {
+		t.Fatalf("regular completion = %+v", plain)
 	}
 }
