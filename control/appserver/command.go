@@ -303,6 +303,9 @@ type HandoffRequest struct {
 
 // CommandResult is the typed recovery result persisted by the operation ledger.
 type CommandResult struct {
+	// CheckpointID identifies the durable event committed by a successful manual compact.
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+
 	// InputStatus is accepted when steering is admitted to the exact Turn.
 	// Application at a safe point is reported by a canonical feed input receipt.
 	InputStatus     string                          `json:"input_status,omitempty"`

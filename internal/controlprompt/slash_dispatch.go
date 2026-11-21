@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -166,10 +167,16 @@ func (r router) dispatchCompact(ctx context.Context, args string) (Result, error
 		return Result{}, FriendlyCommandError("compact", err)
 	}
 	notice := display.CompactNoticeLabel
-	if !compacted {
+	if !compacted.Compacted {
 		notice = "Nothing to compact"
 	}
 	result := r.noticeResult(notice)
+	if compacted.CheckpointID != "" {
+		event := &result.Events[0]
+		event.NoticeKind = eventstream.NoticeKindCompact
+		event.SessionID = compacted.SessionID
+		event.EventID = compacted.CheckpointID
+	}
 	if status, err := r.service.Status(ctx); err == nil {
 		result.StatusUpdate = &status
 	}

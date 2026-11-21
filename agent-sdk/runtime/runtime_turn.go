@@ -179,6 +179,12 @@ func (r *Runtime) runAttempt(
 		}
 		throughSeq = max(throughSeq, seq)
 	}
+	// Publish the confirmed checkpoint before appending pending input. The
+	// companion notice still follows the user echo.
+	if invocation.LiveCompact != nil {
+		observeSequence(invocation.LiveCompact)
+		sink.publishEvent(invocation.LiveCompact)
+	}
 	persistedInputs, appendErr := r.appendInputEvents(ctx, ref, pendingInputs)
 	if appendErr != nil {
 		return false, appendErr
@@ -191,7 +197,6 @@ func (r *Runtime) runAttempt(
 		sink.publishEvent(persisted)
 	}
 	if invocation.LiveCompact != nil {
-		observeSequence(invocation.LiveCompact)
 		r.publishCompactNotice(sink, invocation.LiveCompact)
 	}
 

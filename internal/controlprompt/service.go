@@ -78,7 +78,15 @@ type SessionService interface {
 	ResetSession(context.Context) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
-	Compact(context.Context) (bool, error)
+	Compact(context.Context) (CompactResult, error)
+}
+
+// CompactResult reports the outcome of manual Session compaction. A checkpoint
+// ID correlates success feedback with the canonical Session feed event.
+type CompactResult struct {
+	SessionID    string
+	CheckpointID string
+	Compacted    bool
 }
 
 type SessionModeService interface {
@@ -139,7 +147,7 @@ type RouterService interface {
 	ResetSession(context.Context) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
-	Compact(context.Context) (bool, error)
+	Compact(context.Context) (CompactResult, error)
 	UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error)
 	RepairSandbox(context.Context) (controlstatus.StatusSnapshot, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
