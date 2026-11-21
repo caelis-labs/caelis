@@ -515,3 +515,16 @@ func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskResultMetadataKeepsCanonicalHandle(t *testing.T) {
+	snapshot := taskapi.Snapshot{
+		Ref:      taskapi.Ref{TaskID: "original"},
+		Handle:   "original-script",
+		Kind:     taskapi.KindCodeMode,
+		Metadata: map[string]any{"handle": "stale-display-handle"},
+	}
+	meta := taskToolMeta(snapshot)
+	if got := taskRuntimeMetaString(meta, "task", "handle"); got != "original-script" {
+		t.Fatalf("task receipt handle = %q, want original-script", got)
+	}
+}
