@@ -19,10 +19,10 @@ func TestDesktopWorldScriptSummaries(t *testing.T) {
 		{"coordinate click", `await app.click({x:21,y:33});`, "Chrome · Click"},
 		{"chord array shorthand", `await app.keypress(['META','A']);`, "Chrome · Press META+A"},
 		{"chord string shorthand", `await app.keypress("META+A");`, "Chrome · Press META+A"},
-		{"top-level literal chord", `const chord = ['META','A']; await app.keypress({keys:chord});`, "Chrome · Press META+A"},
-		{"shadowed chord", `const chord = ['META','A']; { const chord = dynamic; await app.keypress({keys:chord}); }`, "Chrome · Press keys"},
-		{"mutated chord", `const chord = ['META','A']; chord[1] = 'Z'; await app.keypress(chord);`, "Chrome · Press keys"},
-		{"escaped chord", `const chord = ['META','A']; change({chord}); await app.keypress(chord);`, "Chrome · Press keys"},
+		{"top-level literal chord", `const chord = ['META','A']; await app.keypress({keys:chord});`, "Chrome · Run a script"},
+		{"shadowed chord", `const chord = ['META','A']; { const chord = dynamic; await app.keypress({keys:chord}); }`, "Chrome · Run a script"},
+		{"mutated chord", `const chord = ['META','A']; chord[1] = 'Z'; await app.keypress(chord);`, "Chrome · Run a script"},
+		{"escaped chord", `const chord = ['META','A']; change({chord}); await app.keypress(chord);`, "Chrome · Run a script"},
 		{"read text", `return app.readText({target:"w1.e12",limit:10});`, "Chrome · Read text from the observed control"},
 		{"multiple continuous operations", `await app.focus(); await app.click("Continue"); await app.quit();`, "Chrome · Focus the window and click “Continue”"},
 		{"duplicates do not become counts", `await app.click("A"); await app.click("A"); await app.click("B");`, "Chrome · Click “A” and click “B”"},
@@ -33,18 +33,22 @@ const pattern = /app\.keypress\(/;
 return await app.look();
 `, "Chrome · Inspect the window"},
 		{"source map is ignored", "await app.look();\n//# sourceMappingURL=file:///NONEXISTENT", "Chrome · Inspect the window"},
-		{"conditional calls", `if (ready) { await app.click("Next"); } else { await app.keypress("ESC"); }`, "Chrome · May click “Next” and may press ESC"},
-		{"literal dead branch", `if (false) await app.quit(); await app.look({text:"order number"});`, "Chrome · Look for “order number”"},
+		{"conditional calls", `if (ready) { await app.click("Next"); } else { await app.keypress("ESC"); }`, "Chrome · Run a script"},
+		{"literal dead branch", `if (false) await app.quit(); await app.look({text:"order number"});`, "Chrome · Run a script"},
 		{"early return", `await app.look(); return 42; await app.keypress("ESC");`, "Chrome · Inspect the window"},
-		{"return expression still runs", `{ return await app.click("Continue"); } await app.keypress("ESC");`, "Chrome · Click “Continue”"},
-		{"finally runs before return", `try { return 7; } finally { await app.look(); } await app.keypress("ESC");`, "Chrome · Inspect the window"},
-		{"throw skips the rest of its block", `try { throw new Error(); await app.keypress("ESC"); } catch { await app.capture(); }`, "Chrome · May take a screenshot"},
-		{"all branches terminate", `if (ready) return await app.look(); else return 0; await app.quit();`, "Chrome · May inspect the window"},
-		{"loop is one lexical site", `for (const row of rows) await app.click(row.name);`, "Chrome · May click"},
-		{"short circuit", `ready && await app.click("OK");`, "Chrome · May click “OK”"},
-		{"optional call", `await app?.click("OK");`, "Chrome · May click “OK”"},
-		{"dynamic target", "await app.click({selector:{text:`tab ${index}`}});", "Chrome · Click"},
-		{"spread can replace literal target", `await app.click({target:"A", ...options});`, "Chrome · Click"},
+		{"return expression", `return await app.click("Continue"); await app.keypress("ESC");`, "Chrome · Click “Continue”"},
+		{"late shadow affects earlier app", `await app.click("Continue"); return; const app = {};`, "Chrome · Run a script"},
+		{"B04 nested await in argument", `await app.keypress({keys:(await app.click("Continue"), ["META","A"])});`, "Chrome · Run a script"},
+		{"B05 inactive class initializer", `class Unused { effect = app.keypress({keys:["META","A"]}); } await app.click("Continue");`, "Chrome · Run a script"},
+		{"return expression still runs", `{ return await app.click("Continue"); } await app.keypress("ESC");`, "Chrome · Run a script"},
+		{"finally runs before return", `try { return 7; } finally { await app.look(); } await app.keypress("ESC");`, "Chrome · Run a script"},
+		{"throw skips the rest of its block", `try { throw new Error(); await app.keypress("ESC"); } catch { await app.capture(); }`, "Chrome · Run a script"},
+		{"all branches terminate", `if (ready) return await app.look(); else return 0; await app.quit();`, "Chrome · Run a script"},
+		{"loop is one lexical site", `for (const row of rows) await app.click(row.name);`, "Chrome · Run a script"},
+		{"short circuit", `ready && await app.click("OK");`, "Chrome · Run a script"},
+		{"optional call", `await app?.click("OK");`, "Chrome · Run a script"},
+		{"dynamic target", "await app.click({selector:{text:`tab ${index}`}});", "Chrome · Run a script"},
+		{"spread can replace literal target", `await app.click({target:"A", ...options});`, "Chrome · Run a script"},
 		{"dynamic method", `await app.look(); await app[method](arg);`, "Chrome · Run a script"},
 		{"hoisted app shadows a direct call", `if (false) { var app; } await app.click('C');`, "Chrome · Run a script"},
 		{"shadowed app", `const app = other; await app.click('C');`, "Chrome · Run a script"},
@@ -71,8 +75,10 @@ func TestDesktopWorldSummaryDisplayColumns(t *testing.T) {
 	}
 	for _, display := range cases {
 		for _, width := range []int{5, 12, 18, 22, 38, 56} {
-			if got := display.label(width, false, false); displayColumns(got) > width || strings.ContainsAny(got, "\r\n") {
-				t.Fatalf("width %d, got %d cells in %q", width, displayColumns(got), got)
+			for _, done := range []bool{false, true} {
+				if got := display.label(width, false, done); displayColumns(got) > width || strings.ContainsAny(got, "\r\n") {
+					t.Fatalf("width %d, done=%v, got %d cells in %q", width, done, displayColumns(got), got)
+				}
 			}
 		}
 	}

@@ -111,9 +111,6 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		child := children[i]
 		if child.desktopWorld != nil {
 			if !hiddenDesktop[i] {
-				if len(children) == 1 {
-					child = desktopWorldWithReturnedResult(child, root)
-				}
 				prefix := explorationChildPrefix(len(rows) == 1)
 				rows = append(rows, renderDesktopWorldCallRows(blockID, child, prefix, width, ctx, opts)...)
 			}

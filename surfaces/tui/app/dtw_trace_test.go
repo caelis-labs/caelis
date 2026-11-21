@@ -234,47 +234,38 @@ func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
 	}
 }
 
-func TestDesktopWorldTraceTerminalEvidence(t *testing.T) {
-	// S01 uses a native selector and a key array, with a read between the inputs.
+func TestDesktopWorldTraceTerminalIntent(t *testing.T) {
 	const beforeKey = `await app.look({role:'text_field',text:'Search inventory'});
 await app.click({selector:{role:'text_field',text:'Search inventory'}});
 await app.look({role:'text_field',text:'Search inventory'});
 `
 	const key = `await app.keypress({keys:['META','A']});`
-	const branch = `await app.look({text:'Web note'});
-if (matches.length === 1) { await app.click({target:matches[0].id}); } else { await app.capture({}); }`
-	const literalChord = `const chord = ['META','A'];
-await app.look();
-if (matches.length !== 1) return null;
-await app.click({target:matches[0].id});
-await app.keypress({keys:chord});
-await app.typeText({text:'hidden'});`
+	const twoDispatches = `{"execution_id":"fixture","effects":{"dispatch":{"dispatched":2}}}`
 	for _, test := range []struct {
 		name, source, status, result string
 		wide, narrow, forbidden      string
 	}{
-		{"complete", beforeKey + key, "completed", `{"execution_id":"ok","effects":{"dispatch":{"dispatched":2}}}`,
-			"Click “Search inventory”, press META+A", "Click, press", "Inspect"},
-		{"interrupted", beforeKey + key, "failed", `{"execution_id":"interrupted","effects":{"dispatch":{"dispatched":1}},"error":{"code":"execution_interrupted"}}`,
+		{"straight-line source remains a plan", beforeKey + key, "completed", twoDispatches,
+			"To click, press", "To click", "Inspect"},
+		{"no dispatch evidence still permits intent", beforeKey + key, "completed", `{"execution_id":"fixture"}`,
+			"To click, press", "To click", "Inspect"},
+		{"interrupted", beforeKey + key, "failed", `{"execution_id":"fixture","error":{"code":"execution_interrupted"}}`,
 			"Script failed", "Failed", "press"},
-		{"unknown dispatch", beforeKey + key, "completed", `{"execution_id":"uncertain","effects":{"dispatch":{"dispatched":1,"unknown":1}}}`,
-			"Run a script", "Run script", "press"},
-		{"early return", beforeKey + "return 42;\n" + key, "completed", `{"execution_id":"returned","effects":{"dispatch":{"dispatched":1}},"result":42}`,
-			"Click “Search inventory”", "Click", "press"},
+		{"early return", beforeKey + "return 42;\n" + key, "completed", `{"execution_id":"fixture","result":42}`,
+			"Plan to click “Search inventory”", "To click", "press"},
 		{"refused input caught by script", beforeKey + "try { " + key + " } catch (e) { return e.code; }", "completed",
-			`{"execution_id":"caught","effects":{"dispatch":{"dispatched":1,"not_dispatched":1}},"result":"input_not_ready"}`,
+			`{"execution_id":"fixture","effects":{"dispatch":{"dispatched":1,"not_dispatched":1}},"result":"input_not_ready"}`,
 			"Run a script", "Run script", "press"},
-		{"missing dispatch evidence", beforeKey + key, "completed", `{"execution_id":"no-effects"}`,
-			"Run a script", "Run script", "press"},
-		{"conditional readonly fallback", branch, "completed", `{"execution_id":"read-fallback","status":"completed"}`,
-			"May take a screenshot", "May capture", "click"},
-		{"conditional input", branch, "completed", `{"execution_id":"branch-click","effects":{"dispatch":{"dispatched":1}}}`,
-			"May click", "May click", "capture"},
-		{"literal chord", literalChord, "completed", `{"execution_id":"chord","effects":{"dispatch":{"dispatched":3}}}`,
-			"Click and press META+A", "Click, press", "type"},
-		{"repeated input totals cannot prove later sites", `for (const row of rows) await app.click(row); await app.keypress("ESC");`,
-			"completed", `{"execution_id":"loop","effects":{"dispatch":{"dispatched":2}}}`,
-			"May click and may press ESC", "May click", ""},
+		{"B04 argument evaluation order", `await app.keypress({keys: (await app.click({selector:{role:'text_field',text:'Search inventory'}}), ['META','A'])});`,
+			"completed", twoDispatches, "Run a script", "Run script", "press"},
+		{"B05 uninstantiated class", `class Clicker {
+  effect = app.click({selector:{role:'text_field',text:'Search inventory'}});
+}
+class Unused {
+  effect = app.keypress({keys:['META','A']});
+}
+await new Clicker().effect;
+await new Clicker().effect;`, "completed", twoDispatches, "Run a script", "Run script", "press"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for _, nested := range []bool{false, true} {
@@ -292,14 +283,6 @@ await app.typeText({text:'hidden'});`
 						if !strings.Contains(got, want) || test.forbidden != "" && strings.Contains(strings.ToLower(got), strings.ToLower(test.forbidden)) {
 							t.Fatalf("nested=%t replay=%t width=%d want %q without %q:\n%s", nested, replay, width, want, test.forbidden, got)
 						}
-						if width == 112 && test.name == "complete" {
-							ctx := m.blockRenderContext(width)
-							clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(fact.ID))
-							open := joinRenderedPlain(b.Render(ctx))
-							if !strings.Contains(open, "Result") || !strings.Contains(open, `"execution_id"`) || !strings.Contains(open, "app.keypress") {
-								t.Fatalf("nested=%t replay=%t lost disclosed arguments or result:\n%s", nested, replay, open)
-							}
-						}
 					}
 				}
 			}
@@ -307,52 +290,63 @@ await app.typeText({text:'hidden'});`
 	}
 }
 
-// Native Code Mode records carry the result without EventTool.Output on the
-// child. The parent may return the exact same structured reply.
-func desktopTracePlacement(t *testing.T, call *session.EventTool, final *session.Event, nested bool, code string) []*session.Event {
+// Native Code Mode stores the structured result on the child, while its
+// bare structured payload may be absent from the child's ACP update.
+func desktopTracePlacement(t *testing.T, call *session.EventTool, final *session.Event, nested bool, parentOutput string) []*session.Event {
 	t.Helper()
 	start := &session.Event{Type: session.EventTypeToolCall, Tool: call}
 	if !nested {
 		return []*session.Event{start, final}
 	}
-	if code == "" {
-		args, err := json.Marshal(call.Input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		code = "return await " + call.Name + "(" + string(args) + ");"
-	}
-	root := &session.EventTool{ID: "outer", Name: "js_exec", Status: "pending", Input: map[string]any{"code": code}}
-	call.Parent = &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
-	final.Tool.Parent = call.Parent
-	raw, err := json.Marshal(final.Tool.Output)
+	args, err := json.Marshal(call.Input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootFinal := desktopTraceResult(root, "completed", string(raw))
+	code := "return await " + call.Name + "(" + string(args) + ");"
+	root := &session.EventTool{ID: "outer", Name: "js_exec", Status: "pending", Input: map[string]any{"code": code}}
+	call.Parent = &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
+	final.Tool.Parent = call.Parent
+	if parentOutput == "" {
+		parentOutput = `{"script":"outer only"}`
+	}
 	final.Tool.Output = nil
-	return []*session.Event{{Type: session.EventTypeToolCall, Tool: root}, start, final, rootFinal}
+	return []*session.Event{{Type: session.EventTypeToolCall, Tool: root}, start, final, desktopTraceResult(root, "completed", parentOutput)}
 }
 
-func TestDesktopWorldAppsEmptyScopedResult(t *testing.T) {
+func TestDesktopWorldAppsResultBelongsToItsCall(t *testing.T) {
+	const empty = `{"apps":[],"coverage":{"complete":false},"next":null}`
+	const matching = `{"apps":[{"app":"fixture.desktop","name":"Fixture Desktop"}],"next":null}`
 	for _, test := range []struct {
-		name, code, output, want string
-		nested                   bool
+		name, child, parent string
+		nested, childOutput bool
+		wantEmpty           bool
 	}{
-		{"direct", "", `{"apps":[],"coverage":{"complete":false},"next":null}`, "No apps in scope", false},
-		{"nested returned", "", `{"apps":[],"coverage":{"complete":false},"next":null}`, "No apps in scope", true},
-		{"another page", "", `{"apps":[],"coverage":{"complete":false},"next":"cursor"}`, "Find apps", true},
-		{"different arguments", `return await dtw__apps({"query":"Not Chrome"});`, `{"apps":[],"next":null}`, "Find apps", true},
-		{"unrelated parent return", `await dtw__apps({"query":"Chrome"}); return {"apps":[]};`, `{"apps":[],"next":null}`, "Find apps", true},
+		{"direct empty", empty, "", false, true, true},
+		{"direct more pages", `{"apps":[],"next":"cursor"}`, "", false, true, false},
+		{"nested child output", empty, matching, true, true, true},
+		{"nested equal parent still not child output", empty, empty, true, false, false},
+		{"B08 shadowed parent returns false empty", matching, empty, true, false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			fact := desktopTraceFact("apps", "dtw", "apps", "desktop-world", map[string]any{"query": "Chrome"})
-			events := desktopTracePlacement(t, fact, desktopTraceResult(fact, "completed", test.output), test.nested, test.code)
+			fact := desktopTraceFact("apps", "dtw", "apps", "desktop-world", map[string]any{"query": "Fixture"})
+			final := desktopTraceResult(fact, "completed", test.child)
+			ownOutput := final.Tool.Output
+			events := desktopTracePlacement(t, fact, final, test.nested, test.parent)
+			if test.childOutput {
+				final.Tool.Output = ownOutput
+			}
 			for _, replay := range []bool{false, true} {
 				m, b := desktopTraceModel(t, events, 112, replay)
-				got := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
-				if !strings.Contains(got, test.want) || !strings.Contains(got, "Chrome") || strings.Contains(got, "coverage") {
-					t.Fatalf("replay=%t want %q and search query:\n%s", replay, test.want, got)
+				ctx := m.blockRenderContext(112)
+				got := joinRenderedPlain(b.Render(ctx))
+				if strings.Contains(got, "No apps in scope") != test.wantEmpty || !strings.Contains(got, "Fixture") || strings.Contains(got, "coverage") {
+					t.Fatalf("replay=%t wrong scoped search summary:\n%s", replay, got)
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(fact.ID))
+				got = joinRenderedPlain(b.Render(ctx))
+				if !strings.Contains(got, "Arguments") || strings.Contains(got, "└ Result") != test.childOutput ||
+					strings.Contains(got, "Fixture Desktop") {
+					t.Fatalf("replay=%t wrong result ownership in disclosure:\n%s", replay, got)
 				}
 			}
 		})

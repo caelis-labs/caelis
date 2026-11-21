@@ -1,25 +1,18 @@
 package tuiapp
 
 import (
-	"bytes"
-	"encoding/json"
-	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/dop251/goja/ast"
-	"github.com/dop251/goja/file"
 	"github.com/dop251/goja/parser"
 	"github.com/dop251/goja/token"
 )
 
-const desktopWorldScriptPrefix = "(async function(){\n"
-
 type desktopWorldAction struct {
-	phrase      string
-	short       string
-	read        bool
-	conditional bool
+	phrase string
+	short  string
+	read   bool
 }
 
 var desktopWorldActions = map[string]desktopWorldAction{
@@ -39,87 +32,13 @@ var desktopWorldActions = map[string]desktopWorldAction{
 	"quit":             {phrase: "quit the app", short: "quit"},
 }
 
-// Desktop World accepts an async function body. Parse it without loading source
-// maps or running code. Keep direct, identifiable calls in written order.
+// Summarize the intent of a small straight-line subset of Desktop World
+// scripts. An unsupported statement or argument leaves the script opaque.
 func desktopWorldScriptActions(source string) []desktopWorldAction {
-	body := parseDesktopWorldScript(source)
-	if body == nil {
+	if source == "" || len(source) > 64<<10 {
 		return nil
 	}
-
-	type site struct {
-		position file.Idx
-		action   desktopWorldAction
-		chord    *ast.Identifier
-	}
-	var sites []site
-	chords := desktopWorldLiteralChords(body)
-	receivers := make(map[*ast.Identifier]bool)
-	keyArgs := make(map[*ast.Identifier]bool)
-	reliable := walkDesktopWorldAST(body, false, false, func(node ast.Node, conditional, inactive bool) bool {
-		switch expr := node.(type) {
-		case *ast.CallExpression:
-			receiver, method := desktopWorldCall(expr.Callee)
-			if receiver == nil || receiver.Name != "app" {
-				return true
-			}
-			receivers[receiver] = true
-			if inactive {
-				return true
-			}
-			action, ok := desktopWorldActions[method]
-			if !ok {
-				return false
-			}
-			action.conditional = conditional
-			s := site{position: expr.Idx0(), action: action}
-			if len(expr.ArgumentList) == 1 {
-				arg := expr.ArgumentList[0]
-				s.action.phrase = desktopWorldActionPhrase(method, action.phrase, arg)
-				if method == "keypress" {
-					s.chord, _ = desktopWorldKeys(arg).(*ast.Identifier)
-					if s.chord != nil {
-						keyArgs[s.chord] = true
-					}
-				}
-			}
-			sites = append(sites, s)
-		case *ast.Identifier:
-			// Any other use can shadow, mutate or expose the array.
-			name := expr.Name.String()
-			if chord, ok := chords[name]; ok && chord.declaration != expr && !keyArgs[expr] {
-				delete(chords, name)
-			}
-			return expr.Name != "app" || receivers[expr]
-		case *ast.PropertyShort:
-			delete(chords, expr.Name.Name.String())
-			return expr.Name.Name != "app"
-		case *ast.WithStatement:
-			return false
-		}
-		return true
-	})
-	if !reliable {
-		return nil
-	}
-	slices.SortStableFunc(sites, func(a, b site) int { return int(a.position - b.position) })
-	actions := make([]desktopWorldAction, 0, len(sites))
-	for _, s := range sites {
-		if s.chord != nil {
-			if chord, ok := chords[s.chord.Name.String()]; ok && chord.declaration.Idx0() < s.position {
-				s.action.phrase = desktopWorldKeypressPhrase(s.action.phrase, chord.keys)
-			}
-		}
-		actions = append(actions, s.action)
-	}
-	return actions
-}
-
-func parseDesktopWorldScript(source string) *ast.BlockStatement {
-	if len(source) == 0 || len(source) > 64<<10 {
-		return nil
-	}
-	program, err := parser.ParseFile(nil, "", desktopWorldScriptPrefix+source+"\n})", 0, parser.WithDisableSourceMaps)
+	program, err := parser.ParseFile(nil, "", "(async function(){\n"+source+"\n})", 0, parser.WithDisableSourceMaps)
 	if err != nil || len(program.Body) != 1 {
 		return nil
 	}
@@ -132,166 +51,123 @@ func parseDesktopWorldScript(source string) *ast.BlockStatement {
 		return nil
 	}
 
-	return fn.Body
+	var actions []desktopWorldAction
+	returned := false
+	for _, stmt := range fn.Body.List {
+		var expressions []ast.Expression
+		ends := false
+		switch node := stmt.(type) {
+		case *ast.EmptyStatement:
+			continue
+		case *ast.ExpressionStatement:
+			expressions = append(expressions, node.Expression)
+		case *ast.ReturnStatement:
+			if node.Argument != nil {
+				expressions = append(expressions, node.Argument)
+			}
+			ends = true
+		case *ast.LexicalDeclaration:
+			if node.Token != token.CONST {
+				return nil
+			}
+			for _, binding := range node.List {
+				id, ok := binding.Target.(*ast.Identifier)
+				if !ok || id.Name == "app" {
+					return nil
+				}
+				expressions = append(expressions, binding.Initializer)
+			}
+		default:
+			return nil
+		}
+		for _, expr := range expressions {
+			if desktopWorldLiteral(expr) {
+				continue
+			}
+			action, ok := desktopWorldCallAction(expr)
+			if !ok {
+				return nil
+			}
+			// Validate the rest of the body too, since declarations can
+			// affect the app binding before a return.
+			if !returned {
+				actions = append(actions, action)
+			}
+		}
+		returned = returned || ends
+	}
+
+	readsOnly := !slices.ContainsFunc(actions, func(action desktopWorldAction) bool { return !action.read })
+	var chosen []desktopWorldAction
+	for _, action := range actions {
+		if action.read == readsOnly && !slices.Contains(chosen, action) {
+			chosen = append(chosen, action)
+			if len(chosen) == 2 {
+				break
+			}
+		}
+	}
+	return chosen
 }
 
-// A sole, directly returned invocation with matching literal arguments can
-// carry the same result as its child. Leave other Code Mode scripts opaque.
-func desktopWorldReturnsCall(source, name string, input map[string]any) bool {
-	body := parseDesktopWorldScript(source)
-	if body == nil || len(body.List) != 1 {
-		return false
-	}
-	ret, ok := body.List[0].(*ast.ReturnStatement)
-	if !ok {
-		return false
-	}
-	expr := ret.Argument
+func desktopWorldCallAction(expr ast.Expression) (desktopWorldAction, bool) {
 	if awaited, ok := expr.(*ast.AwaitExpression); ok {
 		expr = awaited.Argument
 	}
 	call, ok := expr.(*ast.CallExpression)
-	if !ok || len(call.ArgumentList) != 1 {
-		return false
+	if !ok || len(call.ArgumentList) > 1 {
+		return desktopWorldAction{}, false
 	}
-	callee, ok := call.Callee.(*ast.Identifier)
-	object, literal := call.ArgumentList[0].(*ast.ObjectLiteral)
-	if !ok || callee.Name.String() != name || !literal {
-		return false
-	}
-	start := int(object.Idx0()) - len(desktopWorldScriptPrefix) - 1
-	end := int(object.Idx1()) - len(desktopWorldScriptPrefix) - 1
-	if start < 0 || end > len(source) || start >= end {
-		return false
-	}
-	var args map[string]any
-	if err := json.Unmarshal([]byte(source[start:end]), &args); err != nil {
-		return false
-	}
-	got, err := json.Marshal(args)
-	if err != nil {
-		return false
-	}
-	want, err := json.Marshal(input)
-	return err == nil && bytes.Equal(got, want)
-}
-
-type desktopWorldChord struct {
-	declaration *ast.Identifier
-	keys        string
-}
-
-func desktopWorldLiteralChords(body *ast.BlockStatement) map[string]desktopWorldChord {
-	chords := make(map[string]desktopWorldChord)
-	for _, stmt := range body.List {
-		decl, ok := stmt.(*ast.LexicalDeclaration)
-		if !ok || decl.Token != token.CONST {
-			continue
-		}
-		for _, binding := range decl.List {
-			id, named := binding.Target.(*ast.Identifier)
-			array, literal := binding.Initializer.(*ast.ArrayLiteral)
-			if named && literal {
-				chords[id.Name.String()] = desktopWorldChord{id, desktopWorldChordKeys(array)}
-			}
-		}
-	}
-	return chords
-}
-
-// Goja exposes its AST as node fields without a visitor. DeclarationList
-// indexes nodes already visited in the body and is skipped.
-func walkDesktopWorldAST(node ast.Node, conditional, inactive bool, visit func(ast.Node, bool, bool) bool) bool {
-	value := reflect.ValueOf(node)
-	if node == nil || value.IsNil() {
-		return true
-	}
-	switch expr := node.(type) {
-	case *ast.BlockStatement:
-		for _, stmt := range expr.List {
-			if !walkDesktopWorldAST(stmt, conditional, inactive, visit) {
-				return false
-			}
-			// Keep visiting unreachable declarations because they can
-			// still shadow app or a key binding.
-			inactive = inactive || desktopWorldStopsBlock(stmt)
-		}
-		return true
-	case *ast.IfStatement:
-		if literal, ok := expr.Test.(*ast.BooleanLiteral); ok {
-			// Visit dead branches for potential hoisted app bindings, while
-			// excluding their action sites from the summary.
-			return walkDesktopWorldAST(expr.Consequent, conditional, inactive || !literal.Value, visit) &&
-				walkDesktopWorldAST(expr.Alternate, conditional, inactive || literal.Value, visit)
-		}
-		conditional = true
-	case *ast.SwitchStatement, *ast.ConditionalExpression,
-		*ast.ForStatement, *ast.ForInStatement, *ast.ForOfStatement, *ast.WhileStatement, *ast.DoWhileStatement,
-		*ast.CatchStatement, *ast.FunctionLiteral, *ast.ArrowFunctionLiteral, *ast.OptionalChain:
-		conditional = true
-	case *ast.BinaryExpression:
-		conditional = conditional || expr.Operator == token.LOGICAL_AND || expr.Operator == token.LOGICAL_OR || expr.Operator == token.COALESCE
-	}
-	if !visit(node, conditional, inactive) {
-		return false
-	}
-	value = value.Elem()
-	for i := 0; i < value.NumField(); i++ {
-		if value.Type().Field(i).Name == "DeclarationList" {
-			continue
-		}
-		field := value.Field(i)
-		if field.Kind() == reflect.Slice {
-			for j := 0; j < field.Len(); j++ {
-				if child, ok := field.Index(j).Interface().(ast.Node); ok && !walkDesktopWorldAST(child, conditional, inactive, visit) {
-					return false
-				}
-			}
-		} else if child, ok := field.Interface().(ast.Node); ok && !walkDesktopWorldAST(child, conditional, inactive, visit) {
-			return false
-		}
-	}
-	return true
-}
-
-func desktopWorldStopsBlock(stmt ast.Statement) bool {
-	switch node := stmt.(type) {
-	case *ast.ReturnStatement, *ast.ThrowStatement:
-		return true
-	case *ast.BlockStatement:
-		return slices.ContainsFunc(node.List, desktopWorldStopsBlock)
-	case *ast.TryStatement:
-		return node.Finally != nil && desktopWorldStopsBlock(node.Finally) ||
-			desktopWorldStopsBlock(node.Body) && (node.Catch == nil || desktopWorldStopsBlock(node.Catch.Body))
-	case *ast.IfStatement:
-		if literal, ok := node.Test.(*ast.BooleanLiteral); ok {
-			if literal.Value {
-				return desktopWorldStopsBlock(node.Consequent)
-			}
-			return desktopWorldStopsBlock(node.Alternate)
-		}
-		return desktopWorldStopsBlock(node.Consequent) && desktopWorldStopsBlock(node.Alternate)
-	}
-	return false
-}
-
-func desktopWorldCall(callee ast.Expression) (*ast.Identifier, string) {
-	if optional, ok := callee.(*ast.Optional); ok {
-		callee = optional.Expression
-	}
-	var receiver ast.Expression
 	var method string
-	switch member := callee.(type) {
+	var receiver ast.Expression
+	switch member := call.Callee.(type) {
 	case *ast.DotExpression:
 		receiver, method = member.Left, member.Identifier.Name.String()
 	case *ast.BracketExpression:
-		receiver, method = member.Left, desktopWorldString(member.Member)
+		key, ok := member.Member.(*ast.StringLiteral)
+		if !ok {
+			return desktopWorldAction{}, false
+		}
+		receiver, method = member.Left, key.Value.String()
 	}
-	if optional, ok := receiver.(*ast.Optional); ok {
-		receiver = optional.Expression
+	id, app := receiver.(*ast.Identifier)
+	action, known := desktopWorldActions[method]
+	if !app || id.Name != "app" || !known {
+		return desktopWorldAction{}, false
 	}
-	identifier, _ := receiver.(*ast.Identifier)
-	return identifier, method
+	if len(call.ArgumentList) == 1 {
+		arg := call.ArgumentList[0]
+		if !desktopWorldLiteral(arg) {
+			return desktopWorldAction{}, false
+		}
+		action.phrase = desktopWorldActionPhrase(method, action.phrase, arg)
+	}
+	return action, true
+}
+
+func desktopWorldLiteral(expr ast.Expression) bool {
+	switch node := expr.(type) {
+	case *ast.StringLiteral, *ast.BooleanLiteral, *ast.NumberLiteral, *ast.NullLiteral, *ast.RegExpLiteral:
+		return true
+	case *ast.TemplateLiteral:
+		return node.Tag == nil && len(node.Expressions) == 0
+	case *ast.ArrayLiteral:
+		for _, item := range node.Value {
+			if !desktopWorldLiteral(item) {
+				return false
+			}
+		}
+		return true
+	case *ast.ObjectLiteral:
+		for _, property := range node.Value {
+			keyed, ok := property.(*ast.PropertyKeyed)
+			if !ok || keyed.Computed || keyed.Kind != ast.PropertyKindValue || !desktopWorldLiteral(keyed.Value) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func desktopWorldActionPhrase(method, phrase string, arg ast.Expression) string {
