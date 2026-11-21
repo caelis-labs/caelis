@@ -11,8 +11,6 @@ import (
 
 const runnerSubmissionQueueCapacity = 64
 
-var errRunnerSubmissionClosed = agent.ErrRunInputClosed
-
 type runnerSubmissionRequest struct {
 	ctx        context.Context
 	submission agent.Submission
@@ -167,7 +165,7 @@ func (d *runnerSubmissionDispatcher) close(err error) {
 		return
 	}
 	if err == nil {
-		err = errRunnerSubmissionClosed
+		err = agent.ErrRunInputClosed
 	}
 	d.stopOnce.Do(func() {
 		d.mu.Lock()
@@ -183,14 +181,14 @@ func (d *runnerSubmissionDispatcher) close(err error) {
 
 func (d *runnerSubmissionDispatcher) stoppedError() error {
 	if d == nil {
-		return errRunnerSubmissionClosed
+		return agent.ErrRunInputClosed
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.stopErr != nil {
 		return d.stopErr
 	}
-	return errRunnerSubmissionClosed
+	return agent.ErrRunInputClosed
 }
 
 func submissionNotDispatchedError(err error) error {
