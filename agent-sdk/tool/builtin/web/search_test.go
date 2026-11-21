@@ -55,7 +55,7 @@ func TestSearchToolReturnsUnavailableFallbackForProviderReason(t *testing.T) {
 		Input: json.RawMessage(`{"query":"latest release"}`),
 	}, SearchBackend{
 		Provider:          "plain",
-		UnavailableReason: "Xiaomi Token Plan endpoints do not support provider-native web_search. Use a native Xiaomi MiMo API key, or use web_fetch with a known URL.",
+		UnavailableReason: "Xiaomi Token Plan endpoints do not support provider-native web search.",
 		SearchWeb: func(context.Context, model.WebSearchRequest) (model.WebSearchResponse, error) {
 			t.Fatal("provider search ran despite the explicit availability reason")
 			return model.WebSearchResponse{}, nil
@@ -69,7 +69,7 @@ func TestSearchToolReturnsUnavailableFallbackForProviderReason(t *testing.T) {
 		t.Fatalf("status = %#v, want unavailable", got)
 	}
 	message, _ := payload["message"].(string)
-	for _, want := range []string{"Token Plan", "native Xiaomi MiMo API key", "web_fetch"} {
+	for _, want := range []string{"Token Plan", "Use " + FetchToolName + " with a known URL"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("message = %q, want %q", message, want)
 		}

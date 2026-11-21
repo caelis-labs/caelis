@@ -300,8 +300,8 @@ func projectedSpawnStreamText(text string) string {
 		return ""
 	}
 	candidate := strings.TrimLeft(text, " \t\r\n")
-	decoded, remainder, ok := display.SplitLeadingJSONObject(candidate)
-	if !ok || !display.IsSpawnDisplayJSONObject(decoded) {
+	decoded, remainder, ok := splitLeadingJSONObject(candidate)
+	if !ok || !isSpawnDisplayJSONObject(decoded) {
 		return text
 	}
 	if strings.TrimSpace(remainder) == "" {

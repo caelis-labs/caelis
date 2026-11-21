@@ -35,11 +35,7 @@ type anthropicProviderDefaults struct {
 type anthropicSDKLLM struct {
 	name                string
 	provider            string
-	baseURL             string
-	token               string
-	headers             map[string]string
-	auth                AuthConfig
-	client              *anthropic.Client
+	client              anthropic.Client
 	requestTimeout      time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
@@ -97,15 +93,10 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		}
 		opts = append(opts, option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
 	}
-	client := anthropic.NewClient(opts...)
 	return &anthropicSDKLLM{
 		name:                cfg.Model,
 		provider:            cfg.Provider,
-		baseURL:             baseURL,
-		token:               token,
-		headers:             cloneHeaders(cfg.Headers),
-		auth:                cfg.Auth,
-		client:              &client,
+		client:              anthropic.NewClient(opts...),
 		requestTimeout:      cfg.Timeout,
 		maxOutputTok:        maxTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
@@ -154,7 +145,6 @@ func (l *anthropicSDKLLM) Generate(ctx context.Context, req *model.Request) iter
 }
 
 func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthropic.MessageNewParams, yield func(*model.StreamEvent, error) bool) {
-	cli := l.clientOrZero()
 	runCtx := ctx
 	cancel := func() {}
 	if l.requestTimeout > 0 {
@@ -166,7 +156,7 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	if l.requestTimeout > 0 {
 		opts = append(opts, option.WithRequestTimeout(l.requestTimeout))
 	}
-	resp, err := cli.Messages.New(runCtx, params, opts...)
+	resp, err := l.client.Messages.New(runCtx, params, opts...)
 	if err != nil {
 		yield(nil, classifyAnthropicImageError(err))
 		return
@@ -174,7 +164,7 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	if resp != nil {
 		model.RecordInvocationUsage(runCtx, anthropicUsageToKernel(resp.Usage))
 	}
-	msg, finishReason, rawFinishReason, usage, err := anthropicResponseToMessage(l.provider, resp)
+	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(l.provider, resp)
 	if err != nil {
 		yield(nil, err)
 		return
@@ -197,8 +187,7 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 }
 
 func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropic.MessageNewParams, yield func(*model.StreamEvent, error) bool) {
-	cli := l.clientOrZero()
-	stream := cli.Messages.NewStreaming(ctx, params)
+	stream := l.client.Messages.NewStreaming(ctx, params)
 	if stream == nil {
 		yield(nil, fmt.Errorf("providers: anthropic stream is nil"))
 		return
@@ -434,13 +423,6 @@ func applyAnthropicOutputConfig(params *anthropic.MessageNewParams, output *mode
 		return
 	}
 	params.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: schema}
-}
-
-func (l *anthropicSDKLLM) clientOrZero() anthropic.Client {
-	if l.client != nil {
-		return *l.client
-	}
-	return anthropic.NewClient()
 }
 
 func anthropicAuthOptions(cfg Config, token string) []option.RequestOption {
@@ -867,20 +849,9 @@ func anthropicToolInputSchema(schema map[string]any) anthropic.ToolInputSchemaPa
 	return param.Override[anthropic.ToolInputSchemaParam](json.RawMessage(raw))
 }
 
-func anthropicResponseToMessage(provider string, resp *anthropic.Message) (model.Message, model.FinishReason, string, model.Usage, error) {
-	if resp == nil {
-		return model.Message{}, model.FinishReasonUnknown, "", model.Usage{}, fmt.Errorf("providers: anthropic response is nil")
-	}
-	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(provider, resp)
-	if err != nil {
-		return model.Message{}, model.FinishReasonUnknown, "", model.Usage{}, err
-	}
-	return msg, finishReason, rawFinishReason, usage, nil
-}
-
 func anthropicMessageToKernel(provider string, resp *anthropic.Message) (model.Message, model.FinishReason, string, model.Usage, error) {
 	if resp == nil {
-		return model.Message{}, model.FinishReasonUnknown, "", model.Usage{}, fmt.Errorf("providers: anthropic message is nil")
+		return model.Message{}, model.FinishReasonUnknown, "", model.Usage{}, fmt.Errorf("providers: anthropic response is nil")
 	}
 	parts := make([]model.Part, 0, len(resp.Content))
 	for _, block := range resp.Content {

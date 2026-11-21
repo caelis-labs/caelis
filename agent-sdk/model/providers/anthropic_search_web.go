@@ -22,7 +22,7 @@ func (l *anthropicSDKLLM) WebSearchUnavailableReason() string {
 	if provider == "" {
 		provider = "this provider"
 	}
-	return fmt.Sprintf("%s does not support provider-native web_search through Caelis. Use web_fetch with a known URL, or choose a DeepSeek/Anthropic provider.", provider)
+	return fmt.Sprintf("%s does not support provider-native web search.", provider)
 }
 
 func (l *anthropicSDKLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
@@ -55,12 +55,11 @@ func (l *anthropicSDKLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 	// Messages.New adds an SDK-owned ten-minute deadline to every non-streaming
 	// request. Use the SDK's generic JSON path so SearchWeb follows the shared
 	// caller/explicit-timeout contract without changing the provider wire shape.
-	cli := l.clientOrZero()
 	var providerResponse anthropic.Message
-	if err := cli.Post(runCtx, "v1/messages", params, &providerResponse, opts...); err != nil {
+	if err := l.client.Post(runCtx, "v1/messages", params, &providerResponse, opts...); err != nil {
 		return model.WebSearchResponse{}, err
 	}
-	message, _, _, usage, err := anthropicResponseToMessage(l.provider, &providerResponse)
+	message, _, _, usage, err := anthropicMessageToKernel(l.provider, &providerResponse)
 	if err != nil {
 		return model.WebSearchResponse{}, err
 	}

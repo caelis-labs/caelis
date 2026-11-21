@@ -73,7 +73,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 
-		googleSearchEnabled := !req.DisableTools && geminiGoogleSearchEnabled(l.name, req.Tools)
+		googleSearchEnabled := !req.DisableTools && geminiGoogleSearchEnabled(req.Tools)
 		cfg := &genai.GenerateContentConfig{
 			Tools: toGeminiTools(req.Tools, googleSearchEnabled),
 			// Runtime owns generation admission, recovery and per-attempt usage.
@@ -254,7 +254,7 @@ func geminiTerminalError(out *genai.GenerateContentResponse) error {
 }
 
 func geminiFinishReasonError(reason genai.FinishReason) error {
-	return &model.TerminalResponseError{Reason: geminiFinishReasonToKernel(reason), Detail: fmt.Sprintf("model: gemini candidate ended with non-success finishReason %q", reason)}
+	return &model.TerminalResponseError{Detail: fmt.Sprintf("model: gemini candidate ended with non-success finishReason %q", reason)}
 }
 
 func geminiFinishReasonToKernel(reason genai.FinishReason) model.FinishReason {

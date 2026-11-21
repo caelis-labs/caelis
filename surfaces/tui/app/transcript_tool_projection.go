@@ -110,7 +110,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	}
 	displayInput := toolDisplayInputWithRecovered(rawInput, recoveredInput)
 	if semanticName == surfaceToolSpawn {
-		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
+		displayInput = projection.SpawnDisplayInputForResult(rawInput, displayOutput)
 	}
 	if semanticName == surfaceToolTask {
 		displayInput = taskDisplayInputForResult(rawInput, displayOutput)

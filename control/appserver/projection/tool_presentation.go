@@ -144,7 +144,7 @@ func projectedToolTitle(name string, args map[string]any, status string) string 
 			return name + " " + action
 		}
 	case projectedTitleSpawn:
-		if summary := strings.TrimSpace(display.SpawnFullDisplayArgs(args)); summary != "" {
+		if summary := strings.TrimSpace(SpawnFullDisplayArgs(args)); summary != "" {
 			return name + " " + summary
 		}
 	case projectedTitleMessage:

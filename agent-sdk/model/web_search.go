@@ -49,9 +49,9 @@ type WebSearcher interface {
 	SearchWeb(context.Context, WebSearchRequest) (WebSearchResponse, error)
 }
 
-// WebSearchAvailability is an optional model capability for explaining why a
-// provider-native web search tool is unavailable even though the provider is
-// otherwise usable for normal model turns.
+// WebSearchAvailability optionally reports why this endpoint cannot perform
+// provider-native search. The reason describes the provider or endpoint.
+// Callers supply guidance about alternative tools.
 type WebSearchAvailability interface {
 	WebSearchUnavailableReason() string
 }

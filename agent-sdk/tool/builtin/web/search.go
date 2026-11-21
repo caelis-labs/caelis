@@ -79,11 +79,12 @@ func (t *SearchTool) CallWithBackend(ctx context.Context, call tool.Call, backen
 	}
 	req := model.NormalizeWebSearchRequest(model.WebSearchRequest{Query: query, MaxResults: maxResults})
 	provider := strings.TrimSpace(backend.Provider)
-	if reason := strings.TrimSpace(backend.UnavailableReason); reason != "" {
+	reason := strings.TrimSpace(backend.UnavailableReason)
+	if reason != "" || backend.SearchWeb == nil {
+		if reason == "" {
+			reason = "Web search is unavailable for this provider."
+		}
 		return webSearchUnavailableResult(ctx, req, provider, reason)
-	}
-	if backend.SearchWeb == nil {
-		return webSearchUnavailableResult(ctx, req, provider, "Web search is unavailable for this provider. Use WebFetch with a known URL, or configure a search backend.")
 	}
 	resp, err := backend.SearchWeb(ctx, req)
 	if err != nil {
@@ -168,13 +169,14 @@ func webSearchFailedResult(ctx context.Context, req model.WebSearchRequest, prov
 	return result, tool.FailedReply(message)
 }
 
-func webSearchUnavailableResult(ctx context.Context, req model.WebSearchRequest, provider string, message string) (tool.Result, error) {
+func webSearchUnavailableResult(ctx context.Context, req model.WebSearchRequest, provider string, reason string) (tool.Result, error) {
 	toolpresentation.WebSearch(ctx, req.Query, provider, "", nil)
+	message := reason + " Use " + FetchToolName + " with a known URL if available, or choose a provider with native web search."
 	return toolutil.JSONResult(map[string]any{
 		"status":   "unavailable",
 		"query":    req.Query,
 		"provider": provider,
-		"message":  strings.TrimSpace(message),
+		"message":  message,
 		"results":  []any{},
 	})
 }

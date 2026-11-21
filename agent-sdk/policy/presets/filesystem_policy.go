@@ -28,7 +28,7 @@ func decideFilesystemWrite(input policy.ToolContext, def sandbox.Constraints) (p
 func askPathWriteApproval(input policy.ToolContext, def sandbox.Constraints, paths []string) (policy.Decision, error) {
 	reason := "write outside allowed roots requires approval"
 	constraints := withPathWriteGrants(def, paths)
-	decision, err := askApproval(reason, constraints, input)
+	decision, err := askApproval(reason, constraints, input, "edit", "path")
 	if err != nil {
 		return policy.Decision{}, err
 	}
