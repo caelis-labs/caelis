@@ -20,10 +20,6 @@ const (
 	transactionSuffix  = ".txn.json"
 )
 
-// CommittedError is the file-store alias for the durable post-commit signal.
-// Prefer session.CommittedError / session.IsCommitted in new call sites.
-type CommittedError = session.CommittedError
-
 type persistedTransaction struct {
 	Kind     string            `json:"kind"`
 	Version  int               `json:"version"`
@@ -364,8 +360,7 @@ func (s *Store) appendMissingTransactionEvents(
 	if len(missing) == 0 {
 		return nil
 	}
-	_, err = s.appendEventLogTransaction(documentPath, missing)
-	return err
+	return s.appendEventLogTransaction(documentPath, missing)
 }
 
 func (s *Store) appendMissingTransactionEventsIndexed(
@@ -403,8 +398,7 @@ func (s *Store) appendMissingTransactionEventsIndexed(
 	if len(missing) == 0 {
 		return nil
 	}
-	_, err = s.appendEventLogTransaction(documentPath, missing)
-	return err
+	return s.appendEventLogTransaction(documentPath, missing)
 }
 
 func (s *Store) appendMissingTransactionEventsFromTail(documentPath string, events []*session.Event) error {
@@ -439,8 +433,7 @@ func (s *Store) appendMissingTransactionEventsFromTail(documentPath string, even
 	if missing[0].Seq != throughSeq+1 {
 		return &session.EventConflictError{SessionID: missing[0].SessionID, EventID: missing[0].ID}
 	}
-	_, err = s.appendEventLogTransaction(documentPath, missing)
-	return err
+	return s.appendEventLogTransaction(documentPath, missing)
 }
 
 // readEventLogTransactionTail reads only the complete suffix that can overlap

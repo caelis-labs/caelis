@@ -27,62 +27,60 @@ func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocum
 	return s.readCachedEventLogContext(ctx, path)
 }
 
-func (s *Store) appendEventLogTransaction(documentPath string, events []*session.Event) (func() error, error) {
+func (s *Store) appendEventLogTransaction(documentPath string, events []*session.Event) error {
 	events = persistedEvents(events)
 	if len(events) == 0 {
-		return func() error { return nil }, nil
+		return nil
 	}
 	path := eventLogPath(documentPath)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
+		return err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
-		return nil, err
+		return err
 	}
 	if err := truncatePartialEventLogTail(s.durability, path); err != nil {
-		return nil, err
+		return err
 	}
 	var buf bytes.Buffer
 	for _, event := range events {
 		raw, err := session.MarshalEventJSON(event)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		buf.Write(raw)
 		buf.WriteByte('\n')
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	offset, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
 		file.Close()
-		return nil, err
+		return err
 	}
 	written, err := file.Write(buf.Bytes())
 	if err != nil || written != buf.Len() {
 		if err == nil {
 			err = io.ErrShortWrite
 		}
-		return nil, errors.Join(err, rollbackOpenEventLogAppend(s.durability, file, offset))
+		return errors.Join(err, rollbackOpenEventLogAppend(s.durability, file, offset))
 	}
 	if syncErr := s.durability.SyncFile(file); syncErr != nil {
-		return nil, errors.Join(syncErr, rollbackOpenEventLogAppend(s.durability, file, offset))
+		return errors.Join(syncErr, rollbackOpenEventLogAppend(s.durability, file, offset))
 	}
 	if err := file.Close(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		return nil, errors.Join(err, rollbackEventLogAppend(s.durability, path, offset))
+		return errors.Join(err, rollbackEventLogAppend(s.durability, path, offset))
 	}
 	if err := s.durability.SyncDirectory(dir); err != nil {
-		return nil, errors.Join(err, rollbackEventLogAppend(s.durability, path, offset))
+		return errors.Join(err, rollbackEventLogAppend(s.durability, path, offset))
 	}
-	return func() error {
-		return rollbackEventLogAppend(s.durability, path, offset)
-	}, nil
+	return nil
 }
 
 func rollbackOpenEventLogAppend(durability durabilityOps, file *os.File, offset int64) error {

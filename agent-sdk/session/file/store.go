@@ -580,10 +580,6 @@ func (s *Store) BindController(
 	ctx context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(ctx, req)
-}
-
-func (s *Store) bindControllerRequest(ctx context.Context, req session.BindControllerRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
@@ -670,10 +666,6 @@ func (s *Store) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(ctx, req)
-}
-
-func (s *Store) putParticipantRequest(ctx context.Context, req session.PutParticipantRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
@@ -792,10 +784,6 @@ func (s *Store) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(ctx, req)
-}
-
-func (s *Store) removeParticipantRequest(ctx context.Context, req session.RemoveParticipantRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
