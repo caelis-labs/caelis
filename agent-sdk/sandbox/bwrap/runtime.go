@@ -330,14 +330,6 @@ func (b *bwrapRunner) GetSessionStatus(sessionID string) (cmdsession.SessionStat
 	return manager.GetSessionStatus(sessionID)
 }
 
-func (b *bwrapRunner) GetSession(sessionID string) (*cmdsession.AsyncSession, error) {
-	manager, err := b.asyncSessionManager()
-	if err != nil {
-		return nil, err
-	}
-	return manager.GetSession(sessionID)
-}
-
 func (b *bwrapRunner) WaitSession(ctx context.Context, sessionID string, timeout time.Duration) (sandbox.CommandResult, error) {
 	manager, err := b.asyncSessionManager()
 	if err != nil {

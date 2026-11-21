@@ -271,14 +271,6 @@ func (l *landlockRunner) GetSessionStatus(sessionID string) (cmdsession.SessionS
 	return manager.GetSessionStatus(sessionID)
 }
 
-func (l *landlockRunner) GetSession(sessionID string) (*cmdsession.AsyncSession, error) {
-	manager, err := l.asyncSessionManager()
-	if err != nil {
-		return nil, err
-	}
-	return manager.GetSession(sessionID)
-}
-
 func (l *landlockRunner) WaitSession(ctx context.Context, sessionID string, timeout time.Duration) (sandbox.CommandResult, error) {
 	manager, err := l.asyncSessionManager()
 	if err != nil {
