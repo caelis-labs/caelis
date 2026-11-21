@@ -29,10 +29,11 @@ type openAIOutputTokenDetails struct {
 }
 
 func (u openAICompatUsage) hasAny() bool {
+	_, cacheReported := u.cachedInputTokens()
 	return u.reported || u.PromptTokens != 0 ||
 		u.CompletionTokens != 0 ||
 		u.TotalTokens != 0 ||
-		u.cachedInputTokens() != nil ||
+		cacheReported ||
 		u.reasoningTokens() != 0
 }
 
@@ -41,18 +42,16 @@ func (u openAICompatUsage) toKernelUsage() model.Usage {
 	if total == 0 && (u.PromptTokens != 0 || u.CompletionTokens != 0) {
 		total = u.PromptTokens + u.CompletionTokens
 	}
-	usage := model.Usage{
-		CacheReadAccounting: model.CacheReadIncluded,
-		PromptTokens:        u.PromptTokens,
-		CompletionTokens:    u.CompletionTokens,
-		ReasoningTokens:     u.reasoningTokens(),
-		TotalTokens:         total,
-	}
-	if cached := u.cachedInputTokens(); cached != nil {
-		usage.CachedInputTokens = *cached
-		usage.CachedInputTokensReported = true
-	}
-	return usageWithPresence(usage, u.reported)
+	cached, cacheReported := u.cachedInputTokens()
+	return usageWithPresence(model.Usage{
+		CacheReadAccounting:       model.CacheReadIncluded,
+		PromptTokens:              u.PromptTokens,
+		CachedInputTokens:         cached,
+		CachedInputTokensReported: cacheReported,
+		CompletionTokens:          u.CompletionTokens,
+		ReasoningTokens:           u.reasoningTokens(),
+		TotalTokens:               total,
+	}, u.reported)
 }
 
 func (u openAICompatUsage) toKernelUsageOr(fallback model.Usage) model.Usage {
@@ -63,17 +62,19 @@ func (u openAICompatUsage) toKernelUsageOr(fallback model.Usage) model.Usage {
 	return out
 }
 
-func (u openAICompatUsage) cachedInputTokens() *int {
-	if u.PromptCacheHitTokens != nil {
-		return u.PromptCacheHitTokens
+func (u openAICompatUsage) cachedInputTokens() (int, bool) {
+	// Compatible endpoints can report a zero placeholder in one alias and a
+	// nonzero measurement in another. Keep legacy nonzero precedence.
+	reported := false
+	for _, value := range []*int{u.PromptCacheHitTokens, u.CachedTokens, u.InputTokensDetails.CachedTokens, u.PromptTokensDetails.CachedTokens} {
+		if value != nil {
+			reported = true
+			if *value != 0 {
+				return *value, true
+			}
+		}
 	}
-	if u.CachedTokens != nil {
-		return u.CachedTokens
-	}
-	if u.InputTokensDetails.CachedTokens != nil {
-		return u.InputTokensDetails.CachedTokens
-	}
-	return u.PromptTokensDetails.CachedTokens
+	return 0, reported
 }
 
 func (u openAICompatUsage) reasoningTokens() int {

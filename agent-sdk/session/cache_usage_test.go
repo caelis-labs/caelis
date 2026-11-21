@@ -53,8 +53,10 @@ func TestInvocationMetadataCachePresenceSurvivesJSON(t *testing.T) {
 			if err = json.Unmarshal(raw, &payload); err != nil {
 				t.Fatal(err)
 			}
+			payload["cached_tokens"] = 128
+			payload["prompt_cache_hit_tokens"] = 128
 			usage := UsageSnapshotFromMapForProvider(payload, "anthropic")
-			if usage == nil || usage.CachedInputTokensReported != tc.read || usage.CacheWriteTokensReported != tc.write {
+			if usage == nil || usage.CachedInputTokens != tc.usage.CachedInputTokens || usage.CachedInputTokensReported != tc.read || usage.CacheWriteTokensReported != tc.write {
 				t.Fatalf("usage=%+v metadata=%s", usage, raw)
 			}
 		})

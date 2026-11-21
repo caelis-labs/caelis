@@ -270,8 +270,12 @@ func cachedInputTokensFromPayload(payload map[string]any) (int, bool) {
 		// the provider omitted it. Its legacy zero does not establish presence.
 		return intValue(value), reported
 	}
+	if value := payload["cache_read_input_tokens"]; value != nil {
+		return intValue(value), !hasFlag || reported
+	}
+	// Raw legacy aliases keep their nonzero precedence. A supplied zero still
+	// establishes presence when none of these aliases carries a nonzero value.
 	for _, value := range []any{
-		payload["cache_read_input_tokens"],
 		payload["cached_prompt_tokens"],
 		payload["cached_tokens"],
 		payload["prompt_cache_hit_tokens"],
@@ -283,7 +287,10 @@ func cachedInputTokensFromPayload(payload map[string]any) (int, bool) {
 		nestedAny(payload, "usageMetadata", "cachedContentTokenCount"),
 	} {
 		if value != nil {
-			return intValue(value), !hasFlag || reported
+			reported = !hasFlag || reported
+			if tokens := intValue(value); tokens != 0 {
+				return tokens, reported
+			}
 		}
 	}
 	return 0, reported
