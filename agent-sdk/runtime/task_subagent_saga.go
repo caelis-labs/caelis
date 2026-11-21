@@ -255,7 +255,6 @@ func (tm *taskRuntime) startSubagentTarget(
 			_ = spawnActivity.awaitPersistence(context.WithoutCancel(ctx))
 		}
 		task.activityID = activityID
-		task.activityGeneration = 1
 		task.metadata[subagentActivityIDMeta] = activityID
 		task.metadata[subagentActivityGenerationMeta] = int64(1)
 		if usage := spawnActivity.peekUsage(); usage != nil {

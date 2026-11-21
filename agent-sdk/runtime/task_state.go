@@ -224,10 +224,9 @@ type subagentTask struct {
 	stderrCursor int64
 	turnSeq      int64
 	// Admitted follow-up ownership can precede the first Task output event.
-	pendingInput       *childTaskActivity
-	completionReady    bool
-	activityID         string
-	activityGeneration int64
+	pendingInput    *childTaskActivity
+	completionReady bool
+	activityID      string
 }
 
 func newTaskRuntime(

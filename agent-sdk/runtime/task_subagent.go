@@ -628,9 +628,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	delete(task.metadata, "unread_final_responses")
 	delete(task.result, "final_responses")
 	task.activityID = strings.TrimSpace(taskStringValue(entry.Metadata[subagentActivityIDMeta]))
-	if generation, ok := taskInt64Value(entry.Metadata[subagentActivityGenerationMeta]); ok && generation > 0 {
-		task.activityGeneration = generation
-	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
