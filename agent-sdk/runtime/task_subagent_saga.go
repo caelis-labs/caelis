@@ -65,21 +65,6 @@ const (
 	subagentSpawnCompensatedDiagnostic         = "subagent spawn was rolled back"
 )
 
-// Compatibility aliases used by tests and older call sites.
-const (
-	spawnStatusPrepared            = string(spawnPhaseIntent)
-	spawnStatusSpawning            = string(spawnPhaseExternalPending)
-	spawnStatusSpawned             = string(spawnPhasePostSpawn)
-	spawnStatusCommitted           = string(spawnPhaseCommitted)
-	spawnStatusCompensating        = string(spawnPhaseCompensating)
-	spawnStatusChildCancelled      = string(spawnPhaseChildCancelled)
-	spawnStatusCompensated         = string(spawnPhaseCompensated)
-	spawnStatusUnknownOutcome      = string(spawnPhaseUnknownOutcome)
-	spawnStatusParticipantAttached = spawnPhaseLegacyParticipantAttached
-	spawnStatusCanonicalCommitting = spawnPhaseLegacyCanonicalCommitting
-	spawnStatusCanonicalCommitted  = spawnPhaseLegacyCanonicalCommitted
-)
-
 type spawnBeginOutcome struct {
 	Entry       *taskapi.Entry
 	Snapshot    taskapi.Snapshot
@@ -348,7 +333,6 @@ func (tm *taskRuntime) beginSubagentSpawn(
 			"participant_role": string(role),
 			"handle":           strings.TrimSpace(handle), "terminal_id": subagentTerminalID(taskID), "turn_seq": int64(1),
 			subagentActivityIDMeta: activityID,
-			"spawn_phase":          string(spawnPhaseIntent),
 		},
 		Metadata: map[string]any{
 			"spawn_status": string(spawnPhaseIntent), "spawn_identity": strings.TrimSpace(spawnID),
@@ -678,11 +662,8 @@ func setSpawnEntryPhase(entry *taskapi.Entry, phase spawnPhase, reason string) {
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]any{}
 	}
-	if entry.Spec == nil {
-		entry.Spec = map[string]any{}
-	}
 	entry.Metadata["spawn_status"] = string(phase)
-	entry.Spec["spawn_phase"] = string(phase)
+	delete(entry.Spec, "spawn_phase")
 	if strings.TrimSpace(reason) != "" {
 		entry.Metadata["spawn_reason"] = strings.TrimSpace(reason)
 	}
@@ -716,10 +697,6 @@ func (tm *taskRuntime) markSubagentSpawnPhase(ctx context.Context, task *subagen
 		task.metadata["spawn_reason"] = strings.TrimSpace(reason)
 	}
 	entry := task.entrySnapshot(tm.runtime.now())
-	if entry.Spec == nil {
-		entry.Spec = map[string]any{}
-	}
-	entry.Spec["spawn_phase"] = string(phase)
 	task.mu.Unlock()
 	err := tm.persistSpawnEntry(ctx, entry)
 	if err == nil {

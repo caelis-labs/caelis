@@ -592,6 +592,12 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
+	if taskStringValue(task.metadata["spawn_status"]) == "" {
+		// Older Task entries may carry their spawn phase only in Spec.
+		if phase := spawnPhaseOf(entry); phase != "" {
+			task.metadata["spawn_status"] = string(phase)
+		}
+	}
 	if _, ok := task.metadata["context_unsupported"]; !ok && taskSpecBool(entry.Spec, "context_unsupported") {
 		task.metadata["context_unsupported"] = true
 	}
@@ -832,7 +838,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"approval_mode":        t.approvalMode,
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),
 			"spawn_request_digest": taskStringValue(t.metadata["spawn_request_digest"]),
-			"spawn_phase":          taskStringValue(t.metadata["spawn_status"]),
 			subagentCancelPhaseKey: taskStringValue(t.metadata[subagentCancelPhaseKey]),
 			"session_id":           t.anchor.SessionID,
 			"agent_id":             t.anchor.AgentID,

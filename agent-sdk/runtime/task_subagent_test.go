@@ -310,7 +310,7 @@ func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
 			"target": delegation.AgentTarget("helper"), "prompt": "review",
 			"include_context": true, "context": agent.ContextTransfer{},
 		},
-		Metadata: map[string]any{"spawn_status": spawnStatusPrepared, "spawn_request_digest": digest},
+		Metadata: map[string]any{"spawn_status": string(spawnPhaseIntent), "spawn_request_digest": digest},
 	}, ExpectedRevision: 0}); err != nil {
 		t.Fatal(err)
 	}
