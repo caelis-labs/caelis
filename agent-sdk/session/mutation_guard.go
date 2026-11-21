@@ -30,7 +30,6 @@ const (
 	ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
 	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
 	ControlMutationPurposeTest          ControlMutationPurpose = "test"
-	ControlMutationPurposeSystemCommit  ControlMutationPurpose = "system_commit"
 	// ControlMutationPurposeInteraction appends display-only conversation input
 	// without changing Runtime execution, model context or authorization.
 	ControlMutationPurposeInteraction ControlMutationPurpose = "conversation_interaction"
@@ -176,7 +175,7 @@ func AuthorizeMutationGuard(active SessionFence, guard MutationGuard) error {
 			}
 			return nil
 		}
-		if SessionFenceIsHeld(active) && !ControlMutationMayOverlapRuntimeFence(guard.Purpose) {
+		if SessionFenceIsHeld(active) && !controlMutationMayOverlapRuntimeFence(guard.Purpose) {
 			return conflict("active execution fence requires a matching control fence")
 		}
 		return nil
@@ -203,15 +202,14 @@ func sessionFenceMutationAuthorized(active SessionFence, guard MutationGuard) bo
 		sessionFenceClaimMatches(active.claimDigest, guard.claimToken)
 }
 
-// ControlMutationMayOverlapRuntimeFence reports whether an unfenced Control
+// controlMutationMayOverlapRuntimeFence reports whether an unfenced Control
 // mutation is explicitly safe while a Turn owns the Session execution fence.
 // Unknown purposes fail closed during guard validation.
-func ControlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool {
+func controlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool {
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeInteraction,
 		ControlMutationPurposeParticipant,
-		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeSubagentActivity,
 		ControlMutationPurposeSubagentCancellation,
@@ -233,7 +231,6 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeLifecycle,
 		ControlMutationPurposeConfiguration,
 		ControlMutationPurposeTest,
-		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeSubagentActivity,
 		ControlMutationPurposeSubagentCancellation:
