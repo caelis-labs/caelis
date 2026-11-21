@@ -585,7 +585,7 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 		}))
 		defer server.Close()
 		llm := newOpenAIResponsesTestLLM(server, APIOpenAIResponses)
-		response, reasoningDelta, toolDelta, err := collectOpenAICodexTestResponse(llm, &model.Request{
+		response, reasoningDelta, toolStarted, err := collectOpenAICodexTestResponse(llm, &model.Request{
 			Messages: []model.Message{model.NewTextMessage(model.RoleUser, "weather")},
 			Tools:    []model.ToolSpec{model.NewFunctionToolSpec("lookup", "lookup weather", map[string]any{"type": "object"})},
 			Stream:   true,
@@ -593,12 +593,12 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 		if err != nil {
 			t.Fatalf("Generate() error = %v", err)
 		}
-		if reasoningDelta != "checking" || toolDelta != `{"query":"weather"}` {
-			t.Fatalf("deltas = reasoning %q tool %q", reasoningDelta, toolDelta)
+		if reasoningDelta != "checking" || !toolStarted {
+			t.Fatalf("reasoning = %q, saw tool delta = %v", reasoningDelta, toolStarted)
 		}
 		assertPlainReasoning(t, response.Message, "openai", "checking")
 		calls := response.Message.ToolCalls()
-		if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Name != "lookup" {
+		if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Name != "lookup" || calls[0].Args != `{"query":"weather"}` {
 			t.Fatalf("tool calls = %#v", calls)
 		}
 		assertFinishReasonReported(t, response)

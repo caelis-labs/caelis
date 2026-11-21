@@ -679,22 +679,6 @@ func toolResponseResultFromParts(parts []Part) map[string]any {
 	return map[string]any{"result": strings.Join(texts, "\n")}
 }
 
-func (m Message) HasMedia(modality MediaModality) bool {
-	for _, part := range m.Parts {
-		if part.Media == nil {
-			continue
-		}
-		if modality == "" || part.Media.Modality == modality {
-			return true
-		}
-	}
-	return false
-}
-
-func (m Message) HasImages() bool {
-	return m.HasMedia(MediaModalityImage)
-}
-
 func (m Message) ReasoningText() string {
 	parts := m.ReasoningParts()
 	texts := make([]string, 0, len(parts))
@@ -777,10 +761,9 @@ const (
 
 // PartDelta is one incremental provider-neutral part update.
 type PartDelta struct {
-	Index      int      `json:"index,omitempty"`
-	Kind       PartKind `json:"kind,omitempty"`
-	TextDelta  string   `json:"text_delta,omitempty"`
-	InputDelta string   `json:"input_delta,omitempty"`
+	Index     int      `json:"index,omitempty"`
+	Kind      PartKind `json:"kind,omitempty"`
+	TextDelta string   `json:"text_delta,omitempty"`
 }
 
 // Response is the completed semantic result of one step or turn.

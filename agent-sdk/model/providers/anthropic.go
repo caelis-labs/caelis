@@ -321,7 +321,7 @@ func (l *anthropicSDKLLM) emitStreamingDeltaBlock(ev anthropic.ContentBlockDelta
 			return true
 		}
 		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
-			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse, InputDelta: delta.PartialJSON}}, nil)
+			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse}}, nil)
 	default:
 		return true
 	}
