@@ -402,7 +402,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	defer stopProgress()
 	result, callErr := toolbinding.Call(callCtx, target.tool, call, toolbinding.Dispatch{Model: h.owner.producingModel})
 	stopProgress()
-	outcome := codeModeOutcome(result, callErr)
+	outcome := codeModeOutcome(callErr)
 	persistErr := h.appendToolFact(ctx, call, &result, callErr, target)
 	if persistErr != nil {
 		h.fail(persistErr)
@@ -437,8 +437,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	return h.project(callID, result, outcome, target.definition)
 }
 
-func codeModeOutcome(result tool.Result, err error) string {
-	_, err = hookrun.EffectResult(result, err)
+func codeModeOutcome(err error) string {
+	err = hookrun.EffectError(err)
 	if errorcode.Is(err, errorcode.UnknownOutcome) || errorcode.Is(err, errorcode.Cancelled) || errors.Is(err, context.Canceled) {
 		return codemode.OutcomeUnknown
 	}

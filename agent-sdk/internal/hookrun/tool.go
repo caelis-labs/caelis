@@ -15,12 +15,11 @@ import (
 
 func toolEvidence(ctx context.Context, def tool.Definition, call tool.Call) agent.HookContext {
 	e := FromContext(ctx).Evidence
-	c := tool.CloneCall(call)
-	d := tool.CloneDefinition(def)
 	e.ToolExecution = tool.InvocationFromContext(ctx)
 	e.ToolParent = tool.ParentFromContext(ctx)
-	e.Tool = &c
-	e.ToolDefinition = &d
+	// Call and InvokeTool detach this evidence before invoking extensions.
+	e.Tool = &call
+	e.ToolDefinition = &def
 	return e
 }
 
@@ -206,17 +205,19 @@ func failedProcessingResult() tool.Result {
 }
 
 func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base func(context.Context) (tool.Result, error)) (tool.Result, error) {
+	entries := FromContext(ctx).Hooks.ToolInvoke
+	if len(entries) == 0 {
+		return base(ctx)
+	}
 	e := toolEvidence(ctx, def, call)
-	var actual *tool.Result
+	var invoked bool
 	var actualErr error
 	chain := func(ctx context.Context) (tool.Result, error) {
 		r, err := base(ctx)
-		snapshot, _ := tool.CloneResult(r, nil)
-		actual = &snapshot
+		invoked = true
 		actualErr = err
 		return r, err
 	}
-	entries := FromContext(ctx).Hooks.ToolInvoke
 	for i := len(entries) - 1; i >= 0; i-- {
 		h := entries[i]
 		following := chain
@@ -227,14 +228,14 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 		}
 	}
 	r, err := chain(ctx)
-	if err != nil && actual != nil && (!errors.Is(err, actualErr) || !errors.Is(actualErr, err)) {
+	if err != nil && invoked && (!errors.Is(err, actualErr) || !errors.Is(actualErr, err)) {
 		return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: actualErr}
 	}
-	if err == nil && len(entries) > 0 {
+	if err == nil {
 		err = validateResult(def, r, nil)
 		if err != nil {
 			err = &agent.HookError{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
-			if actual != nil {
+			if invoked {
 				return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: actualErr}
 			}
 			return tool.Result{}, err
@@ -281,12 +282,14 @@ func (e *ProcessingError) Error() string {
 }
 func (e *ProcessingError) Unwrap() error   { return e.Cause }
 func (e *ProcessingError) Retryable() bool { return false }
-func EffectResult(result tool.Result, err error) (tool.Result, error) {
+
+// EffectError unwraps a processing failure to the producer's actual error.
+func EffectError(err error) error {
 	var e *ProcessingError
 	if errors.As(err, &e) {
-		return result, e.EffectError
+		return e.EffectError
 	}
-	return result, err
+	return err
 }
 func FailedView(message model.Message) model.Message {
 	message = model.CloneMessage(message)

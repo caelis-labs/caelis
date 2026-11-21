@@ -150,7 +150,7 @@ func (a *Agent) executeToolCallAdmitted(
 	}
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical, err)
-	_, effectErr := hookrun.EffectResult(complete, err)
+	effectErr := hookrun.EffectError(err)
 	originalView := model.CloneMessage(message)
 	message, viewErr := hookrun.ModelView(ctx, selectedTool.Definition(), invocation, message)
 	if viewErr != nil {
