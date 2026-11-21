@@ -73,7 +73,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 
-		googleSearchEnabled := !req.DisableTools && geminiGoogleSearchEnabled(l.name, req.Tools)
+		googleSearchEnabled := !req.DisableTools && geminiGoogleSearchEnabled(req.Tools)
 		cfg := &genai.GenerateContentConfig{
 			Tools: toGeminiTools(req.Tools, googleSearchEnabled),
 			// Runtime owns generation admission, recovery and per-attempt usage.

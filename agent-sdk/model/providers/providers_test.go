@@ -2242,50 +2242,63 @@ func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *tes
 	}
 }
 
-func TestMiniMaxUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
-	llm := newMiniMax(Config{
-		Provider: "minimax",
-		API:      model.APIMiniMax,
-		Model:    "MiniMax-M2",
-		Auth: AuthConfig{
-			Type:  model.AuthBearerToken,
-			Token: "compat-token",
+func TestAnthropicCompatibleDefaultsReachProviderWire(t *testing.T) {
+	for _, fixture := range []struct {
+		name, endpoint, modelName string
+		newModel                  func(Config, string) model.LLM
+		auth                      model.AuthType
+		maxTokens                 int
+	}{
+		{
+			name: "MiniMax", endpoint: miniMaxDefaultBaseURL, modelName: "MiniMax-M2",
+			newModel: newMiniMax, auth: model.AuthBearerToken, maxTokens: 4096,
 		},
-	}, "compat-token")
-	typed, ok := llm.(*anthropicSDKLLM)
-	if !ok {
-		t.Fatalf("newAnthropic() = %T, want *anthropicSDKLLM", llm)
-	}
-	if typed.baseURL != miniMaxDefaultBaseURL {
-		t.Fatalf("baseURL = %q, want %q", typed.baseURL, miniMaxDefaultBaseURL)
-	}
-	if typed.maxOutputTok != 4096 {
-		t.Fatalf("maxOutputTok = %d, want 4096", typed.maxOutputTok)
-	}
-}
-
-func TestDeepSeekUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider: "deepseek",
-		API:      model.APIDeepSeek,
-		Model:    "deepseek-v4-pro",
-		Auth: AuthConfig{
-			Type:  model.AuthAPIKey,
-			Token: "deepseek-token",
+		{
+			name: "DeepSeek", endpoint: deepSeekDefaultAnthropicBaseURL, modelName: "deepseek-v4-pro",
+			newModel: newDeepSeek, auth: model.AuthAPIKey, maxTokens: deepSeekDefaultMaxTokens,
 		},
-	}, "deepseek-token")
-	typed, ok := llm.(*anthropicSDKLLM)
-	if !ok {
-		t.Fatalf("newDeepSeek() = %T, want *anthropicSDKLLM", llm)
-	}
-	if typed.baseURL != deepSeekDefaultAnthropicBaseURL {
-		t.Fatalf("baseURL = %q, want %q", typed.baseURL, deepSeekDefaultAnthropicBaseURL)
-	}
-	if typed.maxOutputTok != deepSeekDefaultMaxTokens {
-		t.Fatalf("maxOutputTok = %d, want %d", typed.maxOutputTok, deepSeekDefaultMaxTokens)
-	}
-	if typed.auth.Type != model.AuthBearerToken {
-		t.Fatalf("auth type = %q, want bearer token", typed.auth.Type)
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			var seen int
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				seen++
+				if got := req.URL.String(); got != fixture.endpoint+"/v1/messages" {
+					t.Errorf("endpoint = %q, want %s/v1/messages", got, fixture.endpoint)
+				}
+				if got := req.Header.Get("Authorization"); got != "Bearer fixture-token" {
+					t.Errorf("authorization = %q, want bearer", got)
+				}
+				var body struct {
+					MaxTokens int `json:"max_tokens"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					return nil, err
+				}
+				if body.MaxTokens != fixture.maxTokens {
+					t.Errorf("max_tokens = %d, want %d", body.MaxTokens, fixture.maxTokens)
+				}
+				return &http.Response{
+					StatusCode: 200,
+					Header:     http.Header{"Content-Type": {"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"id":"msg","type":"message","role":"assistant","model":"fixture","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)),
+					Request:    req,
+				}, nil
+			})}
+			llm := fixture.newModel(Config{
+				Model: fixture.modelName, HTTPClient: client, Auth: AuthConfig{Type: fixture.auth}, Timeout: time.Second,
+			}, "fixture-token")
+			for _, err := range llm.Generate(t.Context(), &model.Request{
+				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+				Reasoning: model.ReasoningConfig{Effort: "none"},
+			}) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if seen != 1 {
+				t.Fatalf("provider received %d requests, want 1", seen)
+			}
+		})
 	}
 }
 
