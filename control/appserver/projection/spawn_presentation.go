@@ -1,16 +1,19 @@
-package display
+package projection
 
 import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+// SpawnFullDisplayArgs projects the thread label and prompt from tool arguments
+// or a legacy result envelope.
 func SpawnFullDisplayArgs(raw map[string]any) string {
 	raw = normalizeSpawnDisplayRawMap(raw)
-	prompt := strings.Join(strings.Fields(NormalizeDisplayArg(MapString(raw, "prompt"))), " ")
-	agent := strings.TrimSpace(MapString(raw, "agent"))
+	prompt := strings.Join(strings.Fields(display.MapString(raw, "prompt")), " ")
+	agent := strings.TrimSpace(display.MapString(raw, "agent"))
 	target := spawnDisplayTarget(raw, agent)
 	if target == "" {
 		return prompt
@@ -22,10 +25,10 @@ func SpawnFullDisplayArgs(raw map[string]any) string {
 }
 
 func spawnDisplayTarget(raw map[string]any, agent string) string {
-	handle := firstNonEmpty(
-		spawnDisplayHandle(MapString(raw, "handle")),
-		spawnDisplayHandle(MapString(raw, "mention")),
-		spawnDisplayHandle(MapString(raw, "task_id")),
+	handle := firstTaskDisplayValue(
+		spawnDisplayHandle(display.MapString(raw, "handle")),
+		spawnDisplayHandle(display.MapString(raw, "mention")),
+		spawnDisplayHandle(display.MapString(raw, "task_id")),
 	)
 	agent = strings.TrimSpace(agent)
 	if handle == "" {
@@ -52,6 +55,7 @@ func spawnDisplayHandle(value string) string {
 	return value
 }
 
+// SpawnDisplayInputForResult fills missing display arguments from a result.
 func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
 	output = normalizeSpawnDisplayRawMap(output)
 	merged := normalizeSpawnDisplayRawMap(input)
@@ -59,7 +63,7 @@ func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map
 		merged = map[string]any{}
 	}
 	for _, key := range []string{"agent", "prompt", "handle", "mention", "task_id"} {
-		if strings.TrimSpace(MapString(merged, key)) != "" {
+		if strings.TrimSpace(display.MapString(merged, key)) != "" {
 			continue
 		}
 		if value, ok := output[key]; ok {
@@ -71,13 +75,13 @@ func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map
 
 func normalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
-		return jsonvalue.CloneMap(raw)
+		return session.CloneState(raw)
 	}
-	out := jsonvalue.CloneMap(raw)
+	out := session.CloneState(raw)
 	for _, key := range []string{"text", "result", "output", "summary", "content", "stdout", "output_preview", "tool_output", "toolOutput", "raw_output", "rawOutput", "message"} {
-		text := MapString(out, key)
-		decoded, remainder, ok := SplitLeadingJSONObject(text)
-		if !ok || !IsSpawnDisplayJSONObject(decoded) {
+		text := display.MapString(out, key)
+		decoded, remainder, ok := splitLeadingJSONObject(text)
+		if !ok || !isSpawnDisplayJSONObject(decoded) {
 			continue
 		}
 		for decodedKey, value := range decoded {
@@ -94,7 +98,7 @@ func normalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
 	return out
 }
 
-func SplitLeadingJSONObject(text string) (map[string]any, string, bool) {
+func splitLeadingJSONObject(text string) (map[string]any, string, bool) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "{") {
 		return nil, text, false
@@ -111,7 +115,7 @@ func SplitLeadingJSONObject(text string) (map[string]any, string, bool) {
 	return decoded, strings.TrimSpace(text[offset:]), true
 }
 
-func IsSpawnDisplayJSONObject(decoded map[string]any) bool {
+func isSpawnDisplayJSONObject(decoded map[string]any) bool {
 	if len(decoded) == 0 {
 		return false
 	}

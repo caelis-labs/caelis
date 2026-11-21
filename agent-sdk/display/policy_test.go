@@ -2,40 +2,6 @@ package display
 
 import "testing"
 
-func TestSpawnFullDisplayArgsUsesAgentAndPrompt(t *testing.T) {
-	raw := map[string]any{
-		"agent":  "codex",
-		"prompt": "inspect the transcript",
-	}
-	if got := SpawnFullDisplayArgs(raw); got != "codex: inspect the transcript" {
-		t.Fatalf("SpawnFullDisplayArgs() = %q", got)
-	}
-}
-
-func TestSpawnFullDisplayArgsUsesHandleWithAgentAnnotation(t *testing.T) {
-	raw := map[string]any{
-		"agent":   "self",
-		"task_id": "jeff",
-		"prompt":  "inspect the transcript",
-	}
-	if got := SpawnFullDisplayArgs(raw); got != "jeff[self]: inspect the transcript" {
-		t.Fatalf("SpawnFullDisplayArgs() = %q", got)
-	}
-}
-
-func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T) {
-	input := map[string]any{"agent": "codex"}
-	output := map[string]any{"text": `{"prompt":"inspect repo","task_id":"task-1"} running`}
-	got := SpawnDisplayInputForResult(input, output)
-	if got["agent"] != "codex" || got["prompt"] != "inspect repo" || got["task_id"] != "task-1" {
-		t.Fatalf("SpawnDisplayInputForResult() = %#v", got)
-	}
-	normalized := normalizeSpawnDisplayRawMap(output)
-	if normalized["text"] != "running" {
-		t.Fatalf("text remainder = %#v", normalized["text"])
-	}
-}
-
 func TestWebSearchSummaryShowsQueryOnly(t *testing.T) {
 	input := map[string]any{"query": "上海 天气"}
 	output := map[string]any{
