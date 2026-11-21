@@ -318,69 +318,6 @@ func (s *Store) AppendEventWithOutcome(
 	return session.AppendEventResult{Event: out, Appended: appended}, nil
 }
 
-// AppendEventWithOutcomeConditional atomically checks related Session
-// revisions and appends the target event under the store root write lock.
-func (s *Store) AppendEventWithOutcomeConditional(
-	ctx context.Context,
-	req session.ConditionalAppendEventRequest,
-) (session.AppendEventResult, error) {
-	event := req.Event
-	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
-	}
-	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
-	if err != nil {
-		return session.AppendEventResult{}, err
-	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
-
-	if err := s.mu.LockContext(ctx); err != nil {
-		return session.AppendEventResult{}, err
-	}
-	defer s.mu.Unlock()
-
-	var out *session.Event
-	var appended bool
-	if err := s.withRootLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
-			return err
-		}
-		for _, precondition := range req.RelatedRevisions {
-			related, err := s.readDocumentForRef(precondition.SessionRef)
-			if err != nil {
-				return err
-			}
-			expected := precondition.ExpectedRevision
-			if err := session.CheckExpectedRevision(related.Session, &expected); err != nil {
-				return err
-			}
-		}
-
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, []*session.Event{event}, nil, nil, nil, req.ExpectedRevision, "", "", prewarm)
-		if err != nil {
-			return err
-		}
-		normalized := tx.Prepared.Events[0]
-		if !tx.Changed {
-			out = session.CloneEvent(normalized)
-			return nil
-		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
-			return err
-		}
-		out = session.CloneEvent(normalized)
-		appended = true
-		return nil
-	}); err != nil {
-		return session.AppendEventResult{}, err
-	}
-	return session.AppendEventResult{Event: out, Appended: appended}, nil
-}
-
 func (s *Store) prepareAppendTransactionForDocument(
 	ctx context.Context,
 	doc persistedDocument,

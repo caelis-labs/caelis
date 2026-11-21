@@ -20,15 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/sessiontest"
 )
-
-func TestStoreConditionalAppendConformance(t *testing.T) {
-	t.Parallel()
-	sessiontest.ConditionalAppendConformance(t, func(t *testing.T) sessiontest.ConditionalAppendStore {
-		return NewStore(Config{RootDir: t.TempDir()})
-	})
-}
 
 func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	t.Parallel()
