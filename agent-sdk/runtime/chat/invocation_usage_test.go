@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"iter"
+	"reflect"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -45,5 +46,25 @@ func TestRepairRetainsEveryProviderInvocation(t *testing.T) {
 	}
 	if llm.calls != 2 || recorded != 2 || tokens != 24 {
 		t.Fatalf("actual calls=%d; recorded usage events=%d; total tokens=%d; want 2/2/24", llm.calls, recorded, tokens)
+	}
+}
+
+func TestResponseAndReceiptUseSameCacheAccountingMetadata(t *testing.T) {
+	for _, basis := range []model.CacheReadAccounting{model.CacheReadIncluded, model.CacheReadSeparate, ""} {
+		t.Run(string(basis), func(t *testing.T) {
+			usage := model.Usage{
+				PromptTokens: 10, CachedInputTokens: 5, CompletionTokens: 2, TotalTokens: 17,
+				CacheReadAccounting: basis,
+			}
+			response := modelResponseEvent(model.NewTextMessage(model.RoleAssistant, "done"),
+				&model.Response{Provider: "deepseek", Usage: usage}, "message", nil)
+			receipt := session.NewModelInvocationReceipt(model.Invocation{Provider: "deepseek", Usage: usage}, "chat")
+			sdkUsage := func(event *session.Event) any {
+				return event.Meta["caelis"].(map[string]any)["sdk"].(map[string]any)["usage"]
+			}
+			if displayed, recorded := sdkUsage(response), sdkUsage(receipt); !reflect.DeepEqual(displayed, recorded) {
+				t.Fatalf("response usage = %#v, want receipt usage %#v", displayed, recorded)
+			}
+		})
 	}
 }

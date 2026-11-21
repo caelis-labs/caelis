@@ -170,7 +170,7 @@ func responseMeta(resp *model.Response) map[string]any {
 	if resp == nil {
 		return nil
 	}
-	usage := session.ModelUsageMetadata(responseUsageAccountingProvider(resp), resp.Usage)
+	usage := session.ModelUsageMetadata(strings.TrimSpace(resp.Provider), resp.Usage)
 	sdk := map[string]any{
 		"model":         strings.TrimSpace(resp.Model),
 		"provider":      strings.TrimSpace(resp.Provider),
@@ -192,22 +192,6 @@ func responseMeta(resp *model.Response) map[string]any {
 			"sdk":     sdk,
 		},
 	}
-}
-
-func responseUsageAccountingProvider(resp *model.Response) string {
-	if resp == nil {
-		return ""
-	}
-	provider := strings.TrimSpace(resp.Provider)
-	if !strings.EqualFold(provider, "deepseek") {
-		return provider
-	}
-	usage := resp.Usage
-	if usage.CachedInputTokens > 0 &&
-		usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens {
-		return "deepseek-anthropic"
-	}
-	return provider
 }
 
 func responseInvocation(resp *model.Response, requestPrefix ...prefixusage.Snapshot) *session.EventInvocation {
