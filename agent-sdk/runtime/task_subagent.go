@@ -567,11 +567,15 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		}
 	}
 	target = delegation.NormalizeTarget(target)
+	turnSeq := taskTurnSeqFromSpec(entry.Spec)
+	if turnSeq <= 0 {
+		turnSeq = max(taskTurnSeqFromSpec(entry.Metadata), 1)
+	}
 	result := session.CloneState(entry.Result)
 	// SDK Task recovery reads first-activity result mirrors written through
 	// v0.79.1. Remove this fallback once the minimum supported upgrade source
 	// is newer than v0.79.1; current writers use Entry.Result only.
-	if taskTurnSeqFromSpec(entry.Spec) <= 1 {
+	if turnSeq == 1 {
 		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
 			if result == nil {
 				result = map[string]any{}
@@ -613,7 +617,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		lease:           taskapi.CloneLease(entry.Lease),
 		state:           entry.State,
 		running:         entry.Running,
-		turnSeq:         taskTurnSeqFromSpec(entry.Spec),
+		turnSeq:         turnSeq,
 		result:          result,
 		metadata:        session.CloneState(entry.Metadata),
 		contextUsage:    taskapi.CloneContextUsageRecord(entry.ContextUsage),
@@ -641,12 +645,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	}
 	if strings.TrimSpace(taskStringValue(task.metadata["parent_call"])) != "" {
 		task.metadata["parent_tool"] = firstNonEmpty(taskStringValue(task.metadata["parent_tool"]), spawn.ToolName)
-	}
-	if task.turnSeq <= 0 {
-		task.turnSeq = taskTurnSeqFromSpec(entry.Metadata)
-	}
-	if task.turnSeq <= 0 {
-		task.turnSeq = 1
 	}
 	if task.runner == nil && task.running {
 		task.applyInterruptedLocked("subagent session requires reconnect")
