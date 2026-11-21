@@ -484,8 +484,9 @@ func (a *Agent) drainFinalSubmissions(ctx agent.Context, messages *[]model.Messa
 
 func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, messages *[]model.Message, yield func(*session.Event) bool) (bool, error) {
 	accepted := false
+	committer, hasCommitter := ctx.(runtimeinput.SubmissionCommitter)
 	for _, submission := range drained {
-		if committer, ok := ctx.(runtimeinput.SubmissionCommitter); ok && (len(submission.Inputs) > 0 || isModelInputSubmission(submission)) {
+		if hasCommitter && (len(submission.Inputs) > 0 || isModelInputSubmission(submission)) {
 			committed, err := committer.CommitSubmission(submission)
 			if err != nil {
 				return accepted, err
@@ -495,20 +496,7 @@ func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, 
 			continue
 		}
 		if len(submission.Inputs) > 0 {
-			if err := agent.ValidateSubmissionInputs(submission); err != nil {
-				return accepted, err
-			}
-			committer, ok := ctx.(runtimeinput.BatchCommitter)
-			if !ok {
-				return accepted, fmt.Errorf("Agent communication batch requires Runtime safe-point persistence")
-			}
-			committed, err := committer.CommitAgentInputBatch(submission.Inputs)
-			if err != nil {
-				return accepted, err
-			}
-			*messages = append(*messages, committed...)
-			accepted = accepted || len(committed) > 0
-			continue
+			return accepted, errors.New("Agent communication batch requires Runtime safe-point persistence")
 		}
 		if !isModelInputSubmission(submission) {
 			continue

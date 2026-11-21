@@ -20,10 +20,6 @@ type localInputContext struct {
 	commit        func(agent.Submission) ([]model.Message, error)
 }
 
-func (c *localInputContext) CommitAgentInputBatch(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
-	return c.commit(agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
-}
-
 func (c *localInputContext) DrainFinalSubmissions() ([]agent.Submission, error) {
 	taskScopeFromContext(c.Context).stopCodeMode()
 	if !taskScopeFromContext(c.Context).wait(c.Context, c.runner.inputReadySignal()) {

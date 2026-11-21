@@ -2,17 +2,11 @@ package runtimeinput
 
 import (
 	"context"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
-
-// BatchCommitter is installed by Runtime on a local Agent context. The Agent
-// calls it synchronously at a safe point; Runtime persists and publishes the
-// complete admission before returning its canonical model messages.
-type BatchCommitter interface {
-	CommitAgentInputBatch([]agent.AgentCommunicationInput) ([]model.Message, error)
-}
 
 // FinalSubmissionDrainer closes admission atomically with an empty final drain.
 // It is not used between tool steps, when the current Turn must remain open.
@@ -20,7 +14,8 @@ type FinalSubmissionDrainer interface {
 	DrainFinalSubmissions() ([]agent.Submission, error)
 }
 
-// SubmissionCommitter persists one effective input through Runtime input hooks.
+// SubmissionCommitter applies input hooks and persists one complete admission
+// before returning its canonical model messages, including for a batch.
 type SubmissionCommitter interface {
 	CommitSubmission(agent.Submission) ([]model.Message, error)
 }
