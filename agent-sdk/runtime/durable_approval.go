@@ -230,7 +230,7 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 		if err != nil {
 			return err
 		}
-		if err := r.checkAuthorization(ctx, active, token.Authorization); err != nil {
+		if _, err := r.checkAuthorization(ctx, active, token.Authorization); err != nil {
 			return err
 		}
 		if err := ctx.Err(); err != nil {
