@@ -11,15 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
@@ -45,8 +47,8 @@ func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 	if !strings.Contains(metadata, "selected") || strings.Contains(metadata, "SELECTED_BODY_MARKER") || strings.Contains(metadata, "ambient") {
 		t.Fatalf("root metadata includes unselected Skill or body: %s", metadata)
 	}
-	meta, matched := catalog.ResolveBool("selected")
-	if !matched {
+	meta, status := catalog.Resolve("selected")
+	if status != skill.ResolveMatched {
 		t.Fatal("selected root was not discovered")
 	}
 	loaded, err := (skillfs.Loader{}).Load(context.Background(), skill.RefFromMeta(meta))
@@ -66,7 +68,7 @@ func TestApplicationCommittedMCPRemovalFailsClosedWhenReloadFails(t *testing.T) 
 	defer endpoint.Close()
 	provider := newGatewayAppCompactionOllamaServer(t)
 	stack, err := newGatewayAppTestStack(t, Config{StoreDir: t.TempDir(), WorkspaceCWD: t.TempDir(), UserID: "owner",
-		Model: ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()}})
+		Model: ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()}})
 	if err != nil {
 		t.Fatal(err)
 	}

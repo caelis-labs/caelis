@@ -20,15 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/sessiontest"
 )
-
-func TestStoreConditionalAppendConformance(t *testing.T) {
-	t.Parallel()
-	sessiontest.ConditionalAppendConformance(t, func(t *testing.T) sessiontest.ConditionalAppendStore {
-		return NewStore(Config{RootDir: t.TempDir()})
-	})
-}
 
 func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	t.Parallel()
@@ -722,7 +714,7 @@ func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveWritePath() error = %v", err)
 	}
-	if _, err := store.appendEventLogTransaction(path, []*session.Event{legacy}); err != nil {
+	if err := store.appendEventLogTransaction(path, []*session.Event{legacy}); err != nil {
 		t.Fatalf("appendEventLogTransaction() error = %v", err)
 	}
 
@@ -1673,9 +1665,9 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 					return state, nil
 				},
 			})
-			var committed *CommittedError
+			var committed *session.CommittedError
 			if !errors.As(err, &committed) {
-				t.Fatalf("AppendEventsAndUpdateState() error = %v, want *CommittedError", err)
+				t.Fatalf("AppendEventsAndUpdateState() error = %v, want *session.CommittedError", err)
 			}
 
 			reopened := NewStore(Config{RootDir: root})

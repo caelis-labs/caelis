@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
 
 func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing.T) {
@@ -101,7 +103,7 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 	}
 }
 
-func skillNamesForPluginTest(metas []SkillMeta) map[string]bool {
+func skillNamesForPluginTest(metas []skill.Meta) map[string]bool {
 	out := map[string]bool{}
 	for _, meta := range metas {
 		if name := strings.TrimSpace(meta.Name); name != "" {

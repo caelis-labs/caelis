@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -17,7 +17,7 @@ func TestModelChoicesProjectConfirmedSessionSelection(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "flash",
+		Provider: "ollama", API: model.APIOllama, Model: "flash",
 		Alias: "same-label", ContextWindowTokens: 32000,
 		ReasoningLevels: []string{"none", "low", "high"}, ReasoningEffort: "low",
 	})
@@ -25,7 +25,7 @@ func TestModelChoicesProjectConfirmedSessionSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	other, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "other", Alias: "same-label",
+		Provider: "ollama", API: model.APIOllama, Model: "other", Alias: "same-label",
 		BaseURL: "http://localhost:11435", ReasoningLevels: []string{"none"}, ReasoningEffort: "none",
 	})
 	if err != nil {
@@ -72,7 +72,7 @@ func TestModelChoicesProjectConfirmedSessionSelection(t *testing.T) {
 
 func TestModelChoiceFastCapabilityRespectsEndpoint(t *testing.T) {
 	for _, baseURL := range []string{"", "https://api.openai.com/v1", "https://custom.invalid/v1"} {
-		cfg := ModelConfig{Provider: "openai", API: providers.APIOpenAI, Model: "gpt-5.6-sol", BaseURL: baseURL, ReasoningEffort: "medium"}
+		cfg := ModelConfig{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.6-sol", BaseURL: baseURL, ReasoningEffort: "medium"}
 		choice := modelChoiceFromConfig(cfg)
 		if choice.FastSupported != modelconfig.SupportsSpeedMode(cfg, "fast") || choice.FastSupported != (baseURL != "https://custom.invalid/v1") {
 			t.Fatalf("endpoint %q fast = %v", baseURL, choice.FastSupported)
@@ -103,7 +103,7 @@ func TestModelChoicesProjectLegacyProviderWithoutProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	modern, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "flash",
+		Provider: "ollama", API: model.APIOllama, Model: "flash",
 		ReasoningLevels: []string{"none", "low", "high"}, ReasoningEffort: "low",
 	})
 	if err != nil {
@@ -116,7 +116,7 @@ func TestModelChoicesProjectLegacyProviderWithoutProfile(t *testing.T) {
 	// A persisted provider config can outlive or precede its ModelProfile. Keep
 	// one without a profile, and free of reasoning metadata, so it is reachable
 	// only through the bounded compatibility catalog.
-	legacy := modelconfig.NormalizeConfig(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "legacy-flash"})
+	legacy := modelconfig.NormalizeConfig(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "legacy-flash"})
 	if legacy.ReasoningEffort != "" || len(legacy.ReasoningLevels) != 0 {
 		t.Fatalf("legacy fixture carries reasoning metadata: %+v", legacy)
 	}

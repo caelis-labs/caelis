@@ -21,12 +21,12 @@ type idleCoordinatorProbe struct {
 }
 
 func (p *idleCoordinatorProbe) Fresh() bool { return p.fresh }
-func (p *idleCoordinatorProbe) Run(context.Context, session.IdleCompactionWindow) (bool, error) {
+func (p *idleCoordinatorProbe) Run(context.Context, session.IdleCompactionWindow) error {
 	p.calls.Add(1)
 	if p.blocked != nil {
 		<-p.blocked
 	}
-	return true, nil
+	return nil
 }
 func (p *idleCoordinatorProbe) FlushAccounting(context.Context) error {
 	if p.accounting.Load() {

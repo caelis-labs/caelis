@@ -48,8 +48,8 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	remote := &fencedCancelControllerHandle{streaming: streaming, release: release}
 	core, err := New(testConfigWithACPForwarder(Config{
 		Sessions: service, AgentFactory: chat.Factory{},
-		Controllers: stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
-			return controller.TurnResult{Handle: remote}, nil
+		Controllers: stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
+			return remote, nil
 		}},
 	}))
 	if err != nil {

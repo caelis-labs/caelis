@@ -23,6 +23,7 @@ type ollamaLLM struct {
 	auth                AuthConfig
 	token               string
 	headers             map[string]string
+	userAgent           string
 	requestTimeout      time.Duration
 	firstEventTimeout   time.Duration
 	maxOutputTok        int
@@ -91,7 +92,7 @@ type ollamaChatResponse struct {
 // newOllama returns a native Ollama /api/chat client.
 func newOllama(cfg Config, token string) model.LLM {
 	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
-		(len(cfg.ReasoningLevels) > 0 || len(cfg.SupportedReasoningEfforts) > 0) {
+		len(cfg.ReasoningLevels) > 0 {
 		// Explicit levels retain the compatible boolean control contract.
 		cfg.ReasoningMode = "toggle"
 	}
@@ -107,6 +108,7 @@ func newOllama(cfg Config, token string) model.LLM {
 		auth:                cfg.Auth,
 		token:               token,
 		headers:             cloneHeaders(cfg.Headers),
+		userAgent:           cfg.UserAgent,
 		requestTimeout:      cfg.Timeout,
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
@@ -171,9 +173,9 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		applyDefaultAttributionHeaders(httpReq, APIOllama)
-		if l.auth.Type != "" && l.auth.Type != AuthNone {
-			applyDefaultAuthHeader(httpReq, Config{API: APIOllama, Auth: l.auth}, l.token, false)
+		setUserAgent(httpReq, l.userAgent)
+		if l.auth.Type != "" && l.auth.Type != model.AuthNone {
+			applyDefaultAuthHeader(httpReq, Config{API: model.APIOllama, Auth: l.auth}, l.token, false)
 		}
 		applyConfiguredHeaders(httpReq, l.headers)
 
@@ -271,9 +273,9 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 					return err
 				}
 				acc.toolCalls = append(acc.toolCalls, calls...)
-				for _, call := range calls {
+				for range calls {
 					if !yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
-						PartDelta: &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: call.Args}}, nil) {
+						PartDelta: &model.PartDelta{Kind: model.PartKindToolUse}}, nil) {
 						stopped = true
 						return errStopSSE
 					}
@@ -321,9 +323,9 @@ func ollamaTerminalFinishReason(done bool, reason string) (model.FinishReason, e
 	case "", "stop":
 		return model.FinishReasonStop, nil
 	case "length":
-		return model.FinishReasonLength, &model.TerminalResponseError{Reason: model.FinishReasonLength, Detail: "model: ollama response reached output length limit"}
+		return model.FinishReasonLength, &model.TerminalResponseError{Detail: "model: ollama response reached output length limit"}
 	default:
-		return model.FinishReasonUnknown, &model.TerminalResponseError{Reason: model.FinishReasonUnknown, Detail: fmt.Sprintf("model: ollama response ended with unknown done_reason %q", reason)}
+		return model.FinishReasonUnknown, &model.TerminalResponseError{Detail: fmt.Sprintf("model: ollama response ended with unknown done_reason %q", reason)}
 	}
 }
 

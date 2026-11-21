@@ -63,12 +63,7 @@ func requiresElevatedACLRepair(err error) bool {
 }
 
 func (r *runtime) prepareUsingCoordinator(ctx context.Context) error {
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "acl",
-		Message: "preparing current workspace ACL policy",
-		Step:    1,
-		Total:   2,
-	})
+
 	_, err := r.ensureForRequestMode(ctx, sandbox.CommandRequest{
 		Dir: r.cfg.CWD,
 		Constraints: sandbox.Constraints{
@@ -78,17 +73,7 @@ func (r *runtime) prepareUsingCoordinator(ctx context.Context) error {
 			Network:    sandbox.NetworkEnabled,
 		},
 	}, ensureModeBackgroundRefresh)
-	if err != nil {
-		return err
-	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "complete",
-		Message: "Windows workspace-write sandbox ACL policy is ready",
-		Step:    2,
-		Total:   2,
-		Done:    true,
-	})
-	return nil
+	return err
 }
 
 func (r *runtime) Repair(ctx context.Context) error {
@@ -105,22 +90,12 @@ func (r *runtime) Repair(ctx context.Context) error {
 	} else if !requiresElevatedACLRepair(err) {
 		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "elevate",
-		Message: "requesting explicit Windows sandbox ACL repair",
-		Step:    1,
-		Total:   2,
-	})
+
 	if err := r.runElevatedRepair(ctx); err != nil {
 		r.recordWorkspaceSetupError(err)
 		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "verify",
-		Message: "verifying Windows sandbox ACL repair",
-		Step:    2,
-		Total:   2,
-	})
+
 	if err := r.prepareUsingCoordinator(ctx); err != nil {
 		r.recordWorkspaceSetupError(err)
 		return err
@@ -237,13 +212,7 @@ func (r *runtime) Reset(ctx context.Context) error {
 	defer finishReset()
 	r.stateCoordinator.aclMu.Lock()
 	defer r.stateCoordinator.aclMu.Unlock()
-	plan := r.cleanupPlan()
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "clean",
-		Message: fmt.Sprintf("cleaning exact Windows sandbox ACL receipts and %d workspace paths", len(plan.LegacyPaths)),
-		Step:    1,
-		Total:   3,
-	})
+	paths := r.workspaceCleanupPaths()
 	var errs []error
 	if err := r.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
 		if r.hostResetBusy(*ledger) {
@@ -252,13 +221,7 @@ func (r *runtime) Reset(ctx context.Context) error {
 		if err := r.resetWorkspaceReceiptsTransaction(ctx, ledger); err != nil {
 			return fmt.Errorf("impl/sandbox/windows: clean exact workspace ACL receipts: %w", err)
 		}
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-			Phase:   "state",
-			Message: "removing Windows sandbox state files",
-			Step:    2,
-			Total:   3,
-		})
-		for _, path := range plan.LegacyPaths {
+		for _, path := range paths {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -270,31 +233,10 @@ func (r *runtime) Reset(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	for _, leftover := range plan.LegacyProtected {
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-			Phase:   "legacy",
-			Message: "legacy Windows sandbox artifact may require elevated cleanup: " + leftover,
-			Step:    2,
-			Total:   3,
-		})
-	}
 	if len(errs) > 0 {
-		joined := errors.Join(errs...)
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-			Phase:   "error",
-			Message: "Windows sandbox cleanup finished with errors: " + joined.Error(),
-			Step:    3,
-			Total:   3,
-		})
-		return fmt.Errorf("impl/sandbox/windows: clean sandbox state: %w", joined)
+		return fmt.Errorf("impl/sandbox/windows: clean sandbox state: %w", errors.Join(errs...))
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Phase:   "complete",
-		Message: "Windows sandbox cleanup complete",
-		Step:    3,
-		Total:   3,
-		Done:    true,
-	})
+
 	return nil
 }
 

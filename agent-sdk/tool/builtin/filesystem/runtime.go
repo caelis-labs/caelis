@@ -28,7 +28,7 @@ func fileSystemFromRuntime(runtime sandbox.Runtime, meta map[string]any) sandbox
 	if runtime == nil {
 		return nil
 	}
-	constraints, _ := sandboxmeta.Constraints(meta)
+	constraints, _, _ := sandboxmeta.DecodeConstraints(meta)
 	if provider, ok := runtime.(constraintAwareFileSystemRuntime); ok {
 		if fsys := provider.FileSystemFor(constraints); fsys != nil {
 			return fsys

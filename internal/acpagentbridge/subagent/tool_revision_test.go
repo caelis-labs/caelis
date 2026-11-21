@@ -80,11 +80,11 @@ func TestDraftLoadedToolRevisionPreservesCurrentActivityOwnership(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
+			_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+			frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 			observed := false
 			for _, frame := range frames {
 				update := session.ProtocolUpdateOf(frame.Event)

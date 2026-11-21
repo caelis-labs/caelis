@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -25,7 +24,7 @@ func TestGuardianPrimaryAndScreeningBindingsComposeAndResetIndependently(t *test
 	stack := newLocalStateTestHost(t)
 	var profiles []modelprofile.ModelProfile
 	for _, name := range []string{"host-default", "session-main", "guardian-specialist"} {
-		profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: name})
+		profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: name})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +139,7 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 	if err != nil || len(aliases) != 0 {
 		t.Fatalf("judgment exposed as conversation alias: %v %v", aliases, err)
 	}
-	chat, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "conversation"})
+	chat, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "conversation"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -362,7 +362,7 @@ func (r *Runner) submitActiveChildInputLocked(
 	switch response.Outcome {
 	case client.SessionSteeringInjected:
 		slot.settleInput(run, true, acceptedInput)
-		return agent.ChildInputResult{ActivityID: activityID}, nil
+		return agent.ChildInputResult{}, nil
 	case client.SessionSteeringPromptRequired:
 		slot.settleInput(run, true, nil)
 		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.FailedPrecondition, "Target Agent is finishing its current turn.", agent.ErrChildInputNotReady)
@@ -719,7 +719,7 @@ func (r *Runner) submitIdleChildInput(
 	}
 	go r.drivePreparedPrompt(responseCtx, run, prepared, prompt, fence)
 	slot.opMu.Unlock()
-	return agent.ChildInputResult{ActivityID: activityID, StartedActivity: true}, nil
+	return agent.ChildInputResult{StartedActivity: true}, nil
 }
 
 func childInputReconnectRequest(run *childRun, target agent.ChildEndpointRef) *tasksubagent.ReconnectRequest {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -152,7 +152,7 @@ func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
 		Name: "research", Command: "existing-research",
 	}}})
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "research-model",
+		Provider: "ollama", API: model.APIOllama, Model: "research-model",
 	})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
@@ -206,7 +206,7 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	stack.composition.process.config.setRuntime(runtimeCfg)
 
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "deepseek-v4-pro",
+		Provider: "ollama", API: model.APIOllama, Model: "deepseek-v4-pro",
 		ReasoningEffort: "xhigh", DefaultReasoningEffort: "high", ReasoningLevels: []string{"high", "xhigh"},
 	})
 	if err != nil {
@@ -326,7 +326,7 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	profile, err := stack.connectTestModel(ModelConfig{
-		Provider: "ollama", API: providers.APIOllama, Model: "reviewer-specialist",
+		Provider: "ollama", API: model.APIOllama, Model: "reviewer-specialist",
 		ReasoningMode: "effort", ReasoningEffort: "high", ReasoningLevels: []string{"high", "xhigh"},
 	})
 	if err != nil {

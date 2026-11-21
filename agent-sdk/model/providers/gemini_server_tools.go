@@ -20,7 +20,7 @@ var geminiGoogleSearchMatcher = providerExecutedToolMatcher{
 	DetailKeys:      []string{"google_search", "googleSearch"},
 }
 
-func geminiGoogleSearchEnabled(_ string, specs []model.ToolSpec) bool {
+func geminiGoogleSearchEnabled(specs []model.ToolSpec) bool {
 	match := providerExecutedToolMatchFromSpecs(specs, geminiGoogleSearchMatcher)
 	return match.Enabled && !match.Disabled
 }
@@ -29,7 +29,7 @@ func (l *geminiLLM) UsesProviderExecutedTools(req *model.Request) bool {
 	if l == nil || req == nil || req.DisableTools {
 		return false
 	}
-	return geminiGoogleSearchEnabled(l.name, req.Tools)
+	return geminiGoogleSearchEnabled(req.Tools)
 }
 
 func toGeminiTools(specs []model.ToolSpec, groundingWithGoogleSearch bool) []*genai.Tool {

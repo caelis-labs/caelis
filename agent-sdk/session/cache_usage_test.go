@@ -23,10 +23,6 @@ func TestCacheUsageRawAndCanonicalPresenceDoNotDoubleCount(t *testing.T) {
 			if u == nil || u.PromptTokens != tc.prompt || u.CachedInputTokens != tc.read || u.CacheWriteTokens != tc.write || u.TotalTokens != tc.total || !u.CacheWriteTokensReported {
 				t.Fatalf("usage=%+v", u)
 			}
-			display := NormalizeUsageForDisplay(*u, "anthropic")
-			if display.PromptTokens != tc.prompt+tc.read || display.TotalTokens != tc.total {
-				t.Fatalf("display double-counted cache: %+v", display)
-			}
 		})
 	}
 	zero := usageSnapshotFromPayload(map[string]any{"cache_creation": map[string]any{"ephemeral_5m_input_tokens": 0}}, "anthropic")

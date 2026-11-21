@@ -51,7 +51,7 @@ func (s *Store) PendingWorkspaceKeyRepairs(ctx context.Context) ([]WorkspaceKeyR
 	}
 	defer s.mu.Unlock()
 	var repairs []WorkspaceKeyRepair
-	err := s.withRootReadLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		loaded, err := s.readWorkspaceKeyRepairMarker()
 		if err != nil {
 			return err
@@ -79,7 +79,7 @@ func (s *Store) RepairWorkspaceKeys(
 	defer s.mu.Unlock()
 
 	var report WorkspaceKeyRepairReport
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		pending, err := s.readWorkspaceKeyRepairMarker()
 		if err != nil {
 			return err
@@ -94,16 +94,15 @@ func (s *Store) RepairWorkspaceKeys(
 			if len(repairs) == 0 {
 				return nil
 			}
-			if err := s.validateWorkspaceKeyRepairs(repairs); err != nil {
-				return err
-			}
-			if err := s.writeWorkspaceKeyRepairMarker(ctx, repairs); err != nil {
-				return err
-			}
 		}
 
 		if err := s.validateWorkspaceKeyRepairs(repairs); err != nil {
 			return err
+		}
+		if len(pending) == 0 {
+			if err := s.writeWorkspaceKeyRepairMarker(ctx, repairs); err != nil {
+				return err
+			}
 		}
 		for _, repair := range repairs {
 			changed, err := s.repairSessionWorkspaceKey(ctx, repair)
@@ -188,7 +187,7 @@ func (s *Store) repairSessionWorkspaceKey(ctx context.Context, repair WorkspaceK
 	if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil, nil); err != nil {
 		return false, fmt.Errorf("agent-sdk/session/file: repair Session %q workspace key: %w", repair.SessionID, err)
 	}
-	delete(s.pathCache, pathCacheKey(repair.SessionID, repair.ExpectedWorkspaceKey))
+	delete(s.pathCache, sanitizeSessionID(repair.SessionID))
 	return true, nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -277,7 +278,7 @@ func toolDisplayFullArgs(name string, kind string, raw map[string]any) string {
 	}
 	switch name {
 	case surfaceToolSpawn:
-		return spawnFullDisplayArgs(raw)
+		return projection.SpawnFullDisplayArgs(raw)
 	case surfaceToolSendMessage:
 		return display.AgentMessageFullDisplayArgs(raw)
 	default:
@@ -297,13 +298,13 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	// read. Compact the title without rewriting kind=read into the exact
 	// built-in Skill identity.
 	if strings.TrimSpace(name) == "" && strings.EqualFold(strings.TrimSpace(kind), "read") {
-		if skillName := display.SkillContentNameFromTitle(title); skillName != "" {
+		if skillName := skillContentNameFromTitle(title); skillName != "" {
 			return skillName
 		}
 	}
 	switch name {
 	case surfaceToolSkill:
-		return display.SkillContentNameFromTitle(title)
+		return skillContentNameFromTitle(title)
 	case surfaceToolRunCommand:
 		return executeTitleDisplayArgs(title)
 	case surfaceToolGlob:
@@ -893,19 +894,11 @@ func looksLikeTaskDuration(value string) bool {
 }
 
 func spawnDisplayArgs(raw map[string]any) string {
-	full := display.SpawnFullDisplayArgs(raw)
+	full := projection.SpawnFullDisplayArgs(raw)
 	if full == "" {
 		return ""
 	}
 	return truncateDisplayPreviewMiddle(full, toolArgsPreviewWidth)
-}
-
-func spawnFullDisplayArgs(raw map[string]any) string {
-	return display.SpawnFullDisplayArgs(raw)
-}
-
-func spawnDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
-	return display.SpawnDisplayInputForResult(input, output)
 }
 
 func taskDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {

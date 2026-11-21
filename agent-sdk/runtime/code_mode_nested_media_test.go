@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -99,11 +100,7 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": "fixture-response", "object": "response", "model": "fixture-model", "status": "completed", "output": output, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
 			}))
 			defer server.Close()
-			factory := providers.NewFactory()
-			if err = factory.Register(providers.Config{Alias: "fixture/picture", Provider: "fixture", API: providers.APIOpenAIResponses, Model: "fixture-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: providers.AuthConfig{Type: providers.AuthNone}, ImageInput: true, ContextWindowTokens: 200000}); err != nil {
-				t.Fatal(err)
-			}
-			llm, err := factory.NewByAlias("fixture/picture")
+			llm, err := providers.New(providers.Config{Provider: "fixture", API: model.APIOpenAIResponses, Model: "fixture-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: providers.AuthConfig{Type: model.AuthNone}, ImageInput: true, ContextWindowTokens: 200000})
 			if err != nil {
 				t.Fatal(err)
 			}

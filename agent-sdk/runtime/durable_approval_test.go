@@ -122,12 +122,12 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 		}{decision: got, err: requestErr}
 	}()
 
-	waiting := agent.RunState{ApprovalRequestID: waitForPendingApprovalRecord(t, sessions, activeSession.SessionRef, runID)}
+	requestID := waitForPendingApprovalRecord(t, sessions, activeSession.SessionRef, runID)
 
 	sessions.failResolved.Store(true)
 	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{
 		SessionRef: activeSession.SessionRef,
-		RequestID:  waiting.ApprovalRequestID,
+		RequestID:  requestID,
 		Decision:   decision,
 	}); err != nil {
 		t.Fatalf("ResolveApproval() error = %v, want durable committed resolution delivered", err)

@@ -8,7 +8,6 @@ import (
 
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -40,12 +39,12 @@ func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSel
 	return out
 }
 
-func (s *runtimeComposition) delegationSpawnTargets(session controlplacement.SessionContext) (map[string]spawn.Target, error) {
+func (s *runtimeComposition) delegationSpawnTargets(session controlplacement.SessionContext) (map[string]sdkdelegation.Target, error) {
 	_, targets, err := s.delegationSpawnConfiguration(session)
 	return targets, err
 }
 
-func (s *runtimeComposition) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]sdkdelegation.Agent, map[string]spawn.Target, error) {
+func (s *runtimeComposition) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]sdkdelegation.Agent, map[string]sdkdelegation.Target, error) {
 	if s == nil || s.authorities.store == nil {
 		return nil, nil, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
@@ -55,7 +54,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 	}
 	hasSessionSelection := strings.TrimSpace(session.ProfileID) != "" || strings.TrimSpace(session.Effort) != ""
 	agents := delegationAgentsForBindings(snapshot.placement.Bindings, hasSessionSelection)
-	targets := make(map[string]spawn.Target, len(agents))
+	targets := make(map[string]sdkdelegation.Target, len(agents))
 
 	if hasSessionSelection {
 		selfSnapshot, err := s.selfPlacementSnapshot(snapshot, session.ProfileID)
@@ -70,7 +69,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 		if err != nil {
 			return nil, nil, err
 		}
-		targets[string(agentbinding.HandleSelf)] = spawn.Target{Selector: string(agentbinding.HandleSelf), Placement: self}
+		targets[string(agentbinding.HandleSelf)] = sdkdelegation.Target{Selector: string(agentbinding.HandleSelf), Placement: self}
 	}
 
 	for _, definition := range agentbinding.CatalogFor(snapshot.placement.Bindings).DelegationDefinitions() {
@@ -88,7 +87,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 		if err != nil {
 			return nil, nil, err
 		}
-		targets[string(handle)] = spawn.Target{Selector: string(handle), Placement: placement}
+		targets[string(handle)] = sdkdelegation.Target{Selector: string(handle), Placement: placement}
 	}
 	return agents, targets, nil
 }

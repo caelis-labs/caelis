@@ -9,14 +9,44 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/sessiontest"
 )
 
-func TestStoreConditionalAppendConformance(t *testing.T) {
+func TestStoreStartSessionRejectsConflictingIdentity(t *testing.T) {
 	t.Parallel()
-	sessiontest.ConditionalAppendConformance(t, func(*testing.T) sessiontest.ConditionalAppendStore {
-		return NewStore(Config{})
-	})
+
+	store := NewStore(Config{})
+	ctx := context.Background()
+	req := session.StartSessionRequest{
+		AppName: "app", UserID: "owner", PreferredSessionID: "shared",
+		Workspace: session.WorkspaceRef{Key: "workspace"},
+		Title:     "original title",
+	}
+	original, err := store.StartSession(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name      string
+		changeRef func(*session.StartSessionRequest)
+	}{
+		{"app", func(req *session.StartSessionRequest) { req.AppName = "other" }},
+		{"user", func(req *session.StartSessionRequest) { req.UserID = "other" }},
+		{"workspace", func(req *session.StartSessionRequest) { req.Workspace.Key = "other" }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			conflicting := req
+			tt.changeRef(&conflicting)
+			got, err := store.StartSession(ctx, conflicting)
+			if !errors.Is(err, session.ErrInvalidSession) || got.SessionID != "" {
+				t.Fatalf("conflicting StartSession returned session %q and err %v", got.SessionID, err)
+			}
+		})
+	}
+	req.Title = "ignored on reuse"
+	reused, err := store.StartSession(ctx, req)
+	if err != nil || reused.SessionRef != original.SessionRef || reused.Title != original.Title {
+		t.Fatalf("same-identity StartSession returned %#v, %v", reused, err)
+	}
 }
 
 func TestStoreAppendAndListCanonicalEvents(t *testing.T) {
@@ -265,8 +295,8 @@ func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
 	}
 
 	state := map[string]any{"nested": map[string]any{"items": []any{"original"}}}
-	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: state}); err != nil {
-		t.Fatalf("ReplaceState() error = %v", err)
+	if _, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(map[string]any) (map[string]any, error) { return state, nil }}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
 	}
 	state["nested"].(map[string]any)["items"].([]any)[0] = "caller-mutated"
 	snapshot, err := store.SnapshotState(ctx, created.SessionRef)
@@ -292,10 +322,10 @@ func TestStoreUpdateStateErrorRollsBackNestedMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{
-		"nested": map[string]any{"value": "before"},
+	if _, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(map[string]any) (map[string]any, error) {
+		return map[string]any{"nested": map[string]any{"value": "before"}}, nil
 	}}); err != nil {
-		t.Fatalf("ReplaceState() error = %v", err)
+		t.Fatalf("UpdateState() error = %v", err)
 	}
 	wantErr := errors.New("reject update")
 	_, err = store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
@@ -323,11 +353,11 @@ func TestStoreRejectsInvalidJSONStateWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{"value": "before"}}); err != nil {
-		t.Fatalf("ReplaceState() error = %v", err)
+	if _, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(map[string]any) (map[string]any, error) { return map[string]any{"value": "before"}, nil }}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
 	}
-	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{"value": math.NaN()}}); err == nil {
-		t.Fatal("ReplaceState(invalid) error = nil, want rejection")
+	if _, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(map[string]any) (map[string]any, error) { return map[string]any{"value": math.NaN()}, nil }}); err == nil {
+		t.Fatal("UpdateState(invalid) error = nil, want rejection")
 	}
 	state, err := store.SnapshotState(ctx, created.SessionRef)
 	if err != nil {
@@ -450,15 +480,15 @@ func TestStoreStateOperationsHandleNilStateWithoutSnapshotMutation(t *testing.T)
 		t.Fatalf("state[mode] = %v, want chat", got)
 	}
 
-	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest)}); err != nil {
-		t.Fatalf("ReplaceState(nil) error = %v", err)
+	if _, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(map[string]any) (map[string]any, error) { return nil, nil }}); err != nil {
+		t.Fatalf("UpdateState(nil) error = %v", err)
 	}
 	state, err = store.SnapshotState(ctx, createdSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SnapshotState(after replace nil) error = %v", err)
 	}
 	if state == nil || len(state) != 0 {
-		t.Fatalf("state after ReplaceState(nil) = %#v, want empty map", state)
+		t.Fatalf("state after UpdateState(nil) = %#v, want empty map", state)
 	}
 }
 

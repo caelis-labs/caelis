@@ -23,7 +23,7 @@ func toolProgressEvent(call model.ToolCall, result tool.Result, extraMeta ...map
 func toolEvent(call model.ToolCall, result tool.Result, err error, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
 	event := &session.Event{
 		Type: session.EventTypeToolResult,
-		Tool: toolEventPayload(call, "", mustObject(call.Args), nil, nil),
+		Tool: toolEventPayload(call, "", mustObject(call.Args)),
 	}
 	applyToolResultPresentation(event, call, result, err, message, statusOverride, extraMeta...)
 	full, _ := tool.CloneResult(result, nil)
@@ -170,7 +170,7 @@ func responseMeta(resp *model.Response) map[string]any {
 	if resp == nil {
 		return nil
 	}
-	usage := session.ModelUsageMetadata(responseUsageAccountingProvider(resp), resp.Usage)
+	usage := session.ModelUsageMetadata(strings.TrimSpace(resp.Provider), resp.Usage)
 	sdk := map[string]any{
 		"model":         strings.TrimSpace(resp.Model),
 		"provider":      strings.TrimSpace(resp.Provider),
@@ -192,22 +192,6 @@ func responseMeta(resp *model.Response) map[string]any {
 			"sdk":     sdk,
 		},
 	}
-}
-
-func responseUsageAccountingProvider(resp *model.Response) string {
-	if resp == nil {
-		return ""
-	}
-	provider := strings.TrimSpace(resp.Provider)
-	if !strings.EqualFold(provider, "deepseek") {
-		return provider
-	}
-	usage := resp.Usage
-	if usage.CachedInputTokens > 0 &&
-		usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens {
-		return "deepseek-anthropic"
-	}
-	return provider
 }
 
 func responseInvocation(resp *model.Response, requestPrefix ...prefixusage.Snapshot) *session.EventInvocation {
@@ -304,40 +288,11 @@ func toolReservedNamespaceCollisionEventMeta(collision bool) map[string]any {
 	}
 }
 
-func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any, rawOutput map[string]any, content []session.EventToolContent) *session.EventTool {
-	payload := &session.EventTool{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(call.Name),
-		Status:  strings.TrimSpace(status),
-		Input:   session.CloneState(rawInput),
-		Output:  session.CloneState(rawOutput),
-		Content: cloneEventToolContent(content),
+func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any) *session.EventTool {
+	return &session.EventTool{
+		ID:     strings.TrimSpace(call.ID),
+		Name:   strings.TrimSpace(call.Name),
+		Status: strings.TrimSpace(status),
+		Input:  session.CloneState(rawInput),
 	}
-	return payload
-}
-
-func cloneEventToolContent(in []session.EventToolContent) []session.EventToolContent {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]session.EventToolContent, 0, len(in))
-	for _, item := range in {
-		var oldText *string
-		if item.OldText != nil {
-			value := *item.OldText
-			oldText = &value
-		}
-		out = append(out, session.EventToolContent{
-			Type:       strings.TrimSpace(item.Type),
-			Text:       item.Text,
-			TerminalID: strings.TrimSpace(item.TerminalID),
-			Path:       strings.TrimSpace(item.Path),
-			OldText:    oldText,
-			NewText:    item.NewText,
-			Changes:    session.CloneProtocolDiffChanges(item.Changes),
-			Patch:      session.CloneProtocolDiffPatch(item.Patch),
-			Meta:       session.CloneState(item.Meta),
-		})
-	}
-	return out
 }

@@ -56,11 +56,6 @@ func Validate(value any) error {
 	return nil
 }
 
-// ValidateMap validates one JSON-compatible object.
-func ValidateMap(value map[string]any) error {
-	return Validate(value)
-}
-
 // Clone recursively copies maps, slices, pointers, arrays, interfaces, and
 // exported struct fields. Valid JSON-compatible inputs never share mutable
 // descendants with the returned value.
@@ -73,17 +68,15 @@ func Clone(value any) any {
 
 // CloneMap recursively copies one map value.
 func CloneMap(value map[string]any) map[string]any {
-	if value == nil {
-		return nil
-	}
-	cloned, _ := Clone(value).(map[string]any)
-	return cloned
+	return Clone(value).(map[string]any)
 }
 
 type visit struct {
 	typeOf reflect.Type
 	kind   reflect.Kind
 	ptr    uintptr
+	// Slices with the same first element can expose different lengths.
+	length int
 }
 
 func validateReflect(value reflect.Value, path string, stack map[visit]bool) error {
@@ -150,8 +143,8 @@ func validateReflect(value reflect.Value, path string, stack map[visit]bool) err
 		if value.Type().Elem().Kind() == reflect.Uint8 {
 			return nil
 		}
-		key := visit{typeOf: value.Type(), kind: value.Kind(), ptr: value.Pointer()}
-		if key.ptr != 0 {
+		key := visit{typeOf: value.Type(), kind: value.Kind(), ptr: value.Pointer(), length: value.Len()}
+		if key.length != 0 {
 			if stack[key] {
 				return &ValidationError{Path: path, Reason: "cyclic value"}
 			}
@@ -178,10 +171,10 @@ func validateReflect(value reflect.Value, path string, stack map[visit]bool) err
 		typeOf := value.Type()
 		for i := 0; i < value.NumField(); i++ {
 			field := typeOf.Field(i)
-			if field.PkgPath != "" || strings.Split(field.Tag.Get("json"), ",")[0] == "-" {
+			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if field.PkgPath != "" || name == "-" {
 				continue
 			}
-			name := strings.Split(field.Tag.Get("json"), ",")[0]
 			if name == "" {
 				name = field.Name
 			}
@@ -204,13 +197,8 @@ func cloneReflect(value reflect.Value, memo map[visit]reflect.Value) reflect.Val
 		if value.IsNil() {
 			return reflect.Zero(value.Type())
 		}
-		cloned := cloneReflect(value.Elem(), memo)
 		out := reflect.New(value.Type()).Elem()
-		if cloned.IsValid() && cloned.Type().AssignableTo(value.Type()) {
-			out.Set(cloned)
-		} else if cloned.IsValid() && cloned.Type().Implements(value.Type()) {
-			out.Set(cloned)
-		}
+		out.Set(cloneReflect(value.Elem(), memo))
 		return out
 	case reflect.Pointer:
 		if value.IsNil() {
@@ -243,14 +231,14 @@ func cloneReflect(value reflect.Value, memo map[visit]reflect.Value) reflect.Val
 		if value.IsNil() {
 			return reflect.Zero(value.Type())
 		}
-		key := visit{typeOf: value.Type(), kind: value.Kind(), ptr: value.Pointer()}
-		if key.ptr != 0 {
+		key := visit{typeOf: value.Type(), kind: value.Kind(), ptr: value.Pointer(), length: value.Len()}
+		if key.length != 0 {
 			if cached, ok := memo[key]; ok {
 				return cached
 			}
 		}
 		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
-		if key.ptr != 0 {
+		if key.length != 0 {
 			memo[key] = out
 		}
 		if value.Type().Elem().Kind() == reflect.Uint8 {

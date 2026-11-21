@@ -18,7 +18,6 @@ import (
 
 var _ taskapi.Store = (*TaskStore)(nil)
 var _ taskapi.CASStore = (*TaskStore)(nil)
-var _ taskapi.LeaseStore = (*TaskStore)(nil)
 
 // NewTaskStore constructs one task store facade backed by the same file store
 // index used for session metadata.
@@ -58,7 +57,7 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	err := s.store.withRootWriteLockContext(ctx, func() error {
+	err := s.store.withRootLockContext(ctx, func() error {
 		if guard.Purpose == session.ControlMutationPurposeSubagentCancellation {
 			if err := s.validateDetachedSubagentLifecycle(entry, expected, guard.Purpose); err != nil {
 				return err
@@ -183,95 +182,6 @@ func detachedSubagentCompletionState(state taskapi.State) bool {
 	}
 }
 
-// AcquireLease conditionally assigns one live worker lease.
-func (s *TaskStore) AcquireLease(ctx context.Context, req taskapi.AcquireLeaseRequest) (*taskapi.Entry, error) {
-	entry, err := s.Get(ctx, req.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	if entry.Revision != req.ExpectedTaskRevision {
-		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: req.ExpectedTaskRevision, Actual: entry.Revision}
-	}
-	now, expiresAt, err := taskLeaseTimes(req.Now, req.TTL)
-	if err != nil {
-		return nil, err
-	}
-	ownerID := strings.TrimSpace(req.OwnerID)
-	leaseID := strings.TrimSpace(req.LeaseID)
-	if ownerID == "" || leaseID == "" {
-		return nil, &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "owner_id and lease_id are required"}
-	}
-	if entry.Lease.ID != "" && entry.Lease.ExpiresAt.After(now) && (entry.Lease.ID != leaseID || entry.Lease.OwnerID != ownerID) {
-		return nil, &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "another live lease owns the task"}
-	}
-	leaseRevision := entry.Lease.Revision + 1
-	entry.Lease = taskapi.Lease{ID: leaseID, OwnerID: ownerID, Revision: leaseRevision, AcquiredAt: now, HeartbeatAt: now, ExpiresAt: expiresAt}
-	return s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: req.ExpectedTaskRevision})
-}
-
-// HeartbeatLease conditionally renews one live worker lease.
-func (s *TaskStore) HeartbeatLease(ctx context.Context, req taskapi.HeartbeatLeaseRequest) (*taskapi.Entry, error) {
-	entry, err := s.Get(ctx, req.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	if entry.Revision != req.ExpectedTaskRevision {
-		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: req.ExpectedTaskRevision, Actual: entry.Revision}
-	}
-	if err := validateTaskLeaseOwner(entry, req.LeaseID, req.OwnerID, req.ExpectedLeaseRevision); err != nil {
-		return nil, err
-	}
-	now, expiresAt, err := taskLeaseTimes(req.Now, req.TTL)
-	if err != nil {
-		return nil, err
-	}
-	if !entry.Lease.ExpiresAt.IsZero() && !entry.Lease.ExpiresAt.After(now) {
-		return nil, &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "lease has expired"}
-	}
-	entry.Lease.Revision++
-	entry.Lease.HeartbeatAt = now
-	entry.Lease.ExpiresAt = expiresAt
-	return s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: req.ExpectedTaskRevision})
-}
-
-// ReleaseLease conditionally clears one worker lease.
-func (s *TaskStore) ReleaseLease(ctx context.Context, req taskapi.ReleaseLeaseRequest) (*taskapi.Entry, error) {
-	entry, err := s.Get(ctx, req.TaskID)
-	if err != nil {
-		return nil, err
-	}
-	if entry.Revision != req.ExpectedTaskRevision {
-		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: req.ExpectedTaskRevision, Actual: entry.Revision}
-	}
-	if err := validateTaskLeaseOwner(entry, req.LeaseID, req.OwnerID, req.ExpectedLeaseRevision); err != nil {
-		return nil, err
-	}
-	entry.Lease = taskapi.Lease{}
-	return s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: req.ExpectedTaskRevision})
-}
-
-func taskLeaseTimes(now time.Time, ttl time.Duration) (time.Time, time.Time, error) {
-	if ttl <= 0 {
-		return time.Time{}, time.Time{}, &taskapi.LeaseConflictError{Detail: "positive TTL is required"}
-	}
-	if now.IsZero() {
-		now = time.Now().UTC()
-	} else {
-		now = now.UTC()
-	}
-	return now, now.Add(ttl), nil
-}
-
-func validateTaskLeaseOwner(entry *taskapi.Entry, leaseID, ownerID string, expectedRevision uint64) error {
-	if entry == nil || entry.Lease.ID == "" {
-		return &taskapi.LeaseConflictError{Detail: "task has no active lease"}
-	}
-	if entry.Lease.ID != strings.TrimSpace(leaseID) || entry.Lease.OwnerID != strings.TrimSpace(ownerID) || entry.Lease.Revision != expectedRevision {
-		return &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "lease identity, owner, or revision mismatch"}
-	}
-	return nil
-}
-
 func (s *TaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task %q not found", strings.TrimSpace(taskID))
@@ -287,7 +197,7 @@ func (s *TaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, err
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	if err := s.store.withRootReadLockContext(ctx, func() error {
+	if err := s.store.withRootLockContext(ctx, func() error {
 		entry, err := s.store.getTaskIndex(taskID)
 		if err != nil {
 			return err
@@ -315,7 +225,7 @@ func (s *TaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]
 	defer s.store.mu.Unlock()
 
 	var out []*taskapi.Entry
-	if err := s.store.withRootReadLockContext(ctx, func() error {
+	if err := s.store.withRootLockContext(ctx, func() error {
 		entries, err := s.store.listTaskIndex(ref)
 		if err != nil {
 			return err
@@ -347,7 +257,7 @@ func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.Sess
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	if err := s.store.withRootReadLockContext(ctx, func() error {
+	if err := s.store.withRootLockContext(ctx, func() error {
 		entry, err := s.store.getSessionTaskIndexByHandle(ref, handle)
 		if err != nil {
 			return err
@@ -398,6 +308,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 		}
 	}
 
+	// Existing task tables require values in the retired Task lease columns.
 	_, err = tx.Exec(
 		`INSERT INTO tasks (
 			task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
@@ -405,7 +316,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 			created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 			stdout_cursor, stderr_cursor, event_cursor,
 			handle, spec_json, context_usage_json, result_json, metadata_json, terminal_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', '', 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			revision = excluded.revision,
 			kind = excluded.kind,
@@ -421,12 +332,6 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 			supports_cancel = excluded.supports_cancel,
 			created_at_ns = excluded.created_at_ns,
 			updated_at_ns = excluded.updated_at_ns,
-			heartbeat_at_ns = excluded.heartbeat_at_ns,
-			lease_id = excluded.lease_id,
-			lease_owner_id = excluded.lease_owner_id,
-			lease_revision = excluded.lease_revision,
-			lease_acquired_at_ns = excluded.lease_acquired_at_ns,
-			lease_expires_at_ns = excluded.lease_expires_at_ns,
 			stdout_cursor = excluded.stdout_cursor,
 			stderr_cursor = excluded.stderr_cursor,
 			event_cursor = excluded.event_cursor,
@@ -451,12 +356,6 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 		boolToSQLite(row.supportsCancel),
 		timeToUnixNano(row.createdAt),
 		timeToUnixNano(row.updatedAt),
-		timeToUnixNano(row.heartbeatAt),
-		row.leaseID,
-		row.leaseOwnerID,
-		row.leaseRevision,
-		timeToUnixNano(row.leaseAcquiredAt),
-		timeToUnixNano(row.leaseExpiresAt),
 		row.stdoutCursor,
 		row.stderrCursor,
 		row.eventCursor,
@@ -507,7 +406,10 @@ func (s *Store) listTaskIndex(ref session.SessionRef) ([]*taskapi.Entry, error) 
 	}
 	defer db.Close()
 
-	rows, err := db.Query(taskIndexSelectSQL()+` WHERE session_id = ? ORDER BY updated_at_ns DESC, task_id ASC`, strings.TrimSpace(ref.SessionID))
+	rows, err := db.Query(
+		taskIndexSelectSQL()+taskIndexSessionScope+` ORDER BY updated_at_ns DESC, task_id ASC`,
+		ref.SessionID, ref.AppName, ref.UserID, ref.WorkspaceKey,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: list task index: %w", err)
 	}
@@ -535,9 +437,8 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle strin
 	defer db.Close()
 
 	rows, err := db.Query(
-		taskIndexSelectSQL()+` WHERE session_id = ? AND handle = ? ORDER BY updated_at_ns DESC, task_id ASC LIMIT 2`,
-		strings.TrimSpace(ref.SessionID),
-		taskapi.NormalizeHandle(handle),
+		taskIndexSelectSQL()+taskIndexSessionScope+` AND handle = ?5 ORDER BY updated_at_ns DESC, task_id ASC LIMIT 2`,
+		ref.SessionID, ref.AppName, ref.UserID, ref.WorkspaceKey, handle,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: lookup task handle: %w", err)
@@ -565,11 +466,16 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle strin
 	}
 }
 
+const taskIndexSessionScope = ` WHERE session_id = ?1
+	AND (?2 = '' OR app_name = ?2)
+	AND (?3 = '' OR user_id = ?3)
+	AND (?4 = '' OR workspace_key = ?4)`
+
 func taskIndexSelectSQL() string {
 	return `SELECT
 		task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
 		failure_diagnostic, running, supports_input, supports_cancel,
-		created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
+		created_at_ns, updated_at_ns,
 		stdout_cursor, stderr_cursor, event_cursor, handle,
 		spec_json, context_usage_json, result_json, metadata_json, terminal_json
 	FROM tasks`
@@ -591,12 +497,6 @@ type taskIndexRow struct {
 	supportsCancel    bool
 	createdAt         time.Time
 	updatedAt         time.Time
-	heartbeatAt       time.Time
-	leaseID           string
-	leaseOwnerID      string
-	leaseRevision     uint64
-	leaseAcquiredAt   time.Time
-	leaseExpiresAt    time.Time
 	stdoutCursor      int64
 	stderrCursor      int64
 	eventCursor       int64
@@ -648,12 +548,6 @@ func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
 		supportsCancel:    entry.SupportsCancel,
 		createdAt:         entry.CreatedAt,
 		updatedAt:         entry.UpdatedAt,
-		heartbeatAt:       entry.Lease.HeartbeatAt,
-		leaseID:           strings.TrimSpace(entry.Lease.ID),
-		leaseOwnerID:      strings.TrimSpace(entry.Lease.OwnerID),
-		leaseRevision:     entry.Lease.Revision,
-		leaseAcquiredAt:   entry.Lease.AcquiredAt,
-		leaseExpiresAt:    entry.Lease.ExpiresAt,
 		stdoutCursor:      entry.StdoutCursor,
 		stderrCursor:      entry.StderrCursor,
 		eventCursor:       entry.EventCursor,
@@ -683,12 +577,6 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		supportsCancel    int64
 		createdAtNS       int64
 		updatedAtNS       int64
-		heartbeatAtNS     int64
-		leaseID           string
-		leaseOwnerID      string
-		leaseRevision     uint64
-		leaseAcquiredAtNS int64
-		leaseExpiresAtNS  int64
 		stdoutCursor      int64
 		stderrCursor      int64
 		eventCursor       int64
@@ -715,12 +603,6 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		&supportsCancel,
 		&createdAtNS,
 		&updatedAtNS,
-		&heartbeatAtNS,
-		&leaseID,
-		&leaseOwnerID,
-		&leaseRevision,
-		&leaseAcquiredAtNS,
-		&leaseExpiresAtNS,
 		&stdoutCursor,
 		&stderrCursor,
 		&eventCursor,
@@ -778,17 +660,13 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		SupportsCancel:    sqliteBool(supportsCancel),
 		CreatedAt:         unixNanoToTime(createdAtNS),
 		UpdatedAt:         unixNanoToTime(updatedAtNS),
-		Lease: taskapi.Lease{
-			ID: strings.TrimSpace(leaseID), OwnerID: strings.TrimSpace(leaseOwnerID), Revision: leaseRevision,
-			AcquiredAt: unixNanoToTime(leaseAcquiredAtNS), HeartbeatAt: unixNanoToTime(heartbeatAtNS), ExpiresAt: unixNanoToTime(leaseExpiresAtNS),
-		},
-		StdoutCursor: stdoutCursor,
-		StderrCursor: stderrCursor,
-		EventCursor:  eventCursor,
-		Spec:         spec,
-		Result:       result,
-		Metadata:     metadata,
-		Terminal:     terminal,
+		StdoutCursor:      stdoutCursor,
+		StderrCursor:      stderrCursor,
+		EventCursor:       eventCursor,
+		Spec:              spec,
+		Result:            result,
+		Metadata:          metadata,
+		Terminal:          terminal,
 	}), nil
 }
 

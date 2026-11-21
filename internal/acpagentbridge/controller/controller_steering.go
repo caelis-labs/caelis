@@ -53,7 +53,7 @@ func (r *controllerRun) steerControllerLocked(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	prompt := buildPromptParts(req.Input, req.ContentParts)
+	prompt := buildPromptParts("", req.ContentParts)
 	if len(prompt) == 0 {
 		return false, errorcode.New(errorcode.InvalidArgument, "internal/acpagentbridge/controller: main steering input is required")
 	}

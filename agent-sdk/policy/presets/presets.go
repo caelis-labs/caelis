@@ -6,17 +6,11 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
@@ -26,11 +20,6 @@ const (
 	// that cannot provide a supported sandbox. It is intentionally omitted from
 	// NewRegistry so ordinary policy configuration cannot enable it.
 	ModeDangerFullAccess = "danger-full-access"
-
-	// ModeAutoReview and ModeManual are legacy policy names kept for callers
-	// that still import them. They normalize to ModeWorkspaceWrite.
-	ModeAutoReview = "auto-review"
-	ModeManual     = "manual"
 
 	// ModeDefault is the built-in fallback policy for omitted, legacy, or
 	// otherwise unresolved local policy configuration.
@@ -51,12 +40,9 @@ func NormalizeModeName(mode string) string {
 	return normalized
 }
 
+// NewRegistry registers the default workspace-write policy under its canonical name.
 func NewRegistry() (*policy.MemoryRegistry, error) {
-	return policy.NewMemory(
-		WorkspaceWriteMode(),
-		workspaceWriteAliasMode(ModeAutoReview),
-		workspaceWriteAliasMode(ModeManual),
-	)
+	return policy.NewMemory(WorkspaceWriteMode())
 }
 
 // WorkspaceWriteMode applies the built-in tool rules and default workspace
@@ -96,11 +82,11 @@ func WorkspaceWriteMode() policy.Mode {
 // carries Session under allow_once kind and Cancel under reject_once kind;
 // the stable option IDs preserve the distinct choices through every Surface.
 func MCPApprovalDecision(input policy.ToolContext, constraints sandbox.Constraints) (policy.Decision, error) {
-	decision, err := askApproval("MCP tool call requires approval", constraints, input)
+	// ACP uses "other"; the MCP identity lives in trusted definition metadata.
+	decision, err := askApproval("MCP tool call requires approval", constraints, input, "other", "")
 	if err != nil {
 		return policy.Decision{}, err
 	}
-	decision.Approval.ToolCall.Kind = "other" // ACP tool-call kind; MCP identity stays in trusted metadata.
 	plugin, _ := input.Tool.Metadata[mcp.MetadataPluginID].(string)
 	server, _ := input.Tool.Metadata[mcp.MetadataServer].(string)
 	remote, _ := input.Tool.Metadata[mcp.MetadataTool].(string)
@@ -128,14 +114,6 @@ func DangerFullAccessMode() policy.Mode {
 	}
 }
 
-func workspaceWriteAliasMode(id string) policy.Mode {
-	base := WorkspaceWriteMode()
-	return policy.NamedMode{
-		ID:     strings.TrimSpace(id),
-		Decide: base.DecideTool,
-	}
-}
-
 func allow(constraints sandbox.Constraints) policy.Decision {
 	return policy.Decision{
 		Action:      policy.ActionAllow,
@@ -158,11 +136,18 @@ func policyErrorOrDeny(err error) (policy.Decision, error) {
 	return deny(err.Error()), nil
 }
 
-func askApproval(reason string, constraints sandbox.Constraints, input policy.ToolContext) (policy.Decision, error) {
+func askApproval(reason string, constraints sandbox.Constraints, input policy.ToolContext, kind, titleArgument string) (policy.Decision, error) {
 	name := toolName(input)
 	call, err := policy.CallArgs(input.Call)
 	if err != nil {
 		return policy.Decision{}, err
+	}
+	title := name
+	if titleArgument != "" {
+		detail, _ := call[titleArgument].(string)
+		if detail = strings.TrimSpace(detail); detail != "" {
+			title += " " + detail
+		}
 	}
 	decision := policy.Decision{
 		Action:      policy.ActionAskApproval,
@@ -173,8 +158,8 @@ func askApproval(reason string, constraints sandbox.Constraints, input policy.To
 			ToolCall: session.ProtocolToolCall{
 				ID:       strings.TrimSpace(input.Call.ID),
 				Name:     name,
-				Kind:     toolKind(name),
-				Title:    approvalTitle(name, call),
+				Kind:     kind,
+				Title:    title,
 				Status:   "pending",
 				RawInput: call,
 			},
@@ -200,61 +185,6 @@ func hostExecutionConstraints() sandbox.Constraints {
 		Isolation:  sandbox.IsolationHost,
 		Network:    sandbox.NetworkInherit,
 	}
-}
-
-func toolKind(name string) string {
-	switch name {
-	case filesystem.ReadToolName, filesystem.ViewImageToolName, skilltool.ToolName:
-		return "read"
-	case filesystem.WriteToolName, filesystem.PatchToolName:
-		return "edit"
-	case filesystem.GlobToolName, filesystem.SearchToolName, web.SearchToolName, web.FetchToolName:
-		return "search"
-	case shell.RunCommandToolName, tasktool.ToolName, spawn.ToolName, sendmessage.ToolName:
-		return "execute"
-	default:
-		return "other"
-	}
-}
-
-func approvalTitle(name string, call map[string]any) string {
-	switch name {
-	case filesystem.ReadToolName, filesystem.ViewImageToolName, filesystem.WriteToolName, filesystem.PatchToolName, filesystem.GlobToolName, filesystem.SearchToolName:
-		if path := strings.TrimSpace(display.MapString(call, "path")); path != "" {
-			return name + " " + path
-		}
-	case skilltool.ToolName:
-		if skillName := strings.TrimSpace(display.MapString(call, "name")); skillName != "" {
-			return name + " " + skillName
-		}
-	case web.SearchToolName:
-		if query := strings.TrimSpace(display.MapString(call, "query")); query != "" {
-			return name + " " + query
-		}
-	case web.FetchToolName:
-		if url := strings.TrimSpace(display.MapString(call, "url")); url != "" {
-			return name + " " + url
-		}
-	case shell.RunCommandToolName, tasktool.ToolName:
-		if command := strings.TrimSpace(display.MapString(call, "command")); command != "" {
-			return name + " " + command
-		}
-		if action := strings.TrimSpace(display.MapString(call, "action")); action != "" {
-			if handle := strings.TrimSpace(display.MapString(call, "handle")); handle != "" {
-				return name + " " + action + " " + handle
-			}
-			return name + " " + action
-		}
-	case spawn.ToolName:
-		if args := strings.TrimSpace(display.SpawnFullDisplayArgs(call)); args != "" {
-			return name + " " + args
-		}
-	case sendmessage.ToolName:
-		if args := strings.TrimSpace(display.AgentMessageFullDisplayArgs(call)); args != "" {
-			return "Send message " + args
-		}
-	}
-	return name
 }
 
 func workspaceWriteConstraints(opts policy.ModeOptions) sandbox.Constraints {

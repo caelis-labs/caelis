@@ -281,7 +281,7 @@ func modelToolCallEvents(
 		event := &session.Event{
 			Type:       session.EventTypeToolCall,
 			Visibility: session.VisibilityCanonical,
-			Tool:       toolEventPayload(call, "pending", rawInput, nil, nil),
+			Tool:       toolEventPayload(call, "pending", rawInput),
 			Meta:       meta,
 		}
 		event.Tool.BatchID = messageID

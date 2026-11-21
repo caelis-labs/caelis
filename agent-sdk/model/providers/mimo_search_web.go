@@ -54,7 +54,7 @@ func (l *mimoLLM) searchMimoWeb(ctx context.Context, req model.WebSearchRequest)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("api-key", l.token)
-	applyDefaultAttributionHeaders(httpReq, APIMimo)
+	setUserAgent(httpReq, l.userAgent)
 	applyConfiguredHeaders(httpReq, l.headers)
 
 	resp, err := l.client.Do(httpReq)
@@ -112,7 +112,6 @@ type mimoWebSearchResponse struct {
 }
 
 type mimoWebAnnotation struct {
-	Type        string `json:"type"`
 	URL         string `json:"url"`
 	Title       string `json:"title"`
 	Summary     string `json:"summary"`

@@ -408,9 +408,7 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 
 	kind := acpsdk.ToolKindExecute
 	status := acpsdk.ToolCallStatusPending
-	req, err := translateApprovalRequest(session.Session{
-		SessionRef: session.SessionRef{SessionID: "sess-1"},
-	}, "codex", "default", client.RequestPermissionRequest{
+	req, err := translateApprovalRequest("codex", "default", client.RequestPermissionRequest{
 		SessionId: "remote-1",
 		ToolCall: acpsdk.ToolCallUpdate{
 			ToolCallId: "call-1",
@@ -997,15 +995,14 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 		SessionRef: parentSession.SessionRef,
 		Session:    parentSession,
 		TurnID:     "turn-empty",
-		Input:      " ",
 	})
 	if err != nil {
 		t.Fatalf("RunTurn(empty) error = %v", err)
 	}
-	if turn.Handle == nil {
+	if turn == nil {
 		t.Fatal("RunTurn(empty) handle = nil")
 	}
-	if err := turn.Handle.WaitCompletion(context.Background()); err != nil {
+	if err := turn.WaitCompletion(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
@@ -1090,7 +1087,6 @@ func TestManagerRejectsImagePromptWithoutACPImageCapability(t *testing.T) {
 		SessionRef:   parentSession.SessionRef,
 		Session:      parentSession,
 		TurnID:       "turn-image",
-		Input:        "look",
 		ContentParts: image,
 	}); err == nil || !strings.Contains(err.Error(), "does not support image prompts") {
 		t.Fatalf("RunTurn(image) error = %v, want unsupported image prompt", err)
@@ -1290,15 +1286,15 @@ func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNex
 		t.Fatalf("Activate() error = %v", err)
 	}
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-prompt",
-		Input:      "hello",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-prompt",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	turnErr := turn.Handle.WaitCompletion(context.Background())
+	turnErr := turn.WaitCompletion(context.Background())
 	if turnErr == nil {
 		t.Fatal("turn error = nil, want ambiguous submitted prompt failure")
 	}
@@ -1310,15 +1306,15 @@ func TestManagerRunTurnReportsUnknownAfterPossiblePromptSubmissionAndRecoversNex
 	}
 
 	recovery, err := manager.RunTurn(ctx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-recovery",
-		Input:      "continue with new input",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-recovery",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "continue with new input"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn(recovery) error = %v", err)
 	}
-	if eventErr := recovery.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := recovery.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("recovery turn event error = %v", eventErr)
 	}
 	if starts != 2 {
@@ -1399,10 +1395,10 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	}
 
 	first, err := manager.RunTurn(context.Background(), controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-cancelled-after-submit",
-		Input:      "first input",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-cancelled-after-submit",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "first input"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn(first) error = %v", err)
@@ -1412,10 +1408,10 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	case <-time.After(time.Second):
 		t.Fatal("first prompt was not submitted")
 	}
-	if got := first.Handle.Cancel().Status; got != controller.CancelStatusCancelled {
+	if got := first.Cancel().Status; got != controller.CancelStatusCancelled {
 		t.Fatalf("Cancel() status = %q, want %q", got, controller.CancelStatusCancelled)
 	}
-	firstErr := first.Handle.WaitCompletion(context.Background())
+	firstErr := first.WaitCompletion(context.Background())
 	if !errorcode.Is(firstErr, errorcode.UnknownOutcome) {
 		t.Fatalf("first Turn error = %v, want unknown_outcome", firstErr)
 	}
@@ -1424,15 +1420,15 @@ func TestManagerRunTurnCancelAfterPromptSubmissionReportsUnknownAndKeepsAdmissio
 	secondCtx, cancelSecond := context.WithTimeout(context.Background(), time.Second)
 	defer cancelSecond()
 	second, err := manager.RunTurn(secondCtx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-after-unknown",
-		Input:      "new input",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-after-unknown",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "new input"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn(second) error = %v", err)
 	}
-	if eventErr := second.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := second.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("second Turn event error = %v", eventErr)
 	}
 	if got := promptCalls.Load(); got != 2 {
@@ -1478,15 +1474,15 @@ func TestManagerActivateKeepsControllerProcessAfterHandoffContextCancel(t *testi
 	turnCtx, cancelTurn := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelTurn()
 	turn, err := manager.RunTurn(turnCtx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-after-cancel",
-		Input:      "hello",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-after-cancel",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
@@ -1557,15 +1553,15 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 	}
 	closeActiveControllerClient(t, manager, parentSession.SessionID)
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-reapply",
-		Input:      "hello",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-reapply",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if starts != 2 {
@@ -1673,7 +1669,7 @@ func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing
 		SessionRef:     parent.SessionRef,
 		Session:        parent,
 		TurnID:         "turn-fresh-reconnect",
-		Input:          "continue",
+		ContentParts:   []model.ContentPart{{Type: model.ContentPartText, Text: "continue"}},
 		Context:        agent.ContextTransfer{Summary: "DELTA-CONTEXT"},
 		FreshContext:   agent.ContextTransfer{Summary: "FULL-CONTEXT"},
 		ContextSyncSeq: 4,
@@ -1681,7 +1677,7 @@ func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatal(eventErr)
 	}
 	var prompt client.PromptRequest
@@ -1768,15 +1764,15 @@ func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t
 	}
 	closeActiveControllerClient(t, manager, parentSession.SessionID)
 	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
-		SessionRef: parentSession.SessionRef,
-		Session:    parentSession,
-		TurnID:     "turn-mode-reapply",
-		Input:      "hello",
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-mode-reapply",
+		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if eventErr := turn.Handle.WaitCompletion(context.Background()); eventErr != nil {
+	if eventErr := turn.WaitCompletion(context.Background()); eventErr != nil {
 		t.Fatalf("turn event error = %v", eventErr)
 	}
 	if starts != 2 {
@@ -2632,7 +2628,7 @@ func TestManagerQuiesceRetiresControllerRuns(t *testing.T) {
 	if _, found, err := manager.ControllerStatus(context.Background(), session.SessionRef{SessionID: "main"}); err != nil || found {
 		t.Fatalf("ControllerStatus() after Quiesce found=%v err=%v, want retired", found, err)
 	}
-	if _, err := manager.RunTurn(context.Background(), controller.TurnRequest{SessionRef: session.SessionRef{SessionID: "main"}, Input: "hello"}); !errors.Is(err, controller.ErrNotActive) {
+	if _, err := manager.RunTurn(context.Background(), controller.TurnRequest{SessionRef: session.SessionRef{SessionID: "main"}, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "hello"}}}); !errors.Is(err, controller.ErrNotActive) {
 		t.Fatalf("RunTurn() after Quiesce error = %v, want ErrNotActive", err)
 	}
 }

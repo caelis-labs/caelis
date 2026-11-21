@@ -103,7 +103,7 @@ func TestACPChildIdleFollowupOmitsIdentitySlice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	if _, _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "continue",
 	}); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestACPChildSteeringOmitsCollaborationSlice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+	if _, _, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "steer now",
 	}); err != nil {
 		t.Fatal(err)

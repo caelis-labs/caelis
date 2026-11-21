@@ -1073,7 +1073,7 @@ func (*controlClientLifecycleRuntime) RunState(context.Context, session.SessionR
 	return agent.RunState{}, nil
 }
 
-func (runtime *controlClientLifecycleRuntime) HandoffController(context.Context, agent.HandoffControllerRequest) (session.Session, error) {
+func (runtime *controlClientLifecycleRuntime) HandoffController(context.Context, controlplane.HandoffControllerRequest) (session.Session, error) {
 	return runtime.session, nil
 }
 

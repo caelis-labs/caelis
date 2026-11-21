@@ -342,32 +342,46 @@ func (tm *taskRuntime) snapshotObservedCommand(ctx context.Context, task *comman
 	return tm.reconcileCommandStatus(ctx, task, status)
 }
 
-func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask) (int64, bool, error) {
-	if task == nil || task.session == nil {
-		return 0, false, fmt.Errorf("command Task has no observable sandbox Session")
+func (tm *taskRuntime) syncCommandStream(ctx context.Context, task *commandTask) (int64, error) {
+	commandSession := task.observableCommandSession()
+	if commandSession == nil {
+		return 0, fmt.Errorf("command Task has no observable sandbox Session")
 	}
-	status, err := task.session.Status(ctx)
+	status, err := commandSession.Status(ctx)
 	if err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	if err := tm.syncCommandOutput(ctx, task, status); err != nil {
-		return 0, false, err
+		return 0, err
 	}
 	task.mu.Lock()
 	cursor := task.outputCursorLocked()
-	unread := task.outputState.frontier.model < cursor
 	task.mu.Unlock()
-	return cursor, unread, nil
+	return cursor, nil
 }
 
-// reconcileCommandStatus dispatches a sandbox status to one of the two
-// lifecycle owners. It intentionally contains no observation or finalization
-// behavior of its own.
+// reconcileCommandStatus applies a sandbox observation without replacing a
+// startup failure with the result of its cleanup process.
 func (tm *taskRuntime) reconcileCommandStatus(
 	ctx context.Context,
 	task *commandTask,
 	status sandbox.SessionStatus,
 ) (taskapi.Snapshot, error) {
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("task is required")
+	}
+	task.mu.Lock()
+	startErr := task.startCleanupErr
+	if startErr != nil && status.Running {
+		status.SupportsInput = false
+		snapshot := task.snapshotLocked(status)
+		task.mu.Unlock()
+		return snapshot, nil
+	}
+	task.mu.Unlock()
+	if startErr != nil {
+		return tm.finalizeCommandStartCleanup(ctx, task, status, startErr)
+	}
 	if status.Running {
 		return tm.observeRunningCommand(ctx, task, status)
 	}

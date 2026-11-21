@@ -259,49 +259,6 @@ type SetupCheck struct {
 	Counts    map[string]int    `json:"counts,omitempty"`
 }
 
-// PrepareProgress is an optional, best-effort progress update emitted during a
-// user-triggered sandbox setup step.
-type PrepareProgress struct {
-	Phase   string `json:"phase,omitempty"`
-	Message string `json:"message,omitempty"`
-	Step    int    `json:"step,omitempty"`
-	Total   int    `json:"total,omitempty"`
-	Done    bool   `json:"done,omitempty"`
-	Debug   bool   `json:"debug,omitempty"`
-}
-
-// PrepareProgressFunc receives best-effort setup progress. Implementations must
-// return quickly; slow callbacks can delay setup.
-type PrepareProgressFunc func(PrepareProgress)
-
-type prepareProgressContextKey struct{}
-
-// ContextWithPrepareProgress attaches a setup progress callback to ctx.
-func ContextWithPrepareProgress(ctx context.Context, fn PrepareProgressFunc) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if fn == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, prepareProgressContextKey{}, fn)
-}
-
-// ReportPrepareProgress emits one setup progress update if ctx carries a
-// progress callback.
-func ReportPrepareProgress(ctx context.Context, progress PrepareProgress) {
-	if ctx == nil {
-		return
-	}
-	fn, ok := ctx.Value(prepareProgressContextKey{}).(PrepareProgressFunc)
-	if !ok || fn == nil {
-		return
-	}
-	progress.Phase = strings.TrimSpace(progress.Phase)
-	progress.Message = strings.TrimSpace(progress.Message)
-	fn(progress)
-}
-
 // OutputChunk is one stdout/stderr streaming fragment. Cursor is the
 // cumulative backend byte marker for Stream after all raw bytes represented
 // by Text. Async backends must set it so a consumer can atomically checkpoint
@@ -325,11 +282,6 @@ type CommandRequest struct {
 	Env      map[string]string `json:"env,omitempty"`
 	UnsetEnv []string          `json:"unset_env,omitempty"`
 	Stdin    []byte            `json:"stdin,omitempty"`
-
-	// Legacy compatibility fields. New callers should prefer Constraints.
-	Permission Permission `json:"permission,omitempty"`
-	RouteHint  Route      `json:"route_hint,omitempty"`
-	Backend    Backend    `json:"backend,omitempty"`
 
 	Constraints Constraints       `json:"constraints,omitempty"`
 	OnOutput    func(OutputChunk) `json:"-"`
@@ -412,9 +364,9 @@ type Session interface {
 	ReadOutput(ctx context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
 	AwaitOutput(ctx context.Context, cursor OutputCursor) (OutputObservation, error)
 	// Status reports the current producer state. A non-running status is a
-	// settled exit: the process has exited, output reading has completed, and
-	// ExitCode is final. A termination request by itself is not an exit and must
-	// keep reporting Running.
+	// settled exit: the process has exited, backend process-tree cleanup and
+	// output reading have completed, and ExitCode is final. A termination
+	// request by itself must keep reporting Running.
 	Status(ctx context.Context) (SessionStatus, error)
 	Wait(ctx context.Context, timeout time.Duration) (SessionStatus, error)
 	Result(ctx context.Context) (CommandResult, error)
@@ -554,7 +506,6 @@ func CloneRequest(in CommandRequest) CommandRequest {
 	out.Env = maps.Clone(in.Env)
 	out.UnsetEnv = slices.Clone(in.UnsetEnv)
 	out.Stdin = append([]byte(nil), in.Stdin...)
-	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
 	out.Constraints = NormalizeConstraints(in.Constraints)
 	return out
 }
@@ -748,21 +699,5 @@ func CloneDescriptor(in Descriptor) Descriptor {
 	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
 	out.Isolation = Isolation(strings.TrimSpace(string(in.Isolation)))
 	out.DefaultConstraints = NormalizeConstraints(in.DefaultConstraints)
-	return out
-}
-
-// EffectiveConstraints merges legacy request fields into the normalized
-// backend-neutral constraints contract.
-func EffectiveConstraints(req CommandRequest) Constraints {
-	out := NormalizeConstraints(req.Constraints)
-	if out.Route == "" {
-		out.Route = Route(strings.TrimSpace(string(req.RouteHint)))
-	}
-	if out.Backend == "" {
-		out.Backend = Backend(strings.TrimSpace(string(req.Backend)))
-	}
-	if out.Permission == "" {
-		out.Permission = Permission(strings.TrimSpace(string(req.Permission)))
-	}
 	return out
 }

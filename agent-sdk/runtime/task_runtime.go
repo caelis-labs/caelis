@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,15 @@ func randomTaskID() (string, error) {
 	return hex.EncodeToString(raw[:]), nil
 }
 
+func taskIDForOperation(ref session.SessionRef, originalID string) (string, error) {
+	originalID = strings.TrimSpace(originalID)
+	if originalID == "" {
+		return randomTaskID()
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(ref.SessionID) + "\x00" + originalID))
+	return hex.EncodeToString(sum[:taskIDRandomBytes]), nil
+}
+
 type taskToolObserver struct {
 	ctx context.Context
 }
@@ -40,22 +50,7 @@ func (o taskToolObserver) ObserveTaskSnapshot(snapshot taskapi.Snapshot) {
 }
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	normalized := normalizeTaskControlRequest(req)
-	if err := validateTaskControlPrincipal(normalized.Principal); err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	identity, err := tm.resolveControlIdentity(ctx, ref, normalized.TaskID)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	if identity.kind == taskapi.KindCommand {
-		task, err := tm.lookupCommand(ctx, ref, identity.taskID)
-		if err != nil {
-			return taskapi.Snapshot{}, err
-		}
-		return tm.waitCommandTask(ctx, ref, task, normalized)
-	}
-	return tm.control(ctx, ref, req, taskControlObserve, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return tm.control(ctx, ref, req, taskControlWait, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
 		return target.Wait(ctx, normalized)
 	})
 }
@@ -97,14 +92,13 @@ type taskBatchControlItem struct {
 	Handle       string
 	Snapshot     taskapi.Snapshot
 	Err          error
-	OK           bool
 	ActualWaitMS int
 }
 
-func taskBatchControlToolResult(ctx context.Context, items []taskBatchControlItem, action string, actualWaitMS int) (tool.Result, error) {
+func taskBatchControlToolResult(items []taskBatchControlItem, action string, actualWaitMS int) (tool.Result, error) {
 	payload := taskBatchControlPayload(items, action, actualWaitMS)
 	result := tool.Result{}
-	failed := taskBatchHasError(items)
+	failed := taskBatchErrorCount(items) > 0
 	if action != "cancel" {
 		for i, item := range items {
 			if item.Err != nil || item.Snapshot.Kind != taskapi.KindCodeMode {
@@ -249,10 +243,6 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, actual
 	return out
 }
 
-func taskBatchHasError(items []taskBatchControlItem) bool {
-	return taskBatchErrorCount(items) > 0
-}
-
 func taskBatchErrorCount(items []taskBatchControlItem) int {
 	count := 0
 	for _, item := range items {
@@ -312,7 +302,7 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); terminalID != "" {
 		taskMeta["terminal_id"] = terminalID
 	}
-	for _, key := range []string{"source", "participant_role", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq", "parent_call", "parent_tool"} {
+	for _, key := range []string{"source", "participant_role", "agent", "agent_id", "mention", "prompt", "turn_id", "turn_seq", "parent_call", "parent_tool"} {
 		if value, ok := snapshot.Metadata[key]; ok {
 			taskMeta[key] = value
 		}
@@ -426,7 +416,7 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 }
 
 func taskPublicHandle(snapshot taskapi.Snapshot) string {
-	return normalizeTaskHandle(firstNonEmpty(snapshot.Handle, taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"]), strings.TrimSpace(snapshot.Ref.TaskID)))
+	return taskapi.NormalizeHandle(firstNonEmpty(snapshot.Handle, taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"]), strings.TrimSpace(snapshot.Ref.TaskID)))
 }
 
 func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entry) error {
@@ -446,9 +436,6 @@ func (tm *taskRuntime) persistTaskEntryWithConflictInvalidation(ctx context.Cont
 			if current, err := tm.store.Get(ctx, entry.TaskID); err == nil && current != nil {
 				expected = current.Revision
 				entry.Revision = current.Revision
-				if entry.Lease.ID == "" {
-					entry.Lease = taskapi.CloneLease(current.Lease)
-				}
 			}
 		}
 		persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
@@ -555,7 +542,6 @@ func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {
 	if command != nil {
 		command.mu.Lock()
 		command.revision = entry.Revision
-		command.lease = taskapi.CloneLease(entry.Lease)
 		command.mu.Unlock()
 	}
 	if script != nil {
@@ -568,7 +554,6 @@ func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {
 	if subagent != nil {
 		subagent.mu.Lock()
 		subagent.revision = entry.Revision
-		subagent.lease = taskapi.CloneLease(entry.Lease)
 		subagent.mu.Unlock()
 	}
 }

@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,10 +19,6 @@ const (
 	transactionVersion = 1
 	transactionSuffix  = ".txn.json"
 )
-
-// CommittedError is the file-store alias for the durable post-commit signal.
-// Prefer session.CommittedError / session.IsCommitted in new call sites.
-type CommittedError = session.CommittedError
 
 type persistedTransaction struct {
 	Kind     string            `json:"kind"`
@@ -366,8 +360,7 @@ func (s *Store) appendMissingTransactionEvents(
 	if len(missing) == 0 {
 		return nil
 	}
-	_, err = s.appendEventLogTransaction(documentPath, missing)
-	return err
+	return s.appendEventLogTransaction(documentPath, missing)
 }
 
 func (s *Store) appendMissingTransactionEventsIndexed(
@@ -405,8 +398,7 @@ func (s *Store) appendMissingTransactionEventsIndexed(
 	if len(missing) == 0 {
 		return nil
 	}
-	_, err = s.appendEventLogTransaction(documentPath, missing)
-	return err
+	return s.appendEventLogTransaction(documentPath, missing)
 }
 
 func (s *Store) appendMissingTransactionEventsFromTail(documentPath string, events []*session.Event) error {
@@ -441,8 +433,7 @@ func (s *Store) appendMissingTransactionEventsFromTail(documentPath string, even
 	if missing[0].Seq != throughSeq+1 {
 		return &session.EventConflictError{SessionID: missing[0].SessionID, EventID: missing[0].ID}
 	}
-	_, err = s.appendEventLogTransaction(documentPath, missing)
-	return err
+	return s.appendEventLogTransaction(documentPath, missing)
 }
 
 // readEventLogTransactionTail reads only the complete suffix that can overlap
@@ -454,49 +445,13 @@ func readEventLogTransactionTail(
 	path string,
 	firstSeq uint64,
 ) (uint64, map[uint64]*session.Event, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, map[uint64]*session.Event{}, nil
-		}
-		return 0, nil, err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return 0, nil, err
-	}
-	if info.Size() == 0 {
-		return 0, map[uint64]*session.Event{}, nil
-	}
-
-	const chunkSize = 64 << 10
-	buf := make([]byte, chunkSize)
-	var suffix []byte
-	position := info.Size()
-	var lastByte [1]byte
-	if _, err := file.ReadAt(lastByte[:], info.Size()-1); err != nil {
-		return 0, nil, err
-	}
-	tailComplete := lastByte[0] == '\n'
-	firstRecord := true
 	var throughSeq uint64
 	bySeq := map[uint64]*session.Event{}
-
-	consume := func(raw []byte) (bool, error) {
-		trimmed := bytes.TrimSpace(raw)
-		if len(trimmed) == 0 {
-			return false, nil
-		}
-		if firstRecord && !tailComplete {
-			firstRecord = false
-			return false, nil
-		}
-		event, err := decodeIndexedEvent(trimmed, path, 0)
+	err := walkEventLogTail(ctx, path, func(raw []byte) (bool, error) {
+		event, err := decodeEventLogRecord(raw, path, 0)
 		if err != nil {
 			return false, err
 		}
-		firstRecord = false
 		if throughSeq == 0 {
 			throughSeq = event.Seq
 		}
@@ -505,44 +460,9 @@ func readEventLogTransactionTail(
 		}
 		bySeq[event.Seq] = event
 		return event.Seq == firstSeq, nil
-	}
-
-	for position > 0 {
-		if err := ctx.Err(); err != nil {
-			return 0, nil, err
-		}
-		readSize := int64(len(buf))
-		if position < readSize {
-			readSize = position
-		}
-		position -= readSize
-		chunk := buf[:readSize]
-		if _, err := file.ReadAt(chunk, position); err != nil && !errors.Is(err, io.EOF) {
-			return 0, nil, err
-		}
-		data := make([]byte, 0, len(chunk)+len(suffix))
-		data = append(data, chunk...)
-		data = append(data, suffix...)
-		end := len(data)
-		for index := len(data) - 1; index >= 0; index-- {
-			if data[index] != '\n' {
-				continue
-			}
-			stop, err := consume(data[index+1 : end])
-			if err != nil {
-				return 0, nil, err
-			}
-			if stop {
-				return throughSeq, bySeq, nil
-			}
-			end = index
-		}
-		suffix = append(suffix[:0], data[:end]...)
-	}
-	if len(bytes.TrimSpace(suffix)) > 0 {
-		if _, err := consume(suffix); err != nil {
-			return 0, nil, err
-		}
+	})
+	if err != nil {
+		return 0, nil, err
 	}
 	return throughSeq, bySeq, nil
 }

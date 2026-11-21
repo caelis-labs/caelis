@@ -149,7 +149,7 @@ func TestOpenAIConnectRoundTripDispatchesResponsesVersusChatCompletions(t *testi
 				}
 			})}
 
-			resolved, err := BuildModel(cfg, 0, 0)
+			resolved, err := BuildModel(cfg, ModelBuildOptions{})
 			if err != nil {
 				t.Fatalf("BuildModel() error = %v", err)
 			}
@@ -162,7 +162,7 @@ func TestOpenAIConnectRoundTripDispatchesResponsesVersusChatCompletions(t *testi
 					t.Fatalf("Generate() error = %v path=%q", genErr, gotPath)
 				}
 				if event != nil && event.Response != nil {
-					text = event.Response.Message.TextContent()
+					text = event.Message.TextContent()
 				}
 			}
 			if !strings.HasSuffix(gotPath, tt.wantPath) {

@@ -151,52 +151,6 @@ func TestUsageSnapshotFromMapForProviderDoesNotTrustUndercountedCacheTotal(t *te
 	}
 }
 
-func TestDeepSeekOpenAICompatCacheHitDoesNotDoubleCount(t *testing.T) {
-	usage := UsageSnapshotFromMapForProvider(map[string]any{
-		"prompt_tokens":           42,
-		"prompt_cache_hit_tokens": 31,
-		"completion_tokens":       8,
-		"total_tokens":            50,
-	}, "deepseek")
-
-	if usage == nil {
-		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
-		return
-	}
-	normalized := NormalizeUsageForDisplay(*usage, "deepseek")
-	if normalized.PromptTokens != 42 {
-		t.Fatalf("PromptTokens = %d, want OpenAI-compatible prompt tokens unchanged", normalized.PromptTokens)
-	}
-	if normalized.CachedInputTokens != 31 {
-		t.Fatalf("CachedInputTokens = %d, want cache-hit breakdown", normalized.CachedInputTokens)
-	}
-	if normalized.TotalTokens != 50 {
-		t.Fatalf("TotalTokens = %d, want provider total without adding cache hit twice", normalized.TotalTokens)
-	}
-}
-
-func TestDeepSeekAnthropicUsageProviderFoldsCacheReadForDisplay(t *testing.T) {
-	usage := UsageSnapshotFromMapForProvider(map[string]any{
-		"provider":            "deepseek-anthropic",
-		"prompt_tokens":       42,
-		"cached_input_tokens": 31,
-		"completion_tokens":   8,
-		"total_tokens":        81,
-	}, "deepseek")
-
-	if usage == nil {
-		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
-		return
-	}
-	normalized := NormalizeUsageForDisplay(*usage, "deepseek-anthropic")
-	if normalized.PromptTokens != 73 {
-		t.Fatalf("PromptTokens = %d, want prompt plus cache read", normalized.PromptTokens)
-	}
-	if normalized.TotalTokens != 81 {
-		t.Fatalf("TotalTokens = %d, want Anthropic total unchanged", normalized.TotalTokens)
-	}
-}
-
 func TestUsageSnapshotFromMapForProviderAcceptsAnthropicThinkingTokenDetails(t *testing.T) {
 	usage := UsageSnapshotFromMapForProvider(map[string]any{
 		"input_tokens":  10,

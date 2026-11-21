@@ -3,9 +3,9 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -24,7 +24,6 @@ type compactionRecovery struct {
 }
 
 type compactionFailureError struct {
-	phase string
 	cause error
 }
 
@@ -42,16 +41,6 @@ func (e *compactionFailureError) Unwrap() error {
 	return e.cause
 }
 
-func wrapCompactionFailure(phase string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &compactionFailureError{
-		phase: strings.TrimSpace(phase),
-		cause: err,
-	}
-}
-
 func compactionRecoveryFromError(err error) (compactionRecovery, bool) {
 	if decision, ok := autoCompactRequired(err); ok {
 		kind := decision.Kind
@@ -60,7 +49,7 @@ func compactionRecoveryFromError(err error) (compactionRecovery, bool) {
 		}
 		return compactionRecovery{kind: kind, decision: decision, cause: err}, true
 	}
-	if isCompactionOverflowError(err) {
+	if model.IsContextOverflow(err) {
 		return compactionRecovery{kind: compactionRecoveryKindOverflow, cause: err}, true
 	}
 	return compactionRecovery{}, false
@@ -80,8 +69,7 @@ func (r *Runtime) recoverByCompacting(
 	}
 	if recovery.decision.Validate != nil {
 		ctx = context.WithValue(ctx, checkpointValidationKey{}, recovery.decision.Validate)
-	} else if req.AgentSpec.ResolveModelRequest == nil {
-	} else {
+	} else if req.AgentSpec.ResolveModelRequest != nil {
 		// An overflow outside the gated model has no captured dynamic catalog.
 		// Do not infer authority from the unresolved bootstrap AgentSpec.
 		return compactionProgress{}, false, fmt.Errorf("agent-sdk/runtime: dynamic compaction recovery requires request authority")

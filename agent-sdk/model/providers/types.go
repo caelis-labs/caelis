@@ -7,89 +7,39 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-// APIType defines protocol dialect used by a model provider.
-type APIType = model.APIType
-
-const (
-	APIOpenAI              = model.APIOpenAI
-	APIOpenAIResponses     = model.APIOpenAIResponses
-	APIOpenAICompatible    = model.APIOpenAICompatible
-	APIOpenRouter          = model.APIOpenRouter
-	APIGemini              = model.APIGemini
-	APIAnthropic           = model.APIAnthropic
-	APIAnthropicCompatible = model.APIAnthropicCompatible
-	APIDeepSeek            = model.APIDeepSeek
-	APIMiniMax             = model.APIMiniMax
-	APIVolcengine          = model.APIVolcengine
-	APIMimo                = model.APIMimo
-	APIVolcengineCoding    = model.APIVolcengineCoding
-	APIXAIResponses        = model.APIXAIResponses
-	APIOllama              = model.APIOllama
-)
-
-// APIOpenAICodex selects the ChatGPT Codex Responses wire adapter.
-const APIOpenAICodex = model.APIOpenAICodex
-
-// AuthType defines model provider authentication strategy.
-type AuthType = model.AuthType
-
-const (
-	AuthAPIKey      = model.AuthAPIKey
-	AuthBearerToken = model.AuthBearerToken
-	AuthOAuthToken  = model.AuthOAuthToken
-	AuthNone        = model.AuthNone
-)
-
 // AuthConfig is provider-agnostic auth configuration.
 type AuthConfig struct {
-	Type          AuthType
-	Token         string
-	CredentialRef string
-	HeaderKey     string
-	Prefix        string
+	Type      model.AuthType
+	Token     string
+	HeaderKey string
+	Prefix    string
 }
 
-// OpenRouterConfig carries OpenRouter-native request options.
-// Zero values mean "use OpenRouter defaults".
-type OpenRouterConfig struct {
-	Models     []string
-	Route      string
-	Provider   map[string]any
-	Transforms []string
-	Plugins    []map[string]any
-}
-
-// Config is a provider-agnostic model alias definition.
+// Config defines the resolved endpoint and model settings for one provider.
 type Config struct {
-	Alias      string
 	Provider   string
-	API        APIType
+	API        model.APIType
 	Model      string
 	BaseURL    string
 	Headers    map[string]string
 	HTTPClient *http.Client
-	// CredentialPath supplies a Host-scoped provider credential file. It is
-	// used only by providers that own their credential format.
-	CredentialPath string
-	Timeout        time.Duration
+	Timeout    time.Duration
+	// UserAgent is the caller's product identity for model discovery and
+	// direct HTTP adapters. SDK-managed generation uses its library's identity.
+	UserAgent string
 	// StreamResponseHeaderTimeout bounds the wait for an HTTP streaming
 	// response to return headers. It does not bound the lifetime of the body.
 	StreamResponseHeaderTimeout time.Duration
 	StreamFirstEventTimeout     time.Duration
 	// StreamIdleTimeout bounds silence between complete SSE data events after
 	// the stream starts.
-	StreamIdleTimeout         time.Duration
-	MaxOutputTok              int
-	ContextWindowTokens       int
-	ImageInput                bool
-	ReasoningLevels           []string
-	ReasoningMode             string
-	SupportedReasoningEfforts []string
-	DefaultReasoningEffort    string
-	ThinkingMode              string
-	ThinkingBudget            int
-	ReasoningEffort           string
-	OpenRouter                OpenRouterConfig
-	Auth                      AuthConfig
-	Retry                     model.RetryConfig
+	StreamIdleTimeout   time.Duration
+	MaxOutputTok        int
+	ContextWindowTokens int
+	ImageInput          bool
+	ReasoningLevels     []string
+	ReasoningMode       string
+
+	Auth  AuthConfig
+	Retry model.RetryConfig
 }

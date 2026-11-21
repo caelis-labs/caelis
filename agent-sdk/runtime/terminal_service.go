@@ -18,10 +18,6 @@ type terminalService struct {
 	tasks *taskRuntime
 }
 
-func newTerminalService(tasks *taskRuntime) *terminalService {
-	return &terminalService{tasks: tasks}
-}
-
 func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
 	ref = terminal.NormalizeRef(ref)
 	task, err := s.resolveTerminalCommand(ctx, ref)
@@ -49,13 +45,16 @@ func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.
 	task.mu.Lock()
 	snapshot := terminalCommandSnapshotLocked(task, status)
 	producerPending := task.running && !taskapi.IsTerminalState(task.state)
+	cleanupPending := task.startCleanupErr != nil
 	task.mu.Unlock()
 	// A yielded Task's durable lifecycle may still say running. Terminal reads
 	// inspect the producer without consuming model output or finalizing the
-	// Task. A non-running producer status is a settled exit: Sessions report it
-	// only after the process exited and its output completed, so it is
-	// authoritative for this point-in-time terminal snapshot.
-	if producerPending && commandSession != nil && !status.Running {
+	// Task. Status reports the process's settled exit independently of the
+	// startup outcome recorded by the Task.
+	if cleanupPending {
+		snapshot.Running = status.Running
+		snapshot.SupportsInput = false
+	} else if producerPending && commandSession != nil && !status.Running {
 		snapshot.Running = false
 		snapshot.SupportsInput = false
 		snapshot.State = string(stateFromStatus(status))
@@ -73,7 +72,7 @@ func (s *terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.
 			return terminal.Snapshot{}, err
 		}
 		task.mu.Lock()
-		settled := taskapi.IsTerminalState(task.state)
+		settled := taskapi.IsTerminalState(task.state) && task.startCleanupErr == nil
 		task.mu.Unlock()
 		if settled {
 			return s.Read(ctx, ref)
@@ -109,10 +108,11 @@ func (s *terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
 	if err != nil {
 		return err
 	}
-	if task.session == nil {
+	commandSession := task.observableCommandSession()
+	if commandSession == nil {
 		return fmt.Errorf("command Task has no live sandbox Session")
 	}
-	return task.session.Terminate(ctx)
+	return commandSession.Terminate(ctx)
 }
 
 func (s *terminalService) Release(ctx context.Context, ref terminal.Ref) error {
@@ -120,15 +120,16 @@ func (s *terminalService) Release(ctx context.Context, ref terminal.Ref) error {
 	if err != nil {
 		return err
 	}
-	if task.session == nil {
+	commandSession := task.observableCommandSession()
+	if commandSession == nil {
 		return nil
 	}
-	status, err := task.session.Status(ctx)
+	status, err := commandSession.Status(ctx)
 	if err != nil {
 		return err
 	}
 	if status.Running {
-		return task.session.Terminate(ctx)
+		return commandSession.Terminate(ctx)
 	}
 	return nil
 }
@@ -185,19 +186,6 @@ func terminalCommandSnapshotLocked(task *commandTask, status sandbox.SessionStat
 		}
 	}
 	return terminal.CloneSnapshot(snapshot)
-}
-
-func terminalSnapshotFromTaskSnapshot(snapshot taskapi.Snapshot) terminal.Snapshot {
-	result := terminal.Snapshot{
-		Ref:   terminal.Ref{SessionID: snapshot.Ref.SessionID, TaskID: snapshot.Ref.TaskID, TerminalID: snapshot.Ref.TerminalID},
-		State: string(snapshot.State), Running: snapshot.Running, SupportsInput: snapshot.SupportsInput,
-		StartedAt: snapshot.CreatedAt, UpdatedAt: snapshot.UpdatedAt,
-	}
-	result.FinalResult = firstNonBlankTaskOutput(taskRawStringValue(snapshot.Result["result"]), noOutputPlaceholder)
-	if code, ok := parseIntArgValue(snapshot.Result["exit_code"]); ok {
-		result.ExitCode = &code
-	}
-	return result
 }
 
 var _ terminal.Controller = (*terminalService)(nil)

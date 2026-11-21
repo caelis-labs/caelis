@@ -30,7 +30,7 @@ func AgentCommunicationPromptFooter(actor ActorRef) string {
 	if actor.Kind == ActorKindController {
 		actor = ParentCommunicationActor()
 	}
-	name := singleLineAgentIdentity(firstNonEmpty(actor.Name, actor.ID, string(actor.Kind), "agent"))
+	name := singleLineAgentIdentity(firstNonEmptyString(actor.Name, actor.ID, string(actor.Kind), "agent"))
 	return "\n\nFrom: " + name
 }
 

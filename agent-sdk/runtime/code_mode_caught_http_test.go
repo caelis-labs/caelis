@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -65,11 +66,7 @@ func TestCodeModeCaughtReadsReachNextHTTPRequest(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "object": "response", "model": "fixture", "status": "completed", "output": output, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
 	}))
 	defer server.Close()
-	factory := providers.NewFactory()
-	if err = factory.Register(providers.Config{Alias: "fixture/catch", Provider: "fixture", API: providers.APIOpenAIResponses, Model: "fixture", BaseURL: server.URL, HTTPClient: server.Client(), Auth: providers.AuthConfig{Type: providers.AuthNone}, ContextWindowTokens: 200000}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("fixture/catch")
+	llm, err := providers.New(providers.Config{Provider: "fixture", API: model.APIOpenAIResponses, Model: "fixture", BaseURL: server.URL, HTTPClient: server.Client(), Auth: providers.AuthConfig{Type: model.AuthNone}, ContextWindowTokens: 200000})
 	if err != nil {
 		t.Fatal(err)
 	}

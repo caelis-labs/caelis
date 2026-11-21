@@ -36,8 +36,8 @@ func (*measuredStreamBody) Close() error { return nil }
 func TestProviderInvocationsPreserveCumulativeUsageOnReadFailureAndCancel(t *testing.T) {
 	constructors := map[string]func(Config) model.LLM{
 		"openai-compatible":           func(c Config) model.LLM { return newOpenAICompat(c, "test") },
-		"openai":                      func(c Config) model.LLM { c.API = APIOpenAI; return newOpenAIResponses(c, "test") },
-		"openai-responses-compatible": func(c Config) model.LLM { c.API = APIOpenAIResponses; return newOpenAIResponses(c, "test") },
+		"openai":                      func(c Config) model.LLM { c.API = model.APIOpenAI; return newOpenAIResponses(c, "test") },
+		"openai-responses-compatible": func(c Config) model.LLM { c.API = model.APIOpenAIResponses; return newOpenAIResponses(c, "test") },
 		"anthropic":                   func(c Config) model.LLM { return newAnthropic(c, "test") },
 		"gemini":                      func(c Config) model.LLM { return newGemini(c, "test") },
 		"ollama":                      func(c Config) model.LLM { return newOllama(c, "test") },

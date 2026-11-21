@@ -19,7 +19,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -29,6 +29,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
@@ -210,7 +211,7 @@ func TestActiveSessionRuntimePromptsAfterConnectingAndSelectingNewModel(t *testi
 		ApprovalMode: "auto-review",
 		Model: ModelConfig{
 			Provider:   "xiaomi",
-			API:        providers.APIMimo,
+			API:        model.APIMimo,
 			Model:      "mimo-v2.5-pro",
 			BaseURL:    "https://token-plan-cn.xiaomimimo.com/v1",
 			Token:      "mimo-secret",
@@ -3276,7 +3277,7 @@ type blockingSessionControl struct {
 
 func (c *blockingSessionControl) HandoffController(
 	ctx context.Context,
-	_ agent.HandoffControllerRequest,
+	_ controlplane.HandoffControllerRequest,
 ) (session.Session, error) {
 	close(c.entered)
 	select {

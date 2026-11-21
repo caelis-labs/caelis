@@ -258,7 +258,7 @@ func TestAsyncCompactionFrozenRequestMatchesForeground(t *testing.T) {
 	run := h.run(t)
 	next := h.startCandidate(t)
 	h.completeCandidate(t, next.scope)
-	data, ok := compact.CompactEventDataFromEvent(next.scope.job.result.CompactEvent)
+	data, ok := session.CheckpointDataFromEvent(next.scope.job.result.CompactEvent)
 	if !ok || data.Generator != "model_context" {
 		t.Fatalf("generator = %q, want model_context", data.Generator)
 	}
@@ -580,7 +580,7 @@ func TestAsyncCompactionDefaultOffAndThresholds(t *testing.T) {
 			receiveSnapshotValue(t, h.llm.foreground)
 			h.llm.responses <- asyncToolResponse("first")
 			next := receiveSnapshotValue(t, h.llm.foreground)
-			if next.scope != nil && next.scope.started {
+			if next.scope != nil && next.scope.job != nil {
 				t.Fatal("unexpected speculation")
 			}
 			h.llm.responses <- asyncTextResponse("done", 500)
@@ -702,7 +702,7 @@ func TestAsyncCompactionAppendAfterAssemblyRemainsInTail(t *testing.T) {
 		t.Fatal("external append entered the assembled request")
 	}
 	h.completeCandidate(t, next.scope)
-	data, _ := compact.CompactEventDataFromEvent(next.scope.job.result.CompactEvent)
+	data, _ := session.CheckpointDataFromEvent(next.scope.job.result.CompactEvent)
 	if data.SummarizedThroughSeq >= appended.Seq {
 		t.Fatal("external append entered summary coverage")
 	}
@@ -760,14 +760,14 @@ func TestAsyncCompactionCoverageContractCannotAdvanceOrRegress(t *testing.T) {
 	h.completeCandidate(t, next.scope)
 	l := &autoCompactGatedLLM{runtime: h.rt, inner: h.llm, sessionRef: h.active.SessionRef}
 	original := next.scope.job.result
-	data, _ := compact.CompactEventDataFromEvent(original.CompactEvent)
-	for _, mutation := range []func(*compact.CompactEventData){
-		func(d *compact.CompactEventData) { d.SummarizedThroughSeq++ },
-		func(d *compact.CompactEventData) { d.SummarizedThroughSeq-- },
-		func(d *compact.CompactEventData) { d.SummarizedThroughID = "wrong" },
-		func(d *compact.CompactEventData) { d.ContractVersion++ },
-		func(d *compact.CompactEventData) { d.Revision++ },
-		func(d *compact.CompactEventData) { d.SourceEventCount++ },
+	data, _ := session.CheckpointDataFromEvent(original.CompactEvent)
+	for _, mutation := range []func(*session.CheckpointData){
+		func(d *session.CheckpointData) { d.SummarizedThroughSeq++ },
+		func(d *session.CheckpointData) { d.SummarizedThroughSeq-- },
+		func(d *session.CheckpointData) { d.SummarizedThroughID = "wrong" },
+		func(d *session.CheckpointData) { d.ContractVersion++ },
+		func(d *session.CheckpointData) { d.Revision++ },
+		func(d *session.CheckpointData) { d.SourceEventCount++ },
 	} {
 		changed := data
 		mutation(&changed)

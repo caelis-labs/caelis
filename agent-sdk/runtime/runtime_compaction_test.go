@@ -15,6 +15,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -96,7 +97,7 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	})
 	noticeIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		notice, ok := session.NoticeOf(event)
-		return ok && notice.Kind == session.EventNoticeKindCompact && notice.Text == compact.CompactNoticeLabel
+		return ok && notice.Kind == session.EventNoticeKindCompact && notice.Text == display.CompactNoticeLabel
 	})
 	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
 		t.Fatalf("runner event order = %#v, want compact activity before compact notice", runEvents)
@@ -416,7 +417,7 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 	if !ok {
 		t.Fatal("expected compact event in durable history")
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatal("expected compact event metadata")
 	}
@@ -517,7 +518,7 @@ func TestRuntimeManualCompactUsesPureTextCheckpointOverlay(t *testing.T) {
 	if !ok {
 		t.Fatal("expected compact event")
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("compact event missing structured metadata: %+v", compactEvent.Meta)
 	}
@@ -628,7 +629,7 @@ func TestInContextCompactionUsesOneRuntimeCallWithCommonModelRetry(t *testing.T)
 	if provider.calls != 2 {
 		t.Fatalf("provider calls = %d, want common retry to make two attempts", provider.calls)
 	}
-	data, ok := compact.CompactEventDataFromEvent(result.CompactEvent)
+	data, ok := session.CheckpointDataFromEvent(result.CompactEvent)
 	if !ok || data.Generator != "model_context" {
 		t.Fatalf("compact metadata = %#v, want model_context", result.CompactEvent.Meta)
 	}
@@ -742,7 +743,7 @@ func TestRuntimeManualCompactUsesCompletedHotRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
-	data, ok := compact.CompactEventDataFromEvent(result.Event)
+	data, ok := session.CheckpointDataFromEvent(result.Event)
 	if !ok || data.Generator != "model_context" {
 		t.Fatalf("compact metadata = %#v, want hot model_context path", result.Event.Meta)
 	}
@@ -812,7 +813,7 @@ func TestRuntimeManualCompactAppliesCurrentServiceTierToCompletedHotRequest(t *t
 			if err != nil {
 				t.Fatalf("Compact() error = %v", err)
 			}
-			data, ok := compact.CompactEventDataFromEvent(result.Event)
+			data, ok := session.CheckpointDataFromEvent(result.Event)
 			if !ok || data.Generator != "model_context" {
 				t.Fatalf("compact metadata = %#v, want hot model_context path", result.Event.Meta)
 			}
@@ -867,7 +868,7 @@ func TestRuntimeManualCompactFallsBackFromHotRequestToIndependentCompactor(t *te
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
-	data, ok := compact.CompactEventDataFromEvent(result.Event)
+	data, ok := session.CheckpointDataFromEvent(result.Event)
 	if !ok || data.Generator != "model_markdown" {
 		t.Fatalf("compact metadata = %#v, want independent model fallback", result.Event.Meta)
 	}
@@ -1077,7 +1078,7 @@ func TestRuntimeManualCompactIncludesConfirmedUserMessage(t *testing.T) {
 - Remove gm_license legacy behavior
 
 ## Next Actions
-1. wait for explicit implementation approval`, compact.CompactEventData{
+1. wait for explicit implementation approval`, session.CheckpointData{
 		ContractVersion: compact.CompactContractVersion,
 		Generator:       "model_markdown",
 		Trigger:         "manual",
@@ -1510,7 +1511,7 @@ Next action: fit the pending user turn inside the compacted prompt
 	if result.Usage.TotalTokens > result.Usage.EffectiveInputBudget {
 		t.Fatalf("usage.TotalTokens = %d, want <= effective budget %d", result.Usage.TotalTokens, result.Usage.EffectiveInputBudget)
 	}
-	data, ok := compact.CompactEventDataFromEvent(result.CompactEvent)
+	data, ok := session.CheckpointDataFromEvent(result.CompactEvent)
 	if !ok {
 		t.Fatal("expected compact event data")
 	}
@@ -1961,9 +1962,9 @@ func TestCompactableEventsIgnoreReplacementOverlayHistory(t *testing.T) {
 		canonical,
 	}
 
-	got := compactableEvents(events)
+	got := compact.EventsAfterLatestCompact(events)
 	if len(got) != 1 {
-		t.Fatalf("compactableEvents() count = %d, want 1 (%v)", len(got), got)
+		t.Fatalf("compact.EventsAfterLatestCompact() count = %d, want 1 (%v)", len(got), got)
 	}
 	if text := eventTextForCompaction(got[0]); text != "Fresh canonical user event after the latest compact." {
 		t.Fatalf("compactable event text = %q, want fresh canonical event", text)
@@ -1979,7 +1980,7 @@ func TestCompactableEventsIgnoreSyntheticCheckpointPromptReplacement(t *testing.
 		Visibility: session.VisibilityCanonical,
 		Text:       compactText,
 		Meta: map[string]any{
-			compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{
+			session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{
 				ContractVersion: compact.CompactContractVersion,
 				Generator:       "model_markdown",
 			}),
@@ -1993,9 +1994,9 @@ func TestCompactableEventsIgnoreSyntheticCheckpointPromptReplacement(t *testing.
 		t.Fatalf("PromptEventsFromLatestCompact() = %+v, want checkpoint replacement plus next event", promptEvents)
 	}
 
-	got := compactableEvents(events)
+	got := compact.EventsAfterLatestCompact(events)
 	if len(got) != 1 {
-		t.Fatalf("compactableEvents() count = %d, want only post-compact event (%+v)", len(got), got)
+		t.Fatalf("compact.EventsAfterLatestCompact() count = %d, want only post-compact event (%+v)", len(got), got)
 	}
 	if text := eventTextForCompaction(got[0]); text != "Fresh canonical user event after the latest compact." {
 		t.Fatalf("compactable event text = %q, want fresh canonical event", text)
@@ -2119,7 +2120,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
 			sawCompactNotice = true
 		}
 	}
@@ -2173,7 +2174,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	if inputTurnID == "" || compactTurnID != inputTurnID {
 		t.Fatalf("overflow compact TurnID = %q, input TurnID = %q; want the causative Turn identity", compactTurnID, inputTurnID)
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
 	}
@@ -2249,7 +2250,7 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
 			sawCompactNotice = true
 		}
 	}
@@ -2279,7 +2280,7 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 	if !ok {
 		t.Fatal("expected durable compact event")
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
 	}
@@ -2371,7 +2372,7 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
 			sawCompactNotice = true
 		}
 		if event != nil && event.Lifecycle != nil &&
@@ -2479,7 +2480,7 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 		return ok &&
 			notice.Level == "warning" &&
 			notice.Kind == session.EventNoticeKindCompactFailed &&
-			strings.Contains(notice.Text, compact.CompactFailureLabel) &&
+			strings.Contains(notice.Text, display.CompactFailureNoticeLabel) &&
 			strings.Contains(notice.Text, "streaming is required")
 	})
 	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
@@ -2578,7 +2579,7 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
 			sawCompactNotice = true
 		}
 	}
@@ -2611,7 +2612,7 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 	if !ok {
 		t.Fatal("expected durable compact event")
 	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	data, ok := session.CheckpointDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
 	}

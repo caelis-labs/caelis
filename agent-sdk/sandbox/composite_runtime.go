@@ -32,7 +32,7 @@ func (r *compositeRuntime) FileSystemFor(constraints Constraints) FileSystem {
 }
 
 func (r *compositeRuntime) Run(ctx context.Context, req CommandRequest) (CommandResult, error) {
-	constraints := EffectiveConstraints(req)
+	constraints := NormalizeConstraints(req.Constraints)
 	selection := r.runtimeSelectionForConstraints(constraints)
 	runtime := selection.runtime
 	if runtime == nil {
@@ -46,15 +46,11 @@ func (r *compositeRuntime) Run(ctx context.Context, req CommandRequest) (Command
 		}
 		return result, fmt.Errorf("ports/sandbox: %s", HostExecutionRequiresApprovalMessage)
 	}
-	result, err := runtime.Run(ctx, req)
-	if !ConstraintsRequestExplicitHost(constraints) {
-		return NormalizeSandboxPermissionFailure(result, err)
-	}
-	return result, err
+	return runtime.Run(ctx, req)
 }
 
 func (r *compositeRuntime) Start(ctx context.Context, req CommandRequest) (Session, error) {
-	constraints := EffectiveConstraints(req)
+	constraints := NormalizeConstraints(req.Constraints)
 	selection := r.runtimeSelectionForConstraints(constraints)
 	runtime := selection.runtime
 	if runtime == nil {

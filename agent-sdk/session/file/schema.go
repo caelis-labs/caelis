@@ -21,13 +21,6 @@ const (
 
 var storeRootLocks sync.Map
 
-type storeRootLockMode int
-
-const (
-	storeRootLockShared storeRootLockMode = iota
-	storeRootLockExclusive
-)
-
 type storeRootLock struct {
 	mu                  contextMutex
 	recoveryInitialized bool

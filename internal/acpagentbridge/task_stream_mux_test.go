@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -766,7 +766,7 @@ func TestACPTaskStreamAnchorUsesTypedToolStatusForParentTerminal(t *testing.T) {
 		update := rawTerminal.Update.(eventstream.ToolCallUpdate)
 		output, _ := update.RawOutput.(map[string]any)
 		t.Fatalf("raw-output anchor was not recognized: target_kind=%q terminal=%#v/%t meta=%#v output=%#v",
-			display.ToolTaskTargetKind(nil, output, meta), info, hasInfo, meta, output)
+			projection.ToolTaskTargetKind(nil, output, meta), info, hasInfo, meta, output)
 	}
 	if anchor.parentTerminal {
 		t.Fatal("free-form output state permanently closed Task stream discovery")

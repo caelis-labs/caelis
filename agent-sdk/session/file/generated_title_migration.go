@@ -56,7 +56,7 @@ func (s *Store) migrateLegacyGeneratedTitles(ctx context.Context) error {
 			continue
 		}
 		doc.Session.Title = title
-		s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
+		s.pathCache[sanitizeSessionID(doc.Session.SessionID)] = path
 		if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil, nil); err != nil {
 			return err
 		}

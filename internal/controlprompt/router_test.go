@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -57,7 +57,7 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
 	}
-	if !svc.compacted || firstNotice(compactResult) != compact.CompactNoticeLabel {
+	if !svc.compacted || firstNotice(compactResult) != display.CompactNoticeLabel {
 		t.Fatalf("compact route compacted=%v notice=%q", svc.compacted, firstNotice(compactResult))
 	}
 	if compactResult.StatusUpdate == nil || compactResult.StatusUpdate.Usage.TotalTokens != 5100 || compactResult.StatusUpdate.Usage.ContextWindowTokens != 1000000 {

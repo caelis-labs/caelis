@@ -41,6 +41,23 @@ func TestCloneRecursivelyIsolatesJSONValues(t *testing.T) {
 	}
 }
 
+func TestJSONValuePreservesOverlappingSliceViews(t *testing.T) {
+	items := []any{"first", "second"}
+	input := []any{items[:1], items[:2]}
+	if cloned := Clone(input); !reflect.DeepEqual(cloned, input) {
+		t.Errorf("Clone() = %#v, want %#v", cloned, input)
+	}
+
+	items[1] = items[:1]
+	if err := Validate(items); err != nil {
+		t.Fatalf("Validate() rejected acyclic subslice: %v", err)
+	}
+	items[0] = items[:1]
+	if err := Validate(items); err == nil {
+		t.Fatal("Validate() accepted a cyclic subslice")
+	}
+}
+
 func TestBytePayloadValidationAndCloning(t *testing.T) {
 	t.Parallel()
 

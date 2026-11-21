@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
@@ -44,6 +45,44 @@ func usageSnapshotFromSession(usage session.UsageSnapshot) controlstatus.UsageSn
 		ReasoningTokens:  usage.ReasoningTokens,
 		TotalTokens:      usage.TotalTokens,
 	}
+}
+
+// normalizeUsageForDisplay converts provider raw usage into the status-table
+// display contract. Reasoning is treated as an output-token breakdown, so it is
+// not added to Total unless CompletionTokens is absent.
+func normalizeUsageForDisplay(usage session.UsageSnapshot, provider string) session.UsageSnapshot {
+	if providerSeparatesCachedInputForSnapshot(provider, usage) && usage.CachedInputTokens > 0 {
+		usage.PromptTokens += usage.CachedInputTokens
+	}
+	usage.CacheReadAccounting = model.CacheReadIncluded
+	minimum := usage.PromptTokens + usage.CompletionTokens
+	if usage.CompletionTokens == 0 {
+		minimum += usage.ReasoningTokens
+	}
+	if usage.TotalTokens < minimum {
+		usage.TotalTokens = minimum
+	}
+	return usage
+}
+
+func normalizedProviderKey(provider string) string {
+	return strings.ToLower(strings.TrimSpace(strings.ReplaceAll(provider, "_", "-")))
+}
+
+func providerSeparatesCachedInputForSnapshot(provider string, usage session.UsageSnapshot) bool {
+	switch usage.CacheReadAccounting {
+	case model.CacheReadIncluded:
+		return false
+	case model.CacheReadSeparate:
+		return true
+	}
+	if model.ProviderSeparatesCachedInput(provider) {
+		return true
+	}
+	if normalizedProviderKey(provider) != "deepseek" || usage.CachedInputTokens <= 0 {
+		return false
+	}
+	return usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens
 }
 
 const (
@@ -244,7 +283,7 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 		if provider == "" && hasInvocation {
 			provider = invocation.Provider
 		}
-		usage := session.NormalizeUsageForDisplay(*one, provider)
+		usage := normalizeUsageForDisplay(*one, provider)
 		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), usage)
 		if hasInvocation {
 			breakdown.addModel(invocation.Provider, invocation.Model, usage)
@@ -258,7 +297,7 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 		}
 	}
 	for lane, item := range latestContextUsage {
-		usage := session.NormalizeUsageForDisplay(item.Usage, item.Provider)
+		usage := normalizeUsageForDisplay(item.Usage, item.Provider)
 		breakdown.add(latestContextCategory[lane], usage)
 		breakdown.addModel(item.Provider, item.Model, usage)
 	}
@@ -297,7 +336,7 @@ func (u *sessionTokenUsageBreakdown) addACPTaskUsage(entries []*taskapi.Entry, a
 			continue
 		}
 		invocation := session.CloneEventInvocation(entry.ContextUsage.Invocation)
-		normalized := session.NormalizeUsageForDisplay(*usage, invocation.Provider)
+		normalized := normalizeUsageForDisplay(*usage, invocation.Provider)
 		u.add(tokenUsageCategorySubagent, normalized)
 		u.addModel(invocation.Provider, invocation.Model, normalized)
 	}
@@ -341,13 +380,13 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 		if usage == nil {
 			continue
 		}
-		normalized := session.NormalizeUsageForDisplay(*usage, invocation.Provider)
+		normalized := normalizeUsageForDisplay(*usage, invocation.Provider)
 		addUsageSnapshot(&autoReviewByModel, normalized)
 		hasAutoReviewByModel = true
 		breakdown.addModel(invocation.Provider, invocation.Model, normalized)
 	}
 	if autoReviewUsage != nil {
-		usage := session.NormalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
+		usage := normalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
 		if hasAutoReviewByModel {
 			// by_model rows are the authoritative auto-review attribution when
 			// present; the aggregate is retained only for older snapshots.

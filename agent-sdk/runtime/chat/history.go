@@ -34,10 +34,6 @@ func promptSummaryID(event *session.Event) string {
 	return ""
 }
 
-func messagesFromEvents(activeSession session.Session, events []*session.Event) []model.Message {
-	messages, _ := messagesFromEventsChecked(activeSession, events)
-	return messages
-}
 func messagesFromEventsChecked(activeSession session.Session, events []*session.Event) ([]model.Message, error) {
 	ordered, err := session.OrderToolFacts(events)
 	if err != nil {

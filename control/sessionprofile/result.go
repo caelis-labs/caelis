@@ -12,7 +12,7 @@ import (
 // projectResult preserves the application's effect receipt independently of
 // media availability. Once resolved, media bytes are historical evidence in
 // canonical Session content; replay never fetches resources or repeats effects.
-func (s *Store) projectResult(ctx context.Context, c CallContext, format string, result CallResult) (tool.Result, error) {
+func (s *Store) projectResult(ctx context.Context, c CallContext, receiptID, format string, result CallResult) (tool.Result, error) {
 	var out tool.Result
 	if format == "" {
 		// The baseline callback format is opaque JSON text.
@@ -40,7 +40,7 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, format string,
 			message = *block.Text
 		}
 	}
-	receipt := resultReceipt(c, result.Outcome, references)
+	receipt := resultReceipt(receiptID, result.Outcome, references)
 	// Store-generated unknown outcomes have no application content. They must
 	// remain machine-readable unknown, not failed execution or permission to retry.
 	var contentErr error
@@ -105,8 +105,8 @@ func legacyCallbackMessage(content json.RawMessage) string {
 	return ""
 }
 
-func resultReceipt(c CallContext, outcome string, references []ContentBlock) map[string]any {
-	receipt := map[string]any{"outcome": outcome, "receipt_id": callID(c)}
+func resultReceipt(receiptID, outcome string, references []ContentBlock) map[string]any {
+	receipt := map[string]any{"outcome": outcome, "receipt_id": receiptID}
 	if len(references) > 0 {
 		receipt["resources"] = references
 	}

@@ -139,9 +139,7 @@ type ToolSpecKind string
 
 const (
 	ToolSpecKindFunction         ToolSpecKind = "function"
-	ToolSpecKindProviderDefined  ToolSpecKind = "provider_defined"
 	ToolSpecKindProviderExecuted ToolSpecKind = "provider_executed"
-	ToolSpecKindMCP              ToolSpecKind = "mcp"
 )
 
 // OutputMode identifies one provider-neutral desired output contract.
@@ -169,13 +167,10 @@ const (
 type StreamEventType string
 
 const (
-	StreamEventPartStart    StreamEventType = "part_start"
 	StreamEventPartDelta    StreamEventType = "part_delta"
-	StreamEventPartDone     StreamEventType = "part_done"
 	StreamEventMessageDone  StreamEventType = "message_done"
 	StreamEventStepDone     StreamEventType = "step_done"
 	StreamEventTurnDone     StreamEventType = "turn_done"
-	StreamEventRawProvider  StreamEventType = "raw_provider_event"
 	StreamEventAttemptReset StreamEventType = "attempt_reset"
 )
 
@@ -500,31 +495,17 @@ type FunctionToolSpec struct {
 	Strict      bool           `json:"strict,omitempty"`
 }
 
-type ProviderDefinedToolSpec struct {
-	Name            string                     `json:"name,omitempty"`
-	Provider        string                     `json:"provider,omitempty"`
-	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
-}
-
 type ProviderExecutedToolSpec struct {
 	Name            string                     `json:"name,omitempty"`
 	Provider        string                     `json:"provider,omitempty"`
 	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
 }
 
-type MCPToolSpec struct {
-	Name   string `json:"name,omitempty"`
-	Server string `json:"server,omitempty"`
-	Tool   string `json:"tool,omitempty"`
-}
-
 // ToolSpec is the provider-neutral visible tool declaration.
 type ToolSpec struct {
 	Kind             ToolSpecKind              `json:"kind"`
 	Function         *FunctionToolSpec         `json:"function,omitempty"`
-	ProviderDefined  *ProviderDefinedToolSpec  `json:"provider_defined,omitempty"`
 	ProviderExecuted *ProviderExecutedToolSpec `json:"provider_executed,omitempty"`
-	MCP              *MCPToolSpec              `json:"mcp,omitempty"`
 }
 
 func NewFunctionToolSpec(name, description string, parameters map[string]any) ToolSpec {
@@ -549,19 +530,17 @@ func NewProviderExecutedToolSpec(provider, name string, details map[string]json.
 	}
 }
 
-// ToolDefinition remains the concrete function-tool declaration used by simple registries.
-type ToolDefinition = FunctionToolSpec
-
-func FunctionToolDefinitions(specs []ToolSpec) []ToolDefinition {
+// FunctionToolDefinitions returns detached function declarations in request order.
+func FunctionToolDefinitions(specs []ToolSpec) []FunctionToolSpec {
 	if len(specs) == 0 {
 		return nil
 	}
-	out := make([]ToolDefinition, 0, len(specs))
+	out := make([]FunctionToolSpec, 0, len(specs))
 	for _, spec := range specs {
 		if spec.Kind != ToolSpecKindFunction || spec.Function == nil {
 			continue
 		}
-		out = append(out, ToolDefinition{
+		out = append(out, FunctionToolSpec{
 			Name:        spec.Function.Name,
 			Description: spec.Function.Description,
 			Parameters:  cloneAnyMap(spec.Function.Parameters),
@@ -700,22 +679,6 @@ func toolResponseResultFromParts(parts []Part) map[string]any {
 	return map[string]any{"result": strings.Join(texts, "\n")}
 }
 
-func (m Message) HasMedia(modality MediaModality) bool {
-	for _, part := range m.Parts {
-		if part.Media == nil {
-			continue
-		}
-		if modality == "" || part.Media.Modality == modality {
-			return true
-		}
-	}
-	return false
-}
-
-func (m Message) HasImages() bool {
-	return m.HasMedia(MediaModalityImage)
-}
-
 func (m Message) ReasoningText() string {
 	parts := m.ReasoningParts()
 	texts := make([]string, 0, len(parts))
@@ -798,12 +761,9 @@ const (
 
 // PartDelta is one incremental provider-neutral part update.
 type PartDelta struct {
-	Index           int                        `json:"index,omitempty"`
-	Kind            PartKind                   `json:"kind,omitempty"`
-	TextDelta       string                     `json:"text_delta,omitempty"`
-	InputDelta      string                     `json:"input_delta,omitempty"`
-	Replay          *ReplayMeta                `json:"replay,omitempty"`
-	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
+	Index     int      `json:"index,omitempty"`
+	Kind      PartKind `json:"kind,omitempty"`
+	TextDelta string   `json:"text_delta,omitempty"`
 }
 
 // Response is the completed semantic result of one step or turn.
@@ -829,10 +789,8 @@ type Response struct {
 type StreamEvent struct {
 	Type      StreamEventType `json:"type"`
 	PartDelta *PartDelta      `json:"part_delta,omitempty"`
-	Message   *Message        `json:"message,omitempty"`
 	*Response
-	RawProviderEvent json.RawMessage `json:"raw_provider_event,omitempty"`
-	AttemptReset     *AttemptReset   `json:"attempt_reset,omitempty"`
+	AttemptReset *AttemptReset `json:"attempt_reset,omitempty"`
 }
 
 func StreamEventFromResponse(resp *Response) *StreamEvent {
@@ -850,7 +808,6 @@ func StreamEventFromResponse(resp *Response) *StreamEvent {
 	}
 	return &StreamEvent{
 		Type:     eventType,
-		Message:  &cp.Message,
 		Response: &cp,
 	}
 }

@@ -1,8 +1,8 @@
-package display
+package tuiapp
 
 import "testing"
 
-func TestSkillContentNameFromHint(t *testing.T) {
+func TestSkillContentDisplayName(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -45,8 +45,12 @@ func TestSkillContentNameFromHint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := SkillContentNameFromHint(tt.title, tt.pathHint); got != tt.want {
-				t.Fatalf("SkillContentNameFromHint() = %q, want %q", got, tt.want)
+			got := skillContentNameFromTitle(tt.title)
+			if tt.pathHint != "" {
+				got = skillContentDisplayNameFromRaw(map[string]any{"path": tt.pathHint})
+			}
+			if got != tt.want {
+				t.Fatalf("display name = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -27,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -341,7 +341,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
-	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{})
+	mcpMgr, err := mcp.NewManager(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier())
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
@@ -377,10 +377,10 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		if err := ctx.Err(); err != nil {
 			return skill.Catalog{}, err
 		}
-		metas, err := skillfs.DiscoverMetaRequest(skill.DiscoverRequest{
+		metas := skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{
 			Dirs: plan.SkillDirs, WorkspaceDir: s.workspace.CWD, PluginBundles: runtimeCfg.PluginSkills,
 		})
-		return skill.NewCatalog(metas), err
+		return skill.NewCatalog(metas), nil
 	}
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
 		Runtime:             sandboxRuntime,
@@ -636,7 +636,7 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 	if configured != nil {
 		return cloneStringSlicePreserveNil(configured)
 	}
-	return DefaultSkillDiscoveryDirs(workspaceDir)
+	return skilldiscovery.DefaultDiscoveryDirs(workspaceDir)
 }
 
 // resolveGatewayPluginContributions samples persisted package availability.

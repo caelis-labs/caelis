@@ -11,18 +11,18 @@ import (
 )
 
 // DiscoverPluginBundleMeta discovers only plugin-managed skill bundles.
-func DiscoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, error) {
-	metas, _, err := discoverPluginBundleMeta(bundles)
-	return metas, err
+func DiscoverPluginBundleMeta(bundles []skill.PluginBundle) []skill.Meta {
+	metas, _ := discoverPluginBundleMeta(bundles)
+	return metas
 }
 
-func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]bool, error) {
+func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]skill.Meta, map[string]bool) {
 	bundles = mergePluginBundles(bundles)
 	suppressedRegular := map[string]bool{}
 	if len(bundles) == 0 {
-		return nil, suppressedRegular, nil
+		return nil, suppressedRegular
 	}
-	out := make([]Meta, 0)
+	out := make([]skill.Meta, 0)
 	seenPaths := map[string]struct{}{}
 	seenNames := map[string]struct{}{}
 	for _, bundle := range bundles {
@@ -72,20 +72,18 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 				if rootErr != nil || skillErr != nil || !pathWithinPluginSkillRoot(realRoot, realSkill) {
 					continue
 				}
-				if !validStandardPluginSkill(skillPath, entry.Name()) {
-					continue
-				}
 			}
 			skillPath = filepath.Clean(skillPath)
-			meta, hash, err := parseMetaHashCached(skillPath)
-			if err != nil {
+			metadata, err := readSkillMetadata(skillPath)
+			if err != nil || bundle.SkipInvalid && !metadata.standard {
 				continue
 			}
+			meta := metadata.meta
 			localName := strings.TrimSpace(meta.Name)
 			if localName == "" {
 				continue
 			}
-			suppressedRegular[skillIdentityKey(localName, hash)] = true
+			suppressedRegular[skillIdentityKey(localName, metadata.hash)] = true
 			if !bundle.Enabled {
 				continue
 			}
@@ -118,21 +116,13 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 			out = append(out, meta)
 		}
 	}
-	return out, suppressedRegular, nil
+	return out, suppressedRegular
 }
 
 var standardSkillName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
 
-func validStandardPluginSkill(path, directory string) bool {
-	raw, err := os.ReadFile(path)
-	if err != nil || len(raw) == 0 {
-		return false
-	}
-	front, _, err := parseFrontMatter(normalizeText(string(raw)))
-	if err != nil {
-		return false
-	}
-	name, description := strings.TrimSpace(front["name"]), strings.TrimSpace(front["description"])
+func validStandardPluginSkill(front frontMatter, directory string) bool {
+	name, description := strings.TrimSpace(front.Name), strings.TrimSpace(front.Description)
 	descriptionCharacters := utf8.RuneCountInString(description)
 	return name == directory && len(name) <= 64 && standardSkillName.MatchString(name) &&
 		!strings.Contains(name, "--") && descriptionCharacters >= 1 && descriptionCharacters <= 1024

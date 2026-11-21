@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -3705,7 +3704,7 @@ func persistedToolCallEvent(id string, name string, input map[string]any) *sessi
 	return &session.Event{
 		ID:   "call:" + id,
 		Type: session.EventTypeToolCall,
-		Tool: toolEventPayload(call, "pending", maps.Clone(input), nil, nil),
+		Tool: toolEventPayload(call, "pending", input),
 		Meta: mergeEventMeta(toolMeta(name)),
 	}
 }
@@ -3717,9 +3716,11 @@ func persistedToolResultEvent(id string, name string, input map[string]any, outp
 		Args: string(mustRawJSON(input)),
 	}
 	meta := mergeEventMeta(toolMeta(name))
+	payload := toolEventPayload(call, "completed", input)
+	payload.Output = session.CloneState(output)
 	return &session.Event{
 		Type: session.EventTypeToolResult,
-		Tool: toolEventPayload(call, "completed", maps.Clone(input), maps.Clone(output), nil),
+		Tool: payload,
 		Meta: meta,
 	}
 }
@@ -4160,11 +4161,8 @@ func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Se
 
 		if call <= 8 {
 			if !yield(&model.StreamEvent{
-				Type: model.StreamEventPartDelta,
-				PartDelta: &model.PartDelta{
-					Kind:       model.PartKindToolUse,
-					InputDelta: `{"value":`,
-				},
+				Type:      model.StreamEventPartDelta,
+				PartDelta: &model.PartDelta{Kind: model.PartKindToolUse},
 			}, nil) {
 				return
 			}

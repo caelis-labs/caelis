@@ -41,11 +41,9 @@ type Client struct {
 
 	catalog *clientCatalog
 
-	// identityMu protects publication of connection loss even without refresh.
-	identityMu sync.Mutex
-	closeOnce  sync.Once
-	closed     chan struct{}
-	closeErr   error
+	closeOnce sync.Once
+	closed    chan struct{}
+	closeErr  error
 }
 
 func resolveExecutable(command string, workDir string) string {
@@ -61,48 +59,34 @@ func resolveExecutable(command string, workDir string) string {
 	return command
 }
 
-func StartClient(ctx context.Context, spec ServerSpec) (*Client, error) {
-	return startClientWithHTTPClient(ctx, spec, nil)
-}
-
-func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) (*Client, error) {
-	return startClientWithCatalog(ctx, spec, httpClient, false)
-}
-
-func startClientWithCatalog(ctx context.Context, spec ServerSpec, httpClient *http.Client, refresh bool) (*Client, error) {
+func startClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) (*Client, error) {
 	transport, transportName, launchIdentity, err := transportForSpecWithIdentity(spec, httpClient)
 	if err != nil {
 		return nil, &startupError{Stage: "transport", Err: err}
 	}
-	var catalog *clientCatalog
-	options := &mcpsdk.ClientOptions{Capabilities: &mcpsdk.ClientCapabilities{}}
-	if refresh {
-		catalog = newClientCatalog()
-		options.ToolListChangedHandler = func(context.Context, *mcpsdk.ToolListChangedRequest) { catalog.invalidate() }
-		if httpTransport, ok := transport.(*mcpsdk.StreamableClientTransport); ok {
-			httpTransport.DisableStandaloneSSE = false
-		}
+	catalog := newClientCatalog()
+	options := &mcpsdk.ClientOptions{
+		Capabilities:           &mcpsdk.ClientCapabilities{},
+		ToolListChangedHandler: func(context.Context, *mcpsdk.ToolListChangedRequest) { catalog.invalidate() },
 	}
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{
 		Name:    "caelis",
 		Title:   "Caelis",
 		Version: "1.0.0",
 	}, options)
-	if refresh {
-		// The manager is the catalog owner. A late page must not repopulate the
-		// SDK's independent TTL cache after list_changed invalidated that cache.
-		client.AddSendingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
-			return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
-				result, err := next(ctx, method, req)
-				if method == "tools/list" {
-					if listed, ok := result.(*mcpsdk.ListToolsResult); ok && listed != nil {
-						listed.TTLMs = 0
-					}
+	// The manager is the catalog owner. A late page must not repopulate the
+	// SDK's independent TTL cache after list_changed invalidated that cache.
+	client.AddSendingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
+		return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+			result, err := next(ctx, method, req)
+			if method == "tools/list" {
+				if listed, ok := result.(*mcpsdk.ListToolsResult); ok && listed != nil {
+					listed.TTLMs = 0
 				}
-				return result, err
 			}
-		})
-	}
+			return result, err
+		}
+	})
 	lifetimeCtx, cancel := context.WithCancel(context.Background())
 	startup := &startupTransport{Transport: transport}
 	diagnostics := observeStartup(transport, spec)
@@ -174,11 +158,6 @@ func connectWithTimeout(ctx context.Context, client *mcpsdk.Client, lifetimeCtx 
 	}
 }
 
-func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (mcpsdk.Transport, string, error) {
-	transport, name, _, err := transportForSpecWithIdentity(spec, httpClient)
-	return transport, name, err
-}
-
 func transportForSpecWithIdentity(spec ServerSpec, httpClient *http.Client) (mcpsdk.Transport, string, string, error) {
 	transportName := NormalizeTransport(spec.Transport, spec.Command, spec.URL)
 	switch transportName {
@@ -227,9 +206,8 @@ func transportForSpecWithIdentity(spec ServerSpec, httpClient *http.Client) (mcp
 			return nil, "", "", fmt.Errorf("URL is required for streamable HTTP MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		return &mcpsdk.StreamableClientTransport{
-			Endpoint:             endpoint,
-			HTTPClient:           httpClientWithHeaders(httpClient, endpoint, spec.Headers),
-			DisableStandaloneSSE: true,
+			Endpoint:   endpoint,
+			HTTPClient: httpClientWithHeaders(httpClient, endpoint, spec.Headers),
 		}, transportName, "", nil
 	case TransportSSE:
 		endpoint := strings.TrimSpace(spec.URL)
@@ -454,9 +432,6 @@ func (c *Client) ListTools(ctx context.Context) ([]*mcpsdk.Tool, error) {
 		}
 		res, err := c.session.ListTools(ctx, params)
 		if err != nil {
-			if c.catalog == nil {
-				c.markFailed(err)
-			}
 			return nil, err
 		}
 		if res == nil {
@@ -546,12 +521,8 @@ func (c *Client) markFailed(err error) {
 // Publish only the local identity transition under the catalog guard; transport
 // cleanup must never hold it. A closed remote transport already rejects calls.
 func (c *Client) publishClosed(err error) {
-	if c.catalog != nil {
-		c.catalog.mu.Lock()
-		defer c.catalog.mu.Unlock()
-	}
-	c.identityMu.Lock()
-	defer c.identityMu.Unlock()
+	c.catalog.mu.Lock()
+	defer c.catalog.mu.Unlock()
 	c.closeErr = err
 	close(c.closed)
 }

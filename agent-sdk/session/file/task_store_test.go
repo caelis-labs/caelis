@@ -16,11 +16,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
-func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
+func TestTaskStoreRevisionCAS(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root}))
+	backing := NewStore(Config{RootDir: root})
+	store := NewTaskStore(backing)
 	created, err := store.Put(context.Background(), task.PutRequest{
 		Entry: &task.Entry{
 			TaskID: "task-cas", Kind: task.KindCommand, Session: taskSessionRef("sess-cas"), State: task.StateRunning, Running: true,
@@ -53,52 +54,31 @@ func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
 		t.Fatalf("stale Put error = %v, want revision conflict at 2", err)
 	}
 
-	now := time.Unix(100, 0).UTC()
-	leased, err := store.AcquireLease(context.Background(), task.AcquireLeaseRequest{
-		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 2, Now: now, TTL: time.Minute,
-	})
+	db, err := backing.openSessionIndex()
 	if err != nil {
-		t.Fatalf("AcquireLease() error = %v", err)
+		t.Fatal(err)
 	}
-	if leased.Revision != 3 || leased.Lease.Revision != 1 || leased.Lease.HeartbeatAt != now {
-		t.Fatalf("acquired lease = %#v, want task revision 3 and lease revision 1", leased)
-	}
-	heartbeatAt := now.Add(10 * time.Second)
-	heartbeat, err := store.HeartbeatLease(context.Background(), task.HeartbeatLeaseRequest{
-		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 3, ExpectedLeaseRevision: 1, Now: heartbeatAt, TTL: time.Minute,
-	})
+	_, err = db.Exec(`UPDATE tasks SET lease_id = 'old-lease', lease_owner_id = 'old-worker', lease_revision = 10 WHERE task_id = 'task-cas'`)
+	_ = db.Close()
 	if err != nil {
-		t.Fatalf("HeartbeatLease() error = %v", err)
+		t.Fatal(err)
 	}
-	if heartbeat.Revision != 4 || heartbeat.Lease.Revision != 2 || heartbeat.Lease.HeartbeatAt != heartbeatAt {
-		t.Fatalf("heartbeat lease = %#v, want task revision 4 and lease revision 2", heartbeat)
-	}
-	_, err = store.HeartbeatLease(context.Background(), task.HeartbeatLeaseRequest{
-		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 4, ExpectedLeaseRevision: 1, Now: heartbeatAt, TTL: time.Minute,
-	})
-	var leaseErr *task.LeaseConflictError
-	if !errors.As(err, &leaseErr) {
-		t.Fatalf("stale HeartbeatLease error = %v, want lease conflict", err)
-	}
-	released, err := store.ReleaseLease(context.Background(), task.ReleaseLeaseRequest{
-		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 4, ExpectedLeaseRevision: 2,
-	})
-	if err != nil {
-		t.Fatalf("ReleaseLease() error = %v", err)
-	}
-	if released.Revision != 5 || released.Lease.ID != "" {
-		t.Fatalf("released task = %#v, want revision 5 without lease", released)
-	}
-	reopened, err := NewTaskStore(NewStore(Config{RootDir: root})).Get(context.Background(), "task-cas")
+	reopenedStore := NewTaskStore(NewStore(Config{RootDir: root}))
+	reopened, err := reopenedStore.Get(context.Background(), "task-cas")
 	if err != nil {
 		t.Fatalf("reopened Get() error = %v", err)
 	}
-	if reopened.Revision != 5 || reopened.Lease.ID != "" {
-		t.Fatalf("reopened task = %#v, want persisted revision 5 without lease", reopened)
+	if reopened.Revision != 2 || reopened.Title != "current" {
+		t.Fatalf("reopened task = %#v, want persisted revision 2 and current title", reopened)
 	}
 	if reopened.ContextUsage == nil || reopened.ContextUsage.Snapshot.Used != 42000 || reopened.ContextUsage.Snapshot.Size != 200000 ||
 		reopened.ContextUsage.Invocation.Provider != "codex" || reopened.ContextUsage.Invocation.Model != "gpt-test" {
 		t.Fatalf("reopened context usage = %#v, want persisted ACP gauge", reopened.ContextUsage)
+	}
+	reopened.Title = "after restart"
+	updated, err = reopenedStore.Put(t.Context(), task.PutRequest{Entry: reopened, ExpectedRevision: reopened.Revision})
+	if err != nil || updated == nil || updated.Revision != 3 || updated.Title != "after restart" {
+		t.Fatalf("Put(reopened task) = %#v, %v, want next revision", updated, err)
 	}
 }
 
@@ -148,7 +128,7 @@ func TestTaskStoreDetachedSubagentActivityRequiresNextGeneration(t *testing.T) {
 
 func TestTaskStoreDetachedSubagentUsagePreservesActivity(t *testing.T) {
 	for _, state := range []task.State{task.StateRunning, task.StateCompleted, task.StateUnknownOutcome} {
-		for _, mutation := range []string{"", "identity", "generation", "state", "running", "result", "cancel", "spec", "lease", "no_gauge"} {
+		for _, mutation := range []string{"", "identity", "generation", "state", "running", "result", "cancel", "spec", "cursor", "no_gauge"} {
 			t.Run(string(state)+"/"+mutation, func(t *testing.T) {
 				store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
 				seed := &task.Entry{
@@ -185,8 +165,8 @@ func TestTaskStoreDetachedSubagentUsagePreservesActivity(t *testing.T) {
 					delete(entry.Metadata, "cancel_turn_seq")
 				case "spec":
 					entry.Spec["retained"] = "changed"
-				case "lease":
-					entry.Lease.ID = "new-lease"
+				case "cursor":
+					entry.EventCursor++
 				case "no_gauge":
 					entry.ContextUsage = nil
 				}
@@ -714,6 +694,59 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 	}
 	if got.TaskID != "task-target" {
 		t.Fatalf("GetSessionTaskByHandle() task = %q, want task-target", got.TaskID)
+	}
+}
+
+func TestTaskStoreScopedReadsVerifyOwningSession(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	ref := taskSessionRef("session")
+	ref.WorkspaceKey = "workspace"
+	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	if err := store.Upsert(t.Context(), &task.Entry{
+		TaskID: "task-original", Session: ref, Handle: "reviewer", State: task.StateCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reopened := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+
+	for _, tt := range []struct {
+		name string
+		ref  session.SessionRef
+	}{
+		{"app", session.SessionRef{SessionID: ref.SessionID, AppName: "another-app"}},
+		{"user", session.SessionRef{SessionID: ref.SessionID, UserID: "another-user"}},
+		{"workspace", session.SessionRef{SessionID: ref.SessionID, WorkspaceKey: "another-workspace"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			list, err := reopened.ListSession(t.Context(), tt.ref)
+			if err != nil || len(list) != 0 {
+				t.Errorf("ListSession = %v, %v, want no entries in mismatched scope", list, err)
+			}
+			states, err := reopened.ReadTaskStates(t.Context(), tt.ref, []string{"task-original"})
+			if err != nil || len(states) != 0 {
+				t.Errorf("ReadTaskStates = %v, %v, want no entries in mismatched scope", states, err)
+			}
+			entry, err := reopened.GetSessionTaskByHandle(t.Context(), tt.ref, "reviewer")
+			if err == nil || entry != nil {
+				t.Errorf("GetSessionTaskByHandle = %v, %v, want not found", entry, err)
+			}
+		})
+	}
+	for _, scope := range []session.SessionRef{ref, {SessionID: ref.SessionID}} {
+		entries, err := reopened.ListSession(t.Context(), scope)
+		if err != nil || len(entries) != 1 || entries[0].TaskID != "task-original" {
+			t.Errorf("ListSession = %v, %v, want original task", entries, err)
+		}
+		states, err := reopened.ReadTaskStates(t.Context(), scope, []string{"task-original"})
+		if err != nil || len(states) != 1 || states[0].TaskID != "task-original" {
+			t.Errorf("ReadTaskStates = %v, %v, want original task", states, err)
+		}
+		entry, err := reopened.GetSessionTaskByHandle(t.Context(), scope, "reviewer")
+		if err != nil || entry == nil || entry.TaskID != "task-original" {
+			t.Errorf("GetSessionTaskByHandle = %v, %v, want original task", entry, err)
+		}
 	}
 }
 

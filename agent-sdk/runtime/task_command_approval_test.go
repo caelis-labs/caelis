@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -58,7 +59,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeAutoReview})
+	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeWorkspaceWrite})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +306,7 @@ func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 
 func mustCommandTaskID(t *testing.T, ref session.SessionRef, callID string) string {
 	t.Helper()
-	id, err := commandTaskID(ref, callID)
+	id, err := taskIDForOperation(ref, callID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +614,7 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 			scope.revoke(errTaskAuthorizationChanged, false)
 			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name}}}, nil
 		}},
-		approval: approvalContext{ctx: owner, runtime: r, session: active, sessionRef: active.SessionRef, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approval: approvalContext{ctx: owner, runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 			approvals++
 			return agent.ApprovalResponse{Approved: true}, nil
 		})},
@@ -629,4 +630,37 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 	if payload["state"] != "cancelled" || approvals != 0 || backend.startCalls() != 0 {
 		t.Fatalf("late admission = %#v, approvals=%d starts=%d", payload, approvals, backend.startCalls())
 	}
+}
+
+func TestTaskContinuationJoinClosesAdmissionBeforeWaiting(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		scope := newTaskContinuationScope()
+		ctx := t.Context()
+		first, err := scope.register(ctx, "original", 0, taskContinuationOrdinary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := make(chan error, 1)
+		go func() {
+			joined <- scope.join()
+		}()
+		synctest.Wait()
+		late, lateErr := scope.register(ctx, "late", 0, taskContinuationOrdinary)
+		if late != nil {
+			scope.complete("late", late, nil)
+		}
+		select {
+		case err := <-joined:
+			scope.complete("original", first, nil)
+			t.Fatalf("Run completed before the original continuation: %v", err)
+		default:
+		}
+		scope.complete("original", first, nil)
+		if err := <-joined; err != nil {
+			t.Fatal(err)
+		}
+		if !errorcode.Is(lateErr, errorcode.FailedPrecondition) {
+			t.Fatalf("late registration error = %v, want closed admission", lateErr)
+		}
+	})
 }

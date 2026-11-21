@@ -145,13 +145,13 @@ func TestComputeUsageSnapshotForModelIgnoresNewerDifferentModelBaseline(t *testi
 		assistantEvent("guardian-usage", "deepseek", "guardian", 25_941),
 	}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 
 	if got.Source != compact.UsageSourceProvider || got.AsOfEventID != "main-usage" {
@@ -188,13 +188,13 @@ func TestComputeUsageSnapshotForModelUsesRecordedRequestPrefixWithoutProviderUsa
 		},
 	}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{EstimatedPromptPrefixTokens: 12_345},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 
 	if got.Source != compact.UsageSourceEstimated {
@@ -234,13 +234,13 @@ func TestComputeUsageSnapshotForModelKeepsRecordedPrefixAcrossCompact(t *testing
 		},
 	}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{EstimatedPromptPrefixTokens: 12_345},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 	if got.EstimatedPrefixTokens != 777 {
 		t.Fatalf("estimated prefix = %d, want last request prefix 777 across compact", got.EstimatedPrefixTokens)
@@ -263,13 +263,13 @@ func TestComputeUsageSnapshotForModelDoesNotReuseDifferentModelRequestPrefix(t *
 		},
 	}}
 
-	got := ComputeUsageSnapshotForModel(
+	got := computeUsageSnapshotForModel(
 		events,
-		nil,
 		258_400,
 		CompactionConfig{EstimatedPromptPrefixTokens: 321},
 		"openai-codex",
 		"gpt-main",
+		estimatePromptEventTokens,
 	)
 	if got.EstimatedPrefixTokens != 321 {
 		t.Fatalf("estimated prefix = %d, want static fallback 321", got.EstimatedPrefixTokens)
@@ -501,7 +501,7 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 	user.ID = "u1"
 	fresh := userTextEvent("fresh post-snapshot event")
 	fresh.ID = "u2"
-	usage, requestTokens, _ := usageForModelRequestDetails([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
+	usage, _ := usageForModelRequest([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
 		staticModel:  staticModel{text: "ok"},
 		providerName: "openai-codex",
 		modelName:    "gpt-5.6-sol",
@@ -509,6 +509,7 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 		DefaultContextWindowTokens: 1000,
 	})
 
+	requestTokens := estimateModelRequestTokens(req)
 	if requestTokens <= 11 {
 		t.Fatalf("request tokens = %d, want larger than provider baseline", requestTokens)
 	}
@@ -569,7 +570,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 		},
 	)
 
-	usage, requestTokens, prefixChanged := usageForModelRequestDetails(
+	usage, prefixChanged := usageForModelRequest(
 		[]*session.Event{assistant},
 		modelIdentity,
 		currentRequest,
@@ -583,7 +584,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 	if usage.TotalTokens != want {
 		t.Fatalf("usage total = %d, want provider total plus prefix delta %d", usage.TotalTokens, want)
 	}
-	if requestTokens < estimatedImageMediaTokens {
+	if requestTokens := estimateModelRequestTokens(currentRequest); requestTokens < prefixusage.EstimatedImageMediaTokens {
 		t.Fatalf("request estimate = %d, want bounded attachment budget retained for estimated-only paths", requestTokens)
 	}
 }
@@ -658,7 +659,7 @@ func TestEstimateModelRequestTokensBoundsInlineMediaPayload(t *testing.T) {
 	if large != small {
 		t.Fatalf("large inline media estimate = %d, want bounded estimate %d independent of base64 length", large, small)
 	}
-	wantAtLeast := estimatedImageMediaTokens +
+	wantAtLeast := prefixusage.EstimatedImageMediaTokens +
 		estimateTextTokens(string(jsonPayload)) +
 		estimateTextTokens("report.pdf") +
 		estimateTextTokens("https://example.com/report.pdf") +
@@ -687,11 +688,11 @@ func TestEstimateModelRequestTokensChargesEachInlineImage(t *testing.T) {
 		),
 	}})
 
-	if one < estimatedImageMediaTokens {
-		t.Fatalf("one image estimate = %d, want at least %d", one, estimatedImageMediaTokens)
+	if one < prefixusage.EstimatedImageMediaTokens {
+		t.Fatalf("one image estimate = %d, want at least %d", one, prefixusage.EstimatedImageMediaTokens)
 	}
-	if three < estimatedImageMediaTokens*3 {
-		t.Fatalf("three image estimate = %d, want at least %d", three, estimatedImageMediaTokens*3)
+	if three < prefixusage.EstimatedImageMediaTokens*3 {
+		t.Fatalf("three image estimate = %d, want at least %d", three, prefixusage.EstimatedImageMediaTokens*3)
 	}
 	if three >= 50000 {
 		t.Fatalf("three image estimate = %d, want bounded attachment estimate below 50000", three)
@@ -728,17 +729,14 @@ func TestEvaluateModelRequestBudgetUsesOneFullyAssembledRequest(t *testing.T) {
 
 	got := EvaluateModelRequestBudget(nil, req, cfg)
 	wantTokens := estimateModelRequestTokens(req)
-	if got.Usage.TotalTokens != wantTokens {
-		t.Fatalf("TotalTokens = %d, want exact request estimate %d", got.Usage.TotalTokens, wantTokens)
+	if got.TotalTokens != wantTokens {
+		t.Fatalf("TotalTokens = %d, want exact request estimate %d", got.TotalTokens, wantTokens)
 	}
 	wantEffective := resolveEffectiveInputBudget(4_096, 512, 256)
-	if got.Usage.EffectiveInputBudget != wantEffective {
-		t.Fatalf("EffectiveInputBudget = %d, want %d", got.Usage.EffectiveInputBudget, wantEffective)
+	if got.EffectiveInputBudget != wantEffective {
+		t.Fatalf("EffectiveInputBudget = %d, want %d", got.EffectiveInputBudget, wantEffective)
 	}
-	if got.Usage.EstimatedPrefixTokens != 0 {
-		t.Fatalf("EstimatedPrefixTokens = %d, want no separately added prefix", got.Usage.EstimatedPrefixTokens)
-	}
-	if got.Compaction != evaluateWatermark(got.Usage, cfg) {
-		t.Fatalf("Compaction = %#v, want Runtime watermark result %#v", got.Compaction, evaluateWatermark(got.Usage, cfg))
+	if got.EstimatedPrefixTokens != 0 {
+		t.Fatalf("EstimatedPrefixTokens = %d, want no separately added prefix", got.EstimatedPrefixTokens)
 	}
 }

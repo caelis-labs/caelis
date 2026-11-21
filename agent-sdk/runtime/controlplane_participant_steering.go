@@ -17,9 +17,7 @@ const steeringCommitTimeout = 5 * time.Second
 type steeringAdmission struct {
 	done chan struct{}
 	once sync.Once
-
-	mu  sync.Mutex
-	err error
+	err  error
 }
 
 func newSteeringAdmission() *steeringAdmission {
@@ -31,9 +29,7 @@ func (a *steeringAdmission) resolve(err error) {
 		return
 	}
 	a.once.Do(func() {
-		a.mu.Lock()
 		a.err = err
-		a.mu.Unlock()
 		close(a.done)
 	})
 }
@@ -47,26 +43,20 @@ func (a *steeringAdmission) wait(ctx context.Context) error {
 	}
 	select {
 	case <-a.done:
-		return a.result()
+		return a.err
 	default:
 	}
 	select {
 	case <-ctx.Done():
 		select {
 		case <-a.done:
-			return a.result()
+			return a.err
 		default:
 			return ctx.Err()
 		}
 	case <-a.done:
-		return a.result()
+		return a.err
 	}
-}
-
-func (a *steeringAdmission) result() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.err
 }
 
 func (r *Runtime) participantSteeringHandler(
@@ -95,8 +85,8 @@ func (r *Runtime) participantSteeringHandler(
 			TurnID:        turnID,
 			ParticipantID: binding.ID,
 			Input:         submission.Text,
-			DisplayInput:  submission.DisplayInput,
-			ContentParts:  submission.ContentParts,
+
+			ContentParts: submission.ContentParts,
 			Commit: func() error {
 				return r.commitParticipantSteering(
 					producerCtx,

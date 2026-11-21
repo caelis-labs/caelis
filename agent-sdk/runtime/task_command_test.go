@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -164,9 +165,10 @@ func (r *commandStartProbeRuntime) startCalls() int {
 
 type commandTerminateProbeSession struct {
 	*yieldProbeSandboxSession
-	mu    sync.Mutex
-	calls int
-	err   error
+	mu           sync.Mutex
+	calls        int
+	err          error
+	leaveRunning bool
 }
 
 func (s *commandTerminateProbeSession) Terminate(context.Context) error {
@@ -174,7 +176,7 @@ func (s *commandTerminateProbeSession) Terminate(context.Context) error {
 	s.calls++
 	err := s.err
 	s.mu.Unlock()
-	if err == nil && s.statusRunning != nil {
+	if err == nil && s.statusRunning != nil && !s.leaveRunning {
 		*s.statusRunning = false
 	}
 	return err
@@ -312,7 +314,7 @@ func TestStartCommandSynchronousOutputBeforeFirstObservationResumesFromDurableSt
 		Text:   early,
 		Cursor: int64(len([]byte(early))),
 	}}
-	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, parentCall)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +451,7 @@ func TestCommandTaskWaitJoinsCommandStartAfterDurableIntent(t *testing.T) {
 	commandSession := newConcurrentCommandWaitSession()
 	backend := newCommandStartProbe(commandSession, nil)
 	const parentCall = "wait-during-intent-handoff"
-	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, parentCall)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +529,7 @@ func TestCommandTaskWaitIntentClaimTimeoutReturnsDurablePreparedState(t *testing
 	commandSession := newConcurrentCommandWaitSession()
 	backend := newCommandStartProbe(commandSession, nil)
 	const parentCall = "wait-intent-timeout"
-	taskID, err := commandTaskID(activeSession.SessionRef, parentCall)
+	taskID, err := taskIDForOperation(activeSession.SessionRef, parentCall)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,6 +765,138 @@ func TestStartCommandCleansUpLiveSessionReturnedWithError(t *testing.T) {
 	}
 	if entry.State != taskapi.StateFailed || entry.Running {
 		t.Fatalf("live-error cleanup entry = %#v", entry)
+	}
+}
+
+func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
+	for _, failure := range []string{"start", "persistence"} {
+		t.Run(failure, func(t *testing.T) {
+			_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
+			store := newSagaTaskStore()
+			runtime.tasks.store = store
+			var startErr error
+			if failure == "persistence" {
+				store.failOnPut = 3
+			} else {
+				startErr = errors.New("backend returned an error with a live command")
+			}
+			running := true
+			process := &commandTerminateProbeSession{
+				yieldProbeSandboxSession: &yieldProbeSandboxSession{statusRunning: &running},
+				leaveRunning:             true,
+			}
+			handle := &commandStartupCleanupProbe{commandTerminateProbeSession: process}
+			lifecycle := &recordingProducerLifecycle{}
+			runtime.taskOutput = lifecycle
+			backend := newCommandStartProbe(handle, startErr)
+			req := taskapi.CommandStartRequest{Command: "probe", ParentCall: "cleanup-exit"}
+			got, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if err == nil || got.Ref.TaskID == "" || got.State != taskapi.StateUnknownOutcome {
+				t.Fatalf("StartCommand() = %+v, %v; want original Task with unknown exit", got, err)
+			}
+			if got.SupportsInput || handle.lastWait != 10*time.Millisecond {
+				t.Fatalf("startup cleanup enabled stdin or skipped the bounded Wait: %+v, wait=%s", got, handle.lastWait)
+			}
+			entry, err := store.Get(t.Context(), got.Ref.TaskID)
+			if err != nil || entry.State != taskapi.StateUnknownOutcome || entry.Terminal.SessionID != handle.Ref().SessionID {
+				t.Fatalf("persisted cleanup = %+v, %v; want original command identity and unknown exit", entry, err)
+			}
+			again, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if err != nil || again.Ref.TaskID != got.Ref.TaskID || backend.startCalls() != 1 || handle.terminateCalls() != 1 {
+				t.Fatalf("retry = %+v, %v, starts=%d, terminates=%d", again, err, backend.startCalls(), handle.terminateCalls())
+			}
+			ref := terminal.Ref{SessionID: active.SessionID, TaskID: got.Ref.TaskID, TerminalID: got.Ref.TerminalID}
+			if err := runtime.Terminals().Release(t.Context(), ref); err != nil || handle.terminateCalls() != 2 {
+				t.Fatalf("Terminal.Release() = %v, original handle Terminate calls = %d; want 2", err, handle.terminateCalls())
+			}
+			observed, err := runtime.Terminals().Read(t.Context(), ref)
+			if err != nil || !observed.Running || observed.SupportsInput || observed.State != string(taskapi.StateUnknownOutcome) {
+				t.Fatalf("Terminal.Read() = %+v, %v; want cleanup pending with stdin disabled", observed, err)
+			}
+			control := taskapi.ControlRequest{TaskID: got.Ref.TaskID, Principal: session.ActorKindUser, Input: "unsafe input"}
+			if _, err := runtime.tasks.Write(t.Context(), active.SessionRef, control); err == nil || handle.writes != 0 {
+				t.Fatalf("Write() = %v, backend writes=%d; want stdin denied", err, handle.writes)
+			}
+			if len(lifecycle.events) != 0 {
+				t.Fatalf("output closed before proof of exit: %+v", lifecycle.events)
+			}
+			// Terminate has returned twice. Only now does the original process exit.
+			running = false
+			final, err := runtime.tasks.Wait(t.Context(), active.SessionRef, control)
+			if err != nil || final.Ref != got.Ref || final.State != taskapi.StateFailed || final.Running || final.SupportsInput {
+				t.Fatalf("late exit = %+v, %v; want startup failure on original Task", final, err)
+			}
+			if startErr != nil && final.Result["error"] != startErr.Error() {
+				t.Fatalf("late exit lost startup error: %+v", final.Result)
+			}
+			entry, err = store.Get(t.Context(), got.Ref.TaskID)
+			if err != nil || entry.State != taskapi.StateFailed || entry.Terminal.SessionID != handle.Ref().SessionID {
+				t.Fatalf("persisted late exit = %+v, %v; want startup failure and original identity", entry, err)
+			}
+			if len(lifecycle.events) != 1 || !lifecycle.events[0].Closed || lifecycle.events[0].State != string(taskapi.StateFailed) {
+				t.Fatalf("terminal output = %+v; want one startup failure after exit", lifecycle.events)
+			}
+			if err := runtime.Terminals().Release(t.Context(), ref); err != nil || handle.terminateCalls() != 2 || backend.startCalls() != 1 {
+				t.Fatalf("release after exit = %v, terminates=%d starts=%d", err, handle.terminateCalls(), backend.startCalls())
+			}
+		})
+	}
+}
+
+type commandStartupCleanupProbe struct {
+	*commandTerminateProbeSession
+	writes int
+}
+
+func (s *commandStartupCleanupProbe) Status(ctx context.Context) (sandbox.SessionStatus, error) {
+	status, err := s.commandTerminateProbeSession.Status(ctx)
+	status.SupportsInput = status.Running
+	return status, err
+}
+
+func (s *commandStartupCleanupProbe) WriteInput(context.Context, []byte) error {
+	s.writes++
+	return nil
+}
+
+func TestStartCommandCleanupUsesSettledStatusAfterCleanupError(t *testing.T) {
+	cleanupErr := errors.New("sandbox cleanup reply failed")
+	for _, tc := range []struct {
+		name         string
+		terminateErr error
+		waitErr      error
+		running      bool
+	}{
+		{name: "terminate", terminateErr: cleanupErr},
+		{name: "wait", waitErr: cleanupErr, running: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
+			store := newSagaTaskStore()
+			runtime.tasks.store = store
+			running := tc.running
+			handle := &commandTerminateProbeSession{
+				yieldProbeSandboxSession: &yieldProbeSandboxSession{statusRunning: &running, waitErr: tc.waitErr},
+				err:                      tc.terminateErr,
+			}
+			startErr := errors.New("start returned a session and an error")
+			backend := newCommandStartProbe(handle, startErr)
+			req := taskapi.CommandStartRequest{Command: "probe", ParentCall: "settled-cleanup"}
+			got, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if got.State != taskapi.StateFailed || got.Running || !isCommandToolError(err) ||
+				!errors.Is(err, startErr) || !errors.Is(err, cleanupErr) {
+				t.Fatalf("StartCommand() = %+v, %v; want settled start failure with both errors", got, err)
+			}
+			entry, err := store.Get(t.Context(), got.Ref.TaskID)
+			if err != nil || entry.State != taskapi.StateFailed || entry.Running ||
+				entry.Terminal.SessionID != handle.Ref().SessionID {
+				t.Fatalf("persisted cleanup = %+v, %v; want settled failure with original identity", entry, err)
+			}
+			again, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, req)
+			if err != nil || again.Ref.TaskID != got.Ref.TaskID || backend.startCalls() != 1 || handle.terminateCalls() != 1 {
+				t.Fatalf("retry = %+v, %v, starts=%d, terminates=%d", again, err, backend.startCalls(), handle.terminateCalls())
+			}
+		})
 	}
 }
 

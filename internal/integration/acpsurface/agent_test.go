@@ -15,9 +15,9 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -141,7 +141,7 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 		WorkspaceKey: workspace, WorkspaceCWD: workspace, ApprovalMode: "manual",
 		SkillDirs: []string{t.TempDir()}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider: "custom-chat", API: providers.APIOpenAICompatible,
+			Provider: "custom-chat", API: model.APIOpenAICompatible,
 			Model: "run-command-test", BaseURL: provider.URL, HTTPClient: provider.Client(),
 			Token: "run-command-token", AuthType: model.AuthBearerToken, Timeout: 2 * time.Second,
 		},
@@ -296,7 +296,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 		SkillDirs:    []string{t.TempDir()},
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider: "custom-chat", API: providers.APIOpenAICompatible,
+			Provider: "custom-chat", API: model.APIOpenAICompatible,
 			Model: "managed-child-test", BaseURL: provider.URL, HTTPClient: provider.Client(),
 			Token: "managed-child-token", AuthType: model.AuthBearerToken, Timeout: 2 * time.Second,
 		},
@@ -412,7 +412,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
 			Provider:   "custom-chat",
-			API:        providers.APIOpenAICompatible,
+			API:        model.APIOpenAICompatible,
 			Model:      "typed-test",
 			BaseURL:    provider.URL,
 			HTTPClient: provider.Client(),

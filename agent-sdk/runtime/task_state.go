@@ -144,7 +144,6 @@ type commandOutputState struct {
 	checkpoint commandOutputCheckpoint
 	resume     commandOutputCheckpoint
 
-	live     bool
 	callback bool
 	exact    bool
 
@@ -169,16 +168,18 @@ type commandTask struct {
 	title         string
 	createdAt     time.Time
 	revision      uint64
-	lease         taskapi.Lease
 
 	outputReadMu sync.Mutex
 	mu           sync.Mutex
 	state        taskapi.State
 	running      bool
-	output       string
-	outputState  commandOutputState
-	result       map[string]any
-	metadata     map[string]any
+	// A failed start can leave a live Session. Keep the startup cause until
+	// the producer's exit is proven and the failed result is recorded.
+	startCleanupErr error
+	output          string
+	outputState     commandOutputState
+	result          map[string]any
+	metadata        map[string]any
 
 	outputObserver output.Observer
 	outputTerminal bool
@@ -203,7 +204,6 @@ type subagentTask struct {
 	approvalMode string
 	createdAt    time.Time
 	revision     uint64
-	lease        taskapi.Lease
 
 	// activityApplyMu serializes producer completion with concurrent Task
 	// lifecycle updates without covering Task-store I/O.
@@ -225,10 +225,9 @@ type subagentTask struct {
 	stderrCursor int64
 	turnSeq      int64
 	// Admitted follow-up ownership can precede the first Task output event.
-	pendingInput       *childTaskActivity
-	completionReady    bool
-	activityID         string
-	activityGeneration int64
+	pendingInput    *childTaskActivity
+	completionReady bool
+	activityID      string
 }
 
 func newTaskRuntime(
@@ -336,8 +335,6 @@ type runtimeToolContext struct {
 	mode              string
 	approvalMode      string
 	approvalRequester agent.ApprovalRequester
-	runID             string
-	turnID            string
 	inputSender       agent.AgentInputSender
 }
 

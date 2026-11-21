@@ -64,27 +64,3 @@ func TestCatalogNameLookupOmitsAmbiguousAliasesAndKeepsCanonicalNames(t *testing
 		t.Fatalf("lookup[one:brainstorm] = %q, want canonical name", got)
 	}
 }
-
-func TestDisplayHelpersPreferLocalNameAndPluginDetail(t *testing.T) {
-	meta := Meta{
-		Name:        "superpowers:brainstorm",
-		Description: "Generate options.",
-		Source:      SourcePlugin,
-		Namespace:   "superpowers",
-		PluginID:    "superpowers-plugin",
-		LocalName:   "brainstorm",
-	}
-
-	if got := DisplayName(meta); got != "brainstorm" {
-		t.Fatalf("DisplayName() = %q, want local name", got)
-	}
-	if got := DisplayKind(meta); got != "Plugin" {
-		t.Fatalf("DisplayKind() = %q", got)
-	}
-	if got := DisplayDetail(meta); got != "superpowers-plugin · Generate options." {
-		t.Fatalf("DisplayDetail() = %q", got)
-	}
-	if got := DisplayDetail(Meta{Name: "plain"}); got != "" {
-		t.Fatalf("DisplayDetail(regular) = %q", got)
-	}
-}

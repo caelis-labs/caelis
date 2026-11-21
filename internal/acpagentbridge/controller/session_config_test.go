@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -52,11 +53,11 @@ func TestControlPreparationPreservesExternalACPDefaults(t *testing.T) {
 				t.Fatal(err)
 			}
 			parent := session.Session{SessionRef: session.SessionRef{SessionID: "parent"}, CWD: t.TempDir()}
-			var turn controller.TurnResult
+			var turn controller.TurnHandle
 			if role == "main" {
 				parent.Controller, err = manager.Activate(ctx, controller.HandoffRequest{Session: parent, Agent: "helper", Placement: frozen})
 				if err == nil {
-					turn, err = manager.RunTurn(ctx, controller.TurnRequest{Session: parent, Input: "review"})
+					turn, err = manager.RunTurn(ctx, controller.TurnRequest{Session: parent, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "review"}}})
 				}
 			} else {
 				request := controller.AttachRequest{Session: parent, Agent: "helper", Placement: frozen}
@@ -72,13 +73,13 @@ func TestControlPreparationPreservesExternalACPDefaults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !prepared || turn.Handle == nil {
+			if !prepared || turn == nil {
 				t.Fatalf("prepared=%v, turn=%#v", prepared, turn)
 			}
-			if err := turn.Handle.WaitCompletion(ctx); err != nil {
+			if err := turn.WaitCompletion(ctx); err != nil {
 				t.Fatal(err)
 			}
-			_ = turn.Handle.Close()
+			_ = turn.Close()
 		})
 	}
 }

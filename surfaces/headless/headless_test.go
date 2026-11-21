@@ -42,7 +42,7 @@ func TestRunSessionOncePreservesDetachedApprovalSubjectAndContext(t *testing.T) 
 	handle := newFakeACPHandle([]eventstream.Envelope{{Kind: eventstream.KindRequestPermission, ApprovalRequestID: "subject-approval", ApprovalSubject: canonical.Subject, Permission: &wire}})
 	called := false
 	_, err = RunSessionOnce(t.Context(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "subject-session", Input: "inspect"}, Options{
-		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
+		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.ReviewResult, error) {
 			called = true
 			if req.RequestID != "subject-approval" || req.Payload == nil || !reflect.DeepEqual(req.Payload.Subject, wantSubject) || !reflect.DeepEqual(req.Payload.Context, wantContext) {
 				t.Fatalf("canonical approval projection changed: %+v", req)
@@ -50,7 +50,7 @@ func TestRunSessionOncePreservesDetachedApprovalSubjectAndContext(t *testing.T) 
 			req.Payload.Subject.Targets[0].Text = "mutated callback"
 			req.Payload.Context.Title = "mutated callback"
 			*req.Payload.Context.Description = "mutated callback"
-			return approval.Decision{OptionID: "allow_session"}, nil
+			return approval.ReviewResult{OptionID: "allow_session"}, nil
 		},
 	})
 	if err != nil || !called || len(handle.submissions) != 1 || handle.submissions[0].RequestID != "subject-approval" {
@@ -339,7 +339,7 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	}
 	called := false
 	_, err := RunSessionOnce(context.Background(), gw, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{
-		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
+		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.ReviewResult, error) {
 			called = true
 			if req.Payload == nil {
 				t.Fatal("approval payload = nil")
@@ -358,7 +358,7 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 				t.Fatalf("approval nested input = %#v, want map", req.Payload.RawInput["nested"])
 			}
 			nested["value"] = "changed"
-			return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
+			return approval.ReviewResult{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 		},
 	})
 	if err != nil {

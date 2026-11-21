@@ -148,7 +148,6 @@ type participantRun struct {
 	operationMu           sync.Mutex
 	mu                    sync.Mutex
 	turnID                string
-	turnSession           session.Session
 	turnStream            bool
 	turnMode              string
 	approvalRequester     controller.ApprovalRequester
@@ -385,7 +384,7 @@ func (m *Manager) Quiesce(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 	req = controller.NormalizeTurnRequest(req)
 	sessionID := strings.TrimSpace(req.SessionRef.SessionID)
 	if sessionID == "" {
@@ -395,18 +394,18 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	run := m.controllers[sessionID]
 	m.mu.RUnlock()
 	if run == nil {
-		return controller.TurnResult{}, fmt.Errorf("%w for session %q", controller.ErrNotActive, sessionID)
+		return nil, fmt.Errorf("%w for session %q", controller.ErrNotActive, sessionID)
 	}
 	if contentPartsContainImage(req.ContentParts) && !run.supportsPromptImages() {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: agent %q does not support image prompts", run.agent)
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: agent %q does not support image prompts", run.agent)
 	}
 
-	prompt := buildPromptParts(req.Input, req.ContentParts)
+	prompt := buildPromptParts("", req.ContentParts)
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(turnCtx, cancel, req.Observer)
 	if err := run.beginTurn(req, handle); err != nil {
 		cancel()
-		return controller.TurnResult{}, err
+		return nil, err
 	}
 	activationContext, activationContextSyncSeq, activationContextFresh := run.consumeContext()
 	pendingContext, pendingContextSyncSeq, pendingContextFresh := selectControllerTurnContext(
@@ -422,7 +421,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	if len(prompt) == 0 {
 		run.finishTurn(handle)
 		handle.finish()
-		return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
+		return handle, nil
 	}
 	go func() {
 		defer handle.finish()
@@ -444,7 +443,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 		run.markContextSynced(attemptedContextSyncSeq)
 		run.finishTurn(handle)
 	}()
-	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
+	return handle, nil
 }
 
 func contentPartsContainImage(parts []model.ContentPart) bool {
@@ -814,37 +813,37 @@ func (m *Manager) Attach(ctx context.Context, req controller.AttachRequest) (ses
 	return run.bindingSnapshot(), nil
 }
 
-func (m *Manager) PromptParticipant(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+func (m *Manager) PromptParticipant(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 	req = controller.NormalizeParticipantPromptRequest(req)
 	if req.ParticipantID == "" {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant id is required")
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: participant id is required")
 	}
 	sessionID, err := participantRequestSessionID(req.SessionRef, req.Session)
 	if err != nil {
-		return controller.TurnResult{}, err
+		return nil, err
 	}
 	if sessionID == "" {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
 	}
 	m.mu.RLock()
 	run := m.participants[participantKey(sessionID, req.ParticipantID)]
 	m.mu.RUnlock()
 	if run == nil {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant %q not found", req.ParticipantID)
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: participant %q not found", req.ParticipantID)
 	}
 	if contentPartsContainImage(req.ContentParts) && !run.supportsPromptImages() {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant %q does not support image prompts", req.ParticipantID)
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: participant %q does not support image prompts", req.ParticipantID)
 	}
 	prompt := buildPromptParts(req.Input, req.ContentParts)
 	prompt = composeACPContextPrompt(prompt, req.Context)
 	if len(prompt) == 0 {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant prompt is required")
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: participant prompt is required")
 	}
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(turnCtx, cancel, req.Observer)
 	if err := run.beginPrompt(req, handle); err != nil {
 		cancel()
-		return controller.TurnResult{}, err
+		return nil, err
 	}
 	go func() {
 		defer handle.finish()
@@ -855,7 +854,7 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 		}
 		run.finishPrompt(handle)
 	}()
-	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
+	return handle, nil
 }
 
 func (m *Manager) Detach(ctx context.Context, req controller.DetachRequest) error {
@@ -1164,7 +1163,6 @@ func acpSessionCapability(resp client.InitializeResponse, name string) bool {
 }
 
 func translateApprovalRequest(
-	turnSession session.Session,
 	agent string,
 	mode string,
 	req client.RequestPermissionRequest,
@@ -1193,8 +1191,6 @@ func translateApprovalRequest(
 	}
 	return controller.ApprovalRequest{
 		EndpointSessionID: string(req.SessionId),
-		SessionRef:        session.NormalizeSessionRef(turnSession.SessionRef),
-		Session:           session.CloneSession(turnSession),
 		Agent:             strings.TrimSpace(agent),
 		Mode:              strings.TrimSpace(mode),
 		ToolCall: controller.ApprovalToolCall{
@@ -1291,7 +1287,7 @@ func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.Con
 	})
 	currentRaw, _ := json.Marshal(client.TextContent{
 		Type: "text",
-		Text: contextprompt.CurrentRequestMarker(),
+		Text: contextprompt.CurrentRequestMarker,
 	})
 	out := make([]json.RawMessage, 0, len(prompt)+2)
 	out = append(out, backgroundRaw, currentRaw)

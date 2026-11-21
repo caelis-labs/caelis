@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policyfs"
@@ -23,6 +25,44 @@ type sourcePolicyRuntime struct {
 }
 
 func (r sourcePolicyRuntime) FileSystemFor(sandbox.Constraints) sandbox.FileSystem { return r.selected }
+
+type recordingSourceRuntime struct {
+	sandbox.Runtime
+	calls []sandbox.Constraints
+}
+
+func (r *recordingSourceRuntime) FileSystemFor(constraints sandbox.Constraints) sandbox.FileSystem {
+	r.calls = append(r.calls, constraints)
+	return r.Runtime.FileSystemFor(constraints)
+}
+
+func TestSourceUsesNormalizedCallConstraintsAndRejectsMalformedMetadata(t *testing.T) {
+	root := t.TempDir()
+	base, err := host.New(host.Config{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = base.Close() })
+	if err := os.WriteFile(filepath.Join(root, "script.js"), []byte("return 1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rt := &recordingSourceRuntime{Runtime: base}
+	declaration := &Tool{Sandbox: rt}
+	call := tool.Call{Input: []byte(`{"file":"script.js"}`), Metadata: map[string]any{
+		sandboxmeta.ConstraintsKey: sandbox.Constraints{Route: " host ", Network: " enabled "},
+	}}
+	if source, err := declaration.ReadSource(call, 64); err != nil || source.Code != "return 1" {
+		t.Fatalf("read source = %+v, %v", source, err)
+	}
+	want := []sandbox.Constraints{{Route: sandbox.RouteHost, Network: sandbox.NetworkEnabled}}
+	if !reflect.DeepEqual(rt.calls, want) {
+		t.Fatalf("filesystem constraints = %+v, want %+v", rt.calls, want)
+	}
+	call.Metadata[sandboxmeta.ConstraintsKey] = map[string]any{"path_rules": true}
+	if _, err := declaration.ReadSource(call, 64); err == nil || len(rt.calls) != 1 {
+		t.Fatalf("malformed constraints must fail before filesystem selection: calls = %+v, err = %v", rt.calls, err)
+	}
+}
 
 func TestSourceReadsFreshBytesWithExistingFilesystemPolicy(t *testing.T) {
 	root := t.TempDir()

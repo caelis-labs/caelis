@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -34,7 +34,7 @@ func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*assem
 }
 
 func defaultOllamaModelCfg() gatewayapp.ModelConfig {
-	return gatewayapp.ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "llama3"}
+	return gatewayapp.ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "llama3"}
 }
 
 func TestRegressionCommandExecStatus(t *testing.T) {
@@ -78,7 +78,7 @@ func TestRegressionCommandExecModelReasoningCompletion(t *testing.T) {
 		Assembly:     assembly.ResolvedAssembly{},
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider: "ollama", API: providers.APIOllama, Model: "llama3",
+			Provider: "ollama", API: model.APIOllama, Model: "llama3",
 			ReasoningLevels: []string{"low", "medium", "high"},
 		},
 	})

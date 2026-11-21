@@ -123,10 +123,10 @@ func latestProviderTokenSnapshotUsing(
 ) (providerTokenSnapshot, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		meta := eventUsageMetadata(event)
-		if event == nil || len(meta) == 0 {
+		if event == nil || len(event.Meta) == 0 {
 			continue
 		}
+		meta := event.Meta
 		baseline, includeSnapshotGroup, ok := providerPromptBaselineTokens(meta)
 		if !ok || baseline <= 0 {
 			continue
@@ -294,10 +294,10 @@ func providerSnapshotGroupStart(events []*session.Event, end int) int {
 }
 
 func providerSnapshotSignature(event *session.Event) string {
-	meta := eventUsageMetadata(event)
-	if event == nil || len(meta) == 0 {
+	if event == nil || len(event.Meta) == 0 {
 		return ""
 	}
+	meta := event.Meta
 	prompt, _ := intFromAny(meta["prompt_tokens"])
 	cached, _ := intFromAny(meta["cached_input_tokens"])
 	completion, _ := intFromAny(meta["completion_tokens"])
@@ -326,13 +326,6 @@ func providerSnapshotSignature(event *session.Event) string {
 		return ""
 	}
 	return fmt.Sprintf("%s|%s|%d|%d|%d|%d", provider, model, prompt, cached, completion, total)
-}
-
-func eventUsageMetadata(event *session.Event) map[string]any {
-	if event == nil {
-		return nil
-	}
-	return event.Meta
 }
 
 func nestedMap(values map[string]any, path ...string) map[string]any {
@@ -415,7 +408,7 @@ func resolveContextWindowTokens(llm model.LLM, fallback int) int {
 
 func resolveReserveOutputTokens(window int, configured int) int {
 	if configured <= 0 {
-		configured = defaultReserveOutputTokens(window)
+		configured = policyForContextWindow(window).reserveOutputTokens
 	}
 	if window <= 0 {
 		return configured
@@ -427,13 +420,9 @@ func resolveReserveOutputTokens(window int, configured int) int {
 	return configured
 }
 
-func defaultReserveOutputTokens(window int) int {
-	return policyForContextWindow(window).reserveOutputTokens
-}
-
 func resolveSafetyMarginTokens(window int, configured int) int {
 	if configured <= 0 {
-		configured = defaultSafetyMarginTokens(window)
+		configured = policyForContextWindow(window).safetyMarginTokens
 	}
 	if window <= 0 {
 		return configured
@@ -443,10 +432,6 @@ func resolveSafetyMarginTokens(window int, configured int) int {
 		return maxSafety
 	}
 	return configured
-}
-
-func defaultSafetyMarginTokens(window int) int {
-	return policyForContextWindow(window).safetyMarginTokens
 }
 
 func resolveEffectiveInputBudget(window, reserve, safety int) int {
@@ -575,57 +560,42 @@ func usageRatio(usage compact.UsageSnapshot) float64 {
 	return float64(usage.TotalTokens) / float64(usage.EffectiveInputBudget)
 }
 
-// ModelRequestBudget is the unified model-visible budget evaluation for one
-// fully assembled request. Usage includes instructions, messages, tools, and
-// the output contract; Compaction applies the Runtime's configured watermark
-// policy to that same total.
-type ModelRequestBudget struct {
-	Usage      compact.UsageSnapshot
-	Compaction compact.TriggerDecision
-}
-
 // EvaluateModelRequestBudget evaluates one fully assembled model request
-// without reading or mutating Session history. Callers must not add
-// EstimatedPromptPrefixTokens separately because req already contains the
-// complete model-visible prefix.
-func EvaluateModelRequestBudget(llm model.LLM, req *model.Request, cfg CompactionConfig) ModelRequestBudget {
+// without reading or mutating Session history. The estimate includes the
+// assembled instructions, messages, tools, and output contract.
+func EvaluateModelRequestBudget(llm model.LLM, req *model.Request, cfg CompactionConfig) compact.UsageSnapshot {
 	cfg = normalizeCompactionConfig(cfg)
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	reserve := resolveReserveOutputTokens(window, cfg.ReserveOutputTokens)
 	safety := resolveSafetyMarginTokens(window, cfg.SafetyMarginTokens)
-	usage := compact.UsageSnapshot{
+	return compact.UsageSnapshot{
 		TotalTokens:          estimateModelRequestTokens(req),
 		ContextWindowTokens:  window,
 		EffectiveInputBudget: resolveEffectiveInputBudget(window, reserve, safety),
 		Source:               compact.UsageSourceEstimated,
 	}
-	return ModelRequestBudget{
-		Usage:      usage,
-		Compaction: evaluateWatermark(usage, cfg),
-	}
 }
 
-func usageForModelRequestDetails(
+func usageForModelRequest(
 	events []*session.Event,
 	llm model.LLM,
 	req *model.Request,
 	cfg CompactionConfig,
-) (compact.UsageSnapshot, int, bool) {
+) (compact.UsageSnapshot, bool) {
 	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
 	usage, providerSnapshot, hasProviderSnapshot := snapshotUsageWithResolvedWindowDetails(promptEvents, window, cfg, func(snapshot providerTokenSnapshot) bool {
 		return providerSnapshotCompatibleWithLLM(snapshot, llm)
 	})
-	return usageWithModelRequestEstimateDetails(usage, providerSnapshot, hasProviderSnapshot, req)
+	return usageWithModelRequestEstimate(usage, providerSnapshot, hasProviderSnapshot, req)
 }
 
-func usageWithModelRequestEstimateDetails(
+func usageWithModelRequestEstimate(
 	usage compact.UsageSnapshot,
 	providerSnapshot providerTokenSnapshot,
 	hasProviderSnapshot bool,
 	req *model.Request,
-) (compact.UsageSnapshot, int, bool) {
-	requestTokens := estimateModelRequestTokens(req)
+) (compact.UsageSnapshot, bool) {
 	// Provider prompt usage is authoritative for the request shape already
 	// accepted by that provider. When runtime-controlled prefix assembly changes,
 	// reconcile only that local delta; messages and attachments remain covered
@@ -643,15 +613,15 @@ func usageWithModelRequestEstimateDetails(
 				0,
 			)
 		}
-		return usage, requestTokens, prefixChanged
+		return usage, prefixChanged
 	}
-	if requestTokens > usage.TotalTokens {
+	if requestTokens := estimateModelRequestTokens(req); requestTokens > usage.TotalTokens {
 		usage.TotalTokens = requestTokens
 		if usage.Source == "" {
 			usage.Source = compact.UsageSourceEstimated
 		}
 	}
-	return usage, requestTokens, false
+	return usage, false
 }
 
 func estimateModelRequestTokens(req *model.Request) int {
@@ -715,11 +685,6 @@ func estimatePartTokens(part model.Part) int {
 	return estimateTextTokens(string(raw))
 }
 
-const (
-	estimatedImageMediaTokens = prefixusage.EstimatedImageMediaTokens
-	estimatedOtherMediaTokens = prefixusage.EstimatedOtherMediaTokens
-)
-
 func estimateMediaPartTokens(media *model.MediaPart) int {
 	if media == nil {
 		return 0
@@ -732,9 +697,9 @@ func estimateMediaPartTokens(media *model.MediaPart) int {
 		estimateTextTokens(media.Source.LocalRef)
 	switch media.Modality {
 	case model.MediaModalityImage:
-		total += estimatedImageMediaTokens
+		total += prefixusage.EstimatedImageMediaTokens
 	default:
-		total += estimatedOtherMediaTokens
+		total += prefixusage.EstimatedOtherMediaTokens
 	}
 	return total
 }
@@ -746,20 +711,10 @@ func estimateToolSpecTokens(spec model.ToolSpec) int {
 		total += estimateTextTokens(spec.Function.Description)
 		total += estimateAnyTokens(spec.Function.Parameters)
 	}
-	if spec.ProviderDefined != nil {
-		total += estimateTextTokens(spec.ProviderDefined.Name)
-		total += estimateTextTokens(spec.ProviderDefined.Provider)
-		total += estimateRawMessageMapTokens(spec.ProviderDefined.ProviderDetails)
-	}
 	if spec.ProviderExecuted != nil {
 		total += estimateTextTokens(spec.ProviderExecuted.Name)
 		total += estimateTextTokens(spec.ProviderExecuted.Provider)
 		total += estimateRawMessageMapTokens(spec.ProviderExecuted.ProviderDetails)
-	}
-	if spec.MCP != nil {
-		total += estimateTextTokens(spec.MCP.Name)
-		total += estimateTextTokens(spec.MCP.Server)
-		total += estimateTextTokens(spec.MCP.Tool)
 	}
 	if total > 0 {
 		return total
@@ -877,8 +832,4 @@ func intFromAny(value any) (int, bool) {
 		}
 	}
 	return 0, false
-}
-
-func isCompactionOverflowError(err error) bool {
-	return model.IsContextOverflow(err)
 }

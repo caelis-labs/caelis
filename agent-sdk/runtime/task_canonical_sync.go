@@ -31,13 +31,13 @@ func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.
 			if !canonicalTaskBatchOutputSyncable(item) {
 				continue
 			}
-			if err := tm.syncCanonicalToolOutput(ctx, ref, "", item, event); err != nil && firstErr == nil {
+			if err := tm.syncCanonicalToolOutput(ctx, ref, item, event); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
 		return firstErr
 	}
-	return tm.syncCanonicalToolOutput(ctx, ref, "", output, event)
+	return tm.syncCanonicalToolOutput(ctx, ref, output, event)
 }
 
 func canonicalTaskBatchOutputs(value any) ([]map[string]any, bool) {
@@ -75,10 +75,8 @@ func canonicalTaskBatchOutputSyncable(output map[string]any) bool {
 	return true
 }
 
-func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.SessionRef, targetKind string, output map[string]any, event *session.Event) error {
-	taskID := firstNonEmpty(
-		taskRuntimeMetaString(event.Meta, "task", "task_id"),
-	)
+func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.SessionRef, output map[string]any, event *session.Event) error {
+	taskID := taskRuntimeMetaString(event.Meta, "task", "task_id")
 	// Pre-TaskHandle canonical history exposed the internal TaskID in task_id.
 	// Keep that history replayable without treating opaque IDs as public
 	// handles. New results carry handle and keep TaskID in runtime metadata.
@@ -103,13 +101,12 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 	if taskID == "" {
 		return nil
 	}
-	metaKind := strings.ToLower(firstNonEmpty(
+	targetKind := strings.ToLower(firstNonEmpty(
 		taskStringValue(output["target_kind"]),
 		taskRuntimeMetaString(event.Meta, "task", "kind"),
 		taskRuntimeMetaString(event.Meta, "task", "task_kind"),
 		taskRuntimeMetaString(event.Meta, "tool", "target_kind"),
 	))
-	targetKind = firstNonEmpty(strings.ToLower(strings.TrimSpace(targetKind)), metaKind)
 	if targetKind == "" {
 		if entry, ok := tm.storedTaskEntryByID(ctx, ref, taskID); ok {
 			targetKind = string(entry.Kind)
@@ -122,39 +119,20 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 			return nil
 		}
 		return tm.syncCodeModeCursor(ctx, ref, taskID, cursor)
-	case string(taskapi.KindCommand):
-		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindCommand, output, event)
-		return err
-	case string(taskapi.KindSubagent):
-		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindSubagent, output, event)
-		return err
+	case string(taskapi.KindCommand), string(taskapi.KindSubagent):
+		return tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.Kind(targetKind), output, event.Time)
 	default:
 		return nil
 	}
 }
 
-func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, taskID string, kind taskapi.Kind, output map[string]any, event *session.Event) (bool, error) {
-	entry, ok := tm.storedTaskEntry(ctx, ref, taskID, kind)
-	if !ok {
-		return false, nil
-	}
-	if !canonicalTaskResultMatchesEntry(entry, output) {
-		return true, nil
-	}
-	updatedAt := time.Time{}
-	if event != nil {
-		updatedAt = event.Time
+func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, taskID string, kind taskapi.Kind, output map[string]any, updatedAt time.Time) error {
+	entry, ok := tm.storedTaskEntryByID(ctx, ref, taskID)
+	if !ok || entry.Kind != kind || !canonicalTaskResultMatchesEntry(entry, output) {
+		return nil
 	}
 	applyCanonicalTaskResult(entry, output, updatedAt)
-	if err := tm.persistTaskEntry(ctx, entry); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func (tm *taskRuntime) storedTaskEntry(ctx context.Context, ref session.SessionRef, taskID string, kind taskapi.Kind) (*taskapi.Entry, bool) {
-	entry, ok := tm.storedTaskEntryByID(ctx, ref, taskID)
-	return entry, ok && entry.Kind == kind
+	return tm.persistTaskEntry(ctx, entry)
 }
 
 func (tm *taskRuntime) storedTaskEntryByID(ctx context.Context, ref session.SessionRef, taskID string) (*taskapi.Entry, bool) {
@@ -438,7 +416,7 @@ func addCanonicalTaskMatchKey(keys map[string]bool, kind taskapi.Kind, value str
 	}
 	keys[value] = true
 	if kind == taskapi.KindSubagent {
-		if handle := normalizeTaskHandle(value); handle != "" {
+		if handle := taskapi.NormalizeHandle(value); handle != "" {
 			keys[handle] = true
 		}
 	}
@@ -453,7 +431,7 @@ func canonicalTaskMatchKeyExists(keys map[string]bool, kind taskapi.Kind, value 
 		return true
 	}
 	if kind == taskapi.KindSubagent {
-		return keys[normalizeTaskHandle(value)]
+		return keys[taskapi.NormalizeHandle(value)]
 	}
 	return false
 }

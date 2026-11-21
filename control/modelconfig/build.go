@@ -13,47 +13,45 @@ type ModelResolution struct {
 	DefaultReasoningEffort string
 }
 
+// ModelBuildOptions supplies the Host build identity and context-window policy.
+type ModelBuildOptions struct {
+	ClientVersion         string
+	FallbackContextWindow int
+	OverrideContextWindow int
+}
+
 // BuildModel constructs an SDK model from a complete Control configuration.
-// overrideContextWindow wins over the configured and host fallback values.
-func BuildModel(cfg Config, fallbackContextWindow int, overrideContextWindow int) (ModelResolution, error) {
+// OverrideContextWindow wins over the configured and host fallback values.
+func BuildModel(cfg Config, opts ModelBuildOptions) (ModelResolution, error) {
 	cfg = NormalizeConfig(cfg)
-	effectiveContextWindow := fallbackContextWindow
+	effectiveContextWindow := opts.FallbackContextWindow
 	if cfg.ContextWindowTokens > 0 {
 		effectiveContextWindow = cfg.ContextWindowTokens
 	}
-	if overrideContextWindow > 0 {
-		effectiveContextWindow = overrideContextWindow
+	if opts.OverrideContextWindow > 0 {
+		effectiveContextWindow = opts.OverrideContextWindow
 	}
-	record := providers.Config{
-		Alias:                     cfg.ID,
-		Provider:                  cfg.Provider,
-		API:                       cfg.API,
-		Model:                     cfg.Model,
-		BaseURL:                   cfg.BaseURL,
-		HTTPClient:                cfg.HTTPClient,
-		CredentialPath:            cfg.CredentialPath,
-		Timeout:                   cfg.Timeout,
-		StreamFirstEventTimeout:   cfg.StreamFirstEventTimeout,
-		MaxOutputTok:              cfg.MaxOutputTok,
-		ContextWindowTokens:       effectiveContextWindow,
-		ImageInput:                ModelSupportsImages(cfg),
-		ReasoningLevels:           append([]string(nil), cfg.ReasoningLevels...),
-		ReasoningMode:             cfg.ReasoningMode,
-		DefaultReasoningEffort:    cfg.DefaultReasoningEffort,
-		ReasoningEffort:           cfg.ReasoningEffort,
-		SupportedReasoningEfforts: append([]string(nil), cfg.ReasoningLevels...),
+	llm, err := providers.New(providers.Config{
+		Provider:                cfg.Provider,
+		API:                     cfg.API,
+		Model:                   cfg.Model,
+		BaseURL:                 cfg.BaseURL,
+		Headers:                 providerAttributionHeaders(cfg.API),
+		UserAgent:               providerUserAgent(opts.ClientVersion),
+		HTTPClient:              cfg.HTTPClient,
+		Timeout:                 cfg.Timeout,
+		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
+		MaxOutputTok:            cfg.MaxOutputTok,
+		ContextWindowTokens:     effectiveContextWindow,
+		ImageInput:              ModelSupportsImages(cfg),
+		ReasoningLevels:         append([]string(nil), cfg.ReasoningLevels...),
+		ReasoningMode:           cfg.ReasoningMode,
 		Auth: providers.AuthConfig{
-			Type:          cfg.AuthType,
-			Token:         cfg.Token,
-			CredentialRef: cfg.CredentialRef,
-			HeaderKey:     cfg.HeaderKey,
+			Type:      cfg.AuthType,
+			Token:     cfg.Token,
+			HeaderKey: cfg.HeaderKey,
 		},
-	}
-	factory := providers.NewFactory()
-	if err := factory.Register(record); err != nil {
-		return ModelResolution{}, err
-	}
-	llm, err := factory.NewByAlias(cfg.ID)
+	})
 	if err != nil {
 		return ModelResolution{}, err
 	}

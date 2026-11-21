@@ -87,7 +87,7 @@ func TestReloadedNoSelectorProfilePreservesProviderReasoningDefault(t *testing.T
 			}))
 			defer server.Close()
 			resolved.BaseURL, resolved.HTTPClient, resolved.Token = server.URL, server.Client(), "synthetic-token"
-			llm, err := modelconfig.BuildModel(resolved, 128000, 0)
+			llm, err := modelconfig.BuildModel(resolved, modelconfig.ModelBuildOptions{FallbackContextWindow: 128000})
 			if err != nil {
 				t.Fatal(err)
 			}

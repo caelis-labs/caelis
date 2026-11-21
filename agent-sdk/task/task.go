@@ -73,24 +73,12 @@ type Snapshot struct {
 	SupportsCancel bool                `json:"supports_cancel,omitempty"`
 	CreatedAt      time.Time           `json:"created_at,omitempty"`
 	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
-	Lease          Lease               `json:"lease,omitempty"`
 	StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
 	StderrCursor   int64               `json:"stderr_cursor,omitempty"`
 	EventCursor    int64               `json:"event_cursor,omitempty"`
 	Result         map[string]any      `json:"result,omitempty"`
 	Metadata       map[string]any      `json:"metadata,omitempty"`
 	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
-}
-
-// Lease is a neutral task-worker ownership record. Core stores enforce its CAS
-// semantics; Control owns worker placement and renewal policy.
-type Lease struct {
-	ID          string    `json:"id,omitempty"`
-	OwnerID     string    `json:"owner_id,omitempty"`
-	Revision    uint64    `json:"revision,omitempty"`
-	AcquiredAt  time.Time `json:"acquired_at,omitempty"`
-	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
 }
 
 // Observer receives transient task lifecycle snapshots while a tool call is
@@ -106,16 +94,15 @@ type CommandStartRequest struct {
 	// tool producers derive it from the admitted occurrence, not the protocol ID.
 	// Empty retains ParentCall identity for legacy direct Task callers; remove
 	// that fallback when the direct Command API requires OperationID.
-	OperationID string        `json:"operation_id,omitempty"`
-	Command     string        `json:"command,omitempty"`
-	Workdir     string        `json:"workdir,omitempty"`
-	TTY         bool          `json:"tty,omitempty"`
-	Yield       time.Duration `json:"yield,omitempty"`
-	Timeout     time.Duration `json:"timeout,omitempty"`
-	ParentCall  string        `json:"parent_call,omitempty"`
-	ParentTool  string        `json:"parent_tool,omitempty"`
-	Constraints any           `json:"-"`
-	Observer    Observer      `json:"-"`
+	OperationID string              `json:"operation_id,omitempty"`
+	Command     string              `json:"command,omitempty"`
+	Workdir     string              `json:"workdir,omitempty"`
+	TTY         bool                `json:"tty,omitempty"`
+	Yield       time.Duration       `json:"yield,omitempty"`
+	Timeout     time.Duration       `json:"timeout,omitempty"`
+	ParentCall  string              `json:"parent_call,omitempty"`
+	Constraints sandbox.Constraints `json:"-"`
+	Observer    Observer            `json:"-"`
 }
 
 // SubagentStartRequest defines one yielded SPAWN launch request. SpawnID is the
@@ -179,7 +166,6 @@ type Entry struct {
 	SupportsCancel bool               `json:"supports_cancel,omitempty"`
 	CreatedAt      time.Time          `json:"created_at,omitempty"`
 	UpdatedAt      time.Time          `json:"updated_at,omitempty"`
-	Lease          Lease              `json:"lease,omitempty"`
 	StdoutCursor   int64              `json:"stdout_cursor,omitempty"`
 	StderrCursor   int64              `json:"stderr_cursor,omitempty"`
 	EventCursor    int64              `json:"event_cursor,omitempty"`
@@ -276,58 +262,6 @@ func (e *RevisionConflictError) Error() string {
 
 func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
-// AcquireLeaseRequest conditionally assigns one task worker lease.
-type AcquireLeaseRequest struct {
-	TaskID               string        `json:"task_id"`
-	OwnerID              string        `json:"owner_id"`
-	LeaseID              string        `json:"lease_id"`
-	ExpectedTaskRevision uint64        `json:"expected_task_revision"`
-	Now                  time.Time     `json:"now"`
-	TTL                  time.Duration `json:"ttl"`
-}
-
-// HeartbeatLeaseRequest conditionally renews one task worker lease.
-type HeartbeatLeaseRequest struct {
-	TaskID                string        `json:"task_id"`
-	OwnerID               string        `json:"owner_id"`
-	LeaseID               string        `json:"lease_id"`
-	ExpectedTaskRevision  uint64        `json:"expected_task_revision"`
-	ExpectedLeaseRevision uint64        `json:"expected_lease_revision"`
-	Now                   time.Time     `json:"now"`
-	TTL                   time.Duration `json:"ttl"`
-}
-
-// ReleaseLeaseRequest conditionally releases one task worker lease.
-type ReleaseLeaseRequest struct {
-	TaskID                string `json:"task_id"`
-	OwnerID               string `json:"owner_id"`
-	LeaseID               string `json:"lease_id"`
-	ExpectedTaskRevision  uint64 `json:"expected_task_revision"`
-	ExpectedLeaseRevision uint64 `json:"expected_lease_revision"`
-}
-
-// LeaseStore is the optional task lease/heartbeat CAS capability.
-type LeaseStore interface {
-	AcquireLease(context.Context, AcquireLeaseRequest) (*Entry, error)
-	HeartbeatLease(context.Context, HeartbeatLeaseRequest) (*Entry, error)
-	ReleaseLease(context.Context, ReleaseLeaseRequest) (*Entry, error)
-}
-
-// LeaseConflictError reports a stale or non-owning lease mutation.
-type LeaseConflictError struct {
-	TaskID string
-	Detail string
-}
-
-func (e *LeaseConflictError) Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("agent-sdk/task: task %q lease conflict: %s", strings.TrimSpace(e.TaskID), strings.TrimSpace(e.Detail))
-}
-
-func (e *LeaseConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
-
 // ResultPersistenceMode controls which task result fields are allowed in a
 // durable task index entry.
 type ResultPersistenceMode int
@@ -382,14 +316,6 @@ func SanitizeEntryForPersistence(entry *Entry, mode ResultPersistenceMode) *Entr
 	return out
 }
 
-// Manager is the runtime-owned task control surface used by yielded tools.
-type Manager interface {
-	StartCommand(context.Context, CommandStartRequest) (Snapshot, error)
-	Wait(context.Context, ControlRequest) (Snapshot, error)
-	Write(context.Context, ControlRequest) (Snapshot, error)
-	Cancel(context.Context, ControlRequest) (Snapshot, error)
-}
-
 // CloneRef returns one normalized task ref copy.
 func CloneRef(in Ref) Ref {
 	return Ref{
@@ -407,16 +333,8 @@ func CloneSnapshot(in Snapshot) Snapshot {
 	out.Title = strings.TrimSpace(in.Title)
 	out.Result = jsonvalue.CloneMap(in.Result)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
-	out.Lease = CloneLease(in.Lease)
 	out.Terminal = sandbox.CloneTerminalRef(in.Terminal)
 	return out
-}
-
-// CloneLease returns one normalized lease copy.
-func CloneLease(in Lease) Lease {
-	in.ID = strings.TrimSpace(in.ID)
-	in.OwnerID = strings.TrimSpace(in.OwnerID)
-	return in
 }
 
 // CloneEntry returns one normalized task entry copy.
@@ -433,7 +351,6 @@ func CloneEntry(in *Entry) *Entry {
 	out.State = State(strings.TrimSpace(string(in.State)))
 	out.FailureDiagnostic = strings.TrimSpace(in.FailureDiagnostic)
 	out.ContextUsage = CloneContextUsageRecord(in.ContextUsage)
-	out.Lease = CloneLease(in.Lease)
 	out.Spec = jsonvalue.CloneMap(in.Spec)
 	out.Result = jsonvalue.CloneMap(in.Result)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)

@@ -746,20 +746,16 @@ func TestExpiredRefreshIsTerminalThroughProviderRetryLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	factory := providers.NewFactory()
-	if err := factory.Register(providers.Config{
-		Alias:      "codex",
+	llm, err := providers.New(providers.Config{
+
 		Provider:   "openai-codex",
-		API:        providers.APIOpenAICodex,
+		API:        model.APIOpenAICodex,
 		Model:      "gpt-test",
 		BaseURL:    "https://chatgpt.com/backend-api/codex",
 		HTTPClient: client,
-		Auth:       providers.AuthConfig{Type: providers.AuthOAuthToken},
+		Auth:       providers.AuthConfig{Type: model.AuthOAuthToken},
 		Retry:      model.RetryConfig{MaxRetries: 3, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("codex")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

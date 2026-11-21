@@ -125,7 +125,7 @@ func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 			t.Fatalf("Generate() error = %v", err)
 		}
 		if event != nil && event.Response != nil {
-			gotText = event.Response.Message.TextContent()
+			gotText = event.Message.TextContent()
 		}
 	}
 
@@ -338,7 +338,7 @@ func TestWithRetryRetriesAfterEmptyEventEmission(t *testing.T) {
 			t.Fatalf("Generate() error = %v", err)
 		}
 		if event != nil && event.Response != nil {
-			gotText = event.Response.Message.TextContent()
+			gotText = event.Message.TextContent()
 		}
 	}
 
@@ -412,7 +412,7 @@ func TestWithRetryRetriesProviderDeadlineExceededButStopsWhenCallerContextDone(t
 			t.Fatalf("Generate() error = %v", err)
 		}
 		if event != nil && event.Response != nil {
-			gotText = event.Response.Message.TextContent()
+			gotText = event.Message.TextContent()
 		}
 	}
 	if inner.calls != 2 {
@@ -637,7 +637,7 @@ func TestWithRetrySpeculativeAttemptRetry(t *testing.T) {
 	if gotEvents[1].AttemptReset.MaxRetries != 2 || gotEvents[1].AttemptReset.RetryDelayMillis <= 0 {
 		t.Errorf("attempt reset retry metadata = %#v, want max retries and delay", gotEvents[1].AttemptReset)
 	}
-	if gotEvents[2].Response == nil || gotEvents[2].Response.Message.TextContent() != "final-ok" {
+	if gotEvents[2].Response == nil || gotEvents[2].Message.TextContent() != "final-ok" {
 		t.Errorf("gotEvents[2] = %#v, want final-ok response", gotEvents[2])
 	}
 }

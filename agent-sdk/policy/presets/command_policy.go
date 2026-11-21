@@ -126,7 +126,7 @@ func askCommandApproval(input policy.ToolContext, req commandSandboxRequest, cla
 	if reason == "" {
 		reason = "host execution requires approval"
 	}
-	decision, err := askApproval(reason, class.Constraints, input)
+	decision, err := askApproval(reason, class.Constraints, input, "execute", "command")
 	if err != nil {
 		return policy.Decision{}, err
 	}

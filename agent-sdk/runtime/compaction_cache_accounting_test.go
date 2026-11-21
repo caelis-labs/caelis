@@ -16,14 +16,14 @@ import (
 
 func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 	for _, route := range []struct {
-		api      providers.APIType
+		api      model.APIType
 		provider string
 	}{
-		{providers.APIAnthropic, "anthropic"},
-		{providers.APIAnthropicCompatible, "custom"},
-		{providers.APIOpenAIResponses, "custom"},
+		{model.APIAnthropic, "anthropic"},
+		{model.APIAnthropicCompatible, "custom"},
+		{model.APIOpenAIResponses, "custom"},
 		// API accounting must override even a conflicting provider label.
-		{providers.APIOpenAIResponses, "anthropic"},
+		{model.APIOpenAIResponses, "anthropic"},
 	} {
 		for _, phase := range []string{"cold", "warm", "zero", "missing"} {
 			t.Run(fmt.Sprintf("%s/%s/%s", route.api, route.provider, phase), func(t *testing.T) {
@@ -31,7 +31,7 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 				if phase == "warm" {
 					cached = 25000
 				}
-				anthropic := route.api != providers.APIOpenAIResponses
+				anthropic := route.api != model.APIOpenAIResponses
 				if phase == "cold" && anthropic {
 					written = 25000
 				}
@@ -57,11 +57,7 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 					calls++
 					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire)), Request: req}, nil
 				})
-				factory := providers.NewFactory()
-				if err := factory.Register(providers.Config{Alias: "fixture", API: route.api, Provider: route.provider, Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: providers.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}}); err != nil {
-					t.Fatal(err)
-				}
-				llm, err := factory.NewByAlias("fixture")
+				llm, err := providers.New(providers.Config{API: route.api, Provider: route.provider, Model: "fixture", BaseURL: "http://fixture.invalid", Auth: providers.AuthConfig{Type: model.AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -103,15 +99,11 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 				if err := json.Unmarshal(raw, measured); err != nil {
 					t.Fatal(err)
 				}
-				display := session.NormalizeUsageForDisplay(*measured, route.provider)
-				if display.PromptTokens != wantPrompt || display.TotalTokens != wantPrompt+50 || display.CachedInputTokens != cached || display.CacheWriteTokens != written {
-					t.Errorf("display=%+v want prompt=%d", display, wantPrompt)
+				if measured.PromptTokens != usage.PromptTokens || measured.TotalTokens != wantPrompt+50 || measured.CachedInputTokens != cached || measured.CacheWriteTokens != written || measured.CacheReadAccounting != usage.CacheReadAccounting {
+					t.Errorf("usage after Session round trip=%+v, provider usage=%+v", measured, usage)
 				}
 				if anthropic && (measured.CachedInputTokensReported != (phase != "missing") || measured.CacheWriteTokensReported != (phase != "missing")) {
 					t.Fatalf("cache presence changed: %+v", measured)
-				}
-				if again := session.NormalizeUsageForDisplay(display, route.provider); again != display {
-					t.Fatalf("display normalization counted cache twice: %+v", again)
 				}
 			})
 		}

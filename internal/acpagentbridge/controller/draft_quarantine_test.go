@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkcontroller "github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
@@ -62,7 +63,7 @@ func TestDraftControllerSteeringReceiptWithoutEchoDoesNotCommitOrReleaseOutput(t
 		t.Fatal(err)
 	}
 	sources := make(chan agent.SourceEvent, 64)
-	turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", Input: "initial input", Stream: true, Observer: agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
+	turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "initial input"}}, Observer: agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
 		sources <- agent.CloneSourceEvent(event)
 		return nil
 	})})
@@ -84,14 +85,14 @@ func TestDraftControllerSteeringReceiptWithoutEchoDoesNotCommitOrReleaseOutput(t
 	steerCtx, cancelSteer := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancelSteer()
 	var commits atomic.Int32
-	err = manager.SteerController(steerCtx, sdkcontroller.ControllerSteerRequest{SessionRef: parent.SessionRef, ControllerID: binding.ControllerID, ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID, TurnID: "original-turn", Input: "ambiguous input", Commit: func() error { commits.Add(1); return nil }})
+	err = manager.SteerController(steerCtx, sdkcontroller.ControllerSteerRequest{SessionRef: parent.SessionRef, ControllerID: binding.ControllerID, ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "ambiguous input"}}, Commit: func() error { commits.Add(1); return nil }})
 	if !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("steering receipt missing echo = %v, want unknown", err)
 	}
 	if commits.Load() != 0 {
 		t.Fatal("unproven steering committed canonical input")
 	}
-	if err := turn.Handle.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
+	if err := turn.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("original turn falsely completed: %v", err)
 	}
 	manager.mu.RLock()
@@ -166,11 +167,11 @@ func TestDraftControllerAcceptedReceiptFailurePreservesUnknownAndApprovalOwner(t
 			})
 			turnCtx, cancelTurn := context.WithTimeout(ctx, 200*time.Millisecond)
 			defer cancelTurn()
-			turn, err := manager.RunTurn(turnCtx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", Input: "original input", ApprovalRequester: requester})
+			turn, err := manager.RunTurn(turnCtx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "original input"}}, ApprovalRequester: requester})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := turn.Handle.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
+			if err := turn.WaitCompletion(ctx); !errorcode.Is(err, errorcode.UnknownOutcome) {
 				t.Fatalf("accepted receipt failure = %v, want unknown outcome", err)
 			}
 			var approval sdkcontroller.ApprovalRequest
@@ -179,7 +180,7 @@ func TestDraftControllerAcceptedReceiptFailurePreservesUnknownAndApprovalOwner(t
 			case <-ctx.Done():
 				t.Fatal("original approval owner was lost")
 			}
-			if approval.EndpointSessionID != peer.SessionID || approval.SessionRef != parent.SessionRef || approval.Approval == nil || approval.Approval.Context == nil || len(approval.Approval.Context.NativeRequestID) == 0 || approval.Approval.Subject == nil || approval.Approval.Subject.Kind != "command" || len(approval.Approval.Subject.Targets) != 2 || approval.Approval.Subject.Targets[0].Text != "git status" || len(approval.Approval.Options) != 2 || approval.Approval.Options[0].ID != "native-allow" {
+			if approval.EndpointSessionID != peer.SessionID || approval.Approval == nil || approval.Approval.Context == nil || len(approval.Approval.Context.NativeRequestID) == 0 || approval.Approval.Subject == nil || approval.Approval.Subject.Kind != "command" || len(approval.Approval.Subject.Targets) != 2 || approval.Approval.Subject.Targets[0].Text != "git status" || len(approval.Approval.Options) != 2 || approval.Approval.Options[0].ID != "native-allow" {
 				t.Fatalf("approval identity/options/subject lost: %+v", approval)
 			}
 			manager.mu.RLock()

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
@@ -22,7 +22,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	status := transcript.NormalizeToolStartStatus(input.Status)
 	semanticName := toolName
 	rawInput := transcript.CloneAnyMap(input.RawInput)
-	toolTaskHandle := display.ToolTaskHandle(rawInput, nil, input.Meta)
+	toolTaskHandle := projection.ToolTaskHandle(rawInput, nil, input.Meta)
 	toolMessageTarget := ""
 	if semanticName == surfaceToolSendMessage {
 		toolMessageTarget = display.AgentMessageTarget(display.MapString(rawInput, "to"))
@@ -73,9 +73,9 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolOutputExact:      toolOutputCollection && transcriptToolContentHasStructuredDiff(content),
 		ToolDiffSummary:      transcriptToolDiffSummary(content),
 		ToolTaskHandle:       toolTaskHandle,
-		ToolTaskAction:       display.ToolTaskAction(rawInput, nil, input.Meta),
-		ToolTaskInput:        display.ToolTaskInput(rawInput, nil, input.Meta),
-		ToolTaskTargetKind:   display.ToolTaskTargetKind(rawInput, nil, input.Meta),
+		ToolTaskAction:       projection.ToolTaskAction(rawInput, nil, input.Meta),
+		ToolTaskInput:        projection.ToolTaskInput(rawInput, nil, input.Meta),
+		ToolTaskTargetKind:   projection.ToolTaskTargetKind(rawInput, nil, input.Meta),
 		ToolMessageTarget:    toolMessageTarget,
 	}
 }
@@ -110,7 +110,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	}
 	displayInput := toolDisplayInputWithRecovered(rawInput, recoveredInput)
 	if semanticName == surfaceToolSpawn {
-		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
+		displayInput = projection.SpawnDisplayInputForResult(rawInput, displayOutput)
 	}
 	if semanticName == surfaceToolTask {
 		displayInput = taskDisplayInputForResult(rawInput, displayOutput)
@@ -174,7 +174,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		display.MapString(rawInput, "handle"),
 		display.MapString(rawOutput, "task_id"),
 		display.MapString(rawInput, "task_id"),
-		display.ToolTaskHandle(rawInput, taskOutput, input.Meta),
+		projection.ToolTaskHandle(rawInput, taskOutput, input.Meta),
 	)
 	if semanticName == "js_exec" && display.MetaString(input.Meta, "caelis", "runtime", "task", "kind") == "code_mode" {
 		toolTaskHandle = display.MetaString(input.Meta, "caelis", "runtime", "task", "handle")
@@ -182,16 +182,16 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	toolTaskAction := firstNonEmpty(
 		display.MapString(rawOutput, "action"),
 		display.MapString(rawInput, "action"),
-		display.ToolTaskAction(rawInput, taskOutput, input.Meta),
+		projection.ToolTaskAction(rawInput, taskOutput, input.Meta),
 	)
 	toolTaskInput := firstNonEmpty(
 		display.MapString(rawOutput, "input"),
 		display.MapString(rawInput, "input"),
-		display.ToolTaskInput(rawInput, taskOutput, input.Meta),
+		projection.ToolTaskInput(rawInput, taskOutput, input.Meta),
 	)
 	toolTaskTargetKind := firstNonEmpty(
 		display.MapString(rawOutput, "target_kind"),
-		display.ToolTaskTargetKind(rawInput, taskOutput, input.Meta),
+		projection.ToolTaskTargetKind(rawInput, taskOutput, input.Meta),
 	)
 	toolTaskState := strings.ToLower(strings.TrimSpace(display.MapString(rawOutput, "state")))
 	// Task write only records the interaction in the transcript. The observed
@@ -291,7 +291,7 @@ func transcriptToolDiffSummary(content []acpprojector.ToolContent) string {
 	var parts []string
 	for _, item := range content {
 		if item.Type == "diff" && item.Changes != nil {
-			if summary := session.StructuredDiffText(item.Changes, nil); summary != "" {
+			if summary := projection.StructuredDiffText(item.Changes, nil); summary != "" {
 				parts = append(parts, strings.ReplaceAll(summary, "\n", "; "))
 			}
 		}

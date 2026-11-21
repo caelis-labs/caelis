@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -61,17 +62,17 @@ func TestPlanCompoundDigestIncludesPersistedExplanation(t *testing.T) {
 }
 
 func planDigestToolResult(explanation string) *session.Event {
+	observation := toolbinding.Observation{BuiltinDisplay: map[string]any{
+		"updated":     true,
+		"entries":     []map[string]any{{"content": "Inspect", "status": "completed"}},
+		"explanation": explanation,
+	}}
 	return &session.Event{
 		IdempotencyKey: "tool_result:run-plan:turn-plan:1:plan-call",
 		Type:           session.EventTypeToolResult,
 		Visibility:     session.VisibilityCanonical,
 		Scope:          &session.EventScope{TurnID: "turn-plan"},
-		Tool: &session.EventTool{
-			ID: "plan-call", Name: plan.ToolName, Status: "completed",
-			Output: map[string]any{
-				"entries":     []map[string]any{{"content": "Inspect", "status": "completed"}},
-				"explanation": explanation,
-			},
-		},
+		Tool:           &session.EventTool{ID: "plan-call", Name: plan.ToolName, Status: "completed", Outcome: session.ToolOutcomeSucceeded},
+		Meta:           observation.EventMeta(),
 	}
 }

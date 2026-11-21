@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -39,10 +41,10 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 	releaseRunTurn := make(chan struct{})
 	steerStarted := make(chan controller.ControllerSteerRequest, 1)
 	backend := steeringACPController{
-		stubACPController: stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			close(runTurnStarted)
 			<-releaseRunTurn
-			return controller.TurnResult{Handle: controllerHandle}, nil
+			return controllerHandle, nil
 		}},
 		steerController: func(_ context.Context, req controller.ControllerSteerRequest) error {
 			steerStarted <- req
@@ -94,18 +96,25 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 		steer.ControllerEpoch != "epoch-1" || steer.RemoteSessionID != "remote-session-1" || steer.TurnID == "" {
 		t.Fatalf("main steering target = %#v, want exact controller generation and Turn", steer)
 	}
-	if steer.Input != "" || len(steer.ContentParts) != 1 ||
+	if len(steer.ContentParts) != 1 ||
 		steer.ContentParts[0].Text != "guide active controller\n\nFrom: @child" {
-		t.Fatalf("main steering prompt = input %q parts %#v, want trusted Agent header", steer.Input, steer.ContentParts)
+		t.Fatalf("main steering prompt = %#v, want trusted Agent header", steer.ContentParts)
 	}
+	image := model.ContentPart{Type: model.ContentPartImage, Data: "YQ==", MimeType: "image/png", FileName: "steering.png"}
 	if err := inputRunner.SubmitContext(ctx, agent.Submission{
 		Kind: agent.SubmissionKindConversation, Text: "guide from user", DisplayInput: "display user guidance",
+		ContentParts: []model.ContentPart{image},
 		Metadata: map[string]any{
 			"operation_id": "main-steer-operation", "steering_operation_id": "main-steer-operation",
 			"actor": "forged-child", "message_id": "forged-message", "caelis": map[string]any{"agent_communication": true},
 		},
 	}); err != nil {
 		t.Fatalf("conversation SubmitContext() error = %v", err)
+	}
+	userSteering := <-steerStarted
+	wantUserParts := []model.ContentPart{{Type: model.ContentPartText, Text: "guide from user"}, image}
+	if !reflect.DeepEqual(userSteering.ContentParts, wantUserParts) {
+		t.Fatalf("main user steering prompt = %#v, want %#v", userSteering.ContentParts, wantUserParts)
 	}
 
 	controllerHandle.finish()
@@ -147,6 +156,9 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 		if event != nil && session.EventTypeOf(event) == session.EventTypeUser {
 			durableUsers = append(durableUsers, session.EventText(event))
 			if session.EventText(event) == "guide from user" {
+				if got := model.ContentPartsFromParts(event.Message.Parts); !reflect.DeepEqual(got, userSteering.ContentParts) {
+					t.Fatalf("durable user steering = %#v, remote prompt = %#v", got, userSteering.ContentParts)
+				}
 				assertCommittedSteeringCorrelation(t, event, "main-steer-operation")
 				if event.ID != userInputs[1].ID {
 					t.Fatalf("recovered steering event identity %q differs from live %q", event.ID, userInputs[1].ID)
@@ -182,9 +194,9 @@ func TestRuntimeACPControllerInitialAgentCommunicationCarriesIdentity(t *testing
 	}
 	controllerHandle := newTestControllerTurnHandle(nil)
 	turns := make(chan controller.TurnRequest, 1)
-	backend := stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+	backend := stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 		turns <- req
-		return controller.TurnResult{Handle: controllerHandle}, nil
+		return controllerHandle, nil
 	}}
 	runtime, err := New(testConfigWithACPForwarder(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Controllers: backend,
@@ -204,9 +216,9 @@ func TestRuntimeACPControllerInitialAgentCommunicationCarriesIdentity(t *testing
 	}
 	select {
 	case turn := <-turns:
-		if turn.Input != "" || len(turn.ContentParts) != 1 ||
+		if len(turn.ContentParts) != 1 ||
 			turn.ContentParts[0].Text != "start from child\n\nFrom: @child" {
-			t.Fatalf("controller prompt = input %q parts %#v", turn.Input, turn.ContentParts)
+			t.Fatalf("controller prompt = %#v", turn.ContentParts)
 		}
 	case <-ctx.Done():
 		t.Fatal("controller Turn did not start")
@@ -259,13 +271,13 @@ func TestRuntimeMainControllerSteeringUsesReattachedBinding(t *testing.T) {
 	steered := make(chan controller.ControllerSteerRequest, 1)
 	runCalls := 0
 	backend := steeringACPController{
-		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			runCalls++
 			if runCalls == 1 {
-				return controller.TurnResult{}, controller.ErrNotActive
+				return nil, controller.ErrNotActive
 			}
 			secondRun <- req
-			return controller.TurnResult{Handle: controllerHandle}, nil
+			return controllerHandle, nil
 		}},
 		steerController: func(_ context.Context, req controller.ControllerSteerRequest) error {
 			steered <- req

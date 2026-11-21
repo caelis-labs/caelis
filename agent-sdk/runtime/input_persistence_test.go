@@ -58,10 +58,10 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				var remoteTurn string
 				remoteCalls := 0
 				backend := steeringACPController{
-					stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+					stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 						remoteTurn = req.TurnID
 						close(remoteStarted)
-						return controller.TurnResult{Handle: remoteHandle}, nil
+						return remoteHandle, nil
 					}},
 					steerController: func(_ context.Context, req controller.ControllerSteerRequest) error {
 						remoteCalls++
@@ -217,12 +217,12 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				var remoteParts []model.ContentPart
 				rt, err := New(testConfigWithACPForwarder(Config{
 					Sessions: store, AgentFactory: chat.Factory{},
-					Controllers: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+					Controllers: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 						remoteCalls++
 						remoteParts = req.ContentParts
 						handle := newTestControllerTurnHandle(nil)
 						handle.finish()
-						return controller.TurnResult{Handle: handle}, nil
+						return handle, nil
 					}},
 				}))
 				if err != nil {

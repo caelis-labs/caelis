@@ -60,7 +60,9 @@ type ModelSelection struct {
 type ConnectRequest struct {
 	// IncludeJudgments includes typed evaluators in the gateway discovery menu.
 	// Existing HTTP clients retain their chat-only menu unless explicitly requested.
-	IncludeJudgments               bool
+	IncludeJudgments bool
+	// ClientVersion is the Host build version used for catalog HTTP attribution.
+	ClientVersion                  string
 	Provider                       string
 	EndpointID                     string
 	Models                         []ModelSelection
@@ -256,7 +258,7 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			}
 		}
 		var err error
-		discovered, err = selectableMagpieModels(ctx, template, req.BaseURL, req.HTTPClient, discoveryToken, template.API != APISystemOne)
+		discovered, err = selectableMagpieModels(ctx, template, req.BaseURL, req.HTTPClient, discoveryToken, template.API != APISystemOne, req.ClientVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -363,10 +365,10 @@ func SelectableModels(ctx context.Context, req ConnectRequest) ([]SelectableMode
 		template, _ = LookupProvider("magpie-judgment")
 	}
 	if template.Provider == "magpie" {
-		return selectableMagpieModels(ctx, template, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.APIKey, req.IncludeJudgments)
+		return selectableMagpieModels(ctx, template, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.APIKey, req.IncludeJudgments, req.ClientVersion)
 	}
 	if template.API == model.APIOllama {
-		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient)
+		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.ClientVersion)
 	}
 	if template.API == APISystemOne {
 		return nil, nil

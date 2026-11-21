@@ -54,10 +54,7 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	writeSkillForDiscoveryTest(t, filepath.Join(home, ".caelis", "skills", "dupe"), "dupe", "private dupe")
 	writeSkillForDiscoveryTest(t, filepath.Join(workspace, ".agents", "skills", "dupe"), "dupe", "workspace dupe")
 
-	metas, err := DiscoverMeta(nil, workspace)
-	if err != nil {
-		t.Fatalf("DiscoverMeta() error = %v", err)
-	}
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{WorkspaceDir: workspace})
 	byName := map[string]skill.Meta{}
 	for _, meta := range metas {
 		if _, exists := byName[meta.Name]; exists {
@@ -100,10 +97,7 @@ func TestDiscoverMetaMaterializesSystemSkillsForExplicitDefaultDirs(t *testing.T
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	systemRoot := filepath.Join(home, ".caelis", "skills", ".system")
 
-	metas, err := DiscoverMeta(DefaultDiscoveryDirs(workspace), workspace)
-	if err != nil {
-		t.Fatalf("DiscoverMeta(explicit default dirs) error = %v", err)
-	}
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: DefaultDiscoveryDirs(workspace), WorkspaceDir: workspace})
 	if _, err := os.Stat(filepath.Join(systemRoot, "review", "SKILL.md")); err != nil {
 		t.Fatalf("review system skill was not materialized: %v", err)
 	}
@@ -124,15 +118,34 @@ func TestDiscoverMetaSkipsSystemRootWhenMaterializationFails(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	writeSkillForDiscoveryTest(t, filepath.Join(workspace, "skills", "workspace-skill"), "workspace-skill", "workspace skill")
 
-	metas, err := DiscoverMeta(nil, workspace)
-	if err != nil {
-		t.Fatalf("DiscoverMeta() error = %v, want workspace discovery despite unavailable system root", err)
-	}
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{WorkspaceDir: workspace})
 	if got := len(metas); got != 1 {
 		t.Fatalf("len(metas) = %d, want only workspace skill: %#v", got, metas)
 	}
 	if metas[0].Name != "workspace-skill" {
 		t.Fatalf("metas[0] = %#v, want workspace skill", metas[0])
+	}
+}
+
+func TestDiscoverMetaDoesNotReplaceAnUnavailableExplicitSystemRoot(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	if err := os.MkdirAll(filepath.Join(home, ".caelis"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".caelis", "skills"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeSkillForDiscoveryTest(t, filepath.Join(home, ".agents", "skills", "other"), "other", "unselected user skill")
+	pluginRoot := t.TempDir()
+	writeSkillForDiscoveryTest(t, filepath.Join(pluginRoot, "selected"), "selected", "configured plugin skill")
+
+	metas := DiscoverMetaRequest(skill.DiscoverRequest{
+		Dirs:          []string{"~/.caelis/skills/.system"},
+		PluginBundles: []skill.PluginBundle{{Plugin: "fixture", Root: pluginRoot, Enabled: true}},
+	})
+	if len(metas) != 1 || metas[0].Name != "fixture:selected" {
+		t.Fatalf("DiscoverMetaRequest() = %#v, want only the configured plugin Skill", metas)
 	}
 }
 
@@ -151,23 +164,22 @@ func TestDiscoverMetaConcurrentSystemMaterializationDoesNotExposeEmptySkills(t *
 
 	const workers = 64
 	start := make(chan struct{})
-	errs := make(chan error, workers)
+	results := make(chan []skill.Meta, workers)
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := DiscoverMeta(nil, workspace)
-			errs <- err
+			results <- DiscoverMetaRequest(skill.DiscoverRequest{WorkspaceDir: workspace})
 		}()
 	}
 	close(start)
 	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatalf("DiscoverMeta() error = %v", err)
+	close(results)
+	for metas := range results {
+		if _, status := skill.NewCatalog(metas).Resolve("review"); status != skill.ResolveMatched {
+			t.Fatalf("concurrent discovery did not find the embedded review Skill: %#v", metas)
 		}
 	}
 }

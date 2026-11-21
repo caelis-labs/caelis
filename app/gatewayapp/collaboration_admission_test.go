@@ -68,7 +68,7 @@ func TestMailboxReceiptWaitDoesNotBlockRuntimeStartThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.StartSubagent(t.Context(), active.SessionRef, "helper", "first", "test"); err != nil {
+	if _, err := engine.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "first", "test", runtime.StartSubagentOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	active, err = sessions.Session(t.Context(), active.SessionRef)
@@ -95,7 +95,7 @@ func TestMailboxReceiptWaitDoesNotBlockRuntimeStartThread(t *testing.T) {
 	}
 	started := make(chan error, 1)
 	go func() {
-		_, err := engine.StartSubagent(t.Context(), active.SessionRef, "helper", "nested thread", "test")
+		_, err := engine.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "nested thread", "test", runtime.StartSubagentOptions{})
 		started <- err
 	}()
 	select {

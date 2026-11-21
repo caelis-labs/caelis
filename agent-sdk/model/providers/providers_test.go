@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"google.golang.org/genai"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func jsonArgs(v map[string]any) string {
@@ -33,8 +34,8 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 		Role:    "assistant",
 		Content: "cited answer",
 		Annotations: []openAICompatAnnotation{
-			{Type: "url_citation", URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
-			{Type: "url_citation", URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
+			{URL: "https://example.com/flat", Title: "Flat", StartIndex: &start, EndIndex: &end},
+			{URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"}},
 		},
 	})
 	if err != nil {
@@ -55,7 +56,6 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 		Role:    "assistant",
 		Content: "answer",
 		Annotations: []openAICompatAnnotation{{
-			Type:        "url_citation",
 			URLCitation: &openAICompatURLCitationDetail{URL: "https://example.com/nested", Title: "Nested"},
 		}},
 	})
@@ -68,50 +68,19 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 	}
 }
 
-func TestNewByAliasRequiresRegistration(t *testing.T) {
-	factory := NewFactory()
-	if _, err := factory.NewByAlias("deepseek/deepseek-v4-flash"); err == nil {
-		t.Fatalf("expected unknown alias error without registration")
-	}
-
-	cfg := Config{
-		Alias:               "deepseek/deepseek-v4-flash",
-		Provider:            "deepseek",
-		API:                 APIDeepSeek,
-		Model:               "deepseek-v4-flash",
-		BaseURL:             "https://api.deepseek.com/v1",
-		ContextWindowTokens: 64000,
-		Auth: AuthConfig{
-			Type:  AuthAPIKey,
-			Token: "secret",
-		},
-	}
-	if err := factory.Register(cfg); err != nil {
-		t.Fatalf("register provider config: %v", err)
-	}
-	if _, err := factory.NewByAlias(cfg.Alias); err != nil {
-		t.Fatalf("NewByAlias(registered alias) error = %v", err)
-	}
-}
-
-func TestFactoryRequiresTokenFromConfig(t *testing.T) {
+func TestNewRequiresTokenFromConfig(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "env-token-should-be-ignored")
 
-	factory := NewFactory()
 	cfg := Config{
-		Alias:    "openai/gpt-4o-mini",
 		Provider: "openai",
-		API:      APIOpenAI,
+		API:      model.APIOpenAI,
 		Model:    "gpt-4o-mini",
 		BaseURL:  "https://api.openai.com/v1",
 		Auth: AuthConfig{
-			Type: AuthAPIKey,
+			Type: model.AuthAPIKey,
 		},
 	}
-	if err := factory.Register(cfg); err != nil {
-		t.Fatalf("register provider config: %v", err)
-	}
-	_, err := factory.NewByAlias(cfg.Alias)
+	_, err := New(cfg)
 	if err == nil {
 		t.Fatalf("expected missing token error")
 	}
@@ -161,7 +130,7 @@ func TestGeminiStream_DoesNotApplyRequestTimeout(t *testing.T) {
 			continue
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
-			finalText = resp.Response.Message.TextContent()
+			finalText = resp.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -204,13 +173,13 @@ func TestAnthropicSDKStream_DoesNotApplyRequestTimeout(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic",
-		API:        APIAnthropic,
+		API:        model.APIAnthropic,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    50 * time.Millisecond,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "sk-anthropic",
 		},
 	}, "sk-anthropic")
@@ -228,7 +197,7 @@ func TestAnthropicSDKStream_DoesNotApplyRequestTimeout(t *testing.T) {
 			continue
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {
-			finalText = event.Response.Message.TextContent()
+			finalText = event.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -337,8 +306,8 @@ func TestGeminiStream_EmitsReasoningChunks(t *testing.T) {
 			reasoningChunks = append(reasoningChunks, strings.TrimSpace(resp.PartDelta.TextDelta))
 		}
 		if resp.Response != nil && resp.TurnComplete {
-			finalReasoning = strings.TrimSpace(resp.Response.Message.ReasoningText())
-			finalText = strings.TrimSpace(resp.Response.Message.TextContent())
+			finalReasoning = strings.TrimSpace(resp.Message.ReasoningText())
+			finalText = strings.TrimSpace(resp.Message.TextContent())
 		}
 	}
 	if strings.Join(reasoningChunks, "|") != "think-1|think-2" {
@@ -614,10 +583,9 @@ func TestFromToOpenAIMessage(t *testing.T) {
 		t.Fatalf("did not expect reasoning_content in generic openai-compatible request")
 	}
 	back, err := toKernelMessage(openAICompatMsg{
-		Role:       raw.Role,
-		Content:    raw.Content,
-		ToolCallID: raw.ToolCallID,
-		ToolCalls:  raw.ToolCalls,
+		Role:      raw.Role,
+		Content:   raw.Content,
+		ToolCalls: raw.ToolCalls,
 		ReasoningContent: func() string {
 			if raw.ReasoningContent == nil {
 				return ""
@@ -695,7 +663,7 @@ func TestDeepSeekUsesAnthropicCompatibleEndpointAndBearerAuth(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -733,7 +701,7 @@ func TestDeepSeekThinkingConfigMapsEmptyMaxAndNone(t *testing.T) {
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -797,7 +765,7 @@ func TestDeepSeekThinkingContentWithoutUsageDetailsDoesNotFabricateReasoningToke
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -888,7 +856,7 @@ func TestDeepSeekProviderExecutedWebSearchPOC(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -949,8 +917,8 @@ func TestDeepSeekProviderExecutedWebSearchPOC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Generate() replay call error = %v", err)
 		}
-		if event != nil && event.Response != nil && event.Response.Message.TextContent() != "continued" {
-			t.Fatalf("replay text = %q, want continued", event.Response.Message.TextContent())
+		if event != nil && event.Response != nil && event.Message.TextContent() != "continued" {
+			t.Fatalf("replay text = %q, want continued", event.Message.TextContent())
 		}
 	}
 	if calls != 2 {
@@ -984,7 +952,7 @@ func TestDeepSeekLiveProviderExecutedWebSearch(t *testing.T) {
 		BaseURL:  baseURL,
 		Timeout:  90 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: token,
 		},
 	}, token)
@@ -1068,7 +1036,7 @@ func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
 }
 
 func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
-	closedTool := model.ToolDefinition{
+	closedTool := model.FunctionToolSpec{
 		Name:        "lookup",
 		Description: "lookup closed schema",
 		Strict:      true,
@@ -1114,7 +1082,7 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 			name: "openrouter",
 			llm: newOpenRouter(Config{
 				Provider: "openrouter",
-				API:      APIOpenRouter,
+				API:      model.APIOpenRouter,
 				Model:    "openai/gpt-5",
 			}, "token"),
 			wantStrict: true,
@@ -1122,7 +1090,7 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			tools := fromKernelTools([]model.ToolDefinition{closedTool}, tc.llm.options.StrictFunctionTools)
+			tools := fromKernelTools([]model.FunctionToolSpec{closedTool}, tc.llm.options.StrictFunctionTools)
 			if len(tools) != 1 {
 				t.Fatalf("tools len = %d, want 1", len(tools))
 			}
@@ -1923,13 +1891,13 @@ func TestAnthropicSDKNonStream_NormalizesBaseURLAndMapsParts(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic",
-		API:        APIAnthropic,
+		API:        model.APIAnthropic,
 		Model:      "test-model",
 		BaseURL:    server.URL + "/v1",
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "sk-anthropic",
 		},
 	}, "sk-anthropic")
@@ -2029,13 +1997,13 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic-compatible",
-		API:        APIAnthropicCompatible,
+		API:        model.APIAnthropicCompatible,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:      AuthAPIKey,
+			Type:      model.AuthAPIKey,
 			Token:     "compat-token",
 			HeaderKey: "x-minimax-api-key",
 		},
@@ -2127,7 +2095,7 @@ func TestDeepSeekAnthropicStreamWrapsMalformedToolInputBeforeSDKMarshal(t *testi
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -2179,13 +2147,13 @@ func TestAnthropicHeaderKeyDisablesEnvironmentDefaults(t *testing.T) {
 
 	llm := newAnthropic(Config{
 		Provider:   "anthropic-compatible",
-		API:        APIAnthropicCompatible,
+		API:        model.APIAnthropicCompatible,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    time.Second,
 		Auth: AuthConfig{
-			Type:      AuthAPIKey,
+			Type:      model.AuthAPIKey,
 			Token:     "compat-token",
 			HeaderKey: "x-minimax-api-key",
 		},
@@ -2197,8 +2165,8 @@ func TestAnthropicHeaderKeyDisablesEnvironmentDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Generate() error = %v", err)
 		}
-		if event != nil && event.Response != nil && event.Response.Message.TextContent() != "ok" {
-			t.Fatalf("response text = %q, want ok", event.Response.Message.TextContent())
+		if event != nil && event.Response != nil && event.Message.TextContent() != "ok" {
+			t.Fatalf("response text = %q, want ok", event.Message.TextContent())
 		}
 	}
 }
@@ -2226,13 +2194,13 @@ func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *tes
 
 	llm := newAnthropic(Config{
 		Provider:   "minimax",
-		API:        APIAnthropicCompatible,
+		API:        model.APIAnthropicCompatible,
 		Model:      "MiniMax-M2.5",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:      AuthAPIKey,
+			Type:      model.AuthAPIKey,
 			Token:     "compat-token",
 			HeaderKey: "x-minimax-api-key",
 		},
@@ -2274,50 +2242,63 @@ func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *tes
 	}
 }
 
-func TestMiniMaxUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
-	llm := newMiniMax(Config{
-		Provider: "minimax",
-		API:      APIMiniMax,
-		Model:    "MiniMax-M2",
-		Auth: AuthConfig{
-			Type:  AuthBearerToken,
-			Token: "compat-token",
+func TestAnthropicCompatibleDefaultsReachProviderWire(t *testing.T) {
+	for _, fixture := range []struct {
+		name, endpoint, modelName string
+		newModel                  func(Config, string) model.LLM
+		auth                      model.AuthType
+		maxTokens                 int
+	}{
+		{
+			name: "MiniMax", endpoint: miniMaxDefaultBaseURL, modelName: "MiniMax-M2",
+			newModel: newMiniMax, auth: model.AuthBearerToken, maxTokens: 4096,
 		},
-	}, "compat-token")
-	typed, ok := llm.(*anthropicSDKLLM)
-	if !ok {
-		t.Fatalf("newAnthropic() = %T, want *anthropicSDKLLM", llm)
-	}
-	if typed.baseURL != miniMaxDefaultBaseURL {
-		t.Fatalf("baseURL = %q, want %q", typed.baseURL, miniMaxDefaultBaseURL)
-	}
-	if typed.maxOutputTok != 4096 {
-		t.Fatalf("maxOutputTok = %d, want 4096", typed.maxOutputTok)
-	}
-}
-
-func TestDeepSeekUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider: "deepseek",
-		API:      APIDeepSeek,
-		Model:    "deepseek-v4-pro",
-		Auth: AuthConfig{
-			Type:  AuthAPIKey,
-			Token: "deepseek-token",
+		{
+			name: "DeepSeek", endpoint: deepSeekDefaultAnthropicBaseURL, modelName: "deepseek-v4-pro",
+			newModel: newDeepSeek, auth: model.AuthAPIKey, maxTokens: deepSeekDefaultMaxTokens,
 		},
-	}, "deepseek-token")
-	typed, ok := llm.(*anthropicSDKLLM)
-	if !ok {
-		t.Fatalf("newDeepSeek() = %T, want *anthropicSDKLLM", llm)
-	}
-	if typed.baseURL != deepSeekDefaultAnthropicBaseURL {
-		t.Fatalf("baseURL = %q, want %q", typed.baseURL, deepSeekDefaultAnthropicBaseURL)
-	}
-	if typed.maxOutputTok != deepSeekDefaultMaxTokens {
-		t.Fatalf("maxOutputTok = %d, want %d", typed.maxOutputTok, deepSeekDefaultMaxTokens)
-	}
-	if typed.auth.Type != AuthBearerToken {
-		t.Fatalf("auth type = %q, want bearer token", typed.auth.Type)
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			var seen int
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				seen++
+				if got := req.URL.String(); got != fixture.endpoint+"/v1/messages" {
+					t.Errorf("endpoint = %q, want %s/v1/messages", got, fixture.endpoint)
+				}
+				if got := req.Header.Get("Authorization"); got != "Bearer fixture-token" {
+					t.Errorf("authorization = %q, want bearer", got)
+				}
+				var body struct {
+					MaxTokens int `json:"max_tokens"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					return nil, err
+				}
+				if body.MaxTokens != fixture.maxTokens {
+					t.Errorf("max_tokens = %d, want %d", body.MaxTokens, fixture.maxTokens)
+				}
+				return &http.Response{
+					StatusCode: 200,
+					Header:     http.Header{"Content-Type": {"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"id":"msg","type":"message","role":"assistant","model":"fixture","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)),
+					Request:    req,
+				}, nil
+			})}
+			llm := fixture.newModel(Config{
+				Model: fixture.modelName, HTTPClient: client, Auth: AuthConfig{Type: fixture.auth}, Timeout: time.Second,
+			}, "fixture-token")
+			for _, err := range llm.Generate(t.Context(), &model.Request{
+				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+				Reasoning: model.ReasoningConfig{Effort: "none"},
+			}) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if seen != 1 {
+				t.Fatalf("provider received %d requests, want 1", seen)
+			}
+		})
 	}
 }
 

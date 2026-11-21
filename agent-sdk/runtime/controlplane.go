@@ -8,18 +8,12 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (r *Runtime) ensureSessionController(ctx context.Context, activeSession session.Session) (session.Session, error) {
-	return r.ensureSessionControllerWithGuard(ctx, activeSession, session.RuntimeMutationGuard(ctx))
-}
-
-func (r *Runtime) ensureSessionControllerWithGuard(
+func (r *Runtime) ensureSessionController(
 	ctx context.Context,
 	activeSession session.Session,
 	mutationGuard session.MutationGuard,
@@ -33,11 +27,11 @@ func (r *Runtime) ensureSessionControllerWithGuard(
 	return r.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef:    activeSession.SessionRef,
 		MutationGuard: mutationGuard,
-		Binding:       r.kernelControllerBinding("runtime"),
+		Binding:       r.kernelControllerBinding(),
 	})
 }
 
-func (r *Runtime) kernelControllerBinding(source string) session.ControllerBinding {
+func (r *Runtime) kernelControllerBinding() session.ControllerBinding {
 	return session.ControllerBinding{
 		Kind:         session.ControllerKindKernel,
 		ControllerID: "sdk-kernel",
@@ -45,7 +39,7 @@ func (r *Runtime) kernelControllerBinding(source string) session.ControllerBindi
 		Label:        "SDK Kernel",
 		EpochID:      r.nextID("kernel", nil),
 		AttachedAt:   r.now(),
-		Source:       firstNonEmpty(strings.TrimSpace(source), "runtime"),
+		Source:       "runtime",
 	}
 }
 
@@ -170,7 +164,6 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(inputErr)
 		return
 	}
-	var lastInputEvent *session.Event
 	persistedInputs, err := r.appendInputEvents(ctx, ref, inputEvents)
 	if err != nil {
 
@@ -179,46 +172,13 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	for _, persisted := range persistedInputs {
 		handle.publishEvent(persisted)
-		lastInputEvent = persisted
-	}
-
-	controllerInput := req.Input
-	controllerParts := append([]model.ContentPart(nil), req.ContentParts...)
-	if normalizeInputKind(req.InputKind) == agent.SubmissionKindAgentCommunication {
-		inputs := communicationInputsFromRunRequest(req)
-		if len(inputs) > 1 {
-			controllerInput = ""
-			controllerParts = nil
-			for _, item := range inputs {
-				_, parts, err := agentcommunication.Prompt(item.Input, item.ContentParts, item.Source)
-				if err != nil {
-
-					handle.publishError(err)
-					return
-				}
-				controllerParts = append(controllerParts, parts...)
-			}
-		} else if lastInputEvent != nil && lastInputEvent.Message != nil {
-			controllerInput = ""
-			controllerParts = model.ContentPartsFromParts(lastInputEvent.Message.Parts)
-		}
-	}
-	if len(r.hooks.Input)+len(r.hooks.TurnStart) > 0 {
-		controllerInput = ""
-		controllerParts = nil
-		for _, e := range persistedInputs {
-			if e.Message != nil {
-				controllerParts = append(controllerParts, model.ContentPartsFromParts(e.Message.Parts)...)
-			}
-		}
 	}
 	turnReq := controller.TurnRequest{
-		SessionRef:        ref,
-		Session:           activeSession,
-		TurnID:            turnID,
-		Input:             controllerInput,
-		ContentParts:      controllerParts,
-		Stream:            req.Request.StreamEnabled(false),
+		SessionRef:   ref,
+		Session:      activeSession,
+		TurnID:       turnID,
+		ContentParts: controllerInputParts(persistedInputs),
+
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
 		CommitBinding: func(commitCtx context.Context) error {
@@ -254,7 +214,7 @@ func (r *Runtime) executeACPControllerTurn(
 			IsUserEcho: isACPControllerUserEcho,
 		})
 	}
-	var turnResult controller.TurnResult
+	var turnHandle controller.TurnHandle
 	var forwarding agent.ControllerEventSession
 	err = r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
 		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "acp", ""), func(turnCtx context.Context) error {
@@ -264,8 +224,8 @@ func (r *Runtime) executeACPControllerTurn(
 				return turnErr
 			}
 			turnReq.Observer = forwarding
-			turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
-			if turnErr != nil && isMissingACPControllerRun(turnErr) {
+			turnHandle, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+			if errors.Is(turnErr, controller.ErrNotActive) {
 				if r.controllerRecovery == nil {
 					return fmt.Errorf("agent-sdk/runtime: controller recovery coordinator is unavailable")
 				}
@@ -287,7 +247,7 @@ func (r *Runtime) executeACPControllerTurn(
 						forwarding, turnErr = newForwarding(turnCtx)
 						if turnErr == nil {
 							turnReq.Observer = forwarding
-							turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+							turnHandle, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
 						}
 					}
 				}
@@ -300,14 +260,14 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(err)
 		return
 	}
-	if turnResult.Handle != nil {
+	if turnHandle != nil {
 		handle.setCancelHook(func() error {
-			return turnResult.Handle.Cancel().Err
+			return turnHandle.Cancel().Err
 		})
-		defer turnResult.Handle.Close()
+		defer turnHandle.Close()
 		admission.resolve(nil)
 		admitted = true
-		err = turnResult.Handle.WaitCompletion(ctx)
+		err = turnHandle.WaitCompletion(ctx)
 		handle.controllerCalls.closeAndWait()
 		if err == nil && forwarding != nil {
 			err = forwarding.Complete(ctx)

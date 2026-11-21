@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -699,12 +698,12 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider:   "openai-compatible",
-			API:        providers.APIOpenAICompatible,
+			API:        model.APIOpenAICompatible,
 			Model:      "hook-test-model",
 			BaseURL:    fakeProvider.URL,
 			HTTPClient: fakeProvider.Client(),
 			Token:      "hook-test-token",
-			AuthType:   providers.AuthBearerToken,
+			AuthType:   model.AuthBearerToken,
 			Timeout:    2 * time.Second,
 		},
 	}

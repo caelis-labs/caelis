@@ -13,6 +13,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -64,21 +65,6 @@ const (
 	subagentSpawnCompensatedDiagnostic         = "subagent spawn was rolled back"
 )
 
-// Compatibility aliases used by tests and older call sites.
-const (
-	spawnStatusPrepared            = string(spawnPhaseIntent)
-	spawnStatusSpawning            = string(spawnPhaseExternalPending)
-	spawnStatusSpawned             = string(spawnPhasePostSpawn)
-	spawnStatusCommitted           = string(spawnPhaseCommitted)
-	spawnStatusCompensating        = string(spawnPhaseCompensating)
-	spawnStatusChildCancelled      = string(spawnPhaseChildCancelled)
-	spawnStatusCompensated         = string(spawnPhaseCompensated)
-	spawnStatusUnknownOutcome      = string(spawnPhaseUnknownOutcome)
-	spawnStatusParticipantAttached = spawnPhaseLegacyParticipantAttached
-	spawnStatusCanonicalCommitting = spawnPhaseLegacyCanonicalCommitting
-	spawnStatusCanonicalCommitted  = spawnPhaseLegacyCanonicalCommitted
-)
-
 type spawnBeginOutcome struct {
 	Entry       *taskapi.Entry
 	Snapshot    taskapi.Snapshot
@@ -119,7 +105,7 @@ func (tm *taskRuntime) startSubagentTarget(
 	if runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent execution is required")
 	}
-	taskID, err := subagentSpawnTaskID(ref, req.SpawnID)
+	taskID, err := taskIDForOperation(ref, req.SpawnID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -254,7 +240,6 @@ func (tm *taskRuntime) startSubagentTarget(
 			_ = spawnActivity.awaitPersistence(context.WithoutCancel(ctx))
 		}
 		task.activityID = activityID
-		task.activityGeneration = 1
 		task.metadata[subagentActivityIDMeta] = activityID
 		task.metadata[subagentActivityGenerationMeta] = int64(1)
 		if usage := spawnActivity.peekUsage(); usage != nil {
@@ -324,7 +309,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 		}
 		return tm.resumeExistingSpawn(ctx, existing, spawnID, runner)
 	}
-	handle, err := tm.reserveTaskHandleValue(ctx, activeSession, ref, taskapi.KindSubagent, target.Selector, strings.TrimSpace(req.Handle))
+	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindSubagent, target.Selector, strings.TrimSpace(req.Handle))
 	if err != nil {
 		return spawnBeginOutcome{}, err
 	}
@@ -348,7 +333,6 @@ func (tm *taskRuntime) beginSubagentSpawn(
 			"participant_role": string(role),
 			"handle":           strings.TrimSpace(handle), "terminal_id": subagentTerminalID(taskID), "turn_seq": int64(1),
 			subagentActivityIDMeta: activityID,
-			"spawn_phase":          string(spawnPhaseIntent),
 		},
 		Metadata: map[string]any{
 			"spawn_status": string(spawnPhaseIntent), "spawn_identity": strings.TrimSpace(spawnID),
@@ -591,7 +575,7 @@ func newSubagentTaskFromSpawn(
 
 func delegationTargetRequiresPlacementRunner(target delegation.Target) bool {
 	target = delegation.NormalizeTarget(target)
-	return target.Placement.Kind == delegation.PlacementModel ||
+	return target.Placement.Kind == placement.KindModel ||
 		target.Placement.ConfigFingerprint != "" || target.Placement.Fingerprint != ""
 }
 
@@ -678,11 +662,8 @@ func setSpawnEntryPhase(entry *taskapi.Entry, phase spawnPhase, reason string) {
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]any{}
 	}
-	if entry.Spec == nil {
-		entry.Spec = map[string]any{}
-	}
 	entry.Metadata["spawn_status"] = string(phase)
-	entry.Spec["spawn_phase"] = string(phase)
+	delete(entry.Spec, "spawn_phase")
 	if strings.TrimSpace(reason) != "" {
 		entry.Metadata["spawn_reason"] = strings.TrimSpace(reason)
 	}
@@ -716,10 +697,6 @@ func (tm *taskRuntime) markSubagentSpawnPhase(ctx context.Context, task *subagen
 		task.metadata["spawn_reason"] = strings.TrimSpace(reason)
 	}
 	entry := task.entrySnapshot(tm.runtime.now())
-	if entry.Spec == nil {
-		entry.Spec = map[string]any{}
-	}
-	entry.Spec["spawn_phase"] = string(phase)
 	task.mu.Unlock()
 	err := tm.persistSpawnEntry(ctx, entry)
 	if err == nil {

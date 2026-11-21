@@ -43,19 +43,6 @@ func ValidateACPOptions(options []Option) error {
 	return nil
 }
 
-// StrictOptionIDs returns validated option identifiers in encounter order.
-func StrictOptionIDs(options []Option) ([]string, error) {
-	normalized, err := normalizeStrictOptions(options)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(normalized))
-	for _, option := range normalized {
-		ids = append(ids, option.ID)
-	}
-	return ids, nil
-}
-
 // ResolveStrictOption resolves one exact option identifier and returns its
 // canonical executable decision. It does not infer semantics from option names
 // or identifiers.

@@ -12,7 +12,7 @@ func TestAnthropicBuildRequestIncludesStructuredOutputFormat(t *testing.T) {
 		Provider: "anthropic",
 		Model:    "claude-sonnet-4-5",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "anthropic-token",
 		},
 	}, "anthropic-token")
@@ -70,7 +70,7 @@ func TestAnthropicBuildRequestUsesAdaptiveThinkingForSupportedModels(t *testing.
 				Provider: tc.provider,
 				Model:    tc.model,
 				Auth: AuthConfig{
-					Type:  AuthAPIKey,
+					Type:  model.AuthAPIKey,
 					Token: "anthropic-token",
 				},
 			}, "anthropic-token").(*anthropicSDKLLM)
@@ -301,7 +301,7 @@ func TestAnthropicBuildRequestUsesObjectSchemaForJSONMode(t *testing.T) {
 		Provider: "anthropic",
 		Model:    "claude-sonnet-4-5",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "anthropic-token",
 		},
 	}, "anthropic-token").(*anthropicSDKLLM)
@@ -326,7 +326,7 @@ func TestDeepSeekAnthropicBuildRequestCarriesStructuredOutputFormat(t *testing.T
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -358,7 +358,7 @@ func TestDeepSeekAnthropicBuildRequestRaisesMaxTokensAboveThinkingBudget(t *test
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
 		Auth: AuthConfig{
-			Type:  AuthAPIKey,
+			Type:  model.AuthAPIKey,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token").(*anthropicSDKLLM)

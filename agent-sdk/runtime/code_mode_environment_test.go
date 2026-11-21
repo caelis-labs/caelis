@@ -168,7 +168,7 @@ func TestCodeModeRetentionBudgetAccumulatesAcrossScriptsAndReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.environment.results.retained != 0 || len(third.environment.results.replies) != 0 {
+	if third.environment.results.retained != 0 || len(third.environment.results.replyParts) != 0 {
 		t.Fatal("reset retained old result storage")
 	}
 	third.release()
@@ -284,7 +284,7 @@ func TestCodeModeRealRetentionAcrossScriptsAndFailedProjections(t *testing.T) {
 	rt.codeModeMu.Unlock()
 	env.results.mu.Lock()
 	defer env.results.mu.Unlock()
-	if env.results.retained != 6 || len(env.results.replies) != 1 || len(env.results.handles) != 0 {
-		t.Fatalf("reset generation retained bytes=%d replies=%d handles=%d", env.results.retained, len(env.results.replies), len(env.results.handles))
+	if env.results.retained != 6 || len(env.results.replyParts) != 1 || len(env.results.handles) != 0 {
+		t.Fatalf("reset generation retained bytes=%d replies=%d handles=%d", env.results.retained, len(env.results.replyParts), len(env.results.handles))
 	}
 }

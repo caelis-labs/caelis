@@ -83,7 +83,7 @@ func TestStartupHTTPDiagnosticsPreserveAuthenticationAndErrorTypes(t *testing.T)
 				_, _ = io.WriteString(w, "token=secret")
 			}))
 			defer server.Close()
-			_, err := StartClient(t.Context(), ServerSpec{PluginID: "p", Name: "http", Transport: TransportStreamableHTTP, URL: server.URL})
+			_, err := startClient(t.Context(), ServerSpec{PluginID: "p", Name: "http", Transport: TransportStreamableHTTP, URL: server.URL}, nil)
 			if err == nil {
 				t.Fatal("HTTP rejection accepted")
 			}
@@ -103,7 +103,7 @@ func TestStartupHTTPDiagnosticsPreserveAuthenticationAndErrorTypes(t *testing.T)
 		{&net.DNSError{IsTimeout: true}, "DNS lookup timed out"},
 	} {
 		base := &http.Client{Transport: mcpTestRoundTripFunc(func(*http.Request) (*http.Response, error) { return nil, tc.err })}
-		_, err := startClientWithHTTPClient(t.Context(), ServerSpec{PluginID: "p", Name: "net", Transport: TransportStreamableHTTP, URL: "http://test.invalid"}, base)
+		_, err := startClient(t.Context(), ServerSpec{PluginID: "p", Name: "net", Transport: TransportStreamableHTTP, URL: "http://test.invalid"}, base)
 		if !(strings.Contains((ServerFailure{Err: err}).Summary(), tc.want)) {
 			t.Fatalf("summary=%s", (ServerFailure{Err: err}).Summary())
 		}
@@ -153,7 +153,7 @@ func TestStartupNPMStderrFlowsThroughRealCommandWithoutOrdinaryMCPMislabel(t *te
 		t.Fatal(err)
 	}
 	for _, command := range []string{npm, executable} {
-		_, err := StartClient(t.Context(), ServerSpec{PluginID: "p", Name: "child", WorkDir: t.TempDir(), Command: command, Args: []string{"-test.run=^TestMCPStartupDiagnosticHelper$"}, Env: map[string]string{"CAELIS_MCP_STARTUP_DIAGNOSTIC_HELPER": "network"}})
+		_, err := startClient(t.Context(), ServerSpec{PluginID: "p", Name: "child", WorkDir: t.TempDir(), Command: command, Args: []string{"-test.run=^TestMCPStartupDiagnosticHelper$"}, Env: map[string]string{"CAELIS_MCP_STARTUP_DIAGNOSTIC_HELPER": "network"}}, nil)
 		if err == nil {
 			t.Fatal("dead peer accepted")
 		}
@@ -171,7 +171,7 @@ func TestStartupNPMStderrFlowsThroughRealCommandWithoutOrdinaryMCPMislabel(t *te
 func TestStartupParentCancellationReapsActualCommand(t *testing.T) {
 	for _, mode := range []string{"wait", "ignore"} {
 		t.Run(mode, func(t *testing.T) {
-			transport, _, err := transportForSpecWithHTTPClient(ServerSpec{PluginID: "p", Name: "pending", Command: os.Args[0], Args: []string{"-test.run=^TestMCPStartupDiagnosticHelper$"}, WorkDir: t.TempDir(), Env: map[string]string{"CAELIS_MCP_STARTUP_DIAGNOSTIC_HELPER": mode}}, nil)
+			transport, _, _, err := transportForSpecWithIdentity(ServerSpec{PluginID: "p", Name: "pending", Command: os.Args[0], Args: []string{"-test.run=^TestMCPStartupDiagnosticHelper$"}, WorkDir: t.TempDir(), Env: map[string]string{"CAELIS_MCP_STARTUP_DIAGNOSTIC_HELPER": mode}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

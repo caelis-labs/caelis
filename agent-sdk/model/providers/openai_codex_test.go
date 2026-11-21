@@ -30,8 +30,8 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		if r.URL.Path != "/responses" {
 			t.Errorf("path = %q, want /responses", r.URL.Path)
 		}
-		if got := r.Header.Get("originator"); got != "caelis" {
-			t.Errorf("originator = %q, want caelis", got)
+		if got := r.Header.Get("originator"); got != "test-product" {
+			t.Errorf("originator = %q, want test-product", got)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
 			t.Errorf("Authorization = %q, want injected bearer", got)
@@ -60,12 +60,12 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 				map[string]any{"type": "response.output_item.added", "output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": ""}},
 				map[string]any{"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 1, "delta": "{\"query\":"},
 				map[string]any{"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 1, "delta": "\"weather\"}"},
-				map[string]any{"type": "response.output_item.done", "output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"query\":\"weather\"}"}},
+				map[string]any{"type": "response.output_item.done", "output_index": 1, "item": map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"}},
 				map[string]any{"type": "response.completed", "response": map[string]any{
 					"model": "gpt-5.4", "status": "completed",
 					"output": []any{
 						map[string]any{"id": "rs_1", "type": "reasoning", "encrypted_content": "encrypted-state", "summary": []any{map[string]any{"type": "summary_text", "text": "checking"}}},
-						map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"query\":\"weather\"}"},
+						map[string]any{"id": "fc_1", "type": "function_call", "call_id": "call_1", "name": "lookup"},
 					},
 					"usage": map[string]any{"input_tokens": 20, "input_tokens_details": map[string]any{"cached_tokens": 5}, "output_tokens": 8, "output_tokens_details": map[string]any{"reasoning_tokens": 3}, "total_tokens": 28},
 				}},
@@ -90,21 +90,17 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 
 	client := server.Client()
 	client.Transport = openAICodexTestAuthTransport{base: client.Transport}
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias:      "codex/gpt-5.4",
+	llm, err := New(Config{
 		Provider:   "openai-codex",
-		API:        APIOpenAICodex,
+		API:        model.APIOpenAICodex,
 		Model:      "gpt-5.4",
 		BaseURL:    server.URL,
 		HTTPClient: client,
-		Auth:       AuthConfig{Type: AuthOAuthToken},
-	}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	llm, err := factory.NewByAlias("codex/gpt-5.4")
+		Headers:    map[string]string{"originator": "test-product"},
+		Auth:       AuthConfig{Type: model.AuthOAuthToken},
+	})
 	if err != nil {
-		t.Fatalf("NewByAlias() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	user := model.NewMessage(
@@ -117,7 +113,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		"properties": map[string]any{"query": map[string]any{"type": "string"}},
 		"required":   []string{"query"},
 	})
-	first, reasoningDelta, toolDelta, err := collectOpenAICodexTestResponse(llm, &model.Request{
+	first, reasoningDelta, toolStarted, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Instructions: []model.Part{model.NewTextPart("use tools")},
 		Messages:     []model.Message{user},
 		Tools:        []model.ToolSpec{toolSpec},
@@ -127,8 +123,8 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Generate() error = %v", err)
 	}
-	if reasoningDelta != "checking" || toolDelta != "{\"query\":\"weather\"}" {
-		t.Fatalf("deltas = reasoning %q tool %q", reasoningDelta, toolDelta)
+	if reasoningDelta != "checking" || !toolStarted {
+		t.Fatalf("reasoning = %q, saw tool delta = %v", reasoningDelta, toolStarted)
 	}
 	assertFinishReasonReported(t, first)
 	if first.FinishReason != model.FinishReasonToolCalls {
@@ -419,11 +415,10 @@ func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
 			}))
 			defer server.Close()
 
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias:      "codex/retry-test",
+			llm, err := New(Config{
+
 				Provider:   "openai-codex",
-				API:        APIOpenAICodex,
+				API:        model.APIOpenAICodex,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
@@ -435,12 +430,9 @@ func TestOpenAICodexFactoryRetriesTransientStreamFailures(t *testing.T) {
 					RateLimitBaseDelay:  time.Nanosecond,
 					RateLimitMaxDelay:   time.Nanosecond,
 				},
-			}); err != nil {
-				t.Fatalf("Register() error = %v", err)
-			}
-			llm, err := factory.NewByAlias("codex/retry-test")
+			})
 			if err != nil {
-				t.Fatalf("NewByAlias() error = %v", err)
+				t.Fatalf("New() error = %v", err)
 			}
 
 			response, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
@@ -503,11 +495,10 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 			}))
 			defer server.Close()
 
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias:      "codex/permanent-error",
+			llm, err := New(Config{
+
 				Provider:   "openai-codex",
-				API:        APIOpenAICodex,
+				API:        model.APIOpenAICodex,
 				Model:      "gpt-test",
 				BaseURL:    server.URL,
 				HTTPClient: server.Client(),
@@ -519,12 +510,9 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 					RateLimitBaseDelay:  time.Nanosecond,
 					RateLimitMaxDelay:   time.Nanosecond,
 				},
-			}); err != nil {
-				t.Fatalf("Register() error = %v", err)
-			}
-			llm, err := factory.NewByAlias("codex/permanent-error")
+			})
 			if err != nil {
-				t.Fatalf("NewByAlias() error = %v", err)
+				t.Fatalf("New() error = %v", err)
 			}
 
 			_, _, _, err = collectOpenAICodexTestResponse(llm, &model.Request{
@@ -544,12 +532,8 @@ func TestOpenAICodexFactoryDoesNotRetryPermanentStreamFailure(t *testing.T) {
 func TestOpenAICodexFactoryRequiresInjectedOAuthClient(t *testing.T) {
 	t.Parallel()
 
-	factory := NewFactory()
-	if err := factory.Register(Config{Alias: "codex", API: APIOpenAICodex, Model: "gpt-test"}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if _, err := factory.NewByAlias("codex"); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
-		t.Fatalf("NewByAlias() error = %v", err)
+	if _, err := New(Config{API: model.APIOpenAICodex, Model: "gpt-test"}); err == nil || !strings.Contains(err.Error(), "authenticated http client") {
+		t.Fatalf("New() error = %v", err)
 	}
 }
 
@@ -648,14 +632,14 @@ func writeOpenAICodexSSE(t *testing.T, w io.Writer, events ...map[string]any) {
 	}
 }
 
-func collectOpenAICodexTestResponse(llm model.LLM, req *model.Request) (*model.Response, string, string, error) {
+func collectOpenAICodexTestResponse(llm model.LLM, req *model.Request) (*model.Response, string, bool, error) {
 	var response *model.Response
 	var reasoning strings.Builder
-	var toolInput strings.Builder
+	var toolStarted bool
 	ctx := model.WithProviderRequestMetadata(context.Background(), model.ProviderRequestMetadata{SessionAffinity: "caelis-session-1"})
 	for event, err := range llm.Generate(ctx, req) {
 		if err != nil {
-			return nil, reasoning.String(), toolInput.String(), err
+			return nil, reasoning.String(), toolStarted, err
 		}
 		if event == nil {
 			continue
@@ -665,7 +649,7 @@ func collectOpenAICodexTestResponse(llm model.LLM, req *model.Request) (*model.R
 			case model.PartKindReasoning:
 				reasoning.WriteString(event.PartDelta.TextDelta)
 			case model.PartKindToolUse:
-				toolInput.WriteString(event.PartDelta.InputDelta)
+				toolStarted = true
 			}
 		}
 		if event.Response != nil && event.TurnComplete {
@@ -674,9 +658,9 @@ func collectOpenAICodexTestResponse(llm model.LLM, req *model.Request) (*model.R
 		}
 	}
 	if response == nil {
-		return nil, reasoning.String(), toolInput.String(), errors.New("missing final response")
+		return nil, reasoning.String(), toolStarted, errors.New("missing final response")
 	}
-	return response, reasoning.String(), toolInput.String(), nil
+	return response, reasoning.String(), toolStarted, nil
 }
 
 func assertOpenAICodexFirstRequest(t *testing.T, body map[string]any) {
@@ -831,7 +815,7 @@ func TestOpenAICodexRequestPreservesEmptyToolProperties(t *testing.T) {
 
 func TestOpenAICompatStrictToolsPreserveEmptyProperties(t *testing.T) {
 	schema := map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}, "additionalProperties": false}
-	tools := fromKernelTools([]model.ToolDefinition{{Name: "no_args", Parameters: schema, Strict: true}}, true)
+	tools := fromKernelTools([]model.FunctionToolSpec{{Name: "no_args", Parameters: schema, Strict: true}}, true)
 	raw, err := json.Marshal(tools)
 	if err != nil {
 		t.Fatal(err)

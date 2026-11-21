@@ -37,7 +37,6 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 			},
 		},
 		TurnID:       " turn-1 ",
-		Input:        "  prompt  ",
 		ContentParts: []model.ContentPart{part},
 		Context: agent.ContextTransfer{Turns: []agent.ContextTurn{{
 			Executor: session.ActorRef{Name: " helper "}, UserMessages: []string{" prior "}, AssistantSummary: " done ",
@@ -50,7 +49,7 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 	if got.SessionRef.SessionID != "session-1" {
 		t.Fatalf("session ref = %q, want session-1", got.SessionRef.SessionID)
 	}
-	if got.TurnID != "turn-1" || got.Input != "prompt" || got.Mode != "plan" || len(got.Context.Turns) != 1 || got.Context.Turns[0].Executor.Name != "helper" {
+	if got.TurnID != "turn-1" || got.Mode != "plan" || len(got.Context.Turns) != 1 || got.Context.Turns[0].Executor.Name != "helper" {
 		t.Fatalf("trimmed fields = %+v", got)
 	}
 	if got.ContextSyncSeq != 3 {
@@ -78,13 +77,9 @@ func TestNormalizeParticipantPromptRequestTrimsFields(t *testing.T) {
 		ParticipantID: " participant ",
 		Input:         " input ",
 		Mode:          " mode ",
-		Stream:        true,
 	})
 	if got.SessionRef.SessionID != "sid" || got.TurnID != "turn" || got.ParticipantID != "participant" || got.Input != "input" || got.Mode != "mode" {
 		t.Fatalf("normalized participant prompt = %+v", got)
-	}
-	if !got.Stream {
-		t.Fatal("stream flag should be preserved")
 	}
 }
 
@@ -105,9 +100,8 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 	detach := NormalizeDetachRequest(DetachRequest{
 		SessionRef:    session.SessionRef{SessionID: " sid "},
 		ParticipantID: " pid ",
-		Source:        " source ",
 	})
-	if detach.SessionRef.SessionID != "sid" || detach.ParticipantID != "pid" || detach.Source != "source" {
+	if detach.SessionRef.SessionID != "sid" || detach.ParticipantID != "pid" {
 		t.Fatalf("normalized detach = %+v", detach)
 	}
 
@@ -115,12 +109,11 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 		SessionRef:     session.SessionRef{SessionID: " sid "},
 		Agent:          " agent ",
 		Source:         " source ",
-		Reason:         " reason ",
 		Context:        agent.ContextTransfer{Summary: " summary "},
 		FreshContext:   agent.ContextTransfer{Summary: " full summary "},
 		ContextSyncSeq: 9,
 	})
-	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Reason != "reason" || handoff.Context.Summary != "summary" || handoff.FreshContext.Summary != "full summary" || handoff.ContextSyncSeq != 9 {
+	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Source != "source" || handoff.Context.Summary != "summary" || handoff.FreshContext.Summary != "full summary" || handoff.ContextSyncSeq != 9 {
 		t.Fatalf("normalized handoff = %+v", handoff)
 	}
 }

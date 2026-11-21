@@ -182,7 +182,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	var (
 		result sandbox.CommandResult
 	)
-	if constraints, ok := sandboxmeta.Constraints(call.Metadata); ok {
+	if constraints, ok, _ := sandboxmeta.DecodeConstraints(call.Metadata); ok {
 		req := sandbox.CommandRequest{
 			Command:     command,
 			Dir:         workingDir,

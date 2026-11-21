@@ -321,7 +321,7 @@ func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonical
 		steerResult <- manager.SteerController(ctx, controller.ControllerSteerRequest{
 			SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
 			ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
-			RemoteSessionID: remoteID, TurnID: run.turnID, Input: "guide main",
+			RemoteSessionID: remoteID, TurnID: run.turnID, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "guide main"}},
 			Commit: func() error {
 				ordered <- "user:guide main"
 				return nil
@@ -394,7 +394,7 @@ func TestMainControllerSteeringAmbiguousOutcomeIsolatesExactRun(t *testing.T) {
 	err = manager.SteerController(ctx, controller.ControllerSteerRequest{
 		SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
 		ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
-		RemoteSessionID: remoteID, TurnID: run.turnID, Input: "ambiguous guide",
+		RemoteSessionID: remoteID, TurnID: run.turnID, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "ambiguous guide"}},
 		Commit: func() error {
 			committed = true
 			return nil
@@ -442,7 +442,7 @@ func TestMainControllerSteeringReportsClosedRunBeforeRuntimeRunnerCloses(t *test
 		request := controller.ControllerSteerRequest{
 			SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
 			ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
-			RemoteSessionID: run.remoteSessionID, TurnID: run.turnID, Input: "after terminal",
+			RemoteSessionID: run.remoteSessionID, TurnID: run.turnID, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "after terminal"}},
 			Commit: func() error { t.Fatal("closed Run committed steering input"); return nil },
 		}
 		return manager, run, handle, request
@@ -902,7 +902,7 @@ func TestControllerCloseAdmissionAbortsBlockedSteeringWrite(t *testing.T) {
 			SessionRef:   session.SessionRef{SessionID: run.parentSessionID},
 			ControllerID: run.binding.ControllerID, ControllerEpoch: run.binding.EpochID,
 			RemoteSessionID: run.remoteSessionID, TurnID: run.turnID,
-			Input: strings.Repeat("blocked controller steering ", 1<<16),
+			ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: strings.Repeat("blocked controller steering ", 1<<16)}},
 			Commit: func() error {
 				committed <- struct{}{}
 				return nil

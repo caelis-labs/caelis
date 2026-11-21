@@ -79,3 +79,20 @@ func TestRunnerSourceOwnershipUsesStableMessageIdentity(t *testing.T) {
 		t.Fatalf("observed ownership = %#v", got)
 	}
 }
+
+func TestRunnerCancelClosesInputBeforeFinish(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	run := newRunner(ctx, "run-1", cancel, nil)
+
+	if got := run.Cancel(); got.Status != agent.CancelStatusCancelled || got.Err != nil {
+		t.Fatalf("Cancel() = %+v", got)
+	}
+	err := run.SubmitContext(t.Context(), agent.Submission{Kind: agent.SubmissionKindConversation, Text: "next input"})
+	if !errors.Is(err, agent.ErrRunInputClosed) {
+		t.Fatalf("SubmitContext() after cancellation = %v, want ErrRunInputClosed", err)
+	}
+	if got := run.drainSubmissions(); len(got) != 0 {
+		t.Fatalf("cancelled runner accepted input: %+v", got)
+	}
+}

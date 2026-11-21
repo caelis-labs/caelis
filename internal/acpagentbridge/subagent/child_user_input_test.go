@@ -57,7 +57,7 @@ func TestUserChildInputActiveAndIdleKeepHumanProvenance(t *testing.T) {
 			if len(parts) != 1 || !quoted || body != "guide now" {
 				t.Fatalf("human prompt lost its literal user body: %#v", parts)
 			}
-			_, err = submitChildInputTest(runner, events, ctx, req)
+			_, _, err = submitChildInputTest(runner, events, ctx, req)
 			if err != nil {
 				t.Fatal(err)
 			}

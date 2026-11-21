@@ -73,7 +73,7 @@ func (c *codexStyleCompactor) generateCompactMarkdown(
 	if err == nil {
 		return text, nil
 	}
-	if isCompactionOverflowError(err) {
+	if model.IsContextOverflow(err) {
 		return c.generateCompactMarkdownSegmented(ctx, llm, baseText, events, serviceTier, 0)
 	}
 	return "", err
@@ -108,7 +108,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 		}
 		update, err := modelCompactMarkdown(ctx, llm, current, segment, serviceTier)
 		if err != nil {
-			if isCompactionOverflowError(err) {
+			if model.IsContextOverflow(err) {
 				update, err = c.generateCompactMarkdownSegmented(ctx, llm, current, segment, serviceTier, depth+1)
 			}
 			if err != nil {
@@ -243,11 +243,9 @@ func compactionResponseUsesTools(event *model.StreamEvent) bool {
 	if event.PartDelta != nil && event.PartDelta.Kind == model.PartKindToolUse {
 		return true
 	}
-	if response := event.Response; response != nil &&
-		(response.FinishReason == model.FinishReasonToolCalls || len(response.Message.ToolCalls()) > 0) {
-		return true
-	}
-	return event.Message != nil && len(event.Message.ToolCalls()) > 0
+	response := event.Response
+	return response != nil &&
+		(response.FinishReason == model.FinishReasonToolCalls || len(response.Message.ToolCalls()) > 0)
 }
 
 func compactMarkdownLooksEmpty(text string) bool {

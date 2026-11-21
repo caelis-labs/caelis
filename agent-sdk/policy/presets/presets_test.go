@@ -81,27 +81,20 @@ func TestWorkspaceWriteModeAllowsWorkspaceWrites(t *testing.T) {
 	}
 }
 
-func TestNewRegistryResolvesLegacyPolicyModeAliases(t *testing.T) {
+func TestLegacyApprovalModeNamesResolveToCanonicalWorkspaceWritePolicy(t *testing.T) {
 	t.Parallel()
 
 	registry, err := NewRegistry()
 	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
+		t.Fatal(err)
 	}
-	for _, name := range []string{ModeWorkspaceWrite, ModeAutoReview, ModeManual} {
-		mode, ok, err := registry.Lookup(context.Background(), name)
-		if err != nil {
-			t.Fatalf("Lookup(%q) error = %v", name, err)
+	for _, name := range []string{"auto-review", "manual"} {
+		if _, ok, err := registry.Lookup(t.Context(), name); err != nil || ok {
+			t.Fatalf("legacy mode %q has a registry entry: %t, %v", name, ok, err)
 		}
-		if !ok || mode == nil {
-			t.Fatalf("Lookup(%q) = nil/%v, want workspace-write compatible mode", name, ok)
-		}
-		decision, err := mode.DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "notes.md")))
-		if err != nil {
-			t.Fatalf("%s DecideTool() error = %v", name, err)
-		}
-		if decision.Action != policy.ActionAllow {
-			t.Fatalf("%s action = %q, want allow", name, decision.Action)
+		mode, ok, err := registry.Lookup(t.Context(), NormalizeModeName(name))
+		if err != nil || !ok || mode.Name() != ModeWorkspaceWrite {
+			t.Fatalf("legacy mode %q did not resolve to workspace-write: %v, %t, %v", name, mode, ok, err)
 		}
 	}
 }

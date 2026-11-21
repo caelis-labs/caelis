@@ -85,6 +85,22 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	assertChildActivityEntry(t, r, task, 0, 2, req.ActivityID, false)
 }
 
+func TestChildCompletionKickKeepsApplyingTask(t *testing.T) {
+	const taskID = "child"
+	claimedTask := &subagentTask{turnSeq: 1}
+	completion := &subagentCompletion{task: claimedTask}
+	tm := &taskRuntime{
+		subagents:          map[string]*subagentTask{taskID: {turnSeq: 2}},
+		completions:        map[string]*subagentCompletion{taskID: completion},
+		completionApplying: map[string]struct{}{taskID: {}},
+	}
+
+	tm.kickSubagentCompletion(taskID)
+	if completion.task != claimedTask {
+		t.Fatal("completion kick changed the Task already owned by the applying producer")
+	}
+}
+
 func TestChildActivityCompletionAdvancesWithoutOutput(t *testing.T) {
 	r, task, _ := newIdleChildActivityTask(t)
 	id, _, completion, err := r.prepareChildTaskOutput(t.Context(), task)
@@ -156,7 +172,7 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := r.StartSubagent(t.Context(), active.SessionRef, "helper", "inspect", "test")
+	started, err := r.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "inspect", "test", StartSubagentOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +372,7 @@ func TestChildSpawnPersistsSynchronousACPUsageGauge(t *testing.T) {
 	}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	const spawnID = "synchronous-terminal-usage"
-	taskID, err := subagentSpawnTaskID(active.SessionRef, spawnID)
+	taskID, err := taskIDForOperation(active.SessionRef, spawnID)
 	if err != nil {
 		t.Fatal(err)
 	}

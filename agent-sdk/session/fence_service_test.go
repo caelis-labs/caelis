@@ -389,10 +389,10 @@ func assertFenceGuardedMutations(
 	}); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("stale UpdateState fence error = %v, want ErrFenceConflict", err)
 	}
-	if _, err := service.ReplaceState(context.Background(), session.ReplaceStateRequest{
-		SessionRef: ref, ExpectedRevision: &currentSession.Revision, State: map[string]any{"unscoped": true},
+	if _, err := service.UpdateState(context.Background(), session.UpdateStateRequest{
+		SessionRef: ref, ExpectedRevision: &currentSession.Revision, Update: func(map[string]any) (map[string]any, error) { return map[string]any{"unscoped": true}, nil },
 	}); !errors.Is(err, session.ErrFenceConflict) {
-		t.Fatalf("unscoped ReplaceState error = %v, want ErrFenceConflict", err)
+		t.Fatalf("unscoped UpdateState error = %v, want ErrFenceConflict", err)
 	}
 	controlSession, err := service.UpdateState(context.Background(), session.UpdateStateRequest{
 		SessionRef: ref, ExpectedRevision: &currentSession.Revision,
@@ -405,12 +405,12 @@ func assertFenceGuardedMutations(
 	if err != nil {
 		t.Fatalf("overlapping approval UpdateState error = %v", err)
 	}
-	runtimeSession, err := service.ReplaceState(context.Background(), session.ReplaceStateRequest{
+	runtimeSession, err := service.UpdateState(context.Background(), session.UpdateStateRequest{
 		SessionRef: ref, ExpectedRevision: &controlSession.Revision,
-		MutationGuard: session.RuntimeMutationGuard(placedCtx), State: map[string]any{"runtime": true},
+		MutationGuard: session.RuntimeMutationGuard(placedCtx), Update: func(map[string]any) (map[string]any, error) { return map[string]any{"runtime": true}, nil },
 	})
 	if err != nil {
-		t.Fatalf("matching runtime ReplaceState error = %v", err)
+		t.Fatalf("matching runtime UpdateState error = %v", err)
 	}
 	staleRevision := controlSession.Revision
 	if _, err := service.UpdateState(context.Background(), session.UpdateStateRequest{

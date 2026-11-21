@@ -12,8 +12,8 @@ import (
 
 type approvalRecoveryContractService interface {
 	session.Lifecycle
-	session.Reader
 	session.EventAppender
+	session.PagedReader
 	session.ApprovalRecoveryService
 }
 
@@ -82,16 +82,25 @@ func TestApprovalRecoverySettlementRevisionCASContract(t *testing.T) {
 					Lifecycle:         &session.EventLifecycle{Status: "interrupted", Reason: "startup_recovery"},
 				},
 			}
-			result, err := service.SettlePendingApproval(ctx, request)
+			err = service.SettlePendingApproval(ctx, request)
 			var conflict *session.RevisionConflictError
-			if !errors.As(err, &conflict) || result.Settled {
-				t.Fatalf("stale revision result = %#v, error = %v, want RevisionConflict", result, err)
+			if !errors.As(err, &conflict) {
+				t.Fatalf("stale revision error = %v, want RevisionConflict", err)
 			}
 			expectedRevision = conflict.Actual
-			result, err = service.SettlePendingApproval(ctx, request)
-			if err != nil || !result.Settled || result.Event == nil || result.Event.Lifecycle == nil ||
-				result.Event.Lifecycle.Reason != "startup_recovery" {
-				t.Fatalf("matching CAS result = %#v, error = %v", result, err)
+			if err := service.SettlePendingApproval(ctx, request); err != nil {
+				t.Fatalf("matching CAS: %v", err)
+			}
+			page, err := service.EventsPage(ctx, session.EventPageRequest{
+				SessionRef: active.SessionRef, Visibility: session.EventPageAllDurable,
+			})
+			if err != nil || len(page.Events) != 3 {
+				t.Fatalf("events after settlement = %#v, %v, want request, unrelated update, and settlement", page.Events, err)
+			}
+			settlement := page.Events[2]
+			if settlement.ApprovalRequestID != request.ApprovalRequestID || settlement.Seq <= candidate.Request.Seq ||
+				settlement.Lifecycle == nil || settlement.Lifecycle.Reason != "startup_recovery" {
+				t.Fatalf("unexpected durable settlement: %#v", settlement)
 			}
 			pending, err = service.PendingApprovals(ctx)
 			if err != nil || len(pending) != 0 {

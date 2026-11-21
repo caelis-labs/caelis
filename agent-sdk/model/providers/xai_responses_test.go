@@ -50,8 +50,8 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 				t.Errorf("%s = %q, want %q", header, got, want)
 			}
 		}
-		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "caelis/") {
-			t.Errorf("User-Agent = %q, want Caelis attribution", got)
+		if got := r.Header.Get("User-Agent"); got != "test-product/1" {
+			t.Errorf("User-Agent = %q, want test-product/1", got)
 		}
 		requestID := r.Header.Get("x-grok-req-id")
 		if requestID == "" || requestID == "spoofed-request" {
@@ -100,11 +100,10 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 
 	client := server.Client()
 	client.Transport = xAIResponsesTestAuthTransport{base: client.Transport}
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias: "xai/grok-4.5", Provider: "xai", API: APIXAIResponses, Model: "grok-4.5",
+	llm, err := New(Config{
+		Provider: "xai", API: model.APIXAIResponses, Model: "grok-4.5", UserAgent: "test-product/1",
 		BaseURL: server.URL, HTTPClient: client, MaxOutputTok: 32768, ContextWindowTokens: 500000,
-		Auth: AuthConfig{Type: AuthOAuthToken},
+		Auth: AuthConfig{Type: model.AuthOAuthToken},
 		Headers: map[string]string{
 			"Accept":                   "application/x-spoofed",
 			"Authorization":            "Bearer spoofed",
@@ -127,10 +126,7 @@ func TestXAIResponsesToolLoopPreservesEncryptedReasoning(t *testing.T) {
 			"X-XAI-Token-Auth":         "spoofed-token-mode",
 			"X-Custom-Safe":            "preserved",
 		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("xai/grok-4.5")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,21 +237,17 @@ func TestXAIResponsesFactoryRequiresOAuthClient(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		auth AuthType
+		auth model.AuthType
 		want string
 	}{
-		{name: "wrong auth", auth: AuthAPIKey, want: "requires oauth authentication"},
-		{name: "missing client", auth: AuthOAuthToken, want: "authenticated http client"},
+		{name: "wrong auth", auth: model.AuthAPIKey, want: "requires oauth authentication"},
+		{name: "missing client", auth: model.AuthOAuthToken, want: "authenticated http client"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			factory := NewFactory()
-			if err := factory.Register(Config{
-				Alias: "grok", API: APIXAIResponses, Model: "grok-4.5", Auth: AuthConfig{Type: tc.auth},
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := factory.NewByAlias("grok"); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("NewByAlias() error = %v, want %q", err, tc.want)
+			if _, err := New(Config{
+				API: model.APIXAIResponses, Model: "grok-4.5", Auth: AuthConfig{Type: tc.auth},
+			}); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New() error = %v, want %q", err, tc.want)
 			}
 		})
 	}

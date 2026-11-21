@@ -115,7 +115,7 @@ func TestTranslateApprovalRequestStandardNameWinsFallbacks(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"read_file", "Read file", "read", ""} {
 		t.Run(name, func(t *testing.T) {
-			request, err := translateApprovalRequest(session.Session{}, "remote", "default", client.RequestPermissionRequest{
+			request, err := translateApprovalRequest("remote", "default", client.RequestPermissionRequest{
 				SessionId: "remote-1",
 				ToolCall: acpsdk.ToolCallUpdate{
 					ToolCallId: "call-1", Name: &name, Title: testStringPtr("Read file"), Kind: acpsdk.Ptr(acpsdk.ToolKindRead),

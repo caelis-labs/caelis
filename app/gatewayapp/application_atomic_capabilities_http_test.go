@@ -1083,13 +1083,12 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	}
 }
 
-func waitAtomicApplicationMCPRunning(t *testing.T, ctx context.Context, client *httpclient.Client, session, name string) {
+func waitAtomicApplicationMCPRunning(t *testing.T, ctx context.Context, client *httpclient.Client, session, name string) sessionprofile.MCPServerStatus {
 	t.Helper()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		status, err := client.SessionMCPStatus(ctx, session)
-		status = optionalCapabilityStatus(status)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1098,7 +1097,7 @@ func waitAtomicApplicationMCPRunning(t *testing.T, ctx context.Context, client *
 				continue
 			}
 			if server.Ready {
-				return
+				return server
 			}
 			if server.Status == "failed" || server.RefreshFailed {
 				t.Fatalf("MCP service %q failed to start: %+v", name, server)

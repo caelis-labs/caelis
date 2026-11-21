@@ -273,10 +273,7 @@ func streamFrameToolMeta(meta map[string]any, taskHandle string) map[string]any 
 }
 
 func shouldProjectFrameTextToParentTool(frame controltaskstream.Frame) bool {
-	if frame.Event != nil && session.ProtocolSessionUpdateTypeOfProtocol(frame.Event.Protocol) == string(session.ProtocolUpdateTypeAgentThought) {
-		return false
-	}
-	return true
+	return session.ProtocolSessionUpdateType(frame.Event) != string(session.ProtocolUpdateTypeAgentThought)
 }
 
 func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame controltaskstream.Frame) []eventstream.Envelope {

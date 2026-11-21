@@ -62,11 +62,11 @@ func TestDraftDistinctOpaqueMessageIDsCannotAliasAcrossActivities(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
+	_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 	observedRevision := false
 	for _, frame := range frames {
 		if update := session.ProtocolUpdateOf(frame.Event); update != nil && update.SessionUpdate == kind && update.MessageID == oldID {
@@ -139,11 +139,11 @@ func TestDraftDistinctOpaqueThoughtIDsCannotInvalidateCurrentResult(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
+	_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "current input"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 	observedRevision := false
 	for _, frame := range frames {
 		if update := session.ProtocolUpdateOf(frame.Event); update != nil && update.SessionUpdate == kind && update.MessageID == oldID {

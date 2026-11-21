@@ -38,7 +38,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		approval.started = time.Now()
 	}
 	deadline := approval.started.Add(req.Yield)
-	taskID, err := commandTaskID(t.sessionRef, firstNonEmpty(req.OperationID, req.ParentCall))
+	taskID, err := taskIDForOperation(t.sessionRef, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -68,7 +68,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 	}
 	if !created {
 		release()
-		return t.observeSubmittedCommand(ctx, call, task, deadline)
+		return t.observeSubmittedCommand(ctx, task, deadline)
 	}
 	scope := taskScopeFromContext(approval.owner)
 	work, err := approval.registerCommand(ctx, scope, taskID)
@@ -108,7 +108,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 	case <-ctx.Done():
 		return tool.Result{}, ctx.Err()
 	}
-	return t.observeSubmittedCommand(ctx, call, task, deadline)
+	return t.observeSubmittedCommand(ctx, task, deadline)
 }
 
 func (a *taskApproval) registerCommand(ctx context.Context, scope *taskContinuationScope, taskID string) (*taskContinuation, error) {
@@ -170,7 +170,7 @@ func validateApprovedCommandTarget(ctx context.Context, validate func(context.Co
 	}
 }
 
-func (t runtimeCommandTool) observeSubmittedCommand(ctx context.Context, call tool.Call, task *commandTask, deadline time.Time) (tool.Result, error) {
+func (t runtimeCommandTool) observeSubmittedCommand(ctx context.Context, task *commandTask, deadline time.Time) (tool.Result, error) {
 	snapshot, err := t.tasks.waitCommandTask(ctx, t.sessionRef, task, taskapi.ControlRequest{Yield: max(time.Until(deadline), 0)})
 	result, resultErr := taskSnapshotToolResult(ctx, snapshot)
 	return result, errors.Join(err, resultErr)

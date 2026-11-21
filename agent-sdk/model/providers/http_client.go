@@ -4,8 +4,15 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
+
+func setUserAgent(req *http.Request, value string) {
+	if value = strings.TrimSpace(value); value != "" {
+		req.Header.Set("User-Agent", value)
+	}
+}
 
 func resetHTTPConnectionsForRetry(client *http.Client, cause error) {
 	if client == nil {

@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
@@ -30,7 +32,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type codeModeBusinessModel struct {
@@ -177,11 +178,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "object": "response", "model": "fixture", "status": "completed", "output": output, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
 			}))
 			defer provider.Close()
-			factory := providers.NewFactory()
-			if err := factory.Register(providers.Config{Alias: "fixture/business", Provider: "fixture", API: providers.APIOpenAIResponses, Model: "fixture", BaseURL: provider.URL, HTTPClient: provider.Client(), Auth: providers.AuthConfig{Type: providers.AuthNone}, ImageInput: true, ContextWindowTokens: 200000}); err != nil {
-				t.Fatal(err)
-			}
-			llm, err := factory.NewByAlias("fixture/business")
+			llm, err := providers.New(providers.Config{Provider: "fixture", API: model.APIOpenAIResponses, Model: "fixture", BaseURL: provider.URL, HTTPClient: provider.Client(), Auth: providers.AuthConfig{Type: model.AuthNone}, ImageInput: true, ContextWindowTokens: 200000})
 			if err != nil {
 				t.Fatal(err)
 			}

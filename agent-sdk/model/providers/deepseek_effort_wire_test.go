@@ -59,7 +59,7 @@ func TestDeepSeekAnthropicStreamingEffortWire(t *testing.T) {
 				_, _ = fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 			}))
 			defer server.Close()
-			llm := newDeepSeek(Config{Provider: "deepseek", Model: "deepseek-flash", BaseURL: server.URL + "/anthropic", HTTPClient: server.Client(), Auth: AuthConfig{Type: AuthAPIKey, Token: "synthetic"}}, "synthetic")
+			llm := newDeepSeek(Config{Provider: "deepseek", Model: "deepseek-flash", BaseURL: server.URL + "/anthropic", HTTPClient: server.Client(), Auth: AuthConfig{Type: model.AuthAPIKey, Token: "synthetic"}}, "synthetic")
 			var final *model.Response
 			for event, err := range llm.Generate(context.Background(), &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "synthetic")}, Reasoning: model.ReasoningConfig{Effort: tc.effort}, Stream: true}) {
 				if err != nil {

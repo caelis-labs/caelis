@@ -50,19 +50,15 @@ func TestVisibilityRules(t *testing.T) {
 		}
 	}
 	tests := []struct {
-		name             string
-		event            *Event
-		wantTransient    bool
-		wantPersist      bool
-		wantModelVisible bool
-		wantSharedLedger bool
+		name          string
+		event         *Event
+		wantTransient bool
+		wantPersist   bool
 	}{
 		{
-			name:             "canonical",
-			event:            assistant("canonical"),
-			wantPersist:      true,
-			wantModelVisible: true,
-			wantSharedLedger: true,
+			name:        "canonical",
+			event:       assistant("canonical"),
+			wantPersist: true,
 		},
 		{
 			name:        "mirror",
@@ -94,11 +90,8 @@ func TestVisibilityRules(t *testing.T) {
 			if got := IsCanonicalHistoryEvent(tt.event); got != tt.wantPersist {
 				t.Fatalf("IsCanonicalHistoryEvent() = %v, want %v", got, tt.wantPersist)
 			}
-			if got := IsInvocationVisibleEvent(tt.event); got != tt.wantModelVisible {
-				t.Fatalf("IsInvocationVisibleEvent() = %v, want %v", got, tt.wantModelVisible)
-			}
-			if got := IsSharedDialogueEvent(tt.event); got != tt.wantSharedLedger {
-				t.Fatalf("IsSharedDialogueEvent() = %v, want %v", got, tt.wantSharedLedger)
+			if got := IsMainInvocationVisibleEvent(tt.event); got != tt.wantPersist {
+				t.Fatalf("IsMainInvocationVisibleEvent() = %v, want %v", got, tt.wantPersist)
 			}
 		})
 	}
@@ -211,8 +204,8 @@ func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *test
 			},
 		},
 	}
-	if !IsInvocationVisibleEvent(sideAssistant) {
-		t.Fatal("side assistant event should remain invocation-visible for non-main consumers")
+	if !IsCanonicalHistoryEvent(sideAssistant) {
+		t.Fatal("side assistant event should remain canonical for non-main consumers")
 	}
 	if !IsMainInvocationVisibleEvent(sideAssistant) {
 		t.Fatal("side assistant final event should be visible to the main invocation")
@@ -681,6 +674,7 @@ func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 	t.Parallel()
 
+	line := 17
 	protocol := CloneEventProtocol(EventProtocol{
 		Update: &ProtocolUpdate{
 			SessionUpdate: string(ProtocolUpdateTypeToolCall),
@@ -689,12 +683,13 @@ func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 			Kind:          "execute",
 			Status:        "pending",
 			RawInput:      map[string]any{"command": "echo hi"},
+			Locations:     []ProtocolToolCallLocation{{Path: "README.md", Line: &line}},
 		},
 	})
 
-	update := ProtocolUpdateOfProtocol(&protocol)
+	update := ProtocolUpdateOf(&Event{Protocol: &protocol})
 	if update == nil {
-		t.Fatal("ProtocolUpdateOfProtocol() = nil")
+		t.Fatal("ProtocolUpdateOf() = nil")
 		return
 	}
 	if update.ToolCallID != "call-1" || update.Kind != "execute" || update.Title != "RUN_COMMAND echo hi" {
@@ -703,6 +698,10 @@ func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 	update.RawInput["command"] = "mutated"
 	if got := protocol.Update.RawInput["command"]; got != "echo hi" {
 		t.Fatalf("source update raw input = %#v, want clone isolation", got)
+	}
+	*update.Locations[0].Line = 42
+	if got := *protocol.Update.Locations[0].Line; got != 17 || line != 17 {
+		t.Fatalf("source lines after mutation = %d, %d, want isolated line 17", got, line)
 	}
 }
 
@@ -825,8 +824,8 @@ func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	if decoded.Method != ProtocolMethodParticipantUpdate {
 		t.Fatalf("decoded.Method = %q, want %q", decoded.Method, ProtocolMethodParticipantUpdate)
 	}
-	if got := ProtocolSessionUpdateTypeOfProtocol(&decoded); got != "attached" {
-		t.Fatalf("ProtocolSessionUpdateTypeOfProtocol() = %q, want attached", got)
+	if got := ProtocolSessionUpdateType(&Event{Protocol: &decoded}); got != "attached" {
+		t.Fatalf("ProtocolSessionUpdateType() = %q, want attached", got)
 	}
 }
 
@@ -856,8 +855,8 @@ func TestEventProtocolRoundTripPreservesHandoffPayload(t *testing.T) {
 	if decoded.Method != ProtocolMethodControllerHandoff {
 		t.Fatalf("decoded.Method = %q, want %q", decoded.Method, ProtocolMethodControllerHandoff)
 	}
-	if got := ProtocolSessionUpdateTypeOfProtocol(&decoded); got != "activation" {
-		t.Fatalf("ProtocolSessionUpdateTypeOfProtocol() = %q, want activation", got)
+	if got := ProtocolSessionUpdateType(&Event{Protocol: &decoded}); got != "activation" {
+		t.Fatalf("ProtocolSessionUpdateType() = %q, want activation", got)
 	}
 }
 

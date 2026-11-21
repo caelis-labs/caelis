@@ -54,7 +54,7 @@ func TestIdlePromptDispatchOrdersInputBeforePeerOutput(t *testing.T) {
 			defer cancelDispatch()
 			finished := make(chan error, 1)
 			go func() {
-				_, err := submitChildInputTest(runner, events, dispatchCtx, agent.ChildInputRequest{
+				_, _, err := submitChildInputTest(runner, events, dispatchCtx, agent.ChildInputRequest{
 					Target: target, UserInput: true, Source: session.ActorRef{Kind: session.ActorKindUser, ID: "user"}, Input: "continue",
 				})
 				finished <- err

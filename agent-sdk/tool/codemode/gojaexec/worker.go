@@ -17,8 +17,6 @@ import (
 //go:embed bootstrap.js
 var bootstrap string
 
-type settlement struct{ resolve, reject func(any) error }
-
 // WorkerMain owns one VM for the process lifetime. Pipe readers and the CPU
 // watchdog only interrupt it; all JS values and Promise jobs stay on this owner.
 func WorkerMain() int {
@@ -67,7 +65,7 @@ func WorkerMain() int {
 			}
 		}
 	}()
-	pending := map[uint64]settlement{}
+	pending := map[uint64]func(any) error{}
 	var next uint64
 	var calls int
 	var limits codemode.Limits
@@ -92,7 +90,7 @@ func WorkerMain() int {
 			vm.Interrupt("Host transport failed")
 			_ = reject("Host transport failed")
 		} else {
-			pending[next] = settlement{resolve, reject}
+			pending[next] = resolve
 		}
 		return vm.ToValue(promise)
 	}
@@ -216,12 +214,12 @@ func WorkerMain() int {
 						if !open {
 							return 2
 						}
-						one, ok := pending[f.id]
+						resolve, ok := pending[f.id]
 						if f.kind != frameReply || !ok {
 							return 2
 						}
 						delete(pending, f.id)
-						runErr = one.resolve(string(f.data))
+						runErr = resolve(string(f.data))
 					case <-time.After(10 * time.Millisecond):
 						_, runErr = vm.RunString("void 0")
 					}
@@ -277,7 +275,7 @@ func WorkerMain() int {
 	}
 }
 
-func workerError(w *wireWriter, budget int, err error) int {
+func workerError(w *wireWriter, budget int, err error) {
 	message := err.Error()
 	// Encoder exceptions are already safe, field-specific diagnostics; their
 	// bootstrap stack is not user source.
@@ -294,5 +292,4 @@ func workerError(w *wireWriter, budget int, err error) int {
 		}
 	}
 	_ = w.send(frameError, 0, []byte(message), budget)
-	return 1
 }

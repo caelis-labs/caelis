@@ -35,7 +35,7 @@ type mimoTokenPlanLLM struct {
 }
 
 func (l *mimoTokenPlanLLM) WebSearchUnavailableReason() string {
-	return "Xiaomi Token Plan endpoints do not support provider-native web_search. Use a native Xiaomi MiMo API key with https://api.xiaomimimo.com/v1, or use web_fetch with a known URL."
+	return "Xiaomi Token Plan endpoints do not support provider-native web search. Native search is available at https://api.xiaomimimo.com/v1 with a native Xiaomi MiMo API key."
 }
 
 func mimoTokenPlanBaseURL(baseURL string) bool {

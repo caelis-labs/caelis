@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
@@ -16,7 +16,7 @@ func TestApplicationCompactUsesProfileModelAndSharedCheckpointReplay(t *testing.
 	ctx := t.Context()
 	provider := newGatewayAppCompactionOllamaServer(t)
 	stack, err := newGatewayAppTestStack(t, Config{AppName: "test", UserID: "owner", StoreDir: filepath.Join(t.TempDir(), "store"), WorkspaceCWD: t.TempDir(), ContextWindow: 4096,
-		Model: ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()}})
+		Model: ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "compact-test", BaseURL: provider.URL, HTTPClient: provider.Client()}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestApplicationCompactUsesProfileModelAndSharedCheckpointReplay(t *testing.
 		t.Fatal(err)
 	}
 	event, present := latestGatewayAppCompactEvent(loaded.Events)
-	data, valid := compact.CompactEventDataFromEvent(event)
+	data, valid := session.CheckpointDataFromEvent(event)
 	if !present || !valid || data.Trigger != "manual" || data.SourceEventCount == 0 {
 		t.Fatalf("native checkpoint metadata: %+v", event)
 	}

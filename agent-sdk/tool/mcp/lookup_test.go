@@ -48,7 +48,7 @@ func TestCatalogLookupRealManagerDirectoryScale(t *testing.T) {
 			for i := range n {
 				catalogTool(server, fmt.Sprintf("item%04d", i), "synthetic lookup", &effects)
 			}
-			manager := catalogManager(t, server, true)
+			manager := catalogManager(t, server)
 			probe := &lookupProbe{manager: manager}
 			start := time.Now()
 			for _, i := range []int{0, n / 2, n - 1} {

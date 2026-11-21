@@ -116,7 +116,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	if result.Backend == "" {
 		result.Backend = r.backend
 	}
-	return sandbox.NormalizeSandboxPermissionFailure(result, err)
+	return result, err
 }
 
 func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
@@ -187,9 +187,7 @@ func (s *session) WriteInput(_ context.Context, input []byte) error {
 }
 
 func (s *session) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) ([]byte, []byte, int64, int64, error) {
-	stdout, stderr, nextStdout, nextStderr, err := s.runner.ReadOutput(s.sessionID, stdoutMarker, stderrMarker)
-	stderr = sandbox.NormalizeSandboxPermissionOutput("stderr", stderr)
-	return stdout, stderr, nextStdout, nextStderr, err
+	return s.runner.ReadOutput(s.sessionID, stdoutMarker, stderrMarker)
 }
 
 func (s *session) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
@@ -240,7 +238,7 @@ func (s *session) Result(ctx context.Context) (sandbox.CommandResult, error) {
 	if plainCommandExitError(err) {
 		err = sandbox.MarkCommandExit(err)
 	}
-	return sandbox.NormalizeSandboxPermissionFailure(result, err)
+	return result, err
 }
 
 func plainCommandExitError(err error) bool {
@@ -268,13 +266,10 @@ func translateRequest(req sandbox.CommandRequest) Request {
 		EnvOverrides: req.Env,
 		UnsetEnv:     req.UnsetEnv,
 		Stdin:        append([]byte(nil), req.Stdin...),
-		Constraints:  sandbox.EffectiveConstraints(req),
+		Constraints:  req.Constraints,
 		OnOutput: func(chunk OutputChunk) {
 			if req.OnOutput == nil {
 				return
-			}
-			if strings.EqualFold(strings.TrimSpace(chunk.Stream), "stderr") {
-				chunk.Text = string(sandbox.NormalizeSandboxPermissionOutput("stderr", []byte(chunk.Text)))
 			}
 			req.OnOutput(sandbox.OutputChunk{Stream: chunk.Stream, Text: chunk.Text, Cursor: chunk.Cursor})
 		},

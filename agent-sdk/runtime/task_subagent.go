@@ -2,17 +2,14 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -24,58 +21,12 @@ const (
 	subagentActivityGenerationMeta = "child_activity_generation"
 )
 
-func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
-	spawnID = strings.TrimSpace(spawnID)
-	if spawnID == "" {
-		return randomTaskID()
-	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(ref.SessionID) + "\x00" + spawnID))
-	return hex.EncodeToString(sum[:taskIDRandomBytes]), nil
-}
-
-func resolveSpawnAgent(session session.Session, requested string) (string, error) {
+func normalizeSpawnAgent(requested string) string {
 	requested = strings.TrimSpace(requested)
 	if requested == "" || strings.EqualFold(requested, "self") {
-		return "self", nil
+		return "self"
 	}
-	return requested, nil
-}
-
-func (r *Runtime) buildDelegatedSpawnPromptContext(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-) (agent.ContextTransfer, uint64, error) {
-	return r.buildParticipantPromptContext(ctx, activeSession, ref, session.ParticipantBinding{
-		ID:             "spawn",
-		Label:          "spawn",
-		ContextSyncSeq: 0,
-	})
-}
-
-func (r *Runtime) buildSideSubagentPromptContext(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	target string,
-	sinceSeq uint64,
-) (agent.ContextTransfer, uint64, error) {
-	if r == nil || r.controllerContextRouter == nil {
-		return agent.ContextTransfer{}, 0, fmt.Errorf("controller context routing is unavailable")
-	}
-	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
-		SessionRef: session.NormalizeSessionRef(ref),
-		Session:    session.CloneSession(activeSession),
-		Binding: session.ParticipantBinding{
-			ID:             strings.TrimSpace(target),
-			Label:          strings.TrimSpace(target),
-			ContextSyncSeq: sinceSeq,
-		},
-	})
-	if err != nil {
-		return agent.ContextTransfer{}, 0, err
-	}
-	return agent.CloneContextTransfer(route.Context), route.SyncSeq, nil
+	return requested
 }
 
 func isSideSubagentTask(task *subagentTask) bool {
@@ -121,16 +72,8 @@ func (tm *taskRuntime) authorizeSubagentControl(task *subagentTask, principal se
 	return nil
 }
 
-func (r *Runtime) StartSubagent(
-	ctx context.Context,
-	ref session.SessionRef,
-	agent string,
-	prompt string,
-	source string,
-) (taskapi.Snapshot, error) {
-	return r.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
-}
-
+// StartSubagentWithOptions admits a sidecar under the Session's current
+// controller and returns the original Task snapshot.
 func (r *Runtime) StartSubagentWithOptions(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -150,14 +93,11 @@ func (r *Runtime) StartSubagentWithOptions(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	activeSession, err = r.ensureSessionController(ctx, activeSession)
+	activeSession, err = r.ensureSessionController(ctx, activeSession, session.RuntimeMutationGuard(ctx))
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	agent, err = resolveSpawnAgent(activeSession, agent)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
+	agent = normalizeSpawnAgent(agent)
 	if strings.TrimSpace(prompt) == "" && len(opts.ContentParts) == 0 {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent prompt is required")
 	}
@@ -167,7 +107,7 @@ func (r *Runtime) StartSubagentWithOptions(
 			approvalMode = string(r.currentApprovalMode(state))
 		}
 	}
-	contextTransfer, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), 0)
+	contextTransfer, err := r.buildParticipantPromptContext(ctx, ref, 0)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -198,27 +138,6 @@ func (r *Runtime) StartSubagentWithOptions(
 		Yield:     2 * time.Second,
 		Principal: session.ActorKindController,
 		Source:    "runtime",
-	})
-}
-
-func (r *Runtime) WaitSubagentTask(
-	ctx context.Context,
-	ref session.SessionRef,
-	taskID string,
-	yield time.Duration,
-) (taskapi.Snapshot, error) {
-	if r == nil || r.tasks == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("subagent Runtime is unavailable")
-	}
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return taskapi.Snapshot{}, fmt.Errorf("subagent Task identity is required")
-	}
-	return r.tasks.Wait(ctx, session.NormalizeSessionRef(ref), taskapi.ControlRequest{
-		TaskID:    taskID,
-		Yield:     yield,
-		Principal: session.ActorKindUser,
-		Source:    "user",
 	})
 }
 
@@ -559,18 +478,22 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		agent := taskSpecString(entry.Spec, "agent")
 		target = delegation.Target{
 			Selector: agent,
-			Placement: delegation.Placement{
-				Kind:  delegation.PlacementAgent,
+			Placement: placement.Placement{
+				Kind:  placement.KindAgent,
 				Agent: firstNonEmpty(taskSpecString(entry.Spec, "target_agent"), agent),
 			},
 		}
 	}
 	target = delegation.NormalizeTarget(target)
+	turnSeq := taskTurnSeqFromSpec(entry.Spec)
+	if turnSeq <= 0 {
+		turnSeq = max(taskTurnSeqFromSpec(entry.Metadata), 1)
+	}
 	result := session.CloneState(entry.Result)
 	// SDK Task recovery reads first-activity result mirrors written through
 	// v0.79.1. Remove this fallback once the minimum supported upgrade source
 	// is newer than v0.79.1; current writers use Entry.Result only.
-	if taskTurnSeqFromSpec(entry.Spec) <= 1 {
+	if turnSeq == 1 {
 		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
 			if result == nil {
 				result = map[string]any{}
@@ -609,10 +532,9 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		approvalMode:    taskSpecString(entry.Spec, "approval_mode"),
 		createdAt:       entry.CreatedAt,
 		revision:        entry.Revision,
-		lease:           taskapi.CloneLease(entry.Lease),
 		state:           entry.State,
 		running:         entry.Running,
-		turnSeq:         taskTurnSeqFromSpec(entry.Spec),
+		turnSeq:         turnSeq,
 		result:          result,
 		metadata:        session.CloneState(entry.Metadata),
 		contextUsage:    taskapi.CloneContextUsageRecord(entry.ContextUsage),
@@ -623,11 +545,14 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	delete(task.metadata, "unread_final_responses")
 	delete(task.result, "final_responses")
 	task.activityID = strings.TrimSpace(taskStringValue(entry.Metadata[subagentActivityIDMeta]))
-	if generation, ok := taskInt64Value(entry.Metadata[subagentActivityGenerationMeta]); ok && generation > 0 {
-		task.activityGeneration = generation
-	}
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
+	}
+	if taskStringValue(task.metadata["spawn_status"]) == "" {
+		// Older Task entries may carry their spawn phase only in Spec.
+		if phase := spawnPhaseOf(entry); phase != "" {
+			task.metadata["spawn_status"] = string(phase)
+		}
 	}
 	if _, ok := task.metadata["context_unsupported"]; !ok && taskSpecBool(entry.Spec, "context_unsupported") {
 		task.metadata["context_unsupported"] = true
@@ -640,12 +565,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	}
 	if strings.TrimSpace(taskStringValue(task.metadata["parent_call"])) != "" {
 		task.metadata["parent_tool"] = firstNonEmpty(taskStringValue(task.metadata["parent_tool"]), spawn.ToolName)
-	}
-	if task.turnSeq <= 0 {
-		task.turnSeq = taskTurnSeqFromSpec(entry.Metadata)
-	}
-	if task.turnSeq <= 0 {
-		task.turnSeq = 1
 	}
 	if task.runner == nil && task.running {
 		task.applyInterruptedLocked("subagent session requires reconnect")
@@ -682,7 +601,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.metadata["state"] = string(t.state)
 	if taskOutputHasNonBlankLine(result.OutputPreview) {
 		t.result["output_preview"] = result.OutputPreview
-	} else if t.result != nil {
+	} else {
 		delete(t.result, "output_preview")
 	}
 	if taskOutputHasNonBlankLine(result.Result) {
@@ -690,10 +609,7 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 		if !t.running {
 			t.result["final_message"] = result.Result
 		}
-	} else if !t.running {
-		delete(t.result, "result")
-		delete(t.result, "final_message")
-	} else if t.result != nil {
+	} else {
 		delete(t.result, "result")
 		delete(t.result, "final_message")
 	}
@@ -833,7 +749,6 @@ func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
 		SupportsCancel: false,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      time.Now(),
-		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		EventCursor:    max(t.turnSeq, 0),
@@ -863,7 +778,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		SupportsCancel: false,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
-		Lease:          taskapi.CloneLease(t.lease),
 		ContextUsage:   taskapi.CloneContextUsageRecord(t.contextUsage),
 		Spec: map[string]any{
 			"content_parts":        t.contentParts,
@@ -875,7 +789,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"approval_mode":        t.approvalMode,
 			"spawn_identity":       taskStringValue(t.metadata["spawn_identity"]),
 			"spawn_request_digest": taskStringValue(t.metadata["spawn_request_digest"]),
-			"spawn_phase":          taskStringValue(t.metadata["spawn_status"]),
 			subagentCancelPhaseKey: taskStringValue(t.metadata[subagentCancelPhaseKey]),
 			"session_id":           t.anchor.SessionID,
 			"agent_id":             t.anchor.AgentID,

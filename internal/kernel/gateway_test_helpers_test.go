@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 )
 
 type mockRuntime struct{}
@@ -432,7 +433,7 @@ func (r *cancellableRuntime) RunState(context.Context, session.SessionRef) (agen
 type controlPlaneRuntime struct {
 	session     session.Session
 	runState    agent.RunState
-	handoffReq  agent.HandoffControllerRequest
+	handoffReq  controlplane.HandoffControllerRequest
 	handoffResp session.Session
 	attachReq   agent.AttachParticipantRequest
 	attachResp  session.Session
@@ -495,7 +496,7 @@ func (r *controlPlaneRuntime) RunState(context.Context, session.SessionRef) (age
 	return r.runState, nil
 }
 
-func (r *controlPlaneRuntime) HandoffController(_ context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
+func (r *controlPlaneRuntime) HandoffController(_ context.Context, req controlplane.HandoffControllerRequest) (session.Session, error) {
 	r.handoffReq = req
 	return r.handoffResp, nil
 }
@@ -588,9 +589,7 @@ func (s staticSessionService) RemoveParticipant(context.Context, session.RemoveP
 func (s staticSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return cloneMap(s.state), nil
 }
-func (s staticSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
-	return s.session, nil
-}
+
 func (s staticSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
 	return s.session, nil
 }
@@ -610,7 +609,6 @@ type recordingSessionService struct {
 	sessionResult      session.Session
 	eventsResult       []*session.Event
 	appendReqs         []session.AppendEventRequest
-	appendOutcomes     []bool
 	snapshotErr        error
 	startErr           error
 	loadErr            error
@@ -652,16 +650,6 @@ func (s *recordingSessionService) Session(_ context.Context, ref session.Session
 func (s *recordingSessionService) AppendEvent(_ context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	s.appendReqs = append(s.appendReqs, req)
 	return storedTestEvent(req), nil
-}
-
-func (s *recordingSessionService) AppendEventWithOutcome(ctx context.Context, req session.AppendEventRequest) (session.AppendEventResult, error) {
-	event, err := s.AppendEvent(ctx, req)
-	appended := true
-	if len(s.appendOutcomes) > 0 {
-		appended = s.appendOutcomes[0]
-		s.appendOutcomes = s.appendOutcomes[1:]
-	}
-	return session.AppendEventResult{Event: event, Appended: appended}, err
 }
 
 func storedTestEvent(req session.AppendEventRequest) *session.Event {
@@ -715,10 +703,6 @@ func (s *recordingSessionService) SnapshotState(context.Context, session.Session
 		return nil, s.snapshotErr
 	}
 	return map[string]any{}, nil
-}
-
-func (s *recordingSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
-	return s.sessionResult, nil
 }
 
 func (s *recordingSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {

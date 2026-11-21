@@ -36,11 +36,10 @@ type asyncCompactScopeKey struct{}
 // Only the foreground accesses scope fields. The producer publishes its result
 // and accounting error by closing done; it never installs a checkpoint.
 type asyncCompactScope struct {
-	mu       sync.Mutex
-	ctx      context.Context
-	job      *asyncCompactJob
-	started  bool
-	releases []func()
+	mu      sync.Mutex
+	ctx     context.Context
+	job     *asyncCompactJob
+	release func()
 }
 
 type asyncCompactJob struct {
@@ -73,10 +72,10 @@ func (s *asyncCompactScope) drain() error {
 		// Cancellation is a request, not evidence of producer quiescence.
 		<-s.job.done
 	}
-	for _, release := range s.releases {
-		release()
+	if s.release != nil {
+		s.release()
+		s.release = nil
 	}
-	s.releases = nil
 	if s.job != nil {
 		return s.job.receiptErr
 	}
@@ -89,15 +88,8 @@ func (*asyncCompactAdoptedError) Error() string {
 	return "runtime: rebuild after durable async compaction"
 }
 
-// asyncCompactBeforeRequest runs after a complete request has been assembled,
-// before dispatch. Returning adopted asks the existing Run loop to rebuild from
-// durable truth; it does not mutate the chat Agent's private message slice.
-func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req *model.Request, hard bool) (bool, error) {
-	return l.asyncCompactionBoundary(ctx, req, hard, false)
-}
-
-// Launch only after actual-attempt admission and request preparation. An
-// assembled request rejected by admission cannot authorize speculative spend.
+// A pre-dispatch boundary can adopt a checkpoint and ask the Run loop to
+// rebuild from durable history. Launch only after actual attempt admission.
 func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *model.Request, hard, dispatch bool) (bool, error) {
 	r := l.runtime
 	s := asyncScope(ctx)
@@ -150,14 +142,14 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 		}
 		return false, nil
 	}
-	if !dispatch || s.started || req.Source == nil || !compactionPrefixSafe(req.Messages) {
+	if !dispatch || s.job != nil || req.Source == nil || !compactionPrefixSafe(req.Messages) {
 		return false, nil
 	}
 	messagesHash, err := requestsource.Fingerprint(req.Messages)
 	if err != nil || messagesHash != req.Source.MessagesHash {
 		return false, nil
 	}
-	if l.requestAuthority != nil && !l.requestAuthority.canSpeculate {
+	if l.requestAuthority != nil && l.requestAuthority.validate == nil {
 		return false, nil
 	}
 	provider, modelName := compactionModelIdentity(l.inner)
@@ -193,11 +185,11 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	if err != nil || prefix != req.Source.SourcePrefixHash || session.LastEventSeq(events) != req.Source.SourceThroughSeq {
 		return false, nil
 	}
-	delta := compactableEvents(events)
+	delta := compact.EventsAfterLatestCompact(events)
 	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) || !asyncToolPairsComplete(compact.PromptEventsFromLatestCompact(events)) {
 		return false, nil
 	}
-	usage, _, _ := usageForModelRequestDetails(events, l.inner, req, r.compaction)
+	usage, _ := usageForModelRequest(events, l.inner, req, r.compaction)
 	ratio := r.compaction.Async.StartRatio
 	if ratio == 0 {
 		ratio = .65
@@ -231,8 +223,8 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 		requestHash: requestHash, epoch: epoch, llm: l.inner, guard: guard,
 		cancel: cancel, done: make(chan struct{}),
 	}
-	s.started, s.job = true, job
-	s.releases = append(s.releases, l.requestAuthority.retain())
+	s.job = job
+	s.release = l.requestAuthority.retain()
 	go func() {
 		defer close(job.done)
 		defer cancel()
@@ -247,7 +239,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 			})
 		}
 		job.result, job.err = r.compactor.(compact.ForceEngine).Force(generationCtx, compact.Request{
-			Session: loaded.Session, SessionRef: l.sessionRef, Events: session.CloneEvents(job.source.Events),
+			Session: loaded.Session, Events: session.CloneEvents(job.source.Events),
 			Model: l.inner, ServiceTier: job.frozen.ServiceTier,
 			InContextRequest: job.frozen, Coverage: &job.coverage, RequireInContext: true,
 		}, "async_candidate")

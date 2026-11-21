@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 )
 
 // Agent is the LLM-visible descriptor of one spawnable ACP agent.
@@ -15,29 +15,11 @@ type Agent struct {
 	Description string `json:"description,omitempty"`
 }
 
-// PlacementKind identifies the reusable execution backend captured for a
-// delegated child. Product-specific profile selection is resolved before this
-// value enters the Runtime.
-type PlacementKind = sdkplacement.Kind
-
-const (
-	// PlacementAgent runs an already assembled external or built-in Agent.
-	PlacementAgent = sdkplacement.KindAgent
-	// PlacementModel runs one configured model through the host's local child
-	// endpoint factory.
-	PlacementModel = sdkplacement.KindModel
-)
-
-// Placement is the typed durable execution decision behind a model-visible
-// Spawn selector. ConfigFingerprint lets the host fail closed when a prepared
-// Spawn is recovered after its referenced configuration changed.
-type Placement = sdkplacement.Placement
-
 // Target combines one stable model-visible selector with its resolved durable
 // execution placement.
 type Target struct {
-	Selector  string    `json:"selector,omitempty"`
-	Placement Placement `json:"placement,omitempty"`
+	Selector  string              `json:"selector,omitempty"`
+	Placement placement.Placement `json:"placement,omitempty"`
 }
 
 // State identifies one delegated child lifecycle state.
@@ -139,7 +121,7 @@ func CloneTargetRequest(in TargetRequest) TargetRequest {
 // AgentTarget returns a target that directly executes one assembled Agent.
 func AgentTarget(name string) Target {
 	name = strings.TrimSpace(name)
-	return Target{Selector: name, Placement: Placement{Kind: PlacementAgent, Agent: name}}
+	return Target{Selector: name, Placement: placement.Placement{Kind: placement.KindAgent, Agent: name}}
 }
 
 // ValidateTarget rejects incomplete or unknown execution placements before a
@@ -149,7 +131,7 @@ func ValidateTarget(raw Target) error {
 	if target.Selector == "" {
 		return fmt.Errorf("agent-sdk/task/delegation: target selector is required")
 	}
-	if err := sdkplacement.Validate(target.Placement); err != nil {
+	if err := placement.Validate(target.Placement); err != nil {
 		return fmt.Errorf("agent-sdk/task/delegation: %w", err)
 	}
 	return nil
@@ -168,15 +150,10 @@ func CloneResult(in Result) Result {
 	return out
 }
 
-// NormalizePlacement returns one canonical detached placement.
-func NormalizePlacement(in Placement) Placement {
-	return sdkplacement.Normalize(in)
-}
-
 // NormalizeTarget returns one canonical detached target.
 func NormalizeTarget(in Target) Target {
 	return Target{
 		Selector:  strings.TrimSpace(in.Selector),
-		Placement: NormalizePlacement(in.Placement),
+		Placement: placement.Normalize(in.Placement),
 	}
 }

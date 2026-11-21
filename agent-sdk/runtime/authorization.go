@@ -18,7 +18,6 @@ type PolicyConsentWriter func(context.Context, string, session.AuthorizationScop
 
 type authorizationFlight struct {
 	scope    session.AuthorizationScope
-	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
 	waiters  int
@@ -44,28 +43,28 @@ func (r *Runtime) authorizationEvidence(ctx context.Context, active session.Sess
 	return session.ProjectAuthorizations(active, events), nil
 }
 
-func (r *Runtime) checkAuthorization(ctx context.Context, active session.Session, a *session.ApprovalAuthorization) error {
+func (r *Runtime) checkAuthorization(ctx context.Context, active session.Session, a *session.ApprovalAuthorization) (session.AuthorizationEvidence, error) {
 	if a == nil {
-		return nil
+		return session.AuthorizationEvidence{}, nil
 	}
 	if a.Scope.SessionID != "" {
 		current, err := r.sessions.Session(ctx, active.SessionRef)
 		if err != nil {
-			return err
+			return session.AuthorizationEvidence{}, err
 		}
 		if !a.Scope.MatchesSession(current) {
-			return errors.New("authorization has a different current Session incarnation or workspace")
+			return session.AuthorizationEvidence{}, errors.New("authorization has a different current Session incarnation or workspace")
 		}
 		active = current
 	}
 	evidence, err := r.authorizationEvidence(ctx, active)
 	if err != nil {
-		return err
+		return session.AuthorizationEvidence{}, err
 	}
 	if evidence.Revocations[a.Scope.Key()] != a.Revocation {
-		return errors.New("authorization revoked while call was pending")
+		return session.AuthorizationEvidence{}, errors.New("authorization revoked while call was pending")
 	}
-	return nil
+	return evidence, nil
 }
 
 // RevokeAuthorization appends one revocation fact under the approval owner.
@@ -162,11 +161,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 		return t.resolveApproval(ctx, request)
 	}
 	r.authorizationMu.Lock()
-	if err := r.checkAuthorization(ctx, t.session, a); err != nil {
-		r.authorizationMu.Unlock()
-		return agent.ApprovalResponse{}, err
-	}
-	evidence, err := r.authorizationEvidence(ctx, t.session)
+	evidence, err := r.checkAuthorization(ctx, t.session, a)
 	if err != nil {
 		r.authorizationMu.Unlock()
 		return agent.ApprovalResponse{}, err
@@ -199,7 +194,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 			cancel = func() { continuation.cancel(context.Canceled) }
 			finish = func() { scope.complete(id, continuation, nil) }
 		}
-		flight = &authorizationFlight{scope: a.Scope, ctx: work, cancel: cancel, done: make(chan struct{})}
+		flight = &authorizationFlight{scope: a.Scope, cancel: cancel, done: make(chan struct{})}
 		if r.authorizationFlights == nil {
 			r.authorizationFlights = map[string]*authorizationFlight{}
 		}
@@ -250,7 +245,7 @@ func (p *policyDispatchPermit) consume(ctx context.Context) error {
 	if r != nil {
 		r.authorizationMu.Lock()
 		defer r.authorizationMu.Unlock()
-		if err := r.checkAuthorization(ctx, p.session, p.decision.Authorization); err != nil {
+		if _, err := r.checkAuthorization(ctx, p.session, p.decision.Authorization); err != nil {
 			return err
 		}
 	}

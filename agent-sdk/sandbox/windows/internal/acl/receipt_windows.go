@@ -19,7 +19,10 @@ import (
 )
 
 const aceReceiptVersion = 2
-const aclRevisionDS = 4
+const (
+	aclRevision   = 2
+	aclRevisionDS = 4
+)
 
 const (
 	accessDeniedObjectACEType         = 0x06

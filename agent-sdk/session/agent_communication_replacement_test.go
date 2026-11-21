@@ -22,7 +22,7 @@ func TestAgentCommunicationObservedClearDoesNotRelaxCanonicalInput(t *testing.T)
 		observed.Protocol.Update.Content = map[string]any{"type": "text", "text": ""}
 		observed.Protocol.Update.Replacement = true
 		communication := ProtocolAgentCommunicationOf(observed)
-		if communication == nil || communication.Text != "" || IsInvocationVisibleEvent(observed) {
+		if communication == nil || communication.Text != "" || IsCanonicalHistoryEvent(observed) {
 			t.Fatalf("display clear lost or acquired model authority: %#v", observed)
 		}
 		canonical := CloneEvent(observed)

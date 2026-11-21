@@ -9,8 +9,8 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -46,7 +46,7 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
 			Provider:            "custom-chat",
-			API:                 providers.APIOpenAICompatible,
+			API:                 model.APIOpenAICompatible,
 			Model:               "messageid-test",
 			BaseURL:             provider.URL,
 			HTTPClient:          provider.Client(),

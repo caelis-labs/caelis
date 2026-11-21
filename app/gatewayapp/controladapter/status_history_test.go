@@ -69,7 +69,9 @@ func TestStatusSharesParentHistoryCutAndRefreshesUsage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		expectedContext := runtime.ComputeUsageSnapshotForModel(events, nil, 128000, runtime.CompactionConfig{}, "fixture", "main")
+		var projection runtime.ContextUsageProjection
+		projection.Append(events)
+		expectedContext := projection.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main")
 		result, err := driver.Status(t.Context())
 		if err != nil {
 			t.Fatal(err)

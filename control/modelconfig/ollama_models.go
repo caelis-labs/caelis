@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 )
 
@@ -18,13 +19,14 @@ var ErrOllamaUnreachable = errorcode.New(errorcode.Unavailable, "Cannot reach Ol
 var ErrOllamaAPINotFound = errorcode.New(errorcode.NotFound, "Ollama model API not found. Check the selected endpoint and retry.")
 
 // selectableOllamaModels discovers installed models from the selected endpoint.
-func selectableOllamaModels(ctx context.Context, baseURL string, client *http.Client) ([]SelectableModel, error) {
+func selectableOllamaModels(ctx context.Context, baseURL string, client *http.Client, clientVersion string) ([]SelectableModel, error) {
 	remote, err := providers.DiscoverModels(ctx, providers.Config{
 		Provider:   "ollama",
-		API:        providers.APIOllama,
+		API:        model.APIOllama,
 		BaseURL:    baseURL,
 		HTTPClient: client,
-		Auth:       providers.AuthConfig{Type: providers.AuthNone},
+		UserAgent:  providerUserAgent(clientVersion),
+		Auth:       providers.AuthConfig{Type: model.AuthNone},
 	})
 	if err != nil {
 		var dial *net.OpError

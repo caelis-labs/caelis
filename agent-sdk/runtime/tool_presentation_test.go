@@ -27,22 +27,33 @@ import (
 func TestRuntimePlanPointerPublishesPlan(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-		if i == 0 {
+		switch i {
+		case 0:
 			return []model.ToolCall{{ID: "plan", Name: plan.ToolName, Args: `{"entries":[{"content":"Check the output","status":"in_progress"}],"explanation":"Verify the result"}`}}
+		case 1:
+			return []model.ToolCall{{ID: "invalid", Name: plan.ToolName, Args: `{"entries":[{"content":"First","status":"in_progress"},{"content":"Second","status":"in_progress"}]}`}}
+		case 2:
+			return []model.ToolCall{{ID: "clear", Name: plan.ToolName, Args: `{"entries":[],"explanation":"Clear the list"}`}}
 		}
 		return nil
 	}}
 	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&plan.Tool{}}}, nil, nil)
+	var updates []*session.Event
 	for _, event := range events {
-		if payload := session.PlanPayloadOf(event); payload != nil && len(payload.Entries) > 0 {
-			want := []session.EventPlanEntry{{Content: "Check the output", Status: "in_progress", Priority: "medium"}}
-			if !reflect.DeepEqual(payload.Entries, want) || event.Text != "Verify the result" {
-				t.Fatalf("plan display = %+v, text = %q", payload, event.Text)
-			}
-			return
+		if event.PlanPayload != nil {
+			updates = append(updates, event)
 		}
 	}
-	t.Fatal("successful Plan call did not publish its entries")
+	if len(updates) != 2 {
+		t.Fatalf("got %d Plan updates, want the initial list and explicit clear", len(updates))
+	}
+	want := []session.EventPlanEntry{{Content: "Check the output", Status: "in_progress", Priority: "medium"}}
+	if !reflect.DeepEqual(updates[0].PlanPayload.Entries, want) || updates[0].Text != "Verify the result" {
+		t.Fatalf("plan display = %+v, text = %q", updates[0].PlanPayload, updates[0].Text)
+	}
+	if len(updates[1].PlanPayload.Entries) != 0 || updates[1].Text != "Clear the list" {
+		t.Fatalf("plan clear = %+v, text = %q", updates[1].PlanPayload, updates[1].Text)
+	}
 }
 
 func TestCodeModeMutationDisplayAndModelReplay(t *testing.T) {

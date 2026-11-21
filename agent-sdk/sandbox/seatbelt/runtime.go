@@ -335,14 +335,6 @@ func (s *seatbeltRunner) GetSessionStatus(sessionID string) (cmdsession.SessionS
 	return manager.GetSessionStatus(sessionID)
 }
 
-func (s *seatbeltRunner) GetSession(sessionID string) (*cmdsession.AsyncSession, error) {
-	manager, err := s.asyncSessionManager()
-	if err != nil {
-		return nil, err
-	}
-	return manager.GetSession(sessionID)
-}
-
 func (s *seatbeltRunner) WaitSession(ctx context.Context, sessionID string, timeout time.Duration) (sandbox.CommandResult, error) {
 	manager, err := s.asyncSessionManager()
 	if err != nil {

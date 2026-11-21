@@ -26,7 +26,7 @@ func TestContentV1AcceptedReceiptNeverTruncates(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	projected, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
+	projected, err := s.projectResult(t.Context(), call.CallContext, call.ID, ResultFormatContentV1, result)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestContentV1StructuredNumbersRemainExact(t *testing.T) {
 	if err != nil || stored.Result == nil || stored.Result.StructuredContent["id"] != json.Number("9007199254740993") {
 		t.Fatalf("structured number changed in receipt: %+v %v", stored.Result, err)
 	}
-	projected, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, *stored.Result)
+	projected, err := s.projectResult(t.Context(), call.CallContext, call.ID, ResultFormatContentV1, *stored.Result)
 	if raw, ok := projected.Structured(); err != nil || !ok || !strings.Contains(string(raw), `9007199254740993`) {
 		t.Fatal("structured number changed in native content")
 	}
@@ -155,7 +155,7 @@ func TestContentV1EmptyStructuredObjectSurvivesReceipt(t *testing.T) {
 		if err := reopened.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 			t.Fatal(err)
 		}
-		projected, err := reopened.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, *got.Result)
+		projected, err := reopened.projectResult(t.Context(), call.CallContext, call.ID, ResultFormatContentV1, *got.Result)
 		if raw, ok := projected.Structured(); err != nil || !ok || string(raw) != `{}` {
 			t.Fatal("empty structured object absent from projected result")
 		}

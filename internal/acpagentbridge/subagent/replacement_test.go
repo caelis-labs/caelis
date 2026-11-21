@@ -153,8 +153,8 @@ func TestDraftChildPreviousActivityRevisionKeepsCurrentResult(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller"}, Input: "second input"})
-			if err != nil || !started.StartedActivity || started.ActivityID == spawn.ActivityID {
+			started, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller"}, Input: "second input"})
+			if err != nil || !started.StartedActivity || expectedActivityID == spawn.ActivityID {
 				t.Fatalf("new Activity admission = %+v, %v", started, err)
 			}
 			observedRevisions := 0
@@ -182,7 +182,7 @@ func TestDraftChildPreviousActivityRevisionKeepsCurrentResult(t *testing.T) {
 				}
 				close(continueAnswer)
 			}
-			frames, second := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+			frames, second := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 			for _, frame := range frames {
 				if frame.Event == nil || frame.Event.Text != "revised first after current" {
 					continue
@@ -302,11 +302,11 @@ func TestDraftChildPreviousThoughtRevisionKeepsCurrentResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "second input"})
+	_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "second input"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	frames, second := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+	frames, second := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 	observedRevision := false
 	for _, frame := range frames {
 		if frame.Event == nil || frame.Event.Text != "revised first thought" {
@@ -378,7 +378,7 @@ func TestChildParentCommunicationPreservesObservedMessagePatch(t *testing.T) {
 				t.Fatalf("observed source or message patch lost: %#v", event)
 			}
 			communication := session.ProtocolAgentCommunicationOf(event)
-			if communication == nil || communication.Text != "" || session.IsInvocationVisibleEvent(event) {
+			if communication == nil || communication.Text != "" || session.IsCanonicalHistoryEvent(event) {
 				t.Fatalf("empty observed mail lost or became model input: %#v", event)
 			}
 		}
@@ -410,7 +410,7 @@ func TestChildTrustedCommunicationReplacementKeepsDisplayBody(t *testing.T) {
 		if index == 1 {
 			want = ""
 		}
-		if communication == nil || communication.Text != want || frame.Event.Actor != source || !frame.Event.Protocol.Update.Replacement || session.IsInvocationVisibleEvent(frame.Event) {
+		if communication == nil || communication.Text != want || frame.Event.Actor != source || !frame.Event.Protocol.Update.Replacement || session.IsCanonicalHistoryEvent(frame.Event) {
 			t.Fatalf("trusted communication display body lost: communication=%#v event=%#v", communication, frame.Event)
 		}
 	}

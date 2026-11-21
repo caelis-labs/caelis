@@ -22,12 +22,6 @@ type Events interface {
 	At(int) *session.Event
 }
 
-// ReadonlyState exposes immutable session state snapshots.
-type ReadonlyState interface {
-	Lookup(string) (any, bool)
-	Snapshot() map[string]any
-}
-
 // SubmissionKind identifies one runtime submission path.
 type SubmissionKind string
 
@@ -79,16 +73,9 @@ const (
 // RunState projects only a live handle in this Runtime. An empty value means
 // no live handle; historical outcomes belong to their owning Session or Task facts.
 type RunState struct {
-	Status            RunLifecycleStatus `json:"status,omitempty"`
-	ActiveRunID       string             `json:"active_run_id,omitempty"`
-	WaitingApproval   bool               `json:"waiting_approval,omitempty"`
-	ApprovalRequestID string             `json:"approval_request_id,omitempty"`
-}
-
-// ContextUsage reports context window usage for one session.
-type ContextUsage struct {
-	CurrentTokens int `json:"current_tokens,omitempty"`
-	MaxTokens     int `json:"max_tokens,omitempty"`
+	Status          RunLifecycleStatus `json:"status,omitempty"`
+	ActiveRunID     string             `json:"active_run_id,omitempty"`
+	WaitingApproval bool               `json:"waiting_approval,omitempty"`
 }
 
 // Runner is one active runtime run handle. Live source observation is installed
@@ -98,6 +85,9 @@ type Runner interface {
 	RunID() string
 	Submit(Submission) error
 	Cancel() CancelResult
+	// WaitCompletion waits for the producer and its final durable writes to
+	// finish, then returns its terminal outcome. If the wait context ends
+	// first, completion remains unproven.
 	WaitCompletion(context.Context) error
 	Close() error
 }
@@ -115,14 +105,6 @@ type ContextSubmissionRunner interface {
 type BatchSubmissionRunner interface {
 	SubmitBatch(context.Context, []AgentCommunicationInput) error
 }
-
-// RunnerCompletionWaiter reports when the execution producer, including its
-// final durable writes, is quiescent. Returning proves that the producer is no
-// longer live; a non-nil error describes its terminal outcome. If the supplied
-// wait context ends first, completion remains unproven. Runtime decorators that
-// own an external fence require this contract before releasing authority after
-// natural completion, cancellation, or Close.
-type RunnerCompletionWaiter interface{ WaitCompletion(context.Context) error }
 
 // SubagentRunner starts delegated child runs from the current invocation.
 // Concrete child-agent configuration is app-owned; runtime only sees the
@@ -189,8 +171,7 @@ type ChildInputCommand struct {
 // true when idle input started a prompt activity; active steering
 // remains part of the already running activity.
 type ChildInputResult struct {
-	ActivityID      string `json:"activity_id,omitempty"`
-	StartedActivity bool   `json:"started_activity,omitempty"`
+	StartedActivity bool `json:"started_activity,omitempty"`
 }
 
 // ChildInputRunner is the optional provider-neutral input capability for an
@@ -229,10 +210,6 @@ type EndpointApprovalToolCall struct {
 	RawOutput   map[string]any                    `json:"raw_output,omitempty"`
 	Content     []session.ProtocolToolCallContent `json:"content,omitempty"`
 }
-
-// SubagentApprovalToolCall preserves the scope-specific name while sharing the
-// endpoint approval tool-call contract.
-type SubagentApprovalToolCall = EndpointApprovalToolCall
 
 // SubagentApprovalRequest is one child permission request bridged into the
 // parent runtime approval surface.
@@ -279,15 +256,12 @@ type SubagentSpawnContext struct {
 	Completion delegation.CompletionSink `json:"-"`
 }
 
-// Context exposes immutable invocation state derived from persisted events and
-// runtime overlays.
+// Context exposes the Session and event history for one Agent invocation.
 type Context interface {
 	context.Context
 	Session() session.Session
 	Events() Events
-	ReadonlyState() ReadonlyState
 	DrainSubmissions() []Submission
-	Overlay() bool
 }
 
 // Agent is the runtime execution unit.
@@ -312,7 +286,6 @@ type AgentSpec struct {
 	// ResolveModelRequest optionally replaces model-facing configuration at
 	// every unsent request boundary. Runtime authority and policy remain fixed.
 	ResolveModelRequest       ModelRequestResolver `json:"-"`
-	SubagentRunner            SubagentRunner       `json:"-"`
 	Request                   ModelRequestOptions
 	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
 	Metadata                  map[string]any     `json:"metadata,omitempty"`
@@ -342,7 +315,7 @@ func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelReq
 		out.Stream = &value
 	}
 	if o.Output != nil {
-		out.Output = cloneOutputSpec(o.Output)
+		out.Output = model.CloneOutputSpec(o.Output)
 	}
 	if o.ServiceTier != "" {
 		out.ServiceTier = o.ServiceTier
@@ -358,51 +331,8 @@ func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool {
 }
 
 func (o ModelRequestOptions) OutputSpec() *model.OutputSpec {
-	return cloneOutputSpec(o.Output)
+	return model.CloneOutputSpec(o.Output)
 }
-
-func cloneOutputSpec(in *model.OutputSpec) *model.OutputSpec {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	if in.JSONSchema != nil {
-		out.JSONSchema = cloneOutputJSONMap(in.JSONSchema)
-	}
-	return &out
-}
-
-func cloneOutputJSONMap(in map[string]any) map[string]any {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneOutputJSONValue(value)
-	}
-	return out
-}
-
-func cloneOutputJSONValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneOutputJSONMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = cloneOutputJSONValue(item)
-		}
-		return out
-	case []string:
-		return append([]string(nil), typed...)
-	default:
-		return typed
-	}
-}
-
-type SubagentRunRequest = delegation.Request
-type SubagentRunResult = delegation.Result
-type SubagentAnchor = delegation.Anchor
 
 // AgentFactory constructs one runnable agent instance.
 type AgentFactory interface {
@@ -414,9 +344,7 @@ type ContextSpec struct {
 	Context          context.Context
 	Session          session.Session
 	Events           []*session.Event
-	State            map[string]any
 	DrainSubmissions func() []Submission
-	Overlay          bool
 	// InputReady optionally observes queued input without consuming it. The
 	// callback must support concurrent calls; see InputReady for signal semantics.
 	InputReady func() <-chan struct{}
@@ -435,9 +363,7 @@ func NewContext(spec ContextSpec) Context {
 		Context:          ctx,
 		session:          session.CloneSession(spec.Session),
 		events:           NewEvents(spec.Events),
-		state:            NewReadonlyState(spec.State),
 		drainSubmissions: spec.DrainSubmissions,
-		overlay:          spec.Overlay,
 	}
 }
 
@@ -448,11 +374,6 @@ func NewEvents(events []*session.Event) Events {
 		return eventSlice{}
 	}
 	return eventSlice{events: session.CloneEvents(events)}
-}
-
-// NewReadonlyState wraps one state snapshot as one readonly view.
-func NewReadonlyState(values map[string]any) ReadonlyState {
-	return readonlyStateSnapshot{values: jsonvalue.CloneMap(values)}
 }
 
 type eventSlice struct {
@@ -480,26 +401,11 @@ func (e eventSlice) At(i int) *session.Event {
 	return session.CloneEvent(e.events[i])
 }
 
-type readonlyStateSnapshot struct {
-	values map[string]any
-}
-
-func (s readonlyStateSnapshot) Lookup(key string) (any, bool) {
-	value, ok := s.values[key]
-	return jsonvalue.Clone(value), ok
-}
-
-func (s readonlyStateSnapshot) Snapshot() map[string]any {
-	return jsonvalue.CloneMap(s.values)
-}
-
 type contextSnapshot struct {
 	context.Context
 	session          session.Session
 	events           Events
-	state            ReadonlyState
 	drainSubmissions func() []Submission
-	overlay          bool
 }
 
 func (c *contextSnapshot) Session() session.Session {
@@ -510,19 +416,11 @@ func (c *contextSnapshot) Events() Events {
 	return c.events
 }
 
-func (c *contextSnapshot) ReadonlyState() ReadonlyState {
-	return c.state
-}
-
 func (c *contextSnapshot) DrainSubmissions() []Submission {
 	if c == nil || c.drainSubmissions == nil {
 		return nil
 	}
 	return CloneSubmissions(c.drainSubmissions())
-}
-
-func (c *contextSnapshot) Overlay() bool {
-	return c != nil && c.overlay
 }
 
 // CloneSubmission copies one submission before queueing or fan-out.

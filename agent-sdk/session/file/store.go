@@ -50,18 +50,9 @@ func newStore(cfg Config) *Store {
 	return store
 }
 
-func (s *Store) withRootWriteLockContext(ctx context.Context, fn func() error) error {
-	return s.withRootLockContext(ctx, storeRootLockExclusive, fn)
-}
-
-func (s *Store) withRootReadLockContext(ctx context.Context, fn func() error) error {
-	// Reads may need to finish a committed WAL transaction before exposing
-	// document/event state, so cancellation changes acquisition only, not the
-	// exclusive recovery barrier.
-	return s.withRootLockContext(ctx, storeRootLockExclusive, fn)
-}
-
-func (s *Store) withRootLockContext(ctx context.Context, mode storeRootLockMode, fn func() error) error {
+// withRootLockContext holds the exclusive root lock for a complete recovery
+// barrier and operation. Reads may need to finish a committed WAL transaction.
+func (s *Store) withRootLockContext(ctx context.Context, fn func() error) error {
 	if s == nil || fn == nil {
 		return nil
 	}
@@ -94,7 +85,7 @@ func (s *Store) withRootLockContext(ctx context.Context, mode storeRootLockMode,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	file, err := lockSessionStoreRoot(ctx, root, mode)
+	file, err := lockSessionStoreRoot(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -104,25 +95,23 @@ func (s *Store) withRootLockContext(ctx context.Context, mode storeRootLockMode,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if mode == storeRootLockExclusive {
-		pending, err := s.transactionRecoveryPending()
-		if err != nil {
+	pending, err := s.transactionRecoveryPending()
+	if err != nil {
+		return err
+	}
+	// A full legacy scan is required once per process/root. Current writers
+	// maintain a durable root marker, so subsequent operations pay only one
+	// Stat unless a committed WAL was abandoned by a crashed process.
+	if !rootLock.recoveryInitialized || pending {
+		if err := s.recoverTransactions(ctx); err != nil {
 			return err
 		}
-		// A full legacy scan is required once per process/root. Current writers
-		// maintain a durable root marker, so subsequent operations pay only one
-		// Stat unless a committed WAL was abandoned by a crashed process.
-		if !rootLock.recoveryInitialized || pending {
-			if err := s.recoverTransactions(ctx); err != nil {
+		if !rootLock.recoveryInitialized {
+			if err := s.migrateLegacyGeneratedTitles(ctx); err != nil {
 				return err
 			}
-			if !rootLock.recoveryInitialized {
-				if err := s.migrateLegacyGeneratedTitles(ctx); err != nil {
-					return err
-				}
-			}
-			rootLock.recoveryInitialized = true
 		}
+		rootLock.recoveryInitialized = true
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -170,7 +159,7 @@ func (s *Store) StartSession(
 	defer s.mu.Unlock()
 
 	var out session.Session
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocument(ref.SessionID)
 		switch {
 		case err == nil:
@@ -193,7 +182,7 @@ func (s *Store) StartSession(
 			CWD:             strings.TrimSpace(req.Workspace.CWD),
 			ExecutionConfig: sandbox.CloneExecutionConfig(req.ExecutionConfig),
 			Title:           strings.TrimSpace(req.Title),
-			Metadata:        cloneMap(req.Metadata),
+			Metadata:        cloneState(req.Metadata),
 			Controller:      session.CloneControllerBinding(req.Controller),
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -234,7 +223,7 @@ func (s *Store) Session(
 	defer s.mu.Unlock()
 
 	var out session.Session
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -257,7 +246,7 @@ func (s *Store) ListSessions(
 	defer s.mu.Unlock()
 
 	var out session.SessionList
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		list, err := s.listFromSessionIndex(req)
 		if err != nil {
 			return err
@@ -274,32 +263,23 @@ func (s *Store) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	result, err := s.AppendEventWithOutcome(ctx, req)
-	return result.Event, err
-}
-
-func (s *Store) AppendEventWithOutcome(
-	ctx context.Context,
-	req session.AppendEventRequest,
-) (session.AppendEventResult, error) {
 	event := req.Event
 	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
+		return nil, session.ErrInvalidEvent
 	}
 	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
 	if err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	defer s.mu.Unlock()
 
 	var out *session.Event
-	var appended bool
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -312,84 +292,17 @@ func (s *Store) AppendEventWithOutcome(
 		if err != nil {
 			return err
 		}
-		normalized := tx.Prepared.Events[0]
-		if !tx.Changed {
-			out = session.CloneEvent(normalized)
-			return nil
-		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
-			return err
-		}
-		out = session.CloneEvent(normalized)
-		appended = true
-		return nil
-	}); err != nil {
-		return session.AppendEventResult{}, err
-	}
-	return session.AppendEventResult{Event: out, Appended: appended}, nil
-}
-
-// AppendEventWithOutcomeConditional atomically checks related Session
-// revisions and appends the target event under the store root write lock.
-func (s *Store) AppendEventWithOutcomeConditional(
-	ctx context.Context,
-	req session.ConditionalAppendEventRequest,
-) (session.AppendEventResult, error) {
-	event := req.Event
-	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
-	}
-	prewarm, err := s.prewarmEventAppendIndexContext(ctx, req.SessionRef)
-	if err != nil {
-		return session.AppendEventResult{}, err
-	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
-
-	if err := s.mu.LockContext(ctx); err != nil {
-		return session.AppendEventResult{}, err
-	}
-	defer s.mu.Unlock()
-
-	var out *session.Event
-	var appended bool
-	if err := s.withRootWriteLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
-			return err
-		}
-		for _, precondition := range req.RelatedRevisions {
-			related, err := s.readDocumentForRef(precondition.SessionRef)
-			if err != nil {
-				return err
-			}
-			expected := precondition.ExpectedRevision
-			if err := session.CheckExpectedRevision(related.Session, &expected); err != nil {
+		if tx.Changed {
+			if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
 				return err
 			}
 		}
-
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, []*session.Event{event}, nil, nil, nil, req.ExpectedRevision, "", "", prewarm)
-		if err != nil {
-			return err
-		}
-		normalized := tx.Prepared.Events[0]
-		if !tx.Changed {
-			out = session.CloneEvent(normalized)
-			return nil
-		}
-		if err := s.writeDocumentWithEvents(ctx, nextDoc, tx.Prepared.Persisted, prewarm); err != nil {
-			return err
-		}
-		out = session.CloneEvent(normalized)
-		appended = true
+		out = session.CloneEvent(tx.Prepared.Events[0])
 		return nil
 	}); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
-	return session.AppendEventResult{Event: out, Appended: appended}, nil
+	return out, nil
 }
 
 func (s *Store) prepareAppendTransactionForDocument(
@@ -450,7 +363,7 @@ func (s *Store) prepareAppendTransactionForDocument(
 		}
 		doc.PendingApprovals = pendingApprovalsFromEvents(existingEvents)
 	}
-	applyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
+	session.ApplyPendingApprovalEvents(doc.PendingApprovals, tx.Prepared.Persisted)
 	if tx.RecordTransaction {
 		if doc.AppliedTransactions == nil {
 			doc.AppliedTransactions = map[string]bool{}
@@ -502,7 +415,7 @@ func (s *Store) AppendEvents(
 	defer s.mu.Unlock()
 
 	var out []*session.Event
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -546,7 +459,7 @@ func (s *Store) AppendEventsAndUpdateState(
 	defer s.mu.Unlock()
 
 	var out []*session.Event
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -581,7 +494,7 @@ func (s *Store) Events(
 	defer s.mu.Unlock()
 
 	var out []*session.Event
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -609,7 +522,7 @@ func (s *Store) EventsPage(
 	defer s.mu.Unlock()
 
 	var out session.EventPage
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -638,7 +551,7 @@ func (s *Store) EventCheckpoint(
 	defer s.mu.Unlock()
 
 	var out session.EventCheckpoint
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -667,17 +580,13 @@ func (s *Store) BindController(
 	ctx context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(ctx, req)
-}
-
-func (s *Store) bindControllerRequest(ctx context.Context, req session.BindControllerRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
 	defer s.mu.Unlock()
 
 	var out session.Session
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -714,7 +623,7 @@ func (s *Store) BindControllerWithEvent(
 	defer s.mu.Unlock()
 	var out session.Session
 	var outEvent *session.Event
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -757,17 +666,13 @@ func (s *Store) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(ctx, req)
-}
-
-func (s *Store) putParticipantRequest(ctx context.Context, req session.PutParticipantRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
 	defer s.mu.Unlock()
 
 	var out session.Session
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -825,7 +730,7 @@ func (s *Store) PutParticipantWithEvent(
 
 	var out session.Session
 	var outEvent *session.Event
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -879,17 +784,13 @@ func (s *Store) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(ctx, req)
-}
-
-func (s *Store) removeParticipantRequest(ctx context.Context, req session.RemoveParticipantRequest) (session.Session, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, err
 	}
 	defer s.mu.Unlock()
 
 	var out session.Session
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -943,7 +844,7 @@ func (s *Store) RemoveParticipantWithEvent(
 
 	var out session.Session
 	var outEvent *session.Event
-	if err := s.withRootWriteLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -999,7 +900,7 @@ func (s *Store) SnapshotState(
 	defer s.mu.Unlock()
 
 	var out map[string]any
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -1012,45 +913,6 @@ func (s *Store) SnapshotState(
 	return out, nil
 }
 
-func (s *Store) ReplaceState(
-	ctx context.Context,
-	req session.ReplaceStateRequest,
-) (session.Session, error) {
-	if err := session.ValidateState(req.State); err != nil {
-		return session.Session{}, err
-	}
-	if err := s.mu.LockContext(ctx); err != nil {
-		return session.Session{}, err
-	}
-	defer s.mu.Unlock()
-
-	var out session.Session
-	err := s.withRootWriteLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
-			return err
-		}
-		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
-			return err
-		}
-		doc.State = cloneState(req.State)
-		doc.Session.Revision++
-		doc.Session.UpdatedAt = s.now()
-		out = session.CloneSession(doc.Session)
-		if err := s.writeDocument(ctx, doc); err != nil {
-			if documentWriteCommitted(err) {
-				return &session.CommittedError{Err: err}
-			}
-			return err
-		}
-		return nil
-	})
-	return out, err
-}
-
 func (s *Store) UpdateState(
 	ctx context.Context,
 	req session.UpdateStateRequest,
@@ -1061,7 +923,7 @@ func (s *Store) UpdateState(
 	defer s.mu.Unlock()
 
 	var out session.Session
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -1108,7 +970,7 @@ func (s *Store) LoadSession(
 	defer s.mu.Unlock()
 
 	var out session.LoadedSession
-	if err := s.withRootReadLockContext(ctx, func() error {
+	if err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err

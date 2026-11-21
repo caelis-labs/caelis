@@ -1,11 +1,9 @@
 package model
 
 // TerminalResponseError rejects an explicitly unsuccessful provider termination.
-// It preserves the normalized reason when an adapter cannot emit a final
-// Response. Callers must not retry it or use another generation path to bypass
-// the rejection. An interrupted transport is a separate failure class.
+// The detail reports why the adapter cannot emit a final Response. Callers
+// must stop generation on this error.
 type TerminalResponseError struct {
-	Reason FinishReason
 	Detail string
 }
 

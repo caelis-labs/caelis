@@ -1,16 +1,28 @@
 package gatewayapp_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"runtime"
 	"testing"
 
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func builtinComputerUseSupported() bool {
 	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" || runtime.GOOS == "windows" && runtime.GOARCH == "amd64"
+}
+
+func waitBuiltinDesktopWorldMCP(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string) {
+	t.Helper()
+	if !builtinComputerUseSupported() {
+		return
+	}
+	if server := waitAtomicApplicationMCPRunning(t, ctx, client, sessionID, "dtw"); server.PluginID != "desktop-world" {
+		t.Fatalf("unexpected source for built-in Desktop World: %+v", server)
+	}
 }
 
 // Optional capability regressions keep checking their exact source set. Fixed

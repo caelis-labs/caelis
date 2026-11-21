@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -100,10 +101,7 @@ func UsageSnapshotFromSessionEvent(event *Event) *UsageSnapshot {
 		}
 	}
 	provider := usageProviderFromSessionEvent(event)
-	for _, meta := range []map[string]any{semanticUsageMetadata(event), event.Meta} {
-		if len(meta) == 0 {
-			continue
-		}
+	if meta := event.Meta; len(meta) > 0 {
 		provider = firstNonEmptyString(provider, usageProviderFromMetadata(meta))
 		raw, ok := meta["usage"]
 		if ok {
@@ -131,10 +129,10 @@ func UsageSnapshotFromSessionEvent(event *Event) *UsageSnapshot {
 // into the bounded usage values consumed by Control status surfaces.
 func UsageSnapshotFromContextUsage(value ContextUsageSnapshot) *UsageSnapshot {
 	usage := &UsageSnapshot{}
-	if value.Used <= uint64(maxUsageInt()) {
+	if value.Used <= math.MaxInt {
 		usage.TotalTokens = int(value.Used)
 	}
-	if value.Size <= uint64(maxUsageInt()) {
+	if value.Size <= math.MaxInt {
 		usage.ContextWindowTokens = int(value.Size)
 	}
 	if usage.TotalTokens == 0 && usage.ContextWindowTokens == 0 {
@@ -142,8 +140,6 @@ func UsageSnapshotFromContextUsage(value ContextUsageSnapshot) *UsageSnapshot {
 	}
 	return usage
 }
-
-func maxUsageInt() int { return int(^uint(0) >> 1) }
 
 // UsageSnapshotFromMapForProvider projects usage while applying
 // provider-specific parsing rules that are unavailable from the payload alone.
@@ -158,10 +154,7 @@ func UsageProviderFromSessionEvent(event *Event) string {
 		return ""
 	}
 	provider := usageProviderFromSessionEvent(event)
-	for _, meta := range []map[string]any{semanticUsageMetadata(event), event.Meta} {
-		if len(meta) == 0 {
-			continue
-		}
+	if meta := event.Meta; len(meta) > 0 {
 		provider = firstNonEmptyString(provider, usageProviderFromMetadata(meta))
 		if raw, ok := meta["usage"].(map[string]any); ok {
 			provider = firstNonEmptyString(usageProviderFromMetadata(raw), provider)
@@ -270,51 +263,6 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 	return usage
 }
 
-// NormalizeUsageForDisplay converts provider raw usage into the status-table
-// display contract. Reasoning is treated as an output-token breakdown, so it is
-// not added to Total unless CompletionTokens is absent.
-func NormalizeUsageForDisplay(usage UsageSnapshot, provider string) UsageSnapshot {
-	if providerSeparatesCachedInputForSnapshot(provider, usage) && usage.CachedInputTokens > 0 {
-		usage.PromptTokens += usage.CachedInputTokens
-	}
-	usage.CacheReadAccounting = model.CacheReadIncluded
-	minimum := usage.PromptTokens + usage.CompletionTokens
-	if usage.CompletionTokens == 0 {
-		minimum += usage.ReasoningTokens
-	}
-	if usage.TotalTokens < minimum {
-		usage.TotalTokens = minimum
-	}
-	return usage
-}
-
-func normalizedProviderKey(provider string) string {
-	return strings.ToLower(strings.TrimSpace(strings.ReplaceAll(provider, "_", "-")))
-}
-
-func providerSeparatesCachedInputForSnapshot(provider string, usage UsageSnapshot) bool {
-	switch usage.CacheReadAccounting {
-	case model.CacheReadIncluded:
-		return false
-	case model.CacheReadSeparate:
-		return true
-	}
-	if model.ProviderSeparatesCachedInput(provider) {
-		return true
-	}
-	if normalizedProviderKey(provider) != "deepseek" || usage.CachedInputTokens <= 0 {
-		return false
-	}
-	return usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens
-}
-
-func semanticUsageMetadata(event *Event) map[string]any {
-	if event == nil {
-		return nil
-	}
-	return event.Meta
-}
-
 func cachedInputTokensFromPayload(payload map[string]any) int {
 	if value := payload["cached_input_tokens"]; value != nil {
 		return intValue(value)
@@ -323,11 +271,9 @@ func cachedInputTokensFromPayload(payload map[string]any) int {
 		return intValue(value)
 	}
 	return firstNonZeroInt(
-		intValue(payload["cached_input_tokens"]),
 		intValue(payload["cached_prompt_tokens"]),
 		intValue(payload["cached_tokens"]),
 		intValue(payload["prompt_cache_hit_tokens"]),
-		intValue(payload["cache_read_input_tokens"]),
 		intValue(payload["cached_content_token_count"]),
 		intValue(payload["cachedContentTokenCount"]),
 		intValue(nestedAny(payload, "input_tokens_details", "cached_tokens")),

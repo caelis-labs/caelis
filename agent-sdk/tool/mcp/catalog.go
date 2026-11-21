@@ -10,21 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// ManagerOptions is retained for source compatibility. Live catalog refresh is
-// built in and always enabled, so the values here no longer change behaviour.
-type ManagerOptions struct {
-	// RefreshTools is deprecated and ignored: refresh is unconditional.
-	RefreshTools bool
-}
-
-// NewManagerWithOptions starts an activation-owned manager with live catalog
-// refresh always enabled.
-func NewManagerWithOptions(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure), _ ManagerOptions) (*Manager, error) {
-	return newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-		return startClientWithCatalog(ctx, spec, nil, true)
-	}, onFailure)
-}
-
 type clientCatalog struct {
 	mu         sync.Mutex
 	generation uint64
@@ -49,14 +34,12 @@ func (c *clientCatalog) invalidate() {
 
 // checkCatalogReadyLocked checks a current directory entry under Manager.mu.
 func (m *Manager) checkCatalogReadyLocked(ctx context.Context, server *managedServer) error {
-	if c := server.client.catalog; c != nil {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-	}
+	server.client.catalog.mu.Lock()
+	defer server.client.catalog.mu.Unlock()
 	return m.checkServerReadyLocked(ctx, server)
 }
 
-// Requires Manager.mu and the client's catalog lock, when present.
+// Requires Manager.mu and the client's catalog lock.
 func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedServer) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -70,7 +53,7 @@ func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedSer
 	if server.client.closedError() != nil {
 		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
 	}
-	if c := server.client.catalog; c != nil && c.dirty {
+	if server.client.catalog.dirty {
 		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 	}
 	return nil
@@ -98,7 +81,7 @@ func (m *Manager) RefreshTools(ctx context.Context, pluginID, serverName string)
 	m.mu.Lock()
 	var found *managedServer
 	for _, s := range m.servers {
-		if s.spec.PluginID == pluginID && s.spec.Name == serverName && s.client != nil && s.client.catalog != nil {
+		if s.spec.PluginID == pluginID && s.spec.Name == serverName && s.client != nil {
 			found = s
 			break
 		}
@@ -271,16 +254,14 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 			if server.client == nil || server.client.closedError() != nil {
 				return tool.NewError(errorcode.Unavailable, "MCP source is offline")
 			}
-			if server.client.catalog != nil {
-				server.client.catalog.mu.Lock()
-				revoked, dirty := server.client.catalog.revoked, server.client.catalog.dirty
-				server.client.catalog.mu.Unlock()
-				if revoked {
-					return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
-				}
-				if dirty {
-					return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh is required")
-				}
+			server.client.catalog.mu.Lock()
+			revoked, dirty := server.client.catalog.revoked, server.client.catalog.dirty
+			server.client.catalog.mu.Unlock()
+			if revoked {
+				return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+			}
+			if dirty {
+				return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh is required")
 			}
 			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 		}

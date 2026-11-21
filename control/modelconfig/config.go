@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
@@ -21,28 +21,25 @@ type Config struct {
 	Provider string `json:"provider,omitempty"`
 	// ProviderEndpointID references the provider endpoint infrastructure used
 	// by this configured model. It is not a product ModelProfile ID.
-	ProviderEndpointID string            `json:"provider_endpoint_id,omitempty"`
-	EndpointID         string            `json:"endpoint_id,omitempty"`
-	API                providers.APIType `json:"api,omitempty"`
-	Model              string            `json:"model,omitempty"`
-	BaseURL            string            `json:"base_url,omitempty"`
-	HTTPClient         *http.Client      `json:"-"`
-	// CredentialPath is transient Host wiring for providers whose SDK runtime
-	// reads a provider-owned credential file. It is never persisted.
-	CredentialPath string `json:"-"`
-	Token          string `json:"token,omitempty"`
+	ProviderEndpointID string        `json:"provider_endpoint_id,omitempty"`
+	EndpointID         string        `json:"endpoint_id,omitempty"`
+	API                model.APIType `json:"api,omitempty"`
+	Model              string        `json:"model,omitempty"`
+	BaseURL            string        `json:"base_url,omitempty"`
+	HTTPClient         *http.Client  `json:"-"`
+	Token              string        `json:"token,omitempty"`
 	// CredentialRef identifies a Control-owned credential without persisting
 	// the credential material in the model profile.
 	CredentialRef string `json:"credential_ref,omitempty"`
 
-	PersistToken           bool               `json:"persist_token,omitempty"`
-	AuthType               providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey              string             `json:"header_key,omitempty"`
-	ContextWindowTokens    int                `json:"context_window_tokens,omitempty"`
-	ReasoningEffort        string             `json:"reasoning_effort,omitempty"`
-	DefaultReasoningEffort string             `json:"default_reasoning_effort,omitempty"`
-	ReasoningLevels        []string           `json:"reasoning_levels,omitempty"`
-	ReasoningMode          string             `json:"reasoning_mode,omitempty"`
+	PersistToken           bool           `json:"persist_token,omitempty"`
+	AuthType               model.AuthType `json:"auth_type,omitempty"`
+	HeaderKey              string         `json:"header_key,omitempty"`
+	ContextWindowTokens    int            `json:"context_window_tokens,omitempty"`
+	ReasoningEffort        string         `json:"reasoning_effort,omitempty"`
+	DefaultReasoningEffort string         `json:"default_reasoning_effort,omitempty"`
+	ReasoningLevels        []string       `json:"reasoning_levels,omitempty"`
+	ReasoningMode          string         `json:"reasoning_mode,omitempty"`
 	// ImageInput pins the accepted model's image capability. Nil is reserved for
 	// incomplete or older configurations and is distinct from explicit false.
 	ImageInput *bool `json:"image_input,omitempty"`
@@ -57,19 +54,19 @@ type Config struct {
 // configured provider models. It is infrastructure configuration, not a
 // product-selectable modelprofile.ModelProfile.
 type ProviderEndpointConfig struct {
-	ID                      string             `json:"id,omitempty"`
-	Provider                string             `json:"provider,omitempty"`
-	EndpointID              string             `json:"endpoint_id,omitempty"`
-	API                     providers.APIType  `json:"api,omitempty"`
-	BaseURL                 string             `json:"base_url,omitempty"`
-	HTTPClient              *http.Client       `json:"-"`
-	Token                   string             `json:"token,omitempty"`
-	CredentialRef           string             `json:"credential_ref,omitempty"`
-	PersistToken            bool               `json:"persist_token,omitempty"`
-	AuthType                providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey               string             `json:"header_key,omitempty"`
-	Timeout                 time.Duration      `json:"timeout,omitempty"`
-	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
+	ID                      string         `json:"id,omitempty"`
+	Provider                string         `json:"provider,omitempty"`
+	EndpointID              string         `json:"endpoint_id,omitempty"`
+	API                     model.APIType  `json:"api,omitempty"`
+	BaseURL                 string         `json:"base_url,omitempty"`
+	HTTPClient              *http.Client   `json:"-"`
+	Token                   string         `json:"token,omitempty"`
+	CredentialRef           string         `json:"credential_ref,omitempty"`
+	PersistToken            bool           `json:"persist_token,omitempty"`
+	AuthType                model.AuthType `json:"auth_type,omitempty"`
+	HeaderKey               string         `json:"header_key,omitempty"`
+	Timeout                 time.Duration  `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration  `json:"stream_first_event_timeout,omitempty"`
 }
 
 // Choice is the presentation-neutral identity of one configured model.
@@ -104,9 +101,9 @@ func SpeedModesForConfig(cfg Config) []modelcatalog.SpeedMode {
 	cfg = NormalizeConfig(cfg)
 	var provider string
 	switch cfg.API {
-	case providers.APIOpenAI:
+	case model.APIOpenAI:
 		provider = "openai"
-	case providers.APIOpenAICodex:
+	case model.APIOpenAICodex:
 		provider = "openai-codex"
 	default:
 		return nil
@@ -350,14 +347,14 @@ func SupportsReasoningEffort(cfg Config, effort string) bool {
 }
 
 // DefaultAPIForProvider returns the maintained protocol dialect for a provider.
-func DefaultAPIForProvider(provider string) providers.APIType {
+func DefaultAPIForProvider(provider string) model.APIType {
 	if template, ok := LookupProvider(provider); ok {
 		return template.API
 	}
 	return savedProviderDefaults[strings.ToLower(strings.TrimSpace(provider))].API
 }
 
-func defaultAPIForEndpoint(provider, baseURL string) providers.APIType {
+func defaultAPIForEndpoint(provider, baseURL string) model.APIType {
 	if saved, ok := savedProviderDefaults[provider]; ok {
 		if endpoint, found := EndpointForBaseURL(saved, baseURL); found && endpoint.API != "" {
 			return endpoint.API
@@ -414,27 +411,27 @@ func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) Provider
 }
 
 // DefaultAuthTypeForProvider returns the maintained authentication scheme.
-func DefaultAuthTypeForProvider(provider string) providers.AuthType {
+func DefaultAuthTypeForProvider(provider string) model.AuthType {
 	template, ok := LookupProvider(provider)
 	if !ok {
 		if legacy := savedProviderDefaults[strings.ToLower(strings.TrimSpace(provider))]; legacy.AuthType != "" {
 			return legacy.AuthType
 		}
-		return providers.AuthAPIKey
+		return model.AuthAPIKey
 	}
 	if template.AuthType == "" {
-		return providers.AuthAPIKey
+		return model.AuthAPIKey
 	}
 	return template.AuthType
 }
 
 // DefaultAuthTypeForEndpoint returns endpoint-specific authentication while
 // preserving the provider default for custom or legacy endpoints.
-func DefaultAuthTypeForEndpoint(provider string, baseURL string) providers.AuthType {
+func DefaultAuthTypeForEndpoint(provider string, baseURL string) model.AuthType {
 	template, ok := LookupProvider(provider)
 	if endpoint, found := EndpointForBaseURL(template, baseURL); ok && found {
 		if endpoint.NoAuthRequired {
-			return providers.AuthNone
+			return model.AuthNone
 		}
 		if endpoint.AuthType != "" {
 			return endpoint.AuthType
@@ -451,7 +448,7 @@ func DefaultAuthTypeForEndpoint(provider string, baseURL string) providers.AuthT
 // EndpointUsesNoAuth reports whether the maintained or provider-default policy
 // for an endpoint uses no authentication.
 func EndpointUsesNoAuth(provider string, baseURL string) bool {
-	return DefaultAuthTypeForEndpoint(provider, baseURL) == providers.AuthNone
+	return DefaultAuthTypeForEndpoint(provider, baseURL) == model.AuthNone
 }
 
 // BuildAlias returns the provider/model alias retained for configuration and
@@ -510,7 +507,7 @@ func BuildModelID(profileID string, alias string) string {
 }
 
 // NormalizeEndpointID resolves maintained endpoints and hashes custom URLs.
-func NormalizeEndpointID(provider string, endpointID string, baseURL string, api providers.APIType) string {
+func NormalizeEndpointID(provider string, endpointID string, baseURL string, api model.APIType) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	endpointID = sanitizeConfigIDPart(endpointID)
 	// "judgment" is also the HTTP onboarding protocol selector. Its identity
@@ -529,16 +526,16 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 	if provider == "custom" {
 		protocol := "responses"
 		switch api {
-		case providers.APIOpenAICompatible:
+		case model.APIOpenAICompatible:
 			protocol = "chat"
-		case providers.APIAnthropicCompatible:
+		case model.APIAnthropicCompatible:
 			protocol = "messages"
 		case APISystemOne:
 			protocol = "judgment"
 		}
 		return protocol + "-" + shortConfigHash(normalizedBaseURL)
 	}
-	if provider == "volcengine" && api == providers.APIVolcengineCoding {
+	if provider == "volcengine" && api == model.APIVolcengineCoding {
 		return "coding-plan"
 	}
 	if template, ok := LookupProvider(provider); ok {
@@ -640,7 +637,7 @@ func DedupeNonEmptyStrings(values []string) []string {
 }
 
 // FirstNonEmptyAPI returns the first specified API dialect.
-func FirstNonEmptyAPI(values ...providers.APIType) providers.APIType {
+func FirstNonEmptyAPI(values ...model.APIType) model.APIType {
 	for _, value := range values {
 		if strings.TrimSpace(string(value)) != "" {
 			return value
@@ -650,7 +647,7 @@ func FirstNonEmptyAPI(values ...providers.APIType) providers.APIType {
 }
 
 // FirstNonEmptyAuthType returns the first specified authentication scheme.
-func FirstNonEmptyAuthType(values ...providers.AuthType) providers.AuthType {
+func FirstNonEmptyAuthType(values ...model.AuthType) model.AuthType {
 	for _, value := range values {
 		if strings.TrimSpace(string(value)) != "" {
 			return value

@@ -62,19 +62,19 @@ func TestCodeModeProjectionFailureDoesNotRetainMedia(t *testing.T) {
 				if _, err := h.project("failed", invalid, codemode.OutcomeSucceeded, tool.Definition{OutputSchema: map[string]any{"type": "object"}}); err == nil {
 					t.Fatalf("failure %d accepted", i)
 				}
-				if len(h.handles) != 1 || len(h.replies) != 1 || h.retained != retained {
-					t.Errorf("failure %d changed retained state: handles=%d replies=%d bytes=%d", i, len(h.handles), len(h.replies), h.retained)
+				if len(h.handles) != 1 || len(h.replyParts) != 1 || h.retained != retained {
+					t.Errorf("failure %d changed retained state: handles=%d replies=%d bytes=%d", i, len(h.handles), len(h.replyParts), h.retained)
 				}
 			}
 			h.limits.ReplyBytes = limits.ReplyBytes
 			second, err := h.project("second", result, codemode.OutcomeSucceeded, tool.Definition{OutputSchema: map[string]any{"type": "object"}})
-			if err != nil || h.retained != limits.RetainedBytes || len(h.handles) != 2 || len(h.replies) != 2 {
-				t.Fatalf("legal projection at exact retention limit: handles=%d replies=%d bytes=%d err=%v", len(h.handles), len(h.replies), h.retained, err)
+			if err != nil || h.retained != limits.RetainedBytes || len(h.handles) != 2 || len(h.replyParts) != 2 {
+				t.Fatalf("legal projection at exact retention limit: handles=%d replies=%d bytes=%d err=%v", len(h.handles), len(h.replyParts), h.retained, err)
 			}
 			if _, err := h.project("overflow", tool.Result{Content: []tool.ContentBlock{tool.Text("x")}}, codemode.OutcomeSucceeded, tool.Definition{OutputSchema: map[string]any{"type": "object"}}); err == nil || !strings.Contains(err.Error(), "retention budget") {
 				t.Fatalf("one byte over budget: %v", err)
 			}
-			if h.retained != limits.RetainedBytes || len(h.handles) != 2 || len(h.replies) != 2 {
+			if h.retained != limits.RetainedBytes || len(h.handles) != 2 || len(h.replyParts) != 2 {
 				t.Fatal("budget failure changed retained state")
 			}
 			for _, reply := range []codemode.Reply{first, second} {

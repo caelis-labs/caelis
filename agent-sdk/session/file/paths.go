@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Store) resolveWritePath(sess session.Session) (string, error) {
-	key := pathCacheKey(sess.SessionID, sess.WorkspaceKey)
+	key := sanitizeSessionID(sess.SessionID)
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
 	}
@@ -27,7 +27,7 @@ func (s *Store) resolveWritePath(sess session.Session) (string, error) {
 }
 
 func (s *Store) resolveDocumentPath(sessionID string, workspaceKey string) (string, error) {
-	key := pathCacheKey(sessionID, workspaceKey)
+	key := sanitizeSessionID(sessionID)
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
 	}

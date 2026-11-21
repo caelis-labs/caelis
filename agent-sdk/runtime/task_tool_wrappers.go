@@ -40,8 +40,8 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		if declaration, ok := one.(*codemode.Tool); ok && declaration.Name == codemode.ToolName {
 			hasCodeMode = true
 		}
-		switch {
-		case isBuiltinRunCommandTool(one):
+		switch one.(type) {
+		case *shell.RunCommandTool:
 			hasCommand = true
 			if runtime, ok := sandboxRuntimeFromTool(one); ok {
 				r.tasks.registerSandboxRuntime(runtime)
@@ -52,7 +52,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
-		case isBuiltinSpawnTool(one):
+		case spawn.Tool, *spawn.Tool:
 			resolver, _ := one.(spawn.Resolver)
 			out = append(out, runtimeSpawnTool{
 				runtime:      r,
@@ -66,14 +66,14 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				approvalMode: strings.TrimSpace(toolCtx.approvalMode),
 				approval:     toolCtx.approvalRequester,
 			})
-		case isBuiltinTaskTool(one):
+		case tasktool.Tool, *tasktool.Tool:
 			hasTask = true
 			out = append(out, runtimeTaskTool{
 				base:       one,
 				sessionRef: session.NormalizeSessionRef(ref),
 				tasks:      r.tasks,
 			})
-		case isBuiltinSendMessageTool(one):
+		case sendmessage.Tool, *sendmessage.Tool:
 			out = append(out, runtimeSendMessageTool{
 				base: one, runtime: r, session: session.CloneSession(activeSession),
 				sessionRef: session.NormalizeSessionRef(ref), external: toolCtx.inputSender,
@@ -91,38 +91,6 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 	}
 
 	return out
-}
-
-func isBuiltinRunCommandTool(candidate tool.Tool) bool {
-	_, ok := candidate.(*shell.RunCommandTool)
-	return ok
-}
-
-func isBuiltinSpawnTool(candidate tool.Tool) bool {
-	switch candidate.(type) {
-	case spawn.Tool, *spawn.Tool:
-		return true
-	default:
-		return false
-	}
-}
-
-func isBuiltinTaskTool(candidate tool.Tool) bool {
-	switch candidate.(type) {
-	case tasktool.Tool, *tasktool.Tool:
-		return true
-	default:
-		return false
-	}
-}
-
-func isBuiltinSendMessageTool(candidate tool.Tool) bool {
-	switch candidate.(type) {
-	case sendmessage.Tool, *sendmessage.Tool:
-		return true
-	default:
-		return false
-	}
 }
 
 type runtimeSendMessageTool struct {
@@ -312,7 +280,7 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
-	constraints, _ := sandboxmeta.Constraints(call.Metadata)
+	constraints, _, _ := sandboxmeta.DecodeConstraints(call.Metadata)
 	req := taskapi.CommandStartRequest{OperationID: toolTaskOperationID(ctx, call),
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),
@@ -320,7 +288,6 @@ func (t runtimeCommandTool) commandRequest(ctx context.Context, call tool.Call, 
 		Timeout:     commandTimeoutFromTool(t.base),
 		Yield:       time.Duration(yieldMS) * time.Millisecond,
 		ParentCall:  strings.TrimSpace(call.ID),
-		ParentTool:  strings.TrimSpace(call.Name),
 		Constraints: constraints,
 		Observer:    taskToolObserver{ctx: ctx},
 	}
@@ -406,7 +373,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		requestedHandle = handle
 	}
 	requested, _ := stringArg(args, "agent")
-	requested, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, requested)
+	requested, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), requested)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -449,7 +416,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	}
 	payload := map[string]any{"handle": snapshot.Handle, "state": snapshot.State}
 	payload["supports_steering"] = taskSpecBool(snapshot.Metadata, "supports_steering")
-	if spawnContextUnsupported(snapshot) {
+	if taskSpecBool(snapshot.Metadata, "context_unsupported") {
 		payload["system_hint"] = spawnContextUnsupportedHint
 	}
 	result, _ := taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
@@ -460,15 +427,11 @@ func (t runtimeSpawnTool) resolveDelegatedSpawnContext(ctx context.Context) (age
 	if t.runtime == nil || t.runtime.controllerContextRouter == nil {
 		return agent.ContextTransfer{}, true
 	}
-	transfer, _, err := t.runtime.buildDelegatedSpawnPromptContext(ctx, t.session, t.sessionRef)
+	transfer, err := t.runtime.buildParticipantPromptContext(ctx, t.sessionRef, 0)
 	if err != nil {
 		return agent.ContextTransfer{}, true
 	}
 	return transfer, false
-}
-
-func spawnContextUnsupported(snapshot taskapi.Snapshot) bool {
-	return taskSpecBool(snapshot.Metadata, "context_unsupported")
 }
 
 const spawnContextUnsupportedHint = "Current host does not support parent context transfer; the child received only the spawn prompt."
@@ -484,14 +447,14 @@ func hideSpawnIncludeContext(def *tool.Definition) {
 	delete(props, "include_context")
 }
 
-func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Session, requested string) (string, error) {
+func resolveRuntimeSpawnToolAgent(def tool.Definition, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	enum := spawnAgentEnum(def)
 	if len(enum) == 0 {
 		if requested != "" && !strings.EqualFold(requested, "self") {
 			return "", fmt.Errorf("Spawn agent %q is not available", requested)
 		}
-		return resolveSpawnAgent(activeSession, requested)
+		return normalizeSpawnAgent(requested), nil
 	}
 	if requested == "" {
 		for _, allowed := range enum {
@@ -551,7 +514,7 @@ func newSubagentApprovalRequester(
 	if requester == nil && runtime != nil {
 		requester = runtime.childApprovalRequester
 	}
-	if requester == nil && (runtime == nil || normalizePolicyMode(mode) != presets.ModeDangerFullAccess) {
+	if requester == nil && (runtime == nil || presets.NormalizeModeName(mode) != presets.ModeDangerFullAccess) {
 		return nil
 	}
 	return subagentApprovalRequester{
@@ -777,7 +740,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return t.callBatchTaskWaitAny(ctx, handles, yield)
 	}
 	if len(handles) > 1 {
-		return t.callBatchTaskControl(ctx, normalizedAction, handles, input)
+		return t.callBatchTaskCancel(ctx, handles)
 	}
 	identity, err := t.resolveJobHandle(ctx, handles[0])
 	if err != nil {
@@ -819,7 +782,7 @@ func durationMillis(value time.Duration) int {
 	return int(value / time.Millisecond)
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, action string, handles []string, input string) (tool.Result, error) {
+func (t runtimeTaskTool) callBatchTaskCancel(ctx context.Context, handles []string) (tool.Result, error) {
 	items := make([]taskBatchControlItem, 0, len(handles))
 	for _, handle := range handles {
 		identity, resolveErr := t.resolveJobHandle(ctx, handle)
@@ -830,23 +793,22 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, action string
 
 		req := taskapi.ControlRequest{
 			TaskID:    identity.taskID,
-			Input:     input,
 			Principal: session.ActorKindTool,
 			Source:    "agent_tool",
 		}
-		snapshot, err := t.callTaskControl(ctx, action, req)
+		snapshot, err := t.tasks.Cancel(ctx, t.sessionRef, req)
 
 		if err != nil {
 			items = append(items, taskBatchControlItem{Handle: handle, Err: err})
 			continue
 		}
 
-		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot, OK: true})
+		items = append(items, taskBatchControlItem{Handle: handle, Snapshot: snapshot})
 	}
 
-	result, resultErr := taskBatchControlToolResult(ctx, items, action, 0)
+	result, resultErr := taskBatchControlToolResult(items, "cancel", 0)
 	observation := toolbinding.Observed(ctx)
-	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, action, input, 0, 0, items)
+	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "cancel", 0, 0, items)
 	return result, resultErr
 }
 
@@ -911,7 +873,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []str
 			waited := outcomes[item.handle]
 			if waited.err == nil {
 
-				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: waited.snapshot, OK: true, ActualWaitMS: waited.waitMS}
+				itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: waited.snapshot, ActualWaitMS: waited.waitMS}
 				continue
 			}
 			if winner.handle == "" || !errors.Is(waited.err, context.Canceled) {
@@ -922,7 +884,7 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []str
 				TaskID: item.identity.taskID, Principal: session.ActorKindTool, Source: "agent_tool",
 			})
 
-			itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: snapshot, OK: err == nil, Err: err}
+			itemsByHandle[item.handle] = taskBatchControlItem{Handle: item.handle, Snapshot: snapshot, Err: err}
 		}
 	}
 	items := make([]taskBatchControlItem, 0, len(handles))
@@ -930,9 +892,9 @@ func (t runtimeTaskTool) callBatchTaskWaitAny(ctx context.Context, handles []str
 		items = append(items, itemsByHandle[handle])
 	}
 	actualWaitMS := durationMillis(time.Since(started))
-	result, resultErr := taskBatchControlToolResult(ctx, items, "wait", actualWaitMS)
+	result, resultErr := taskBatchControlToolResult(items, "wait", actualWaitMS)
 	observation := toolbinding.Observed(ctx)
-	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "wait", "", yield, actualWaitMS, items)
+	observation.TaskEvent = taskBatchToolResultEventMeta(observation.TaskEvent, "wait", yield, actualWaitMS, items)
 	return result, resultErr
 }
 
@@ -988,7 +950,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	return out
 }
 
-func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yield time.Duration, actualWaitMS int, items []taskBatchControlItem) map[string]any {
+func taskBatchToolResultEventMeta(existing map[string]any, action string, yield time.Duration, actualWaitMS int, items []taskBatchControlItem) map[string]any {
 	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -1008,9 +970,6 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		toolMeta["effective_yield_time_ms"] = durationMillis(yield)
 		toolMeta["actual_wait_time_ms"] = actualWaitMS
 	}
-	if strings.EqualFold(strings.TrimSpace(action), "write") {
-		toolMeta["input"] = strings.TrimSpace(input)
-	}
 	taskMeta := toolbinding.RuntimeSection(out, "task")
 	taskMeta["handles"] = taskBatchVisibleHandles(items)
 	taskMeta["count"] = len(items)
@@ -1027,7 +986,7 @@ func taskBatchVisibleHandles(items []taskBatchControlItem) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		handle := strings.TrimSpace(item.Handle)
-		if handle == "" && item.OK {
+		if handle == "" && item.Err == nil {
 			handle = taskPublicHandle(item.Snapshot)
 		}
 		if handle != "" {
@@ -1040,7 +999,7 @@ func taskBatchVisibleHandles(items []taskBatchControlItem) []string {
 func commonTaskBatchKind(items []taskBatchControlItem) (taskapi.Kind, bool) {
 	var kind taskapi.Kind
 	for _, item := range items {
-		if !item.OK {
+		if item.Err != nil {
 			continue
 		}
 		if strings.TrimSpace(string(item.Snapshot.Kind)) == "" {

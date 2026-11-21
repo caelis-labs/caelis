@@ -64,21 +64,29 @@ func TestValidateControlMutationGuardFailsClosed(t *testing.T) {
 }
 
 func TestControlMutationOverlapPolicyFailsUnknownPurposeClosed(t *testing.T) {
+	active, err := session.NewSessionFenceClaim(session.SessionFence{
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		FenceID:    "fence-1", OwnerID: "owner-1", FencingToken: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		purpose session.ControlMutationPurpose
 		want    bool
 	}{
 		{purpose: session.ControlMutationPurposeApproval, want: true},
 		{purpose: session.ControlMutationPurposeParticipant, want: true},
-		{purpose: session.ControlMutationPurposeSystemCommit, want: true},
+		{purpose: session.ControlMutationPurpose("system_commit"), want: false},
 		{purpose: session.ControlMutationPurposeLifecycle, want: false},
 		{purpose: session.ControlMutationPurposeConfiguration, want: false},
 		{purpose: session.ControlMutationPurposeHandoff, want: false},
 		{purpose: session.ControlMutationPurposeCoordinator, want: false},
 		{purpose: session.ControlMutationPurpose("future_unknown"), want: false},
 	} {
-		if got := session.ControlMutationMayOverlapRuntimeFence(test.purpose); got != test.want {
-			t.Fatalf("ControlMutationMayOverlapRuntimeFence(%q) = %v, want %v", test.purpose, got, test.want)
+		err := session.AuthorizeMutationGuard(active, session.ControlMutationGuard(test.purpose))
+		if test.want && err != nil || !test.want && !errors.Is(err, session.ErrFenceConflict) {
+			t.Fatalf("AuthorizeMutationGuard(%q) = %v, want allowed=%v", test.purpose, err, test.want)
 		}
 	}
 }

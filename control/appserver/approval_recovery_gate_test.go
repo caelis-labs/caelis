@@ -76,8 +76,8 @@ func (*cancelAwareApprovalRecoveryStore) Session(context.Context, session.Sessio
 	return session.Session{}, nil
 }
 
-func (*cancelAwareApprovalRecoveryStore) SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) (session.SettlePendingApprovalResult, error) {
-	return session.SettlePendingApprovalResult{}, nil
+func (*cancelAwareApprovalRecoveryStore) SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) error {
+	return nil
 }
 
 func (*deferredApprovalRecoveryStore) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
@@ -112,9 +112,9 @@ func (*deferredApprovalRecoveryStore) PendingApprovals(context.Context) ([]sessi
 	}}, nil
 }
 
-func (s *deferredApprovalRecoveryStore) SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) (session.SettlePendingApprovalResult, error) {
+func (s *deferredApprovalRecoveryStore) SettlePendingApproval(context.Context, session.SettlePendingApprovalRequest) error {
 	s.settleCalls++
-	return session.SettlePendingApprovalResult{}, session.ErrFenceConflict
+	return session.ErrFenceConflict
 }
 
 func (s *deferredApprovalRecoveryStore) SessionFence(_ context.Context, ref session.SessionRef) (session.SessionFence, error) {
@@ -138,8 +138,8 @@ func (*blockingApprovalRecoveryStore) Session(context.Context, session.SessionRe
 func (*blockingApprovalRecoveryStore) SettlePendingApproval(
 	context.Context,
 	session.SettlePendingApprovalRequest,
-) (session.SettlePendingApprovalResult, error) {
-	return session.SettlePendingApprovalResult{}, nil
+) error {
+	return nil
 }
 
 func TestApprovalRecoveryGateBlocksTurnsWithoutBlockingStartup(t *testing.T) {

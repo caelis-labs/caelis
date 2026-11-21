@@ -17,7 +17,7 @@ type idleStoreMutation struct {
 type idleStoreUpdate func(*session.IdleCompactionState, session.SessionFence, session.LoadedSession) (idleStoreMutation, error)
 
 func (r *record) authorizeMutation(guard session.MutationGuard) error {
-	if err := validateMutationGuard(r.fence, guard); err != nil {
+	if err := session.AuthorizeMutationGuard(r.fence, guard); err != nil {
 		return err
 	}
 	r.idle.Invalidate()
@@ -132,14 +132,12 @@ func (s *Store) StageCompactionReceipt(ctx context.Context, ticket session.Compa
 }
 
 // FinalizeCompactionReceipt atomically appends the sealed journal and clears pending state.
-func (s *Store) FinalizeCompactionReceipt(ctx context.Context, ticket session.CompactionReceiptTicket) (*session.Event, error) {
-	return s.idleTransaction(ctx, ticket.SessionRef(), func(state *session.IdleCompactionState, _ session.SessionFence, loaded session.LoadedSession) (idleStoreMutation, error) {
-		event, err := state.ReceiptEvent(ticket, loaded)
-		if err == nil {
-			state.ForgetReceipt(ticket)
-		}
+func (s *Store) FinalizeCompactionReceipt(ctx context.Context, ticket session.CompactionReceiptTicket) error {
+	_, err := s.idleTransaction(ctx, ticket.SessionRef(), func(state *session.IdleCompactionState, _ session.SessionFence, loaded session.LoadedSession) (idleStoreMutation, error) {
+		event, err := state.FinalizeReceipt(ticket, loaded)
 		return idleStoreMutation{event: event}, err
 	})
+	return err
 }
 
 // CancelCompactionReservation reconciles a rejected start hook without billing

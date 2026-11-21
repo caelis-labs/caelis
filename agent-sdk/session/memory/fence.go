@@ -106,10 +106,6 @@ func (s *Store) ReleaseSessionFence(_ context.Context, req session.ReleaseSessio
 	return nil
 }
 
-func validateMutationGuard(active session.SessionFence, guard session.MutationGuard) error {
-	return session.AuthorizeMutationGuard(active, guard)
-}
-
 func fenceConflict(ref session.SessionRef, detail string) error {
 	return &session.FenceConflictError{SessionID: session.NormalizeSessionRef(ref).SessionID, Detail: detail}
 }

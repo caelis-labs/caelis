@@ -3,7 +3,6 @@ package file
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -112,7 +111,7 @@ func (s *Store) prewarmEventAppendIndexContext(
 	// Path discovery runs before the Store mutex and root write lock so a cold
 	// index scan cannot monopolize unrelated Session interactions. The cache avoids a
 	// namespace walk on every append; the locked transaction verifies the path.
-	pathKey := pathCacheKey(ref.SessionID, ref.WorkspaceKey)
+	pathKey := sanitizeSessionID(ref.SessionID)
 	cachedPath, _ := s.eventAppendPaths.Load(pathKey)
 	documentPath, _ := cachedPath.(string)
 	if strings.TrimSpace(documentPath) == "" {
@@ -156,7 +155,7 @@ func (s *Store) eventAppendPreparationContext(
 	if err != nil {
 		return eventAppendPreparation{}, err
 	}
-	s.eventAppendPaths.Store(pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey), filepath.Clean(documentPath))
+	s.eventAppendPaths.Store(sanitizeSessionID(doc.Session.SessionID), filepath.Clean(documentPath))
 	logInfo, statErr := os.Stat(eventLogPath(documentPath))
 	if statErr == nil && logInfo.Size() <= s.eventLogCacheLimitBytes() {
 		existingEvents, err := s.readCachedEventLogContext(ctx, documentPath)
@@ -316,7 +315,7 @@ func (s *Store) readEventAppendIndexLocked(
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
-			event, err := decodeIndexedEvent([]byte(trimmed), path, nextLineNo)
+			event, err := decodeEventLogRecord([]byte(trimmed), path, nextLineNo)
 			if err != nil {
 				s.removeEventAppendIndex(path)
 				return nil, err
@@ -507,23 +506,9 @@ func readIndexedEvent(file *os.File, record eventAppendRecord) (*session.Event, 
 	if n != len(data) {
 		return nil, io.ErrUnexpectedEOF
 	}
-	return decodeIndexedEvent([]byte(strings.TrimSpace(string(data))), file.Name(), 0)
-}
-
-func decodeIndexedEvent(data []byte, path string, lineNo int) (*session.Event, error) {
-	if err := rejectUnsupportedLegacyEventLogLine(data, path, lineNo); err != nil {
+	event, err := decodeEventLogRecord([]byte(strings.TrimSpace(string(data))), file.Name(), 0)
+	if err != nil {
 		return nil, err
 	}
-	migratedRaw, err := session.MigrateEventJSON(json.RawMessage(data))
-	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
-	}
-	var event session.Event
-	if err := json.Unmarshal(migratedRaw, &event); err != nil {
-		return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d: %w", path, lineNo, err)
-	}
-	if err := session.ValidateDurableCoreEvent(&event); err != nil {
-		return nil, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
-	}
-	return session.CloneEvent(&event), nil
+	return session.CloneEvent(event), nil
 }

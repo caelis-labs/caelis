@@ -268,7 +268,7 @@ func NormalizeDecision(mode string, in Decision) (Decision, error) {
 	if err := validateConstraints(out.Constraints); err != nil {
 		return Decision{}, &DecisionError{Mode: mode, Detail: "invalid constraints", Err: err}
 	}
-	if err := jsonvalue.ValidateMap(out.Metadata); err != nil {
+	if err := jsonvalue.Validate(out.Metadata); err != nil {
 		return Decision{}, &DecisionError{Mode: mode, Detail: "invalid metadata", Err: err}
 	}
 	return out, nil

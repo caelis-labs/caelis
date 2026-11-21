@@ -11,10 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -74,7 +73,7 @@ func TestNativeSelfSnapshotSurvivesHostCapabilityEdit(t *testing.T) {
 			return delegationResponse(req)
 		})}, nil
 	}
-	configured := ModelConfig{Provider: "custom", API: providers.APIOpenAIResponses, Model: "session-x", BaseURL: "https://self.example/v1", Token: "synthetic-self", ReasoningEffort: "low", DefaultReasoningEffort: "low", ReasoningLevels: []string{"low", "high"}}
+	configured := ModelConfig{Provider: "custom", API: model.APIOpenAIResponses, Model: "session-x", BaseURL: "https://self.example/v1", Token: "synthetic-self", ReasoningEffort: "low", DefaultReasoningEffort: "low", ReasoningLevels: []string{"low", "high"}}
 	profile, err := stack.connectTestModel(configured)
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +147,7 @@ func TestTeamChildPreparationUsesMaterializedCredentials(t *testing.T) {
 						return delegationResponse(req)
 					})}, nil
 				}
-				configured := ModelConfig{Provider: "custom", API: providers.APIOpenAIResponses, Model: "team-key", BaseURL: "https://team-key.example/v1", Token: "synthetic-old"}
+				configured := ModelConfig{Provider: "custom", API: model.APIOpenAIResponses, Model: "team-key", BaseURL: "https://team-key.example/v1", Token: "synthetic-old"}
 				if change == "rotated-key" {
 					if _, err := stack.connectTestModel(configured); err != nil {
 						t.Fatal(err)
@@ -176,7 +175,7 @@ func TestTeamChildPreparationUsesMaterializedCredentials(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: spawn.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
+				agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: sdkdelegation.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -243,7 +242,7 @@ func TestMaterializedTeamChildKeepsInFlightCredential(t *testing.T) {
 			return delegationResponse(req)
 		})}, nil
 	}
-	configured := ModelConfig{Provider: "custom", API: providers.APIOpenAIResponses, Model: "held-key", BaseURL: "https://held-key.example/v1", Token: "synthetic-before"}
+	configured := ModelConfig{Provider: "custom", API: model.APIOpenAIResponses, Model: "held-key", BaseURL: "https://held-key.example/v1", Token: "synthetic-before"}
 	profile, err := stack.connectTestModel(configured)
 	if err != nil {
 		t.Fatal(err)

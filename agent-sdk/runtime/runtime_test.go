@@ -438,13 +438,12 @@ func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	waiter, ok := result.Handle.(agent.RunnerCompletionWaiter)
-	if !ok {
-		t.Fatal("Runner does not implement RunnerCompletionWaiter")
+	if result.Handle == nil {
+		t.Fatal("Run() did not return an execution handle")
 	}
 	completionCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := waiter.WaitCompletion(completionCtx); err != nil {
+	if err := result.Handle.WaitCompletion(completionCtx); err != nil {
 		t.Fatalf("WaitCompletion() error = %v", err)
 	}
 
@@ -1109,10 +1108,8 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	}
 
 	releaseFinal := make(chan struct{})
-	streamSeen := make(chan bool, 1)
 	testController := stubACPController{
-		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
-			streamSeen <- req.Stream
+		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(session.MarkUIOnly(&session.Event{
@@ -1130,7 +1127,7 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 				handle.publishEvent(event)
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1173,15 +1170,6 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	case <-time.After(300 * time.Millisecond):
 		t.Fatal("Run() did not return before ACP final completion")
 	}
-	select {
-	case stream := <-streamSeen:
-		if !stream {
-			t.Fatal("TurnRequest.Stream = false, want true")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("controller did not observe stream request")
-	}
-
 	var sawUser bool
 	var sawChunk bool
 	deadline := time.NewTimer(2 * time.Second)
@@ -1293,7 +1281,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 
 	turnReqCh := make(chan controller.TurnRequest, 1)
 	testController := stubACPController{
-		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(ctx context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
 			turnReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
@@ -1304,7 +1292,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 				handle.publishEvent(event)
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1386,7 +1374,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 	turnCtx := session.ContextWithRuntimeFence(context.Background(), fence)
 	turnReqCh := make(chan controller.ParticipantPromptRequest, 1)
 	testController := stubACPController{
-		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			turnReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
@@ -1447,7 +1435,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 					},
 				})
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1560,12 +1548,12 @@ func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 			binding.ContextSyncSeq = 0
 			return binding, nil
 		},
-		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			_ = ctx
 			promptReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1667,10 +1655,10 @@ func TestRuntimePromptParticipantCancelCancelsControllerTurn(t *testing.T) {
 	})
 	turnReqCh := make(chan controller.ParticipantPromptRequest, 1)
 	testController := stubACPController{
-		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
 			_ = ctx
 			turnReqCh <- req
-			return controller.TurnResult{Handle: controllerHandle}, nil
+			return controllerHandle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1745,7 +1733,7 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 
 	testController := stubACPController{
-		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(acpControllerChunk("hel"))
@@ -1768,7 +1756,7 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 				handle.publishEvent(acpControllerChunk("hello"))
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1849,17 +1837,16 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 }
 
-func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
+func TestRuntimeACPControllerRegistersSourceObserverForAnyModelStreamOption(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name    string
 		request agent.ModelRequestOptions
-		want    bool
 	}{
-		{name: "default false", request: agent.ModelRequestOptions{}, want: false},
-		{name: "explicit false", request: agent.ModelRequestOptions{Stream: boolPtr(false)}, want: false},
-		{name: "explicit true", request: agent.ModelRequestOptions{Stream: boolPtr(true)}, want: true},
+		{name: "default false", request: agent.ModelRequestOptions{}},
+		{name: "explicit false", request: agent.ModelRequestOptions{Stream: boolPtr(false)}},
+		{name: "explicit true", request: agent.ModelRequestOptions{Stream: boolPtr(true)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1877,13 +1864,13 @@ func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BindController() error = %v", err)
 			}
-			streamSeen := make(chan bool, 1)
+			observerSeen := make(chan bool, 1)
 			testController := stubACPController{
-				runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
-					streamSeen <- req.Stream
+				runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
+					observerSeen <- req.Observer != nil
 					handle := newTestControllerTurnHandle(nil)
 					handle.finish()
-					return controller.TurnResult{Handle: handle}, nil
+					return handle, nil
 				},
 			}
 			runtime, err := New(testConfigWithACPForwarder(Config{
@@ -1907,12 +1894,12 @@ func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
 				t.Fatal(err)
 			}
 			select {
-			case got := <-streamSeen:
-				if got != tc.want {
-					t.Fatalf("controller stream = %v, want %v", got, tc.want)
+			case got := <-observerSeen:
+				if !got {
+					t.Fatal("ACP Turn has no source event observer")
 				}
 			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for controller stream flag")
+				t.Fatal("timed out waiting for ACP Turn observer registration")
 			}
 		})
 	}
@@ -1938,14 +1925,14 @@ func TestRuntimeACPControllerInterruptedTurnDoesNotPersistLocalReplaySnapshot(t 
 		t.Fatalf("BindController() error = %v", err)
 	}
 	testController := stubACPController{
-		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(acpControllerChunk("partial answer"))
 				handle.publishError(errors.New("remote stream interrupted"))
 				handle.finish()
 			}()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -2000,14 +1987,14 @@ func TestRuntimeACPControllerUnknownOutcomePersistsJournalAndAllowsNextTurn(t *t
 	}
 	calls := 0
 	testController := stubACPController{
-		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
 			calls++
 			handle := newTestControllerTurnHandle(nil)
 			if calls == 1 {
 				handle.publishError(errorcode.New(errorcode.UnknownOutcome, "remote prompt outcome cannot be proven"))
 			}
 			handle.finish()
-			return controller.TurnResult{Handle: handle}, nil
+			return handle, nil
 		},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
@@ -2198,7 +2185,6 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 		Workdir:    workdir,
 		Yield:      5 * time.Millisecond,
 		ParentCall: "command-1",
-		ParentTool: shell.RunCommandToolName,
 	})
 	if err != nil {
 		t.Fatalf("StartCommand() error = %v", err)
@@ -2653,7 +2639,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2801,7 +2787,7 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2878,11 +2864,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 	}
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Tools: []tool.Tool{targetTool},
-	}, approvalContext{
-		ctx:        context.Background(),
-		session:    activeSession,
-		sessionRef: activeSession.SessionRef,
-	})
+	}, approvalContext{ctx: context.Background()})
 	if got := len(wrapped); got != 1 {
 		t.Fatalf("len(wrapped) = %d, want 1", got)
 	}
@@ -2918,7 +2900,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	}
 	runtime := &Runtime{
 		policies:          registry,
-		defaultPolicyMode: presets.ModeAutoReview,
+		defaultPolicyMode: presets.ModeWorkspaceWrite,
 	}
 	targetTool := tool.NamedTool{
 		Def: tool.Definition{Name: "Write"},
@@ -2930,11 +2912,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Metadata: map[string]any{policy.MetadataPolicyProfile: "unknown-policy"},
 		Tools:    []tool.Tool{targetTool},
-	}, approvalContext{
-		ctx:        context.Background(),
-		session:    activeSession,
-		sessionRef: activeSession.SessionRef,
-	})
+	}, approvalContext{ctx: context.Background()})
 	if got := len(wrapped); got != 1 {
 		t.Fatalf("len(wrapped) = %d, want 1", got)
 	}
@@ -2985,7 +2963,7 @@ func TestRuntimePolicyRegistryErrorAndEmptyDecisionFailClosed(t *testing.T) {
 			runtime := &Runtime{policies: tt.registry, defaultPolicyMode: "empty"}
 			wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 				Tools: []tool.Tool{targetTool},
-			}, approvalContext{ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef})
+			}, approvalContext{ctx: context.Background()})
 			_, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
 			switch tt.wantType.(type) {
 			case *policy.ProfileError:
@@ -3015,7 +2993,7 @@ func (r staticPolicyRegistry) Lookup(context.Context, string) (policy.Mode, bool
 	return r.mode, r.mode != nil, nil
 }
 
-func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testing.T) {
+func TestRuntimePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
@@ -3031,9 +3009,11 @@ func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *test
 		"locked-down":     "locked-down",
 		"TeamStrict":      "TeamStrict",
 	}
+	var runtime Runtime
 	for input, want := range tests {
-		if got := normalizePolicyMode(input); got != want {
-			t.Fatalf("normalizePolicyMode(%q) = %q, want %q", input, got, want)
+		spec := agent.AgentSpec{Metadata: map[string]any{policy.MetadataPolicyProfile: input}}
+		if got := runtime.policyMode(spec); got != want {
+			t.Fatalf("policyMode(%q) = %q, want %q", input, got, want)
 		}
 	}
 }
@@ -3047,7 +3027,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3092,7 +3072,15 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testing.T) {
 	t.Parallel()
 
-	sessions, activeSession := newTestSessionService(t, "sess-policy-approval")
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "test", UserID: "user-1", Workspace: session.WorkspaceRef{CWD: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sandboxPolicy := sandbox.PolicySnapshot{
 		Route:            sandbox.RouteSandbox,
 		Backend:          sandbox.BackendSeatbelt,
@@ -3100,11 +3088,12 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		ReadOnlySubpaths: []string{".git"},
 	}
 	runtime, err := New(Config{
-		Sessions: sessions,
+		Sessions:  sessions,
+		TaskStore: sessionfile.NewTaskStore(sessions),
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 		SandboxPolicy:     sandboxPolicy,
 	})
 	if err != nil {
@@ -3119,21 +3108,48 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	// Keep approval pending until the model observes the yielded Task. Run
 	// completion alone must not stand in for this command's completion.
 	approve := make(chan struct{})
-	testModel := &approveEscalatedCommandRuntimeModel{t: t, command: shellWriteFileForTest(target, "approved\n"), onPending: func() { close(approve) }}
+	testModel := &approveEscalatedCommandRuntimeModel{
+		command: shellWriteFileForTest(target, "approved\n"),
+		onPending: func(ctx context.Context, handle string) error {
+			identity, err := runtime.tasks.resolveTaskHandle(ctx, activeSession.SessionRef, handle)
+			if err != nil {
+				return err
+			}
+			close(approve)
+			// Settle the command through a user observation before the model
+			// waits on the original handle, exercising terminal Task readback.
+			snapshot, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, taskapi.ControlRequest{
+				TaskID: identity.taskID, Yield: 5 * time.Second, Principal: session.ActorKindUser,
+			})
+			if err != nil {
+				return err
+			}
+			if snapshot.State != taskapi.StateCompleted || snapshot.Handle != handle {
+				return fmt.Errorf("user observed command Task %q in state %q, want %q completed", snapshot.Handle, snapshot.State, handle)
+			}
+			runtime.tasks.mu.RLock()
+			live := runtime.tasks.tasks[identity.taskID] != nil
+			runtime.tasks.mu.RUnlock()
+			if live {
+				return fmt.Errorf("completed command Task %q is still in the live directory", handle)
+			}
+			return nil
+		},
+	}
 	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
-			t.Fatalf("RunState() during approval error = %v", err)
+			return agent.ApprovalResponse{}, fmt.Errorf("RunState during approval: %w", err)
 		}
 		if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || req.OperationTaskID == "" {
-			t.Fatalf("run state during command approval = %+v, want running with a Task-owned approval", state)
+			return agent.ApprovalResponse{}, fmt.Errorf("run state during command approval = %+v, want running with a Task-owned approval", state)
 		}
 		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
-			t.Fatalf("approval request = %+v, want RUN_COMMAND tool call", req.Approval)
+			return agent.ApprovalResponse{}, fmt.Errorf("approval request = %+v, want RunCommand tool call", req.Approval)
 		}
 		got, ok := req.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
 		if !ok || !reflect.DeepEqual(got, sandboxPolicy) {
-			t.Fatalf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
+			return agent.ApprovalResponse{}, fmt.Errorf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
 		}
 		budget, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -3151,7 +3167,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 			Approved: true,
 		}, nil
 	})
-	result, err := runtime.Run(context.Background(), agent.RunRequest{
+	result, err := runtime.Run(ctx, agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
 		Input:             "write inside workspace",
 		ApprovalRequester: requester,
@@ -3164,8 +3180,12 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+	defer result.Handle.Cancel()
+	if err := result.Handle.WaitCompletion(ctx); err != nil {
 		t.Fatalf("runner error = %v", err)
+	}
+	if testModel.calls != 3 {
+		t.Fatalf("model requests = %d, want command, wait, and final response", testModel.calls)
 	}
 
 	data, err := os.ReadFile(target)
@@ -3175,7 +3195,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	if got := strings.TrimSpace(string(data)); got != "approved" {
 		t.Fatalf("written content = %q, want %q", got, "approved")
 	}
-	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	state, err := runtime.RunState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("RunState() error = %v", err)
 	}
@@ -3226,7 +3246,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}
 	sessions.beforeAppend = func() {
 		state, err := runtime.RunState(t.Context(), activeSession.SessionRef)
-		if err != nil || state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || state.ApprovalRequestID != "" {
+		if err != nil || state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval {
 			t.Errorf("before pending approval is committed, RunState = %+v, %v", state, err)
 		}
 	}
@@ -3247,19 +3267,17 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}
 	defer func() {
 		run.Handle.Cancel()
-		if waiter, ok := run.Handle.(agent.RunnerCompletionWaiter); ok {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := waiter.WaitCompletion(cleanupCtx); err != nil {
-				t.Errorf("WaitCompletion(cleanup) error = %v", err)
-			}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := run.Handle.WaitCompletion(cleanupCtx); err != nil {
+			t.Errorf("WaitCompletion(cleanup) error = %v", err)
 		}
 	}()
 	var waiting agent.RunState
 	deadline := time.After(10 * time.Second)
 	for {
 		waiting, err = runtime.RunState(context.Background(), activeSession.SessionRef)
-		if err == nil && waiting.WaitingApproval && waiting.ApprovalRequestID != "" {
+		if err == nil && waiting.WaitingApproval {
 			break
 		}
 		select {
@@ -3269,12 +3287,13 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
+	requestID := waitForPendingApprovalRecord(t, sessions, activeSession.SessionRef, run.Handle.RunID())
 	resumed, err := runtime.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: run.Handle.RunID()})
 	if err != nil || resumed.Handle != run.Handle {
 		t.Fatalf("AttachLiveRun() = %+v, %v; want same live runner", resumed, err)
 	}
 	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: waiting.ApprovalRequestID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() error = %v", err)
 	}
 	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
@@ -3286,7 +3305,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("tool calls = %d, want 1", calls)
 	}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: waiting.ApprovalRequestID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("idempotent ResolveApproval() error = %v", err)
 	}
 	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
@@ -3296,6 +3315,9 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	var pauseStatuses []session.ApprovalRecordStatus
 	for _, event := range events {
 		if event.Type == session.EventTypeLifecycle && event.Approval != nil {
+			if event.Approval.RequestID != requestID {
+				t.Fatalf("pause token ID = %q, want original %q", event.Approval.RequestID, requestID)
+			}
 			pauseStatuses = append(pauseStatuses, event.Approval.Status)
 		}
 	}
@@ -3303,13 +3325,17 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 		t.Fatalf("pause token journal = %v, want %v", pauseStatuses, want)
 	}
 
-	reopened, err := New(Config{Sessions: sessionfile.NewStore(sessionfile.Config{RootDir: root}), AgentFactory: chat.Factory{}})
+	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened, err := New(Config{Sessions: reopenedStore, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatalf("New(reopened) error = %v", err)
 	}
 	state, err := reopened.RunState(context.Background(), activeSession.SessionRef)
 	if err != nil || state.ActiveRunID != "" {
 		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
+	}
+	if err := reopened.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+		t.Fatalf("ResolveApproval() after reopening with original request ID: %v", err)
 	}
 	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
 	var notResumable *agent.RunNotAttachableError
@@ -3399,8 +3425,9 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 		participantSessionID: "remote-side-1",
 	}
 	_, err := requester.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
-		Agent: "claude",
-		Mode:  "default",
+		EndpointSessionID: "remote-side-1",
+		Agent:             "claude",
+		Mode:              "default",
 		ToolCall: controller.ApprovalToolCall{
 			ID:   "call-1",
 			Name: "RunCommand",
@@ -3408,6 +3435,12 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("RequestControllerApproval() error = %v", err)
+	}
+	if captured.SessionRef.SessionID != "sess-approval" || captured.Session.SessionID != "sess-approval" {
+		t.Fatalf("request local owner = %+v, snapshot = %+v", captured.SessionRef, captured.Session.SessionRef)
+	}
+	if captured.Origin == nil || captured.Origin.SessionID != "remote-side-1" || captured.Origin.ParentSessionID != "sess-approval" {
+		t.Fatalf("request approval origin = %+v", captured.Origin)
 	}
 	for key, want := range map[string]string{
 		"scope":                  "participant",
@@ -3434,7 +3467,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeAutoReview,
+		DefaultPolicyMode: presets.ModeWorkspaceWrite,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -5145,15 +5178,10 @@ func TestRuntimeRunCommandToolDoesNotFetchResultWhileStillRunning(t *testing.T) 
 	assertRunningTaskSnapshot(t, result)
 }
 
-func TestResolveSpawnAgentAllowsRegisteredAgentNameWithoutSessionParticipant(t *testing.T) {
-	activeSession := session.Session{}
-	if got, err := resolveSpawnAgent(activeSession, ""); err != nil || got != "self" {
-		t.Fatalf("resolveSpawnAgent(empty) = %q, %v; want self", got, err)
-	}
-	if got, err := resolveSpawnAgent(activeSession, "self"); err != nil || got != "self" {
-		t.Fatalf("resolveSpawnAgent(self) = %q, %v; want self", got, err)
-	}
-	if got, err := resolveSpawnAgent(activeSession, "codex"); err != nil || got != "codex" {
-		t.Fatalf("resolveSpawnAgent(codex) = %q, %v; want codex", got, err)
+func TestNormalizeSpawnAgent(t *testing.T) {
+	for input, want := range map[string]string{"": "self", "  SELF ": "self", " codex ": "codex"} {
+		if got := normalizeSpawnAgent(input); got != want {
+			t.Errorf("normalizeSpawnAgent(%q) = %q, want %q", input, got, want)
+		}
 	}
 }

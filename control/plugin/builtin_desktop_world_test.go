@@ -211,9 +211,9 @@ func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metas, err := fs.DiscoverPluginBundleMeta(contributions.SkillBundles)
-	if err != nil || len(metas) != 1 || !PathWithinRoot(root, metas[0].Path) {
-		t.Fatalf("builtin Skill = %+v, %v", metas, err)
+	metas := fs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+	if len(metas) != 1 || !PathWithinRoot(root, metas[0].Path) {
+		t.Fatalf("builtin Skill = %+v", metas)
 	}
 	skill := metas[0].Path
 	if err := os.WriteFile(skill, []byte("changed bytes"), 0o600); err != nil {

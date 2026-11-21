@@ -14,7 +14,7 @@ import (
 func projectedToolResultContent(toolCallID string, name string, input, output, meta map[string]any, status string) []eventstream.ToolCallContent {
 	profile, known := projectedBuiltinToolProfile(name)
 	displayOutput := projectedToolDisplayOutput(profile, known, output, meta)
-	if known && profile.result == projectedResultTask && projectedSuppressTaskControlContent(display.ToolTaskAction(input, displayOutput, meta)) {
+	if known && profile.result == projectedResultTask && projectedSuppressTaskControlContent(ToolTaskAction(input, displayOutput, meta)) {
 		return nil
 	}
 	isErr := strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed)
@@ -126,8 +126,8 @@ func projectedToolResultText(profile projectedToolProfile, known bool, input, ou
 	case projectedResultTask:
 		observedStatus := firstNonEmpty(projectedToolString(output["state"]), status)
 		if projectedToolStatusFinal(observedStatus, isErr) {
-			if summary := display.CleanSubagentFinalOutput(projectedToolString(output["final_message"])); summary != "" {
-				return summary
+			if text := projectedToolRawString(output["final_message"]); projectedOutputHasNonBlankLine(text) {
+				return normalizeSubagentFinalOutput(text)
 			}
 		}
 		return projectedTerminalResultText(output, observedStatus, isErr)
@@ -267,12 +267,16 @@ func projectedSpawnResultText(output map[string]any, status string, isErr bool) 
 		}
 	}
 	if projectedToolStatusFinal(status, isErr) {
-		return display.CleanSubagentFinalOutput(firstNonEmpty(
-			display.SpawnDisplayTextCandidate(projectedToolString(output["final_message"])),
-			display.SpawnDisplayTextCandidate(projectedToolString(output["finalMessage"])),
-			display.SpawnDisplayTextCandidate(projectedToolString(output["result"])),
-			display.SpawnDisplayTextCandidate(projectedToolString(output["output"])),
-			display.SpawnDisplayTextCandidate(projectedToolString(output["text"])),
+		if text := projectedToolRawString(output["final_message"]); projectedOutputHasNonBlankLine(text) {
+			return normalizeSubagentFinalOutput(text)
+		}
+		// Older transcripts used these fields for both the transport wrapper
+		// and its trailing human-readable output.
+		return normalizeSubagentFinalOutput(firstNonEmpty(
+			projectedSpawnStreamText(projectedToolString(output["finalMessage"])),
+			projectedSpawnStreamText(projectedToolString(output["result"])),
+			projectedSpawnStreamText(projectedToolString(output["output"])),
+			projectedSpawnStreamText(projectedToolString(output["text"])),
 		))
 	}
 	return projectedFirstNonBlankRaw(
@@ -283,13 +287,21 @@ func projectedSpawnResultText(output map[string]any, status string, isErr bool) 
 	)
 }
 
+// normalizeSubagentFinalOutput normalizes transport line endings without
+// interpreting the Final Message as display markup. Final Messages are
+// canonical user-visible content, so Markdown structure, blank lines, and
+// repeated text must survive unchanged.
+func normalizeSubagentFinalOutput(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+}
+
 func projectedSpawnStreamText(text string) string {
 	if text == "" {
 		return ""
 	}
 	candidate := strings.TrimLeft(text, " \t\r\n")
-	decoded, remainder, ok := display.SplitLeadingJSONObject(candidate)
-	if !strings.HasPrefix(candidate, "{") || !ok || !display.IsSpawnDisplayJSONObject(decoded) {
+	decoded, remainder, ok := splitLeadingJSONObject(candidate)
+	if !ok || !isSpawnDisplayJSONObject(decoded) {
 		return text
 	}
 	if strings.TrimSpace(remainder) == "" {

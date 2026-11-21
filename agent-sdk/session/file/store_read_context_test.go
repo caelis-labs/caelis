@@ -107,10 +107,10 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 			})
 			return err
 		},
-		"replace_state": func(ctx context.Context) error {
-			_, err := store.ReplaceState(ctx, session.ReplaceStateRequest{
+		"update_state": func(ctx context.Context) error {
+			_, err := store.UpdateState(ctx, session.UpdateStateRequest{
 				SessionRef: active.SessionRef,
-				State:      map[string]any{"should": "cancel"},
+				Update:     func(map[string]any) (map[string]any, error) { return map[string]any{"should": "cancel"}, nil },
 			})
 			return err
 		},
@@ -123,7 +123,9 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 	for name, operation := range operations {
 		operation := operation
 		t.Run(name, func(t *testing.T) {
-			store.mu.Lock()
+			if err := store.mu.LockContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 			callCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
 			result := make(chan error, 1)
@@ -148,7 +150,7 @@ func TestStoreListHonorsContextWhileWaitingForRootFileLock(t *testing.T) {
 	if _, err := store.ListSessions(context.Background(), session.ListSessionsRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	held, err := lockSessionStoreRoot(context.Background(), root, storeRootLockExclusive)
+	held, err := lockSessionStoreRoot(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

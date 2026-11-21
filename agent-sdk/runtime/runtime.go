@@ -114,8 +114,8 @@ type Runtime struct {
 	lifecycle               agent.TraceOptions
 }
 
-// RunnerCompletionWaiterGuaranteed marks that every non-nil Runner returned
-// by Runtime implements agent.RunnerCompletionWaiter.
+// RunnerCompletionWaiterGuaranteed marks that every Runner returned by
+// Runtime honors the WaitCompletion contract.
 func (*Runtime) RunnerCompletionWaiterGuaranteed() {}
 
 // New returns one baseline local runtime.
@@ -182,7 +182,7 @@ func New(cfg Config) (*Runtime, error) {
 	if r.defaultPolicyMode == "" {
 		r.defaultPolicyMode = presets.ModeDefault
 	}
-	r.defaultPolicyMode = normalizePolicyMode(r.defaultPolicyMode)
+	r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	if err := validateControllerForwarder(cfg); err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
 	r.tasks.taskCommitted = cfg.TaskCommitted
-	r.terminals = newTerminalService(r.tasks)
+	r.terminals = &terminalService{tasks: r.tasks}
 	return r, nil
 }
 
@@ -204,20 +204,19 @@ func (r *Runtime) currentApprovalMode(state map[string]any) approval.Mode {
 }
 
 func validateControllerForwarder(cfg Config) error {
-	if requiresControllerForwarder(cfg) && cfg.ControllerEventForwarder == nil {
+	if cfg.Controllers == nil {
+		return nil
+	}
+	if cfg.ControllerEventForwarder == nil {
 		return errors.New("agent-sdk/runtime: controller event forwarder is required when ACP controllers are configured")
 	}
-	if cfg.Controllers != nil && cfg.ControllerContextRouter == nil {
+	if cfg.ControllerContextRouter == nil {
 		return errors.New("agent-sdk/runtime: controller context router is required when controller endpoints are configured")
 	}
-	if cfg.Controllers != nil && cfg.ControllerRecovery == nil {
+	if cfg.ControllerRecovery == nil {
 		return errors.New("agent-sdk/runtime: controller recovery coordinator is required when ACP controllers are configured")
 	}
 	return nil
-}
-
-func requiresControllerForwarder(cfg Config) bool {
-	return cfg.Controllers != nil
 }
 
 // Terminals returns the command fallback/control surface for this Runtime.
@@ -245,7 +244,7 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	activeSession, err = r.ensureSessionController(ctx, activeSession)
+	activeSession, err = r.ensureSessionController(ctx, activeSession, session.RuntimeMutationGuard(ctx))
 	if err != nil {
 		return agent.RunResult{}, err
 	}
@@ -259,9 +258,6 @@ func (r *Runtime) Run(
 		if err := validateRunRequestAgentSpec(req); err != nil {
 			return agent.RunResult{}, err
 		}
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	if activeSession.Controller.Kind == session.ControllerKindACP {
@@ -375,7 +371,6 @@ func (r *Runtime) executeKernelTurn(
 
 	ctx = hookrun.WithRun(ctx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
 	hookrun.FromContext(ctx).Trace = r.lifecycle
-	batch := make([]*session.Event, 0, 4)
 	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
 	if inputErr != nil {
 		handle.publishError(inputErr)
@@ -399,7 +394,7 @@ func (r *Runtime) executeKernelTurn(
 	}
 	lifecycleErr := r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
-			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
+			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, handle)
 			scope := taskScopeFromContext(turnCtx)
 			scope.stopCodeMode()
 			if runErr != nil {
@@ -423,5 +418,8 @@ func (r *Runtime) nextID(prefix string, custom func() string) string {
 }
 
 func (r *Runtime) now() time.Time {
-	return r.clock()
+	if r != nil && r.clock != nil {
+		return r.clock()
+	}
+	return time.Now()
 }

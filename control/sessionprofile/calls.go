@@ -17,13 +17,12 @@ func callID(c CallContext) string {
 	return stableID("client-call-", c.PrincipalID, c.SessionID, c.TurnID, c.ItemID)
 }
 
-// Invoke persists an intent before waking consumers, then waits for a terminal
-// result using notifications and originating Turn cancellation. It never executes an
-// application callback itself or retries an uncertain external effect.
-func (s *Store) Invoke(ctx context.Context, c CallContext, name string, args json.RawMessage) (result CallResult, invokeErr error) {
+// invoke waits for a terminal receipt from the original call, including
+// a migrated call's stored address. The application owns the actual effect.
+func (s *Store) invoke(ctx context.Context, c CallContext, name string, args json.RawMessage) (result CallResult, receiptID string, invokeErr error) {
 	id, err := s.enqueue(ctx, c, name, args)
 	if err != nil {
-		return CallResult{}, err
+		return CallResult{}, "", err
 	}
 	defer func() {
 		if ctx.Err() != nil {
@@ -37,13 +36,13 @@ func (s *Store) Invoke(ctx context.Context, c CallContext, name string, args jso
 		call, changed, err := s.observeCall(ctx, c.Scope, c.SessionID, id)
 		s.mu.Unlock()
 		if err != nil {
-			return CallResult{}, err
+			return CallResult{}, "", err
 		}
 		if result, done, err := terminalResult(call); done {
-			return result, err
+			return result, id, err
 		}
 		if err := waitCallChange(ctx, changed); err != nil {
-			return CallResult{Outcome: "unknown", Content: json.RawMessage(`null`)}, err
+			return CallResult{Outcome: "unknown", Content: json.RawMessage(`null`)}, id, err
 		}
 	}
 }

@@ -77,7 +77,7 @@ func TestStoreMigratesOnlyExactLegacyCorruptedGeneratedTitle(t *testing.T) {
 	if err := store.mu.LockContext(ctx); err != nil {
 		t.Fatal(err)
 	}
-	err = store.withRootWriteLockContext(ctx, func() error {
+	err = store.withRootLockContext(ctx, func() error {
 		var pathErr error
 		generatedPath, pathErr = store.resolveWritePath(generated)
 		if pathErr != nil {

@@ -194,7 +194,7 @@ func ValidateMetadata(metadata map[string]any) error {
 }
 
 func validateJSONMap(scope string, value map[string]any) error {
-	if err := jsonvalue.ValidateMap(value); err != nil {
+	if err := jsonvalue.Validate(value); err != nil {
 		return &JSONValueError{Scope: scope, Err: err}
 	}
 	return nil
@@ -436,28 +436,6 @@ type AppendEventRequest struct {
 	Event            *Event        `json:"event"`
 }
 
-// AppendEventResult distinguishes a newly committed event from an idempotent
-// retry that resolved to the already durable event.
-type AppendEventResult struct {
-	Event    *Event
-	Appended bool
-}
-
-// SessionRevisionPrecondition requires one related Session to remain at the
-// exact revision observed while a cross-Session authority was resolved.
-type SessionRevisionPrecondition struct {
-	SessionRef       SessionRef
-	ExpectedRevision uint64
-}
-
-// ConditionalAppendEventRequest appends one target event only while every
-// related Session revision still matches. Stores check all preconditions and
-// commit the target append in one serialization boundary.
-type ConditionalAppendEventRequest struct {
-	AppendEventRequest
-	RelatedRevisions []SessionRevisionPrecondition
-}
-
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {
@@ -482,15 +460,6 @@ type AppendEventsAndUpdateStateRequest struct {
 	MutationDigest   string
 	Events           []*Event
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
-}
-
-// ReplaceStateRequest replaces one durable Session state snapshot under an
-// explicit revision and mutation-authority fence.
-type ReplaceStateRequest struct {
-	SessionRef       SessionRef
-	ExpectedRevision *uint64
-	MutationGuard    MutationGuard
-	State            map[string]any
 }
 
 // UpdateStateRequest derives one durable Session state snapshot under an
@@ -720,12 +689,6 @@ type EventAppender interface {
 	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
 }
 
-// ConditionalEventAppenderWithOutcome is the precise append contract for an
-// event whose authority depends on durable facts in other Sessions.
-type ConditionalEventAppenderWithOutcome interface {
-	AppendEventWithOutcomeConditional(context.Context, ConditionalAppendEventRequest) (AppendEventResult, error)
-}
-
 // ControllerBindingStore mutates the durable active-controller binding.
 type ControllerBindingStore interface {
 	BindController(context.Context, BindControllerRequest) (Session, error)
@@ -750,7 +713,6 @@ type StateReader interface {
 // Implementations enforce ExpectedRevision and MutationGuard before commit and
 // return the exact committed Session alongside post-commit reporting errors.
 type StateWriter interface {
-	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
 	UpdateState(context.Context, UpdateStateRequest) (Session, error)
 }
 

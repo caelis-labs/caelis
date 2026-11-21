@@ -20,13 +20,14 @@ const defaultOpenAIResponsesBaseURL = "https://api.openai.com/v1"
 // including reasoning and tool results, is supplied by the caller on every turn;
 // the adapter never depends on provider-stored responses or subscription auth.
 type openAIResponsesLLM struct {
-	api                   APIType
+	api                   model.APIType
 	name                  string
 	provider              string
 	baseURL               string
 	token                 string
 	auth                  AuthConfig
 	headers               map[string]string
+	userAgent             string
 	client                *http.Client
 	requestTimeout        time.Duration
 	responseHeaderTimeout time.Duration
@@ -50,6 +51,7 @@ func newOpenAIResponses(cfg Config, token string) *openAIResponsesLLM {
 	return &openAIResponsesLLM{
 		api: cfg.API, name: strings.TrimSpace(cfg.Model), provider: provider,
 		baseURL: baseURL, token: token, auth: cfg.Auth, headers: cloneHeaders(cfg.Headers),
+		userAgent:             cfg.UserAgent,
 		client:                coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:        cfg.Timeout,
 		responseHeaderTimeout: normalizeStreamResponseHeaderTimeout(cfg.StreamResponseHeaderTimeout),
@@ -97,8 +99,8 @@ func (l *openAIResponsesLLM) Generate(ctx context.Context, req *model.Request) i
 		if req.Stream {
 			httpReq.Header.Set("Accept", "text/event-stream")
 		}
-		applyDefaultAttributionHeaders(httpReq, l.api)
-		if l.auth.Type != AuthNone {
+		setUserAgent(httpReq, l.userAgent)
+		if l.auth.Type != model.AuthNone {
 			applyDefaultAuthHeader(httpReq, Config{API: l.api, Auth: l.auth}, l.token, false)
 		}
 		applyConfiguredHeaders(httpReq, l.headers)
@@ -188,7 +190,7 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 	}
 	payload := openAIResponsesRequest{openAICodexRequest: openAICodexRequest{
 		Model: l.name, Input: input, Instructions: instructions,
-		Tools:        openAICodexTools(req.Tools, l.api == APIOpenAI),
+		Tools:        openAICodexTools(req.Tools, l.api == model.APIOpenAI),
 		MaxOutputTok: l.maxOutputTok, Store: false, Stream: req.Stream,
 		Include: []string{"reasoning.encrypted_content"}, ServiceTier: req.ServiceTier,
 	}}
@@ -202,7 +204,7 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 	// default intact. Effort-based models can still explicitly request none.
 	if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" && (effort != "none" || l.reasoningMode != "none") {
 		payload.Reasoning = &openAICodexReasoning{Effort: effort}
-		if l.api == APIOpenAI && effort != "none" {
+		if l.api == model.APIOpenAI && effort != "none" {
 			payload.Reasoning.Summary = "auto"
 		}
 	}

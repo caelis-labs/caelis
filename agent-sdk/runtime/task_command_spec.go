@@ -26,7 +26,7 @@ type commandApprovalRef struct {
 }
 
 func commandExecutionForRequest(req taskapi.CommandStartRequest) commandExecutionSpec {
-	constraints, _ := req.Constraints.(sandbox.Constraints)
+	constraints := req.Constraints
 	return commandExecutionSpec{Version: 1, Timeout: req.Timeout, Constraints: constraints}
 }
 

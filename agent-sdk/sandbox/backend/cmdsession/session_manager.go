@@ -12,9 +12,7 @@ import (
 
 var (
 	// ErrSessionNotFound is returned when a session ID is not found.
-	ErrSessionNotFound = errors.New("session not found")
-	// ErrSessionAlreadyExists is returned when trying to register a duplicate session.
-	ErrSessionAlreadyExists = errors.New("session already exists")
+	ErrSessionNotFound      = errors.New("session not found")
 	errSessionServiceClosed = errors.New("async session service is closed")
 )
 
@@ -181,47 +179,6 @@ func (sm *SessionManager) TerminateSession(id string) error {
 	return session.Terminate()
 }
 
-// RemoveSession terminates and removes a session.
-func (sm *SessionManager) RemoveSession(id string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, ok := sm.sessions[id]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	session.Close()
-	delete(sm.sessions, id)
-	return nil
-}
-
-// ListSessions returns information about all sessions.
-func (sm *SessionManager) ListSessions() []SessionInfo {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	infos := make([]SessionInfo, 0, len(sm.sessions))
-	for _, session := range sm.sessions {
-		infos = append(infos, session.Info())
-	}
-	return infos
-}
-
-// ListActiveSessions returns information about running sessions only.
-func (sm *SessionManager) ListActiveSessions() []SessionInfo {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	var infos []SessionInfo
-	for _, session := range sm.sessions {
-		if !session.HasExited() {
-			infos = append(infos, session.Info())
-		}
-	}
-	return infos
-}
-
 // WaitSession waits for a session to complete.
 func (sm *SessionManager) WaitSession(ctx context.Context, id string) (int, error) {
 	session, err := sm.GetSession(id)
@@ -229,15 +186,6 @@ func (sm *SessionManager) WaitSession(ctx context.Context, id string) (int, erro
 		return -1, err
 	}
 	return session.Wait(ctx)
-}
-
-// WaitSessionWithTimeout waits for a session with a timeout.
-func (sm *SessionManager) WaitSessionWithTimeout(id string, timeout time.Duration) (int, error) {
-	session, err := sm.GetSession(id)
-	if err != nil {
-		return -1, err
-	}
-	return session.WaitWithTimeout(timeout)
 }
 
 // WaitSessionWithContextTimeout waits for a session with both caller
@@ -263,27 +211,6 @@ func (sm *SessionManager) GetResult(id string) (sandbox.CommandResult, error) {
 		return sandbox.CommandResult{}, err
 	}
 	return session.GetResult()
-}
-
-// SessionCount returns the total number of sessions.
-func (sm *SessionManager) SessionCount() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return len(sm.sessions)
-}
-
-// ActiveSessionCount returns the number of running sessions.
-func (sm *SessionManager) ActiveSessionCount() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	count := 0
-	for _, s := range sm.sessions {
-		if !s.HasExited() {
-			count++
-		}
-	}
-	return count
 }
 
 // Close terminates all sessions and closes the manager.

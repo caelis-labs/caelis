@@ -67,7 +67,7 @@ func (l *xAIResponsesLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 	applyConfiguredHeaders(httpReq, l.headers)
 	// Each hosted search is an isolated temporary Responses conversation while
 	// routing and prompt-cache affinity remain stable for the parent Session.
-	applyXAIResponsesHeaders(httpReq, "application/json", l.name, xAIResponsesWireIdentity{
+	applyXAIResponsesHeaders(httpReq, "application/json", l.name, l.userAgent, xAIResponsesWireIdentity{
 		conversationID: temporaryConversationID,
 		requestID:      uuid.NewString(),
 		sessionID:      affinity,

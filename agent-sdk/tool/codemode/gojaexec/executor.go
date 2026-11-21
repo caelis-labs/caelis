@@ -29,7 +29,6 @@ type Metrics struct {
 	Startup          time.Duration `json:"startup_ns"`
 	Wall             time.Duration `json:"wall_ns"`
 	StopReap         time.Duration `json:"stop_reap_ns"`
-	HostDrain        time.Duration `json:"host_drain_ns"`
 	CPU              time.Duration `json:"cpu_ns"`
 	PeakRSS          int64         `json:"peak_rss_bytes"`
 	HostCalls        int           `json:"host_calls"`
@@ -37,7 +36,6 @@ type Metrics struct {
 	HostReplyBytes   int64         `json:"host_reply_bytes"`
 	Killed           bool          `json:"killed"`
 	Reaped           bool          `json:"reaped"`
-	HardMemoryLimit  bool          `json:"hard_memory_limit"`
 	ExitCode         int           `json:"exit_code"`
 	RPCSentBytes     int64         `json:"rpc_sent_bytes"`
 	RPCReceivedBytes int64         `json:"rpc_received_bytes"`
@@ -108,7 +106,6 @@ type workerProcess struct {
 	started   time.Time
 	mu        sync.Mutex
 	metrics   Metrics
-	waitErr   error
 	closeOnce sync.Once
 	executor  *Executor
 }
@@ -150,9 +147,8 @@ func startWorker(e *Executor) (*workerProcess, error) {
 	writeEnd.Close()
 	child.metrics.PID = cmd.Process.Pid
 	go func() {
-		err := cmd.Wait()
+		_ = cmd.Wait()
 		child.mu.Lock()
-		child.waitErr = err
 		child.metrics.Reaped = cmd.ProcessState != nil
 		if cmd.ProcessState != nil {
 			child.metrics.ExitCode = cmd.ProcessState.ExitCode()

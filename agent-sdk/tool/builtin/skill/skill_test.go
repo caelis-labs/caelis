@@ -25,7 +25,7 @@ func TestSkillToolLoadsSkillContent(t *testing.T) {
 	}
 
 	skillTool := New(Config{
-		Catalog: catalogForSkillToolTest(t, skill.DiscoverRequest{Dirs: []string{root}}),
+		Catalog: catalogForSkillToolTest(skill.DiscoverRequest{Dirs: []string{root}}),
 	})
 	result, err := skillTool.Call(context.Background(), tool.Call{
 		ID:    "call-1",
@@ -65,7 +65,7 @@ func TestSkillToolLoadsPluginSkillByLocalName(t *testing.T) {
 	}
 
 	skillTool := New(Config{
-		Catalog: catalogForSkillToolTest(t, skill.DiscoverRequest{
+		Catalog: catalogForSkillToolTest(skill.DiscoverRequest{
 			PluginBundles: []skill.PluginBundle{{
 				Plugin:    "superpowers",
 				Namespace: "superpowers",
@@ -127,7 +127,7 @@ func TestSkillToolReportsAmbiguousLocalName(t *testing.T) {
 	oneRoot := writePluginSkillForSkillToolTest(t, "brainstorm", "Brainstorm one.")
 	twoRoot := writePluginSkillForSkillToolTest(t, "brainstorm", "Brainstorm two.")
 	skillTool := New(Config{
-		Catalog: catalogForSkillToolTest(t, skill.DiscoverRequest{
+		Catalog: catalogForSkillToolTest(skill.DiscoverRequest{
 			PluginBundles: []skill.PluginBundle{
 				{Plugin: "one", Namespace: "one", Root: oneRoot, Enabled: true},
 				{Plugin: "two", Namespace: "two", Root: twoRoot, Enabled: true},
@@ -183,13 +183,8 @@ func writePluginSkillForSkillToolTest(t *testing.T, name string, description str
 	return root
 }
 
-func catalogForSkillToolTest(t *testing.T, req skill.DiscoverRequest) skill.Catalog {
-	t.Helper()
-	metas, err := (skillfs.Discovery{}).Discover(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Discover() error = %v", err)
-	}
-	return skill.NewCatalog(metas)
+func catalogForSkillToolTest(req skill.DiscoverRequest) skill.Catalog {
+	return skill.NewCatalog(skillfs.DiscoverMetaRequest(req))
 }
 
 func mustJSONForSkillToolTest(t *testing.T, value any) json.RawMessage {

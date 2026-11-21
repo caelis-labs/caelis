@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/internal/version"
 )
 
 type connectModelChoice struct {
@@ -468,7 +469,7 @@ func compactNonEmpty(values []string) []string {
 }
 
 func connectModelCatalog(ctx context.Context, driver *assembler, payload connectWizardPayload, includeJudgments bool) ([]modelconfig.SelectableModel, error) {
-	req := modelconfig.ConnectRequest{Provider: payload.Provider, BaseURL: payload.BaseURL, APIKey: payload.TokenRef, IncludeJudgments: includeJudgments}
+	req := modelconfig.ConnectRequest{ClientVersion: version.String(), Provider: payload.Provider, BaseURL: payload.BaseURL, APIKey: payload.TokenRef, IncludeJudgments: includeJudgments}
 	if driver != nil && driver.deps != nil && driver.deps.Model.ConnectionModelsFn != nil {
 		return driver.deps.Model.ConnectionModelsFn(ctx, req)
 	}

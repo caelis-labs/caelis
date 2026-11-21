@@ -78,7 +78,7 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 	}
 	texts := []string{"explain\n\nFrom: parent", "hello\n\nFrom: Alice", "[Internal agent message]\nSender: parent\nMessage:\nbody"}
 	for i, text := range texts {
-		result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+		_, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 			Target: run.slot.target, ActivityID: fmt.Sprintf("user-%d", i), UserInput: true,
 			Source: session.ActorRef{Kind: session.ActorKindUser, ID: "owner", Name: "user"}, Input: text,
 			ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: text}, {Type: model.ContentPartImage, Data: "aW1hZ2U=", MimeType: "image/png"}},
@@ -86,7 +86,7 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+		frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 		found := false
 		for _, frame := range frames {
 			if frame.Event != nil && frame.Event.Type == session.EventTypeUser {

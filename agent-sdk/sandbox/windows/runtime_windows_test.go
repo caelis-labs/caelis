@@ -226,6 +226,7 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 		done:      make(chan struct{}),
 	}
 
+	session.releaseRuntimeUse()
 	session.forceTerminated(waitErr)
 	status, err := session.Wait(context.Background(), time.Second)
 	if err != nil {
@@ -323,23 +324,48 @@ func TestWindowsSessionForcedPublicationDoesNotReleaseRuntimeUseBeforeProcessWai
 	t.Parallel()
 
 	released := make(chan struct{})
+	draining, finishDrain := make(chan struct{}), make(chan struct{})
+	var finishOnce sync.Once
+	defer finishOnce.Do(func() { close(finishDrain) })
 	session := &windowsSession{
-		running:      true,
-		done:         make(chan struct{}),
-		outputSignal: make(chan struct{}),
-		releaseUse:   func() { close(released) },
+		running:       true,
+		supportsInput: true,
+		done:          make(chan struct{}),
+		outputSignal:  make(chan struct{}),
+		releaseUse:    func() { close(released) },
+		drainTree: func(context.Context) error {
+			close(draining)
+			<-finishDrain
+			return nil
+		},
 	}
 	session.forceTerminated(errors.New("forced publication"))
+	go session.retryProcessTreeDrain()
 	select {
+	case <-draining:
+	case <-time.After(time.Second):
+		t.Fatal("late Job drain did not start")
+	}
+	status, err := session.Wait(t.Context(), 10*time.Millisecond)
+	if err != nil || !status.Running || status.SupportsInput {
+		t.Fatalf("Wait before Job cleanup proof = %+v, %v; want pending cleanup with stdin disabled", status, err)
+	}
+	select {
+	case <-session.done:
+		t.Fatal("wait completed before the Job tree drained")
 	case <-released:
-		t.Fatal("runtime use released before the process wait path became quiescent")
+		t.Fatal("runtime use released before the Job tree drained")
 	default:
 	}
-	session.releaseRuntimeUse()
+	finishOnce.Do(func() { close(finishDrain) })
+	status, err = session.Wait(t.Context(), time.Second)
+	if err != nil || status.Running || status.SupportsInput {
+		t.Fatalf("Wait after Job cleanup proof = %+v, %v; want settled exit", status, err)
+	}
 	select {
 	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("runtime use was not released by the process wait path")
+	default:
+		t.Fatal("runtime use was not released before publishing the settled exit")
 	}
 }
 
@@ -374,6 +400,7 @@ func TestWindowsSessionTerminalObservationIncludesDecoderTail(t *testing.T) {
 		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
 	}
 
+	session.releaseRuntimeUse()
 	forceDone := make(chan struct{})
 	go func() {
 		session.forceTerminated(errors.New("forced after partial output"))
@@ -432,6 +459,7 @@ func TestWindowsSessionConcurrentFinalizersWaitForTerminalPublish(t *testing.T) 
 		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
 	}
 
+	session.releaseRuntimeUse()
 	go session.finalize(normalErr, false)
 	<-tailStarted
 	forceDone := make(chan struct{})
@@ -475,6 +503,7 @@ func TestWindowsSessionTailCallbackCanTerminateWithoutDeadlock(t *testing.T) {
 		t.Fatalf("decoder emitted incomplete UTF-8 prefix %q before Flush", got)
 	}
 
+	session.releaseRuntimeUse()
 	go session.finalize(nil, false)
 	select {
 	case err := <-callbackDone:
@@ -1227,9 +1256,9 @@ func TestWorkspaceManifestsAreIsolatedAcrossRuntimeInstances(t *testing.T) {
 	if !bytes.Equal(manifestBBefore, manifestBAfter) {
 		t.Fatalf("workspace B manifest changed during workspace A refresh\nbefore=%s\nafter=%s", manifestBBefore, manifestBAfter)
 	}
-	plan := windowsA.cleanupPlan()
-	if containsPath(plan.LegacyPaths, windowsB.manifestPath()) {
-		t.Fatalf("workspace A cleanup paths = %#v, must not include workspace B manifest", plan.LegacyPaths)
+	paths := windowsA.workspaceCleanupPaths()
+	if containsPath(paths, windowsB.manifestPath()) {
+		t.Fatalf("workspace A cleanup paths = %#v, must not include workspace B manifest", paths)
 	}
 }
 
@@ -2737,7 +2766,7 @@ func TestPolicySkipsBroadWritableRootsInsteadOfFailing(t *testing.T) {
 	}
 }
 
-func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
+func TestWorkspaceCleanupIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	rt, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
@@ -2750,21 +2779,18 @@ func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 		t.Fatalf("ensureForRequest() error = %v", err)
 	}
 
-	plan := windowsRT.cleanupPlan()
-	if !containsPath(plan.LegacyPaths, filepath.Dir(windowsRT.manifestPath())) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want current workspace manifest directory", plan.LegacyPaths)
+	paths := windowsRT.workspaceCleanupPaths()
+	if !containsPath(paths, filepath.Dir(windowsRT.manifestPath())) {
+		t.Fatalf("workspace cleanup paths = %#v, want current workspace manifest directory", paths)
 	}
-	if containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-bin")) || containsPath(plan.LegacyPaths, windowsRT.workspaceManifestBase()) {
-		t.Fatalf("cleanup LegacyPaths = %#v, must not delete StateDir-wide or other-workspace state", plan.LegacyPaths)
+	if containsPath(paths, filepath.Join(stateDir, ".sandbox-bin")) || containsPath(paths, windowsRT.workspaceManifestBase()) {
+		t.Fatalf("workspace cleanup paths = %#v, must not delete StateDir-wide or other-workspace state", paths)
 	}
-	if !containsPath(plan.LegacyPaths, filepath.Join(workspace, ".caelis-sandbox")) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want workspace sandbox env dir", plan.LegacyPaths)
+	if !containsPath(paths, filepath.Join(workspace, ".caelis-sandbox")) {
+		t.Fatalf("workspace cleanup paths = %#v, want workspace sandbox env dir", paths)
 	}
-	if !containsPath(plan.LegacyPaths, windowsRT.sandboxEnvRoot(workspace)) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want only current workspace sandbox env", plan.LegacyPaths)
-	}
-	if len(plan.LegacyProtected) == 0 {
-		t.Fatalf("cleanup plan = %+v, want protected legacy artifact reports", plan)
+	if !containsPath(paths, windowsRT.sandboxEnvRoot(workspace)) {
+		t.Fatalf("workspace cleanup paths = %#v, want only current workspace sandbox env", paths)
 	}
 }
 

@@ -202,7 +202,7 @@ func TestDeepSeekSearchWebUsesAnthropicServerToolAndReturnsSources(t *testing.T)
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -266,7 +266,7 @@ func TestDeepSeekNormalRequestDoesNotIncludeServerSideWebSearch(t *testing.T) {
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
 		Auth: AuthConfig{
-			Type:  AuthBearerToken,
+			Type:  model.AuthBearerToken,
 			Token: "deepseek-token",
 		},
 	}, "deepseek-token")
@@ -319,8 +319,8 @@ func TestMimoTokenPlanDoesNotExposeWebSearcher(t *testing.T) {
 			if !ok {
 				t.Fatal("newMimo() missing web search unavailable reason for token-plan endpoint")
 			}
-			if reason := reasoner.WebSearchUnavailableReason(); !strings.Contains(reason, "Token Plan") || !strings.Contains(reason, "api.xiaomimimo.com") {
-				t.Fatalf("WebSearchUnavailableReason() = %q, want Token Plan/native API guidance", reason)
+			if reason := reasoner.WebSearchUnavailableReason(); !strings.Contains(reason, "Token Plan") || !strings.Contains(reason, "api.xiaomimimo.com") || strings.Contains(reason, "web_fetch") || strings.Contains(reason, "WebFetch") {
+				t.Fatalf("WebSearchUnavailableReason() = %q, want Token Plan/native API facts", reason)
 			}
 			providerTools, ok := llm.(interface{ UsesProviderExecutedTools(*model.Request) bool })
 			if !ok {

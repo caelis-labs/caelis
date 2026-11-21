@@ -377,13 +377,9 @@ func TestUsageReadModelAccountingCatchUpPreservesContext(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var canonical []*session.Event
-		for _, event := range all {
-			if session.IsCanonicalHistoryEvent(event) {
-				canonical = append(canonical, event)
-			}
-		}
-		want := runtime.ComputeUsageSnapshotForModel(canonical, nil, 128000, runtime.CompactionConfig{}, "fixture", "main")
+		var rebuilt runtime.ContextUsageProjection
+		rebuilt.Append(all)
+		want := rebuilt.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main")
 		if got := view.context.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main"); got != want {
 			t.Fatalf("context=%+v want full reconstruction=%+v", got, want)
 		}

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -39,7 +39,7 @@ func TestSessionPublicSelectorRoundTripsIntoResolvedModelRequest(t *testing.T) {
 		ApprovalMode: "auto-review",
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
-			Provider: "ollama", API: providers.APIOllama, Model: "llama3",
+			Provider: "ollama", API: model.APIOllama, Model: "llama3",
 		},
 	})
 	if err != nil {
@@ -60,14 +60,14 @@ func TestSessionPublicSelectorRoundTripsIntoResolvedModelRequest(t *testing.T) {
 	// endpoint also carries, so only a fully qualified public selector can name
 	// the intended route.
 	if _, err := first.connectTestModel(ModelConfig{
-		Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro",
+		Provider: "xiaomi", API: model.APIMimo, Model: "mimo-v2.5-pro",
 		BaseURL: modelconfig.XiaomiAPIBaseURL, Token: "api-cn-round-trip-secret",
 	}); err != nil {
 		_ = first.Close()
 		t.Fatalf("Connect(api-cn) error = %v", err)
 	}
 	tokenPlanProfile, err := first.connectTestModel(ModelConfig{
-		Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro",
+		Provider: "xiaomi", API: model.APIMimo, Model: "mimo-v2.5-pro",
 		BaseURL: modelconfig.XiaomiTokenPlanCNBaseURL, Token: secret,
 	})
 	if err != nil {

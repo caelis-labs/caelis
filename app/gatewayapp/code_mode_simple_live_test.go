@@ -199,7 +199,7 @@ func TestCodeModeSimpleLive(t *testing.T) {
 		}
 		localCfg := cfg
 		localCfg.HTTPClient = &http.Client{Transport: &fairTransport{base: headerless, root: dir}}
-		built, e := modelconfig.BuildModel(localCfg, 0, 0)
+		built, e := modelconfig.BuildModel(localCfg, modelconfig.ModelBuildOptions{})
 		if e != nil {
 			t.Fatal("selected model construction failed")
 		}

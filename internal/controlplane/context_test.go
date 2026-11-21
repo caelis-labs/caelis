@@ -18,7 +18,7 @@ import (
 )
 
 var _ controller.RecoveryCoordinator = (*Coordinator)(nil)
-var _ agent.SessionControlPlane = (*SessionControl)(nil)
+var _ SessionControlPlane = (*SessionControl)(nil)
 
 func TestDefaultControllerEpochIdentitySurvivesCoordinatorRestart(t *testing.T) {
 	t.Parallel()
@@ -71,8 +71,6 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	}
 	route, err := router.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef: activeSession.SessionRef,
-		Session:    activeSession,
-		Controller: session.ControllerBinding{Kind: session.ControllerKindACP, Label: "old", ContextSyncSeq: 4},
 	})
 	if err != nil {
 		t.Fatalf("ControllerContext() error = %v", err)
@@ -110,18 +108,14 @@ func TestContextRouterAllowsEmptyCanonicalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	route, err := router.ParticipantContext(ctx, controller.ParticipantContextRequest{
+	transfer, err := router.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: activeSession.SessionRef,
-		Session:    activeSession,
-		Binding: session.ParticipantBinding{
-			ID: "spawn", Label: "spawn", ContextSyncSeq: 0,
-		},
 	})
 	if err != nil {
 		t.Fatalf("ParticipantContext(empty history) error = %v", err)
 	}
-	if route.SyncSeq != 0 || !agent.ContextTransferEmpty(route.Context) || !agent.ContextTransferEmpty(route.FreshContext) {
-		t.Fatalf("empty history route = %#v, want empty transfer without error", route)
+	if !agent.ContextTransferEmpty(transfer) {
+		t.Fatalf("empty history transfer = %#v, want empty transfer without error", transfer)
 	}
 }
 
@@ -182,7 +176,6 @@ func TestControllerContextIncludesFullBootstrapAlongsideResumeDelta(t *testing.T
 	}
 	route, err := router.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef: activeSession.SessionRef,
-		Session:    activeSession,
 		SinceSeq:   2,
 	})
 	if err != nil {
@@ -322,7 +315,7 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
 	}
-	updated, err := coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	updated, err := coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex", Source: "user", Reason: "delegate",
 	})
 	if err != nil {
@@ -393,7 +386,7 @@ func TestCoordinatorHandoffDoesNotBypassActiveTurnFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	_, err = coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "claude",
 	})
 	if !errors.Is(err, session.ErrFenceConflict) {
@@ -463,7 +456,7 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	_, err = coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex",
 	})
 	if !errors.Is(err, commitErr) {
@@ -504,7 +497,7 @@ func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+	updated, err := coordinator.HandoffController(ctx, HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex",
 	})
 	if err != nil {
@@ -612,16 +605,16 @@ func (b *recordingControllerBackend) Deactivate(context.Context, session.Session
 	return nil
 }
 
-func (*recordingControllerBackend) RunTurn(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
-	return controller.TurnResult{}, nil
+func (*recordingControllerBackend) RunTurn(context.Context, controller.TurnRequest) (controller.TurnHandle, error) {
+	return nil, nil
 }
 
 func (*recordingControllerBackend) Attach(context.Context, controller.AttachRequest) (session.ParticipantBinding, error) {
 	return session.ParticipantBinding{}, nil
 }
 
-func (*recordingControllerBackend) PromptParticipant(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error) {
-	return controller.TurnResult{}, nil
+func (*recordingControllerBackend) PromptParticipant(context.Context, controller.ParticipantPromptRequest) (controller.TurnHandle, error) {
+	return nil, nil
 }
 
 func (*recordingControllerBackend) Detach(context.Context, controller.DetachRequest) error {

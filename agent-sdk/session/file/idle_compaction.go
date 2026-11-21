@@ -17,7 +17,7 @@ type idleStoreMutation struct {
 type idleStoreUpdate func(*session.IdleCompactionState, session.SessionFence, session.LoadedSession) (idleStoreMutation, error)
 
 func authorizeDocumentMutation(doc *persistedDocument, guard session.MutationGuard) error {
-	if err := validateFileMutationGuard(activeDocumentFence(*doc), guard); err != nil {
+	if err := session.AuthorizeMutationGuard(activeDocumentFence(*doc), guard); err != nil {
 		return err
 	}
 	doc.Idle.Invalidate()
@@ -32,7 +32,7 @@ func (s *Store) idleTransaction(ctx context.Context, ref session.SessionRef, upd
 	}
 	defer s.mu.Unlock()
 	var result *session.Event
-	err := s.withRootWriteLockContext(ctx, func() error {
+	err := s.withRootLockContext(ctx, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -147,14 +147,12 @@ func (s *Store) StageCompactionReceipt(ctx context.Context, ticket session.Compa
 }
 
 // FinalizeCompactionReceipt atomically appends the sealed journal and clears pending state.
-func (s *Store) FinalizeCompactionReceipt(ctx context.Context, ticket session.CompactionReceiptTicket) (*session.Event, error) {
-	return s.idleTransaction(ctx, ticket.SessionRef(), func(state *session.IdleCompactionState, _ session.SessionFence, loaded session.LoadedSession) (idleStoreMutation, error) {
-		event, err := state.ReceiptEvent(ticket, loaded)
-		if err == nil {
-			state.ForgetReceipt(ticket)
-		}
+func (s *Store) FinalizeCompactionReceipt(ctx context.Context, ticket session.CompactionReceiptTicket) error {
+	_, err := s.idleTransaction(ctx, ticket.SessionRef(), func(state *session.IdleCompactionState, _ session.SessionFence, loaded session.LoadedSession) (idleStoreMutation, error) {
+		event, err := state.FinalizeReceipt(ticket, loaded)
 		return idleStoreMutation{event: event}, err
 	})
+	return err
 }
 
 // CancelCompactionReservation reconciles a rejected start hook without billing
@@ -182,7 +180,7 @@ func (s priorHostFenceService) RecoverCompactionReceipts(ctx context.Context, re
 		return err
 	}
 	defer store.mu.Unlock()
-	return store.withRootWriteLockContext(ctx, func() error {
+	return store.withRootLockContext(ctx, func() error {
 		doc, err := store.readDocumentForRef(ref)
 		if err != nil {
 			return err

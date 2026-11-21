@@ -16,29 +16,16 @@ func (r *Runtime) buildControllerTurnContext(
 	ref session.SessionRef,
 	excludeTurnID string,
 ) (controller.ContextRoute, error) {
-	binding := session.CloneControllerBinding(activeSession.Controller)
+	binding := activeSession.Controller
 	if binding.Kind != session.ControllerKindACP {
 		return controller.ContextRoute{SyncSeq: binding.ContextSyncSeq}, nil
 	}
-	return r.buildControllerHandoffContext(ctx, activeSession, ref, binding, binding.ContextSyncSeq, excludeTurnID)
-}
-
-func (r *Runtime) buildControllerHandoffContext(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	from session.ControllerBinding,
-	sinceSeq uint64,
-	excludeTurnID string,
-) (controller.ContextRoute, error) {
 	if r == nil || r.controllerContextRouter == nil {
 		return controller.ContextRoute{}, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
 	route, err := r.controllerContextRouter.ControllerContext(ctx, controller.ControllerContextRequest{
 		SessionRef:    session.NormalizeSessionRef(ref),
-		Session:       session.CloneSession(activeSession),
-		Controller:    session.CloneControllerBinding(from),
-		SinceSeq:      sinceSeq,
+		SinceSeq:      binding.ContextSyncSeq,
 		ExcludeTurnID: strings.TrimSpace(excludeTurnID),
 	})
 	if err != nil {
@@ -53,22 +40,20 @@ func (r *Runtime) buildControllerHandoffContext(
 
 func (r *Runtime) buildParticipantPromptContext(
 	ctx context.Context,
-	activeSession session.Session,
 	ref session.SessionRef,
-	binding session.ParticipantBinding,
-) (agent.ContextTransfer, uint64, error) {
+	sinceSeq uint64,
+) (agent.ContextTransfer, error) {
 	if r == nil || r.controllerContextRouter == nil {
-		return agent.ContextTransfer{}, 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
+		return agent.ContextTransfer{}, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
-	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
+	transfer, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
-		Session:    session.CloneSession(activeSession),
-		Binding:    session.CloneParticipantBinding(binding),
+		SinceSeq:   sinceSeq,
 	})
 	if err != nil {
-		return agent.ContextTransfer{}, 0, err
+		return agent.ContextTransfer{}, err
 	}
-	return agent.CloneContextTransfer(route.Context), route.SyncSeq, nil
+	return agent.CloneContextTransfer(transfer), nil
 }
 
 func (r *Runtime) updateControllerContextCheckpoint(ctx context.Context, ref session.SessionRef) error {

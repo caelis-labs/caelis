@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -120,7 +121,7 @@ func TestContentV1CallbackProjectionAndReceipt(t *testing.T) {
 		if err := reopened.CompleteCall(t.Context(), b.Scope, b.SessionID, next.ID, result); err != nil {
 			t.Fatal(err)
 		}
-		out, err := reopened.projectResult(t.Context(), next.CallContext, ResultFormatContentV1, result)
+		out, err := reopened.projectResult(t.Context(), next.CallContext, next.ID, ResultFormatContentV1, result)
 		if !tool.HasFailedReply(err) || err.Error() != before || len(out.Content) != 4 {
 			t.Fatalf("lost %s receipt: %+v %v", outcome, out, err)
 		}
@@ -139,6 +140,62 @@ func assertContentV1Receipt(t *testing.T, block tool.ContentBlock, id, outcome s
 		t.Fatalf("missing %s callback receipt %s: %+v", outcome, id, block)
 	}
 	return receipt
+}
+
+func TestContentV1ReusesMigratedCallReceipt(t *testing.T) {
+	for _, outcome := range []string{"succeeded", "unknown"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx := t.Context()
+			s, path := testStore(t)
+			b := contentBinding(t, s, testOwner(t, s, 1), "migrated-session")
+			call := claimContent(t, s, b, "migrated-item")
+			if outcome == "succeeded" {
+				if err := s.CompleteCall(ctx, b.Scope, b.SessionID, call.ID, contentResult(t)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Simulate an opaque address preserved by a prior migration.
+			currentID := call.ID
+			call.ID, call.State = "legacy-opaque-address", "pending"
+			body, err := encode(call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.ExecContext(ctx, `UPDATE client_tool_calls SET call=?, digest=?, body=? WHERE call=?`, call.ID, digestBytes(body), body, currentID); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			configuration, err := reopened.Configuration(ctx, b.Scope, b.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tools, err := reopened.ToolsForConfiguration(ctx, b, configuration, call.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := tools[0].(callbackTool).invoke(ctx,
+				tool.Call{ID: call.CallID, Name: call.Name, Input: call.Arguments},
+				tool.InvocationContext{SessionID: call.SessionID, TurnID: call.TurnID, ItemID: call.ItemID})
+			if outcome == "succeeded" && err != nil || outcome == "unknown" && errorcode.CodeOf(err) != errorcode.UnknownOutcome {
+				t.Fatalf("callback outcome %s: %v", outcome, err)
+			}
+			if len(result.Content) == 0 {
+				t.Fatal("callback omitted the receipt")
+			}
+			assertContentV1Receipt(t, result.Content[0], call.ID, outcome)
+			calls, err := reopened.ListCalls(ctx, b.Scope, b.SessionID)
+			if err != nil || len(calls) != 1 || calls[0].ID != call.ID {
+				t.Fatalf("stored calls = %+v, err = %v", calls, err)
+			}
+		})
+	}
 }
 
 func TestContentV1RejectsMalformedResultsWithoutCompleting(t *testing.T) {
@@ -216,7 +273,7 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
+	out, err := s.projectResult(t.Context(), call.CallContext, call.ID, ResultFormatContentV1, result)
 	if err != nil || len(out.Content) != 3 {
 		t.Fatalf("resource not resolved with provenance: %+v %v", out, err)
 	}
@@ -259,7 +316,7 @@ func TestContentV1ResourcesScopeExpiryAndSnapshot(t *testing.T) {
 	}
 	next := claimContent(t, s, b, "expired")
 	assertError(t, s.CompleteCall(t.Context(), c.Scope, b.SessionID, next.ID, result), ErrResourceExpired)
-	expired, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
+	expired, err := s.projectResult(t.Context(), call.CallContext, call.ID, ResultFormatContentV1, result)
 	if !tool.HasFailedReply(err) || err.Error() != ErrResourceExpired.Error() || len(expired.Content) != 2 {
 		t.Fatalf("expiry changed content failure: %+v %v", expired, err)
 	}
@@ -295,7 +352,7 @@ func TestContentV1CatalogAndLegacyCompatibility(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.projectResult(t.Context(), call.CallContext, "", result)
+	out, err := s.projectResult(t.Context(), call.CallContext, call.ID, "", result)
 	if err != nil || len(out.Content) != 1 {
 		t.Fatalf("legacy receipt shape: %+v, %v", out, err)
 	}
@@ -317,7 +374,7 @@ func TestLegacyCallbackFailurePreservesOpaqueReceipt(t *testing.T) {
 	if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.projectResult(t.Context(), call.CallContext, "", result)
+	out, err := s.projectResult(t.Context(), call.CallContext, call.ID, "", result)
 	if !tool.HasFailedReply(err) || err.Error() != "fixture refused the request" || len(out.Content) != 1 ||
 		out.Content[0] != tool.Text(`{"outcome":"failed","content":{"message":"fixture refused the request","details":["unchanged",9223372036854775807]}}`) {
 		t.Fatalf("failed callback changed: %+v, %v", out, err)
@@ -367,7 +424,7 @@ func TestContentV1UnknownLifecycleCannotReissue(t *testing.T) {
 					t.Fatalf("terminal %s %v", call.State, err)
 				}
 				if claimed {
-					out, err := s.projectResult(t.Context(), call.CallContext, ResultFormatContentV1, result)
+					out, err := s.projectResult(t.Context(), call.CallContext, call.ID, ResultFormatContentV1, result)
 					if !tool.HasFailedReply(err) || err.Error() != "Application callback outcome: unknown" || len(out.Content) != 1 {
 						t.Fatalf("unknown effect lost: %+v %v", out, err)
 					}

@@ -48,8 +48,6 @@ type fragment struct {
 	Content string
 }
 
-type SkillMeta = skill.Meta
-
 type Result struct {
 	Prompt       string
 	BasePrompt   string
@@ -96,14 +94,11 @@ func BuildSystemPromptResult(cfg Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	skills, err := discoverSkillMeta(skill.DiscoverRequest{
+	skills := skilldiscovery.DiscoverMetaRequest(skill.DiscoverRequest{
 		Dirs:          cfg.SkillDirs,
 		WorkspaceDir:  workspaceDir,
 		PluginBundles: cfg.PluginSkills,
 	})
-	if err != nil {
-		return Result{}, err
-	}
 	sort.Slice(skills, func(i, j int) bool {
 		return skills[i].Path < skills[j].Path
 	})
@@ -460,26 +455,6 @@ func renderRawFragments(fragments []fragment) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
-	return skilldiscovery.DefaultDiscoveryDirs(workspaceDir)
-}
-
-func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return skilldiscovery.DiscoverMeta(dirs, workspaceDir)
-}
-
-func DiscoverSkillMetaRequest(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return skilldiscovery.DiscoverMetaRequest(req)
-}
-
-func DiscoverLegacyPluginSkillCopies(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return skilldiscovery.DiscoverLegacyPluginCopies(req)
-}
-
-func DiscoverPluginBundleMeta(bundles []skill.PluginBundle) ([]SkillMeta, error) {
-	return skilldiscovery.DiscoverPluginBundleMeta(bundles)
-}
-
 func ResolvePromptPath(path string) (string, error) {
 	return resolvePromptPath(path)
 }
@@ -511,10 +486,6 @@ func EstimatePromptTextTokens(text string) int {
 		return 1
 	}
 	return tokens
-}
-
-func discoverSkillMeta(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return DiscoverSkillMetaRequest(req)
 }
 
 func readOptionalPromptFile(path string) (string, error) {

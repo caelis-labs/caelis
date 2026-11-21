@@ -5,7 +5,6 @@ package errorcode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -106,14 +105,5 @@ func CodeOf(err error) Code {
 	}
 }
 
-// Is reports whether any error in the chain has code.
+// Is reports whether CodeOf resolves the error to code.
 func Is(err error, code Code) bool { return CodeOf(err) == code }
-
-// Require returns an error when actual differs from expected. It is useful in
-// black-box contract tests and adapters.
-func Require(err error, expected Code) error {
-	if actual := CodeOf(err); actual != expected {
-		return fmt.Errorf("error code %q, want %q", actual, expected)
-	}
-	return nil
-}

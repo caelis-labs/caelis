@@ -50,27 +50,21 @@ func (r *waitResultTestRunner) GetSessionStatus(string) (cmdsession.SessionStatu
 }
 
 func (r *waitResultTestRunner) WaitSession(ctx context.Context, _ string, timeout time.Duration) (sandbox.CommandResult, error) {
-	if r.waitSessionResult != nil || r.waitSessionErr != nil {
-		if r.session != nil {
-			if timeout > 0 {
-				if _, err := r.session.WaitWithTimeout(timeout); err != nil {
-					return sandbox.CommandResult{}, err
-				}
-			} else if _, err := r.session.Wait(ctx); err != nil {
-				return sandbox.CommandResult{}, err
-			}
+	if r.session != nil {
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(context.Background(), timeout)
+			defer cancel()
 		}
-		if r.waitSessionResult != nil {
-			return *r.waitSessionResult, r.waitSessionErr
-		}
-		return sandbox.CommandResult{}, r.waitSessionErr
-	}
-	if timeout > 0 {
-		if _, err := r.session.WaitWithTimeout(timeout); err != nil {
+		if _, err := r.session.Wait(ctx); err != nil {
 			return sandbox.CommandResult{}, err
 		}
-	} else if _, err := r.session.Wait(ctx); err != nil {
-		return sandbox.CommandResult{}, err
+	}
+	if r.waitSessionResult != nil {
+		return *r.waitSessionResult, r.waitSessionErr
+	}
+	if r.waitSessionErr != nil {
+		return sandbox.CommandResult{}, r.waitSessionErr
 	}
 	return r.session.GetResult()
 }

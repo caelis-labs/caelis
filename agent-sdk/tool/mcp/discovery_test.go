@@ -22,6 +22,36 @@ func TestSearchSchemaOmitsDefinitionMetadata(t *testing.T) {
 	}
 }
 
+func TestToolSearchProjectionOwnsSchemas(t *testing.T) {
+	def := tool.Definition{
+		Name: "docs__read", Description: " Read a document ",
+		InputSchema:  map[string]any{"required": []string{"path"}},
+		OutputSchema: map[string]any{"properties": map[string]any{"content": map[string]any{"type": "string"}}},
+		Metadata: map[string]any{
+			MetadataKind: KindTool, MetadataServer: "docs",
+			MetadataTool: "read", MetadataSourceFingerprint: "v1",
+		},
+	}
+	result := NewToolSearchResult([]tool.Definition{def})
+	if result.Count != 1 || len(result.Tools) != 1 {
+		t.Fatalf("unexpected discovery result: %+v", result)
+	}
+	entry := result.Tools[0]
+	if entry.Name != def.Name || entry.Description != def.Description ||
+		entry.Binding == nil || *entry.Binding != BindingForDefinition(def) {
+		t.Fatalf("unexpected discovery entry: %+v", entry)
+	}
+
+	entry.InputSchema["required"].([]string)[0] = "other"
+	if got := def.InputSchema["required"].([]string)[0]; got != "path" {
+		t.Fatalf("discovery changed the canonical input schema: %q", got)
+	}
+	def.OutputSchema["properties"].(map[string]any)["content"].(map[string]any)["type"] = "number"
+	if got := entry.OutputSchema["properties"].(map[string]any)["content"].(map[string]any)["type"]; got != "string" {
+		t.Fatalf("canonical output schema changed the discovery result: %q", got)
+	}
+}
+
 func TestParseToolSearchOutput(t *testing.T) {
 	t.Parallel()
 

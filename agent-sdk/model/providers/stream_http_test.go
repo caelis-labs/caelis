@@ -100,10 +100,10 @@ func TestMaintainedResponsesProvidersBoundHeaderAndIdleTimeoutRetries(t *testing
 
 	tests := []struct {
 		name string
-		api  APIType
+		api  model.APIType
 	}{
-		{name: "codex", api: APIOpenAICodex},
-		{name: "grok", api: APIXAIResponses},
+		{name: "codex", api: model.APIOpenAICodex},
+		{name: "grok", api: model.APIXAIResponses},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+" response headers", func(t *testing.T) {
@@ -150,11 +150,10 @@ func TestMaintainedResponsesProvidersBoundHeaderAndIdleTimeoutRetries(t *testing
 	}
 }
 
-func newTimeoutTestLLM(t *testing.T, api APIType, transport *streamTimeoutTestTransport, timeouts Config) model.LLM {
+func newTimeoutTestLLM(t *testing.T, api model.APIType, transport *streamTimeoutTestTransport, timeouts Config) model.LLM {
 	t.Helper()
-	factory := NewFactory()
-	if err := factory.Register(Config{
-		Alias:                       "timeout-test",
+	llm, err := New(Config{
+
 		Provider:                    "test",
 		API:                         api,
 		Model:                       "test-model",
@@ -163,7 +162,7 @@ func newTimeoutTestLLM(t *testing.T, api APIType, transport *streamTimeoutTestTr
 		StreamResponseHeaderTimeout: timeouts.StreamResponseHeaderTimeout,
 		StreamFirstEventTimeout:     timeouts.StreamFirstEventTimeout,
 		StreamIdleTimeout:           timeouts.StreamIdleTimeout,
-		Auth:                        AuthConfig{Type: AuthOAuthToken},
+		Auth:                        AuthConfig{Type: model.AuthOAuthToken},
 		Retry: model.RetryConfig{
 			MaxRetries:          5,
 			BaseDelay:           time.Nanosecond,
@@ -172,10 +171,7 @@ func newTimeoutTestLLM(t *testing.T, api APIType, transport *streamTimeoutTestTr
 			RateLimitBaseDelay:  time.Nanosecond,
 			RateLimitMaxDelay:   time.Nanosecond,
 		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	llm, err := factory.NewByAlias("timeout-test")
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +232,7 @@ func TestHeaderWriteTimeoutKeepsNormalRetryBudget(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}},
 			Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"recovered\"}]}]}}\n\n")), Request: req}, nil
 	}
-	llm := newTimeoutTestLLM(t, APIOpenAICodex, transport, Config{})
+	llm := newTimeoutTestLLM(t, model.APIOpenAICodex, transport, Config{})
 	resets, err := runTimeoutTestLLM(llm)
 	if err != nil || resets != 2 || transport.requests.Load() != 3 {
 		t.Fatalf("retry recovery: requests=%d resets=%d error=%v", transport.requests.Load(), resets, err)

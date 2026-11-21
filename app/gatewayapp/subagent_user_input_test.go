@@ -261,14 +261,24 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 			observed[update.Content.Text]++
 		}
 	}
-	initial, err := active.instance.engine.WaitSubagentTask(ctx, parent.SessionRef, child.DelegationID, 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// This fixture starts follow-up Turns. A visible first delta does not prove
-	// the original Activity is terminal; wait on its existing authoritative Task.
-	if initial.Running || initial.State != task.StateCompleted {
-		t.Fatalf("initial child Task did not complete before follow-up: %+v", initial)
+	// A first delta can arrive before the producer settles the original Task.
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	ticks := time.NewTicker(10 * time.Millisecond)
+	defer ticks.Stop()
+	for {
+		initial, err := host.composition.authorities.taskStore.Get(waitCtx, child.DelegationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if initial != nil && !initial.Running && initial.State == task.StateCompleted {
+			break
+		}
+		select {
+		case <-waitCtx.Done():
+			t.Fatalf("initial child Task did not complete before follow-up: %+v", initial)
+		case <-ticks.C:
+		}
 	}
 	if restored {
 		if err := host.sessionRuntimes.releaseSession(ctx, parent.SessionID); err != nil {

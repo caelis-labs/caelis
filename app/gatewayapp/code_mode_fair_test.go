@@ -634,7 +634,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 	transport.ResponseHeaderTimeout = 0
 	defer transport.CloseIdleConnections()
 	cfg.HTTPClient = &http.Client{Transport: &fairTransport{base: transport, root: root}}
-	resolved, err := modelconfig.BuildModel(cfg, 0, 0)
+	resolved, err := modelconfig.BuildModel(cfg, modelconfig.ModelBuildOptions{})
 	if err != nil {
 		return err
 	}

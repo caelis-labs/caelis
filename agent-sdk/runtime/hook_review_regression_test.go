@@ -322,7 +322,7 @@ func (*hookBudgetCompactor) Prepare(_ context.Context, r compact.Request) (compa
 }
 func (c *hookBudgetCompactor) CompactOnOverflow(_ context.Context, r compact.Request, _ error) (compact.Result, error) {
 	revision := c.calls.Add(1)
-	data := compact.CompactEventData{Revision: int(revision), ContractVersion: compact.CompactContractVersion, SummarizedThroughID: lastEventID(r.Events), SummarizedThroughSeq: session.LastEventSeq(r.Events), SourceEventCount: len(r.Events), Generator: "review", Trigger: "overflow"}
+	data := session.CheckpointData{Revision: int(revision), ContractVersion: compact.CompactContractVersion, SummarizedThroughID: lastEventID(r.Events), SummarizedThroughSeq: session.LastEventSeq(r.Events), SourceEventCount: len(r.Events), Generator: "review", Trigger: "overflow"}
 	e := buildCompactEvent(r.Session, "prior history summarized", data)
 	return compact.Result{Compacted: true, CompactEvent: e, PromptEvents: compact.PromptEventsFromLatestCompact([]*session.Event{e})}, nil
 }

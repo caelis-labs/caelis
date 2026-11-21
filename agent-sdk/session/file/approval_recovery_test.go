@@ -96,7 +96,7 @@ func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
 	reopened.eventLogLineRead = func(_ string, _ int, _ int64) { reads++ }
 	candidate := pending[0]
 	expectedRevision := candidate.Revision
-	result, err := reopened.SettlePendingApproval(context.Background(), session.SettlePendingApprovalRequest{
+	err = reopened.SettlePendingApproval(context.Background(), session.SettlePendingApprovalRequest{
 		SessionRef: active.SessionRef, ExpectedRevision: &expectedRevision,
 		MutationGuard:          session.ControlMutationGuard(session.ControlMutationPurposeApproval),
 		ApprovalRequestID:      candidate.Request.ApprovalRequestID,
@@ -111,11 +111,12 @@ func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Settled || result.Event == nil {
-		t.Fatalf("SettlePendingApproval() = %#v, want one settlement", result)
-	}
 	if reads != 9 {
 		t.Fatalf("large-log settlement decoded %d lines, want one lock-free index build over 9 lines", reads)
+	}
+	pending, err = reopened.PendingApprovals(context.Background())
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("PendingApprovals(after settlement) = %#v, %v, want none", pending, err)
 	}
 }
 
@@ -164,7 +165,7 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndFenceRel
 		t.Fatal(err)
 	}
 	expectedRevision := stale.Revision
-	result, err := service.SettlePendingApproval(ctx, session.SettlePendingApprovalRequest{
+	err = service.SettlePendingApproval(ctx, session.SettlePendingApprovalRequest{
 		SessionRef: active.SessionRef, ExpectedRevision: &expectedRevision,
 		MutationGuard:          session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		ApprovalRequestID:      stale.Request.ApprovalRequestID,
@@ -178,9 +179,6 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndFenceRel
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if result.Settled || result.Event != nil {
-		t.Fatalf("SettlePendingApproval(stale) = %#v, want no-op", result)
 	}
 	page, err := service.EventsPage(ctx, session.EventPageRequest{
 		SessionRef: active.SessionRef, Visibility: session.EventPageAllDurable,
@@ -411,9 +409,9 @@ func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplifica
 	recoveryStore.approvalRecoverySessionDone = func(session.SessionRef) {
 		reorderOnce.Do(func() {
 			mutator := newLogicalTestStore(t, Config{RootDir: root, Clock: func() time.Time { return base.Add(time.Hour) }})
-			if _, err := mutator.ReplaceState(context.Background(), session.ReplaceStateRequest{
+			if _, err := mutator.UpdateState(context.Background(), session.UpdateStateRequest{
 				SessionRef:    target.SessionRef,
-				State:         map[string]any{"reordered": true},
+				Update:        func(map[string]any) (map[string]any, error) { return map[string]any{"reordered": true}, nil },
 				MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
 			}); err != nil {
 				t.Errorf("reorder target Session: %v", err)

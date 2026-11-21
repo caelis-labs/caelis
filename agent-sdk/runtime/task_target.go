@@ -27,6 +27,7 @@ type taskControlAccess uint8
 
 const (
 	taskControlObserve taskControlAccess = iota
+	taskControlWait
 	taskControlExclusive
 	taskControlCancel
 )
@@ -49,13 +50,22 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 		}
 		return fn(target, req)
 	}
+	// Command waits take short claims only for applying observations. Holding a
+	// claim during the wait would prevent other callers from controlling it.
+	if access == taskControlWait && identity.kind == taskapi.KindCommand {
+		task, err := tm.lookupCommand(ctx, ref, identity.taskID)
+		if err != nil {
+			return taskapi.Snapshot{}, err
+		}
+		return fn(commandControlTarget{runtime: tm, task: task}, req)
+	}
 	if access == taskControlCancel && identity.kind == taskapi.KindSubagent {
 		return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command or script tasks")
 	}
 	// Subagent read/wait are observations, not lifecycle operations. They must
 	// not contend with SendMessage or producer completion for the mutation
 	// claim. Result application is fenced by the observed child Turn instead.
-	if access == taskControlObserve && identity.kind == taskapi.KindSubagent {
+	if (access == taskControlObserve || access == taskControlWait) && identity.kind == taskapi.KindSubagent {
 		task, err := tm.lookupSubagent(ctx, ref, identity.taskID)
 		if err != nil {
 			return taskapi.Snapshot{}, err
@@ -104,11 +114,9 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 		tm.mu.RUnlock()
 		return taskControlIdentity{taskID: lookupID, kind: taskapi.KindSubagent}, nil
 	}
-	for taskID, script := range tm.codeTasks {
-		if script != nil && script.sessionRef.SessionID == ref.SessionID && (taskID == lookupID || script.handle == lookupID) {
-			tm.mu.RUnlock()
-			return taskControlIdentity{taskID: taskID, kind: taskapi.KindCodeMode}, nil
-		}
+	if script := tm.codeTasks[lookupID]; script != nil && script.sessionRef.SessionID == ref.SessionID {
+		tm.mu.RUnlock()
+		return taskControlIdentity{taskID: lookupID, kind: taskapi.KindCodeMode}, nil
 	}
 	tm.mu.RUnlock()
 	if tm.store == nil {
@@ -125,7 +133,7 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 // Session-scoped public Handle into the TaskID consumed by Runtime internals.
 // No low-level Task lookup may fall back between the two identity domains.
 func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.SessionRef, rawHandle string) (taskControlIdentity, error) {
-	handle := normalizeTaskHandle(rawHandle)
+	handle := taskapi.NormalizeHandle(rawHandle)
 	ref = session.NormalizeSessionRef(ref)
 	if handle == "" {
 		return taskControlIdentity{}, fmt.Errorf("task handle is required")
@@ -139,7 +147,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		// Directory locking protects membership; approval refresh mutates the
 		// command's public identity under the command lock.
 		command.mu.Lock()
-		matches := strings.TrimSpace(command.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) && normalizeTaskHandle(command.handle) == handle
+		matches := strings.TrimSpace(command.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) && taskapi.NormalizeHandle(command.handle) == handle
 		command.mu.Unlock()
 		if !matches {
 			continue
@@ -148,7 +156,13 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		break
 	}
 	for taskID, subagent := range tm.subagents {
-		if subagent == nil || strings.TrimSpace(subagent.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(subagent.handle) != handle {
+		if subagent == nil || strings.TrimSpace(subagent.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
+			continue
+		}
+		subagent.mu.Lock()
+		matches := taskapi.NormalizeHandle(subagent.handle) == handle
+		subagent.mu.Unlock()
+		if !matches {
 			continue
 		}
 		if matched.taskID != "" && matched.taskID != taskID {
@@ -158,7 +172,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindSubagent}
 	}
 	for taskID, script := range tm.codeTasks {
-		if script != nil && script.sessionRef.SessionID == ref.SessionID && normalizeTaskHandle(script.handle) == handle {
+		if script != nil && script.sessionRef.SessionID == ref.SessionID && taskapi.NormalizeHandle(script.handle) == handle {
 			matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindCodeMode}
 			break
 		}
@@ -171,7 +185,7 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		return taskControlIdentity{}, fmt.Errorf("task handle %q not found", handle)
 	}
 	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, handle)
-	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(entry.Handle) != handle {
+	if err != nil || entry == nil || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || taskapi.NormalizeHandle(entry.Handle) != handle {
 		return taskControlIdentity{}, fmt.Errorf("task handle %q not found", handle)
 	}
 	return taskControlIdentity{taskID: strings.TrimSpace(entry.TaskID), kind: entry.Kind}, nil
@@ -233,17 +247,23 @@ type commandControlTarget struct {
 }
 
 func (t commandControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return t.runtime.waitCommandCompletion(ctx, t.task, req.Yield)
+	return t.runtime.waitCommandTask(ctx, t.task.sessionRef, t.task, req)
 }
 
 func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	t.task.mu.Lock()
+	cleanupPending := t.task.startCleanupErr != nil
+	t.task.mu.Unlock()
+	if cleanupPending {
+		return taskapi.Snapshot{}, fmt.Errorf("command task %q does not accept stdin", t.task.handle)
+	}
 	if t.task.approvalWithoutSession() {
 		return taskapi.Snapshot{}, fmt.Errorf("command task %q has not started and does not accept stdin", t.task.handle)
 	}
 	if t.task.commandOutcomeUnattached() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
-	baseline, _, err := t.runtime.syncCommandStream(ctx, t.task)
+	baseline, err := t.runtime.syncCommandStream(ctx, t.task)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -268,7 +288,7 @@ func (t commandControlTarget) Read(ctx context.Context, req taskapi.ControlReque
 	if t.task.commandOutcomeUnattached() || t.task.approvalWithoutSession() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
-	_, _, err := t.runtime.syncCommandStream(ctx, t.task)
+	_, err := t.runtime.syncCommandStream(ctx, t.task)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}

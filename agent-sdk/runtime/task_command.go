@@ -43,17 +43,7 @@ func isCommandToolError(err error) bool {
 	return ok
 }
 
-func commandTaskID(ref session.SessionRef, parentCall string) (string, error) {
-	parentCall = strings.TrimSpace(parentCall)
-	if parentCall == "" {
-		return randomTaskID()
-	}
-	sum := sha256.Sum256([]byte(strings.TrimSpace(ref.SessionID) + "\x00" + parentCall))
-	return hex.EncodeToString(sum[:taskIDRandomBytes]), nil
-}
-
 func commandRequestDigest(req taskapi.CommandStartRequest) (string, error) {
-	constraints, _ := req.Constraints.(sandbox.Constraints)
 	payload := struct {
 		Command     string              `json:"command"`
 		Workdir     string              `json:"workdir"`
@@ -62,7 +52,7 @@ func commandRequestDigest(req taskapi.CommandStartRequest) (string, error) {
 		ParentCall  string              `json:"parent_call"`
 		Constraints sandbox.Constraints `json:"constraints"`
 		OperationID string              `json:"operation_id,omitempty"`
-	}{strings.TrimSpace(req.Command), strings.TrimSpace(req.Workdir), req.TTY, req.Timeout, strings.TrimSpace(req.ParentCall), constraints, strings.TrimSpace(req.OperationID)}
+	}{strings.TrimSpace(req.Command), strings.TrimSpace(req.Workdir), req.TTY, req.Timeout, strings.TrimSpace(req.ParentCall), req.Constraints, strings.TrimSpace(req.OperationID)}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -80,10 +70,11 @@ func (tm *taskRuntime) StartCommand(
 ) (taskapi.Snapshot, error) {
 	var outputTask *commandTask
 	sandboxReq := sandbox.CommandRequest{
-		Command: strings.TrimSpace(req.Command),
-		Dir:     strings.TrimSpace(req.Workdir),
-		TTY:     req.TTY,
-		Timeout: req.Timeout,
+		Command:     strings.TrimSpace(req.Command),
+		Dir:         strings.TrimSpace(req.Workdir),
+		TTY:         req.TTY,
+		Timeout:     req.Timeout,
+		Constraints: req.Constraints,
 		OnOutput: func(chunk sandbox.OutputChunk) {
 			if chunk.Text == "" {
 				return
@@ -93,13 +84,7 @@ func (tm *taskRuntime) StartCommand(
 			}
 		},
 	}
-	if constraints, ok := req.Constraints.(sandbox.Constraints); ok {
-		sandboxReq.Constraints = constraints
-		sandboxReq.RouteHint = constraints.Route
-		sandboxReq.Backend = constraints.Backend
-		sandboxReq.Permission = constraints.Permission
-	}
-	taskID, err := commandTaskID(ref, firstNonEmpty(req.OperationID, req.ParentCall))
+	taskID, err := taskIDForOperation(ref, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -146,7 +131,7 @@ func (tm *taskRuntime) prepareCommandClaimed(ctx context.Context, activeSession 
 	} else if ok {
 		return existing, false, nil
 	}
-	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindCommand, "command")
+	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindCommand, "command", "")
 	if err != nil {
 		return nil, false, err
 	}
@@ -327,14 +312,16 @@ func (tm *taskRuntime) startClaimedCommand(
 	runningEntry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	if err := tm.persistTaskEntry(ctx, runningEntry); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		terminateErr := sessionHandle.Terminate(cleanupCtx)
-		cancel()
-		if terminateErr != nil {
-			return tm.retainCommandAfterFailedInitialPersistence(ctx, task, err, terminateErr)
+		task.mu.Lock()
+		task.startCleanupErr = err
+		task.supportsInput = false
+		task.mu.Unlock()
+		status, settled, cleanupErr := terminateFailedCommandStart(ctx, sessionHandle)
+		if !settled {
+			return tm.retainCommandWithUnconfirmedExit(ctx, task, status, err, cleanupErr)
 		}
-		snapshot, cleanupErr := tm.finalizeCommandStartCleanup(ctx, task, err)
-		return snapshot, errors.Join(err, cleanupErr)
+		snapshot, persistErr := tm.finalizeCommandStartCleanup(ctx, task, status, err)
+		return snapshot, errors.Join(err, cleanupErr, persistErr)
 	}
 	if req.Observer != nil {
 		task.mu.Lock()
@@ -355,7 +342,6 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 	task.operationID = taskSpecString(entry.Spec, "operation_id")
 	task.revision = entry.Revision
 	task.handle = firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"]))
-	task.lease = taskapi.CloneLease(entry.Lease)
 	task.state = entry.State
 	task.running = entry.Running
 	task.supportsInput = entry.SupportsInput
@@ -437,11 +423,15 @@ func (tm *taskRuntime) snapshotExistingCommand(ctx context.Context, task *comman
 	}
 	task.mu.Lock()
 	running := task.running
+	cleanupPending := task.startCleanupErr != nil
 	task.mu.Unlock()
-	if !running {
+	if !running || cleanupPending {
 		status, err := task.session.Status(ctx)
 		if err != nil {
 			return task.snapshotWithoutSession(tm.runtime.now()), err
+		}
+		if cleanupPending {
+			return tm.reconcileCommandStatus(ctx, task, status)
 		}
 		task.mu.Lock()
 		snapshot := task.snapshotLocked(status)
@@ -476,32 +466,53 @@ func (tm *taskRuntime) handleCommandStartFailure(ctx context.Context, task *comm
 	}
 	task.mu.Lock()
 	task.session = handle
+	task.startCleanupErr = startErr
 	task.ref.SessionID = strings.TrimSpace(handle.Ref().SessionID)
 	task.ref.TerminalID = strings.TrimSpace(handle.Terminal().TerminalID)
 	task.metadata["session_id"] = task.ref.SessionID
 	task.metadata["terminal_id"] = task.ref.TerminalID
 	task.mu.Unlock()
 	tm.installCommandTask(task)
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	terminateErr := handle.Terminate(cleanupCtx)
-	cancel()
-	if terminateErr != nil {
-		return tm.retainCommandAfterFailedInitialPersistence(ctx, task, startErr, terminateErr)
+	status, settled, cleanupErr := terminateFailedCommandStart(ctx, handle)
+	if !settled {
+		return tm.retainCommandWithUnconfirmedExit(ctx, task, status, startErr, cleanupErr)
 	}
-	snapshot, persistErr := tm.finalizeCommandStartCleanup(ctx, task, startErr)
+	snapshot, persistErr := tm.finalizeCommandStartCleanup(ctx, task, status, startErr)
 	if persistErr == nil {
-		return snapshot, &commandToolError{startErr}
+		return snapshot, &commandToolError{errors.Join(startErr, cleanupErr)}
 	}
-	return snapshot, errors.Join(startErr, persistErr)
+	return snapshot, errors.Join(startErr, cleanupErr, persistErr)
 }
 
-func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *commandTask, cause error) (taskapi.Snapshot, error) {
+func terminateFailedCommandStart(ctx context.Context, handle sandbox.Session) (sandbox.SessionStatus, bool, error) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	cleanupErr := handle.Terminate(cleanupCtx)
+	if cleanupErr == nil {
+		status, waitErr := handle.Wait(cleanupCtx, taskCancelWait)
+		if waitErr == nil {
+			if status.Running {
+				return status, false, errors.New("command termination has not reached a settled exit")
+			}
+			return status, true, nil
+		}
+		cleanupErr = waitErr
+	}
+	// Status can confirm a settled exit even when the cleanup operation reported an error.
+	status, statusErr := handle.Status(cleanupCtx)
+	return status, statusErr == nil && !status.Running, errors.Join(cleanupErr, statusErr)
+}
+
+func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *commandTask, status sandbox.SessionStatus, cause error) (taskapi.Snapshot, error) {
 	reason := "command start state could not be persisted; the sandbox session was terminated"
 	if cause != nil && strings.TrimSpace(cause.Error()) != "" {
 		reason = strings.TrimSpace(cause.Error())
 	}
 	now := tm.runtime.now()
-	status := sandbox.SessionStatus{SessionRef: task.session.Ref(), Terminal: task.session.Terminal(), Running: false, UpdatedAt: now}
+	status.SupportsInput = false
+	if status.UpdatedAt.IsZero() {
+		status.UpdatedAt = now
+	}
 	task.mu.Lock()
 	task.state = taskapi.StateFailed
 	task.running = false
@@ -520,10 +531,12 @@ func (tm *taskRuntime) finalizeCommandStartCleanup(ctx context.Context, task *co
 	persistErr := tm.persistTaskEntry(context.WithoutCancel(ctx), entry)
 	task.mu.Lock()
 	task.revision = entry.Revision
-	task.lease = taskapi.CloneLease(entry.Lease)
+	if persistErr == nil {
+		task.startCleanupErr = nil
+	}
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
-	if persistErr == nil {
+	if persistErr == nil && tm.store != nil {
 		tm.removeCommandTask(task)
 	}
 	return snapshot, persistErr
@@ -561,24 +574,17 @@ func (tm *taskRuntime) removeCommandTask(task *commandTask) {
 	tm.mu.Unlock()
 }
 
-func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
+func (tm *taskRuntime) retainCommandWithUnconfirmedExit(
 	ctx context.Context,
 	task *commandTask,
-	persistErr error,
-	terminateErr error,
+	status sandbox.SessionStatus,
+	startErr error,
+	exitErr error,
 ) (taskapi.Snapshot, error) {
 	now := tm.runtime.now()
-	reason := "initial task persistence and sandbox termination both failed; command outcome is unknown"
-	status, statusErr := task.session.Status(context.WithoutCancel(ctx))
-	if statusErr != nil {
-		status = sandbox.SessionStatus{
-			SessionRef:    task.session.Ref(),
-			Terminal:      task.session.Terminal(),
-			Running:       true,
-			SupportsInput: false,
-			UpdatedAt:     now,
-		}
-	}
+	reason := "command exit could not be confirmed after startup cleanup"
+	status.SessionRef = task.session.Ref()
+	status.Terminal = task.session.Terminal()
 	status.Running = false
 	status.SupportsInput = false
 	if status.UpdatedAt.IsZero() {
@@ -602,7 +608,6 @@ func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
 		"state": string(taskapi.StateUnknownOutcome),
 		"error": reason,
 	}
-	task.emitOutputTerminalLocked(taskapi.StateUnknownOutcome, status, false)
 	task.notifyCommandOutputChangeLocked()
 	entry := task.entrySnapshot(now)
 	task.mu.Unlock()
@@ -611,7 +616,7 @@ func (tm *taskRuntime) retainCommandAfterFailedInitialPersistence(
 	task.mu.Lock()
 	snapshot := task.snapshotLocked(status)
 	task.mu.Unlock()
-	return snapshot, errors.Join(persistErr, terminateErr, statusErr, recoveryPersistErr)
+	return snapshot, errors.Join(startErr, exitErr, recoveryPersistErr)
 }
 
 // waitCommandCompletion is the claimed lifecycle wait used by RunCommand's
@@ -638,6 +643,12 @@ func (tm *taskRuntime) reconcileCommandWaitError(ctx context.Context, task *comm
 		return fallback, waitErr
 	}
 	status, statusErr := task.session.Status(context.WithoutCancel(ctx))
+	task.mu.Lock()
+	cleanupPending := task.startCleanupErr != nil
+	task.mu.Unlock()
+	if cleanupPending && (statusErr != nil || status.Running) {
+		return fallback, errors.Join(waitErr, statusErr)
+	}
 	if statusErr != nil {
 		snapshot, persistErr := tm.markCommandUnknown(context.WithoutCancel(ctx), task, errors.Join(waitErr, statusErr))
 		return snapshot, errors.Join(waitErr, statusErr, persistErr)

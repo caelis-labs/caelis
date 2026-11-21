@@ -60,10 +60,6 @@ func ModifyFileDACL(string, ...Entry) error {
 	return fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
 }
 
-func RemoveFileDACLPrincipals(string, ...string) error {
-	return fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
-}
-
 func MissingFileDACLEntries(string, ...Entry) ([]Entry, error) {
 	return nil, fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
 }

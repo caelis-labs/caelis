@@ -89,7 +89,7 @@ func TestMagpieUnifiedCatalogKeepsLegacyMenuAndDispatchIdentity(t *testing.T) {
 						t.Fatal(err)
 					}
 				} else {
-					built, err := BuildModel(saved, 0, 0)
+					built, err := BuildModel(saved, ModelBuildOptions{})
 					if err != nil {
 						t.Fatal(err)
 					}

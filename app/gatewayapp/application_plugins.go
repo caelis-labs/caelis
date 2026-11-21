@@ -102,10 +102,7 @@ func applicationPluginSkills(bundles []skill.PluginBundle) ([]skill.Meta, error)
 	var out []skill.Meta
 	seen := map[string]bool{}
 	for _, bundle := range bundles {
-		metas, err := skillfs.DiscoverPluginBundleMeta([]skill.PluginBundle{bundle})
-		if err != nil {
-			return nil, err
-		}
+		metas := skillfs.DiscoverPluginBundleMeta([]skill.PluginBundle{bundle})
 		for _, meta := range metas {
 			key := strings.ToLower(meta.Name)
 			if seen[key] {

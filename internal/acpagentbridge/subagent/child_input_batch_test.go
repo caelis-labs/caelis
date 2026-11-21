@@ -41,11 +41,11 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 		{MessageID: "mail-1", Source: session.ParentCommunicationActor(), Input: "first\n\nMessage-ID: mail-1", DisplayInput: "first"},
 		{MessageID: "mail-2", Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second\n\nMessage-ID: mail-2", DisplayInput: "second"},
 	}
-	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
+	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
 	if err != nil || !result.StartedActivity {
 		t.Fatalf("batch admission: %#v %v", result, err)
 	}
-	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, expectedActivityID)
 	var accepted int
 	running := 0
 	for _, frame := range frames {
@@ -107,10 +107,10 @@ func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
 		t.Fatal(releaseErr)
 	}
-	if err != nil || result.StartedActivity || result.ActivityID != spawn.ActivityID {
+	if err != nil || result.StartedActivity {
 		t.Fatalf("active batch = %#v, %v", result, err)
 	}
-	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, spawn.ActivityID)
 	accepted := 0
 	for _, frame := range frames {
 		if communication := session.ProtocolAgentCommunicationOf(frame.Event); communication != nil {

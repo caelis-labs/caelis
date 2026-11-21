@@ -69,7 +69,7 @@ func coverageRequest(t *testing.T, llm *coverageModel) compact.Request {
 
 func bindCoverage(t *testing.T, req *compact.Request) {
 	t.Helper()
-	delta := compactableEvents(req.Events)
+	delta := compact.EventsAfterLatestCompact(req.Events)
 	req.Coverage = &compact.Coverage{
 		SourceThroughSeq: session.LastEventSeq(req.Events), SummarizedThroughSeq: session.LastEventSeq(delta),
 		SummarizedThroughID: lastEventID(delta), SourceEventCount: len(delta),
@@ -132,7 +132,7 @@ func TestCompactionCoverageRejectsInvalidBeforeGeneration(t *testing.T) {
 func TestCompactionCoverageAllowsCheckpointAfterRawTail(t *testing.T) {
 	llm := &coverageModel{}
 	req := coverageRequest(t, llm)
-	checkpoint := &session.Event{ID: "checkpoint", Seq: 3, Type: session.EventTypeCompact, Text: "older summary", Meta: map[string]any{compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{ContractVersion: compact.CompactContractVersion, SummarizedThroughSeq: 1, SummarizedThroughID: "user"})}}
+	checkpoint := &session.Event{ID: "checkpoint", Seq: 3, Type: session.EventTypeCompact, Text: "older summary", Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{ContractVersion: compact.CompactContractVersion, SummarizedThroughSeq: 1, SummarizedThroughID: "user"})}}
 	req.Events = append(req.Events, checkpoint)
 	req.InContextRequest.Messages = []model.Message{
 		model.NewTextMessage(model.RoleUser, "older summary"),
@@ -147,7 +147,7 @@ func TestCompactionCoverageAllowsCheckpointAfterRawTail(t *testing.T) {
 	if err != nil || !result.Compacted || llm.calls != 1 {
 		t.Fatalf("calls=%d result=%+v error=%v", llm.calls, result, err)
 	}
-	data, ok := compact.CompactEventDataFromEvent(result.CompactEvent)
+	data, ok := session.CheckpointDataFromEvent(result.CompactEvent)
 	if !ok || data.SummarizedThroughSeq != 2 || data.SourceEventCount != 1 {
 		t.Fatalf("checkpoint coverage = %+v", data)
 	}

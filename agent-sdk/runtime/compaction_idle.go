@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -31,7 +32,6 @@ type IdleCompactionJob struct {
 	startedAt, preparedAt time.Time
 	turnID, sourceStamp   string
 	attempts              []idleCompactionAttempt
-	accountingErr         error
 	uncertainBegin        *session.BeginCompactionAttemptRequest
 }
 
@@ -46,7 +46,7 @@ type idleCompactionCandidate struct {
 }
 
 func (r *Runtime) bindIdleCompactionAttempt(ref session.SessionRef, in model.Invocation, authority *modelRequestAuthority, turnID string) {
-	if !r.compaction.Idle.Enabled || authority == nil || !authority.canSpeculate || turnID == "" {
+	if !r.compaction.Idle.Enabled || authority == nil || authority.validate == nil || turnID == "" {
 		return
 	}
 	release := authority.retain()
@@ -137,7 +137,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	if final.Type != session.EventTypeAssistant || final.Message == nil || final.Scope == nil || final.Scope.TurnID != snapshot.turnID || !reflect.DeepEqual(*final.Message, snapshot.final) {
 		return nil, nil
 	}
-	if !asyncToolPairsComplete(mainInvocationEvents(loaded.Events)) {
+	if !asyncToolPairsComplete(events) {
 		return nil, nil
 	}
 	tasks, err := r.tasks.activeSubagentSessionEntries(ctx, ref)
@@ -158,7 +158,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 			}
 		}
 	}
-	delta := compactableEvents(events)
+	delta := compact.EventsAfterLatestCompact(events)
 	if estimatePromptEventsTokens(delta) < 16000 {
 		return nil, nil
 	}
@@ -175,7 +175,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	if !ok || window.ContextWindowTokens() <= 0 {
 		return nil, nil
 	}
-	usage, _, _ := usageForModelRequestDetails(events, snapshot.model, snapshot.request, r.compaction)
+	usage, _ := usageForModelRequest(events, snapshot.model, snapshot.request, r.compaction)
 	if float64(usage.TotalTokens) < .5*float64(window.ContextWindowTokens()) || evaluateWatermark(usage, r.compaction).ShouldCompact {
 		return nil, nil
 	}
@@ -214,12 +214,12 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 		return nil, nil
 	}
 	release()
-	authority := &modelRequestAuthority{epoch: fresh.Revision, admit: fresh.Admit, validate: fresh.Validate, deferredTools: fresh.DeferredTools, canSpeculate: true, refs: 1, release: fresh.Release}
+	authority := &modelRequestAuthority{epoch: fresh.Revision, admit: fresh.Admit, validate: fresh.Validate, deferredTools: fresh.DeferredTools, refs: 1, release: fresh.Release}
 	release = authority.drop
 	snapshot.model = fresh.Model
 	snapshot.authority = authority
 	job := &asyncCompactJob{id: r.nextID("idle-compact", nil), source: loaded, frozen: frozen, llm: snapshot.model, epoch: snapshot.authority.epoch, requestHash: requestHash, coverage: compact.Coverage{SourceThroughSeq: final.Seq, SummarizedThroughSeq: session.LastEventSeq(delta), SummarizedThroughID: lastEventID(delta), SourceEventCount: len(delta), SourcePrefixHash: sourceHash, FrozenRequestHash: frozenHash, RequireInContext: true}}
-	out := &IdleCompactionJob{runtime: r, candidate: job, authority: snapshot.authority, release: release, startedAt: snapshot.startedAt, preparedAt: r.compactionSnapshotTime(), turnID: snapshot.turnID, sourceStamp: stamp}
+	out := &IdleCompactionJob{runtime: r, candidate: job, authority: snapshot.authority, release: release, startedAt: snapshot.startedAt, preparedAt: r.now(), turnID: snapshot.turnID, sourceStamp: stamp}
 	if !out.Fresh() {
 		return nil, nil
 	}
@@ -238,7 +238,7 @@ func (j *IdleCompactionJob) Source(hostID, activationID string) session.IdleComp
 // A five-minute cache lifetime with a thirty-second margin is an experimental
 // assumption for other channels, not a provider capability probe.
 func (j *IdleCompactionJob) Fresh() bool {
-	now := j.runtime.compactionSnapshotTime()
+	now := j.runtime.now()
 	age := time.Duration(now.UnixNano() - j.startedAt.UnixNano())
 	wall := time.Duration(now.UnixNano() - j.preparedAt.UnixNano())
 	drift := wall - now.Sub(j.preparedAt)
@@ -248,19 +248,19 @@ func (j *IdleCompactionJob) Fresh() bool {
 // Run performs one generation (at most two actual attempts), then one adoption.
 // It returns only after the provider is drained. Accounting remains independent
 // of candidate success, cancellation and foreground revocation.
-func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompactionWindow) (bool, error) {
+func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompactionWindow) error {
 	if !j.Fresh() {
-		return false, nil
+		return nil
 	}
 	if j.authority.validate == nil {
-		return false, nil
+		return nil
 	}
 	release, err := j.authority.validate(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if release == nil {
-		return false, agent.ErrModelRequestSnapshotStale
+		return agent.ErrModelRequestSnapshotStale
 	}
 	release()
 	store := j.runtime.sessions.(session.CompactionReceiptStore)
@@ -277,7 +277,7 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	}
 	generation = model.WithInvocationAdmission(generation, func(ctx context.Context, _ *model.Request) error {
 		if len(j.attempts) >= 2 {
-			return &idleCompactionAttemptLimit{}
+			return errors.New("runtime: idle compaction attempt limit reached")
 		}
 		if !j.Fresh() {
 			return session.ErrIdleCompactionRevoked
@@ -299,9 +299,8 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 		request := session.BeginCompactionAttemptRequest{Window: window, Invocation: in}
 		ticket, err := store.BeginCompactionAttempt(ctx, request)
 		if err != nil && !session.IsCommitted(err) {
-			j.accountingErr = err
 			j.uncertainBegin = &request
-			return &idleCompactionAccountingError{err}
+			return fmt.Errorf("runtime: idle compaction accounting: %w", err)
 		}
 		j.attempts = append(j.attempts, idleCompactionAttempt{ticket: ticket, invocation: in})
 		return nil
@@ -315,19 +314,19 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 		}
 	})
 	c := j.candidate
-	c.result, c.err = j.runtime.compactor.(compact.ForceEngine).Force(generation, compact.Request{Session: c.source.Session, SessionRef: c.source.Session.SessionRef, Events: session.CloneEvents(c.source.Events), Model: c.llm, ServiceTier: c.frozen.ServiceTier, InContextRequest: c.frozen, Coverage: &c.coverage, RequireInContext: true}, "idle_candidate")
+	c.result, c.err = j.runtime.compactor.(compact.ForceEngine).Force(generation, compact.Request{Session: c.source.Session, Events: session.CloneEvents(c.source.Events), Model: c.llm, ServiceTier: c.frozen.ServiceTier, InContextRequest: c.frozen, Coverage: &c.coverage, RequireInContext: true}, "idle_candidate")
 	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	accountingErr := j.FlushAccounting(cleanup)
 	cancelCleanup()
 	if accountingErr != nil {
-		return false, accountingErr
+		return accountingErr
 	}
 	if c.err != nil {
-		return false, c.err
+		return c.err
 	}
 	if ctx.Err() != nil {
 		j.keepReadyCandidate()
-		return false, ctx.Err()
+		return ctx.Err()
 	}
 	idleStore := j.runtime.sessions.(session.IdleCompactionStore)
 	var grant *session.IdleCompactionGrant
@@ -346,23 +345,8 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	if !adopted && (errors.Is(err, session.ErrIdleCompactionRevoked) || errors.Is(err, context.Canceled) || errors.Is(err, errSessionWriteBusy)) {
 		j.keepReadyCandidate()
 	}
-	return adopted, err
+	return err
 }
-
-type idleCompactionAttemptLimit struct{}
-
-func (*idleCompactionAttemptLimit) Error() string {
-	return "runtime: idle compaction attempt limit reached"
-}
-func (*idleCompactionAttemptLimit) Retryable() bool { return false }
-
-type idleCompactionAccountingError struct{ cause error }
-
-func (e *idleCompactionAccountingError) Error() string {
-	return "runtime: idle compaction accounting: " + e.cause.Error()
-}
-func (e *idleCompactionAccountingError) Unwrap() error { return e.cause }
-func (*idleCompactionAccountingError) Retryable() bool { return false }
 
 // FlushAccounting retries only original sealed invocation identities. Successful
 // staging is durable, but an unconfirmed terminal payload retains this job.
@@ -373,10 +357,6 @@ func (j *IdleCompactionJob) FlushAccounting(ctx context.Context) error {
 			return err
 		}
 		j.uncertainBegin = nil
-		j.accountingErr = nil
-	}
-	if j.accountingErr != nil {
-		return j.accountingErr
 	}
 	for i := range j.attempts {
 		attempt := &j.attempts[i]
@@ -391,7 +371,7 @@ func (j *IdleCompactionJob) FlushAccounting(ctx context.Context) error {
 			}
 			attempt.staged = true
 		}
-		if _, err := store.FinalizeCompactionReceipt(ctx, attempt.ticket); err != nil && !session.IsCommitted(err) {
+		if err := store.FinalizeCompactionReceipt(ctx, attempt.ticket); err != nil && !session.IsCommitted(err) {
 			return err
 		}
 		attempt.finalized = true
@@ -404,7 +384,7 @@ func (j *IdleCompactionJob) keepReadyCandidate() {
 	r.idleCandidateMu.Lock()
 	defer r.idleCandidateMu.Unlock()
 	if j.candidate.err == nil && j.candidate.result.Compacted {
-		now := r.compactionSnapshotTime()
+		now := r.now()
 		for key, value := range r.idleCandidates {
 			age := now.Sub(value.readyAt)
 			if age < 0 || age > 120*time.Second {
@@ -421,7 +401,7 @@ func (j *IdleCompactionJob) keepReadyCandidate() {
 			}
 			delete(r.idleCandidates, oldestKey)
 		}
-		r.idleCandidates[compactionSessionKey(j.candidate.source.Session.SessionRef)] = &idleCompactionCandidate{job: j.candidate, readyAt: r.compactionSnapshotTime()}
+		r.idleCandidates[compactionSessionKey(j.candidate.source.Session.SessionRef)] = &idleCompactionCandidate{job: j.candidate, readyAt: r.now()}
 	}
 }
 
@@ -452,7 +432,7 @@ func (l *autoCompactGatedLLM) adoptReadyIdleCandidate(ctx context.Context, req *
 		return false, nil
 	}
 	job := candidate.job
-	age := r.compactionSnapshotTime().Sub(candidate.readyAt)
+	age := r.now().Sub(candidate.readyAt)
 	if age < 0 || age > 120*time.Second || l.requestAuthority == nil || job.epoch != l.requestAuthority.epoch || !sameCompactionModel(job.llm, l.inner) {
 		return false, nil
 	}

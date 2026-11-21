@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sandboxport "github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -329,14 +330,11 @@ func (s *runtimeComposition) legacyPluginSkillCopyWarnings(workspace string) []s
 	if len(runtimeCfg.PluginSkills) == 0 {
 		return nil
 	}
-	copies, err := DiscoverLegacyPluginSkillCopies(skill.DiscoverRequest{
+	copies := skilldiscovery.DiscoverLegacyPluginCopies(skill.DiscoverRequest{
 		Dirs:          stackSkillDiscoveryDirs(workspace, runtimeCfg.SkillDirs),
 		WorkspaceDir:  workspace,
 		PluginBundles: skill.ClonePluginBundles(runtimeCfg.PluginSkills),
 	})
-	if err != nil {
-		return []string{"legacy plugin skill copy check failed: " + err.Error()}
-	}
 	if len(copies) == 0 {
 		return nil
 	}
@@ -456,7 +454,7 @@ func modelConfigMissingAPIKey(cfg ModelConfig) bool {
 	if cfg.Provider == "" || cfg.Model == "" {
 		return false
 	}
-	if cfg.AuthType == "" || cfg.AuthType == providers.AuthNone {
+	if cfg.AuthType == "" || cfg.AuthType == model.AuthNone {
 		return false
 	}
 	if strings.TrimSpace(cfg.Token) != "" {

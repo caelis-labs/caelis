@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 // CheckpointMetadataKey is the canonical checkpoint metadata namespace.
@@ -156,7 +157,7 @@ func decodeCompactIntegers(values map[string]any, out *CheckpointData) bool {
 			continue
 		}
 		parsed, err := compactUint64(value)
-		if err != nil || parsed > uint64(maxInt()) {
+		if err != nil || parsed > math.MaxInt {
 			return false
 		}
 		*field.target = int(parsed)
@@ -205,10 +206,6 @@ func compactUint64(value any) (uint64, error) {
 		}
 	}
 	return 0, fmt.Errorf("invalid non-negative integer %T", value)
-}
-
-func maxInt() int {
-	return int(^uint(0) >> 1)
 }
 
 func normalizeCheckpointData(in CheckpointData) CheckpointData {

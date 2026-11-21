@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMode) (*os.File, error) {
+func lockSessionStoreRoot(ctx context.Context, root string) (*os.File, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -27,10 +27,7 @@ func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMo
 		_ = file.Close()
 		return nil, err
 	}
-	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
-	if mode == storeRootLockExclusive {
-		flags |= windows.LOCKFILE_EXCLUSIVE_LOCK
-	}
+	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY | windows.LOCKFILE_EXCLUSIVE_LOCK)
 	for {
 		if err := ctx.Err(); err != nil {
 			_ = file.Close()

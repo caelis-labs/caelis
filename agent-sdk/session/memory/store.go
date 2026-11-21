@@ -30,8 +30,7 @@ type Store struct {
 }
 
 var (
-	_ session.ApprovalRecoveryService             = (*Store)(nil)
-	_ session.ConditionalEventAppenderWithOutcome = (*Store)(nil)
+	_ session.ApprovalRecoveryService = (*Store)(nil)
 )
 
 // NewStore constructs one new in-memory session store.
@@ -89,8 +88,9 @@ func (s *Store) StartSession(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if existing, ok := s.sessions[ref.SessionID]; ok {
-		if !session.EqualExecutionConfig(existing.session.ExecutionConfig, req.ExecutionConfig) {
+	if _, occupied := s.sessions[ref.SessionID]; occupied {
+		existing, matches := s.lookupLocked(ref)
+		if !matches || !session.EqualExecutionConfig(existing.session.ExecutionConfig, req.ExecutionConfig) {
 			return session.Session{}, session.ErrInvalidSession
 		}
 		return existing.cloneSession(), nil
@@ -191,20 +191,12 @@ func (s *Store) ListSessions(
 }
 
 func (s *Store) AppendEvent(
-	ctx context.Context,
+	_ context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	result, err := s.AppendEventWithOutcome(ctx, req)
-	return result.Event, err
-}
-
-func (s *Store) AppendEventWithOutcome(
-	_ context.Context,
-	req session.AppendEventRequest,
-) (session.AppendEventResult, error) {
 	event := req.Event
 	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
+		return nil, session.ErrInvalidEvent
 	}
 
 	s.mu.Lock()
@@ -212,60 +204,19 @@ func (s *Store) AppendEventWithOutcome(
 
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return session.AppendEventResult{}, session.ErrSessionNotFound
+		return nil, session.ErrSessionNotFound
 	}
 	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 
 	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")
 	if err != nil {
-		return session.AppendEventResult{}, err
+		return nil, err
 	}
 	normalized := tx.Prepared.Events[0]
 	s.applyAppendTransactionToRecord(record, tx)
-	return session.AppendEventResult{Event: session.CloneEvent(normalized), Appended: tx.Changed}, nil
-}
-
-// AppendEventWithOutcomeConditional atomically checks related Session
-// revisions and appends the target event under the store-wide write lock.
-func (s *Store) AppendEventWithOutcomeConditional(
-	_ context.Context,
-	req session.ConditionalAppendEventRequest,
-) (session.AppendEventResult, error) {
-	event := req.Event
-	if event == nil {
-		return session.AppendEventResult{}, session.ErrInvalidEvent
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.lookupLocked(req.SessionRef)
-	if !ok {
-		return session.AppendEventResult{}, session.ErrSessionNotFound
-	}
-	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return session.AppendEventResult{}, err
-	}
-	for _, precondition := range req.RelatedRevisions {
-		related, ok := s.lookupLocked(precondition.SessionRef)
-		if !ok {
-			return session.AppendEventResult{}, session.ErrSessionNotFound
-		}
-		expected := precondition.ExpectedRevision
-		if err := session.CheckExpectedRevision(related.session, &expected); err != nil {
-			return session.AppendEventResult{}, err
-		}
-	}
-
-	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")
-	if err != nil {
-		return session.AppendEventResult{}, err
-	}
-	normalized := tx.Prepared.Events[0]
-	s.applyAppendTransactionToRecord(record, tx)
-	return session.AppendEventResult{Event: session.CloneEvent(normalized), Appended: tx.Changed}, nil
+	return session.CloneEvent(normalized), nil
 }
 
 // SettlePendingApproval appends one approval settlement only while the exact
@@ -273,9 +224,9 @@ func (s *Store) AppendEventWithOutcomeConditional(
 func (s *Store) SettlePendingApproval(
 	_ context.Context,
 	req session.SettlePendingApprovalRequest,
-) (session.SettlePendingApprovalResult, error) {
+) error {
 	if err := session.ValidateSettlePendingApprovalRequest(req); err != nil {
-		return session.SettlePendingApprovalResult{}, err
+		return err
 	}
 
 	s.mu.Lock()
@@ -283,18 +234,17 @@ func (s *Store) SettlePendingApproval(
 
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return session.SettlePendingApprovalResult{}, session.ErrSessionNotFound
+		return session.ErrSessionNotFound
 	}
-	result := session.SettlePendingApprovalResult{}
-	current := pendingApprovalForEvents(record.events, req.ApprovalRequestID)
+	current := session.PendingApprovalEvent(record.events, req.ApprovalRequestID)
 	if !session.PendingApprovalMatches(current, req) {
-		return result, nil
+		return nil
 	}
 	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return result, err
+		return err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
-		return result, err
+		return err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
 		record,
@@ -306,31 +256,10 @@ func (s *Store) SettlePendingApproval(
 		"",
 	)
 	if err != nil {
-		return result, err
+		return err
 	}
 	s.applyAppendTransactionToRecord(record, tx)
-	result.Settled = tx.Changed
-	if len(tx.Prepared.Events) > 0 {
-		result.Event = session.CloneEvent(tx.Prepared.Events[0])
-	}
-	return result, nil
-}
-
-func pendingApprovalForEvents(events []*session.Event, approvalRequestID string) *session.Event {
-	requestID := strings.TrimSpace(approvalRequestID)
-	var pending *session.Event
-	for _, event := range events {
-		if event == nil || strings.TrimSpace(event.ApprovalRequestID) != requestID {
-			continue
-		}
-		switch {
-		case session.ProtocolPermissionOf(event) != nil:
-			pending = event
-		case event.Lifecycle != nil:
-			pending = nil
-		}
-	}
-	return pending
+	return nil
 }
 
 func (s *Store) prepareAppendTransactionForRecord(
@@ -497,10 +426,6 @@ func (s *Store) BindController(
 	_ context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(req)
-}
-
-func (s *Store) bindControllerRequest(req session.BindControllerRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -554,10 +479,6 @@ func (s *Store) PutParticipant(
 	_ context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(req)
-}
-
-func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -633,10 +554,6 @@ func (s *Store) RemoveParticipant(
 	_ context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(req)
-}
-
-func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -714,32 +631,6 @@ func (s *Store) SnapshotState(
 	return cloneState(record.state), nil
 }
 
-func (s *Store) ReplaceState(
-	_ context.Context,
-	req session.ReplaceStateRequest,
-) (session.Session, error) {
-	if err := session.ValidateState(req.State); err != nil {
-		return session.Session{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	record, ok := s.lookupLocked(req.SessionRef)
-	if !ok {
-		return session.Session{}, session.ErrSessionNotFound
-	}
-	if err := record.authorizeMutation(req.MutationGuard); err != nil {
-		return session.Session{}, err
-	}
-	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
-		return session.Session{}, err
-	}
-	record.state = cloneState(req.State)
-	record.session.Revision++
-	record.session.UpdatedAt = s.now()
-	return record.cloneSession(), nil
-}
-
 func (s *Store) UpdateState(
 	_ context.Context,
 	req session.UpdateStateRequest,
@@ -790,13 +681,6 @@ func (s *Store) LoadSession(
 	}, nil
 }
 
-// SettlePendingApproval atomically settles one still-pending recovery
-// candidate.
-
-// EventsPage returns one bounded forward sequence page.
-
-// EventCheckpoint returns one atomic Session/event high-water cut.
-
 // PendingApprovals returns durable permission requests without a later
 // settlement across the in-memory Store.
 func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
@@ -818,21 +702,7 @@ func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval
 	keys := make([]pendingKey, 0)
 	for _, record := range s.sessions {
 		pending := map[string]*session.Event{}
-		for _, event := range record.events {
-			requestID := ""
-			if event != nil {
-				requestID = strings.TrimSpace(event.ApprovalRequestID)
-			}
-			if requestID == "" {
-				continue
-			}
-			switch {
-			case session.ProtocolPermissionOf(event) != nil:
-				pending[requestID] = event
-			case event.Lifecycle != nil:
-				delete(pending, requestID)
-			}
-		}
+		session.ApplyPendingApprovalEvents(pending, record.events)
 		for requestID, request := range pending {
 			keys = append(keys, pendingKey{
 				sessionID: record.session.SessionID, requestID: requestID,

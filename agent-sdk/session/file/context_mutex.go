@@ -20,10 +20,6 @@ func (m *contextMutex) init() {
 	})
 }
 
-func (m *contextMutex) Lock() {
-	_ = m.LockContext(context.Background())
-}
-
 func (m *contextMutex) LockContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()

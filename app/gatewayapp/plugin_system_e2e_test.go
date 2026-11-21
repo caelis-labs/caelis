@@ -12,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -65,12 +67,12 @@ func TestPluginSystemE2E(t *testing.T) {
 		Model: ModelConfig{
 			Alias:               "plugin-e2e",
 			Provider:            "openai-compatible",
-			API:                 providers.APIOpenAICompatible,
+			API:                 model.APIOpenAICompatible,
 			Model:               "plugin-e2e-model",
 			BaseURL:             fakeProvider.URL,
 			HTTPClient:          fakeProvider.Client(),
 			Token:               "plugin-e2e-token",
-			AuthType:            providers.AuthBearerToken,
+			AuthType:            model.AuthBearerToken,
 			ContextWindowTokens: 128000,
 			MaxOutputTok:        1024,
 			Timeout:             5 * time.Second,
@@ -110,11 +112,11 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 
 	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{
-		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.Decision, error) {
+		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.ReviewResult, error) {
 			if request.Payload == nil || request.Payload.ToolName != pluginE2EToolName {
 				t.Fatalf("unexpected E2E approval request: %+v", request.Payload)
 			}
-			return approval.Decision{OptionID: "allow_once"}, nil
+			return approval.ReviewResult{OptionID: "allow_once"}, nil
 		},
 	})
 	if err != nil {

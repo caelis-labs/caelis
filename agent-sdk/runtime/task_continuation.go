@@ -176,15 +176,17 @@ func (s *taskContinuationScope) join() error {
 	if s == nil {
 		return nil
 	}
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	s.wait(context.Background(), nil)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.closed = true
 	return s.err
 }
 
-// stopCodeMode closes original-Run script admission at a final safe point.
-// It leaves the existing command-approval continuation contract unchanged.
+// stopCodeMode cancels active scripts at a final safe point. Ordinary Task
+// continuations remain eligible to finish under the same Run.
 func (s *taskContinuationScope) stopCodeMode() {
 	if s == nil {
 		return

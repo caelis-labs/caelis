@@ -17,7 +17,7 @@ func TestReviewerAdapterFinalizesReviewResult(t *testing.T) {
 			Rationale:     "model selected reject",
 		},
 	}
-	result, err := ReviewerAdapter{Reviewer: reviewer}.Decide(context.Background(), Request{
+	result, err := ReviewerAdapter{Reviewer: reviewer}.Decide(context.Background(), ReviewRequest{
 		Approval: &Payload{
 			Options: []Option{
 				{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},

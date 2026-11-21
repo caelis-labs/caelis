@@ -3,7 +3,6 @@ package file
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -200,46 +199,27 @@ func (s *Store) readEventLogTailContext(
 		}
 		lineStart := offset
 		line, readErr := reader.ReadString('\n')
-		if len(line) == 0 && errors.Is(readErr, io.EOF) {
+		if errors.Is(readErr, io.EOF) {
 			break
+		}
+		if readErr != nil {
+			return nil, offset, lineNo, lastCheckpoint, readErr
 		}
 		offset += int64(len(line))
 		lineNo++
 		if s.eventLogLineRead != nil {
 			s.eventLogLineRead(path, lineNo, lineStart)
 		}
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return nil, offset, lineNo, lastCheckpoint, readErr
-		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
-			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
+			event, err := decodeEventLogRecord([]byte(trimmed), path, lineNo)
+			if err != nil {
 				return nil, offset, lineNo, lastCheckpoint, err
 			}
-			migratedRaw, err := session.MigrateEventJSON(json.RawMessage(trimmed))
-			if err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
-				return nil, offset, lineNo, lastCheckpoint, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
-			}
-			var event session.Event
-			if err := json.Unmarshal(migratedRaw, &event); err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
-				return nil, offset, lineNo, lastCheckpoint, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d: %w", path, lineNo, err)
-			}
-			if err := session.ValidateDurableCoreEvent(&event); err != nil {
-				return nil, offset, lineNo, lastCheckpoint, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
-			}
-			events = append(events, session.CloneEvent(&event))
+			events = append(events, session.CloneEvent(event))
 			if event.Seq > 0 {
 				lastCheckpoint = newEventPageCheckpoint(event.Seq, lineStart, offset, lineNo, line)
 			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
 		}
 	}
 	return events, offset, lineNo, lastCheckpoint, nil

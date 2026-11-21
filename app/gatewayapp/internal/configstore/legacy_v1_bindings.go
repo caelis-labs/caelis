@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
@@ -50,42 +50,42 @@ func (c *legacyPersistedModelConfig) UnmarshalJSON(data []byte) error {
 }
 
 type legacyProviderEndpoint struct {
-	ID                      string             `json:"id,omitempty"`
-	Provider                string             `json:"provider,omitempty"`
-	EndpointID              string             `json:"endpoint_id,omitempty"`
-	API                     providers.APIType  `json:"api,omitempty"`
-	BaseURL                 string             `json:"base_url,omitempty"`
-	Token                   string             `json:"token,omitempty"`
-	CredentialRef           string             `json:"credential_ref,omitempty"`
-	PersistToken            bool               `json:"persist_token,omitempty"`
-	AuthType                providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey               string             `json:"header_key,omitempty"`
-	Timeout                 time.Duration      `json:"timeout,omitempty"`
-	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
+	ID                      string         `json:"id,omitempty"`
+	Provider                string         `json:"provider,omitempty"`
+	EndpointID              string         `json:"endpoint_id,omitempty"`
+	API                     model.APIType  `json:"api,omitempty"`
+	BaseURL                 string         `json:"base_url,omitempty"`
+	Token                   string         `json:"token,omitempty"`
+	CredentialRef           string         `json:"credential_ref,omitempty"`
+	PersistToken            bool           `json:"persist_token,omitempty"`
+	AuthType                model.AuthType `json:"auth_type,omitempty"`
+	HeaderKey               string         `json:"header_key,omitempty"`
+	Timeout                 time.Duration  `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration  `json:"stream_first_event_timeout,omitempty"`
 }
 
 type legacyModelConfig struct {
-	ID                      string             `json:"id,omitempty"`
-	Alias                   string             `json:"alias,omitempty"`
-	Provider                string             `json:"provider,omitempty"`
-	ProfileID               string             `json:"profile_id,omitempty"`
-	EndpointID              string             `json:"endpoint_id,omitempty"`
-	API                     providers.APIType  `json:"api,omitempty"`
-	Model                   string             `json:"model,omitempty"`
-	BaseURL                 string             `json:"base_url,omitempty"`
-	Token                   string             `json:"token,omitempty"`
-	CredentialRef           string             `json:"credential_ref,omitempty"`
-	PersistToken            bool               `json:"persist_token,omitempty"`
-	AuthType                providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey               string             `json:"header_key,omitempty"`
-	ContextWindowTokens     int                `json:"context_window_tokens,omitempty"`
-	ReasoningEffort         string             `json:"reasoning_effort,omitempty"`
-	DefaultReasoningEffort  string             `json:"default_reasoning_effort,omitempty"`
-	ReasoningLevels         []string           `json:"reasoning_levels,omitempty"`
-	ReasoningMode           string             `json:"reasoning_mode,omitempty"`
-	MaxOutputTok            int                `json:"max_output_tokens,omitempty"`
-	Timeout                 time.Duration      `json:"timeout,omitempty"`
-	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
+	ID                      string         `json:"id,omitempty"`
+	Alias                   string         `json:"alias,omitempty"`
+	Provider                string         `json:"provider,omitempty"`
+	ProfileID               string         `json:"profile_id,omitempty"`
+	EndpointID              string         `json:"endpoint_id,omitempty"`
+	API                     model.APIType  `json:"api,omitempty"`
+	Model                   string         `json:"model,omitempty"`
+	BaseURL                 string         `json:"base_url,omitempty"`
+	Token                   string         `json:"token,omitempty"`
+	CredentialRef           string         `json:"credential_ref,omitempty"`
+	PersistToken            bool           `json:"persist_token,omitempty"`
+	AuthType                model.AuthType `json:"auth_type,omitempty"`
+	HeaderKey               string         `json:"header_key,omitempty"`
+	ContextWindowTokens     int            `json:"context_window_tokens,omitempty"`
+	ReasoningEffort         string         `json:"reasoning_effort,omitempty"`
+	DefaultReasoningEffort  string         `json:"default_reasoning_effort,omitempty"`
+	ReasoningLevels         []string       `json:"reasoning_levels,omitempty"`
+	ReasoningMode           string         `json:"reasoning_mode,omitempty"`
+	MaxOutputTok            int            `json:"max_output_tokens,omitempty"`
+	Timeout                 time.Duration  `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration  `json:"stream_first_event_timeout,omitempty"`
 }
 
 type legacyAgentConfiguration struct {

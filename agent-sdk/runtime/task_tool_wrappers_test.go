@@ -51,7 +51,7 @@ func (r *runtimeChildInputRunner) SubmitChildInput(_ context.Context, req agent.
 	r.mu.Lock()
 	r.request = agent.CloneChildInputRequest(req)
 	r.mu.Unlock()
-	return agent.ChildInputResult{ActivityID: req.ActivityID, StartedActivity: true}, nil
+	return agent.ChildInputResult{StartedActivity: true}, nil
 }
 
 type preRuntimeToolWrapper struct {
@@ -191,7 +191,7 @@ func TestRuntimeExplicitSDKSendMessageSurvivesWorkspaceWritePolicy(t *testing.T)
 	runtime := &Runtime{policies: registry, defaultPolicyMode: presets.ModeWorkspaceWrite}
 	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{Tools: []tool.Tool{sendmessage.New()}}, runtimeToolContext{inputSender: sender})
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
-		ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef,
+		ctx: context.Background(),
 	})
 	if len(wrapped) != 1 {
 		t.Fatalf("wrapped tools = %d, want only SendMessage", len(wrapped))

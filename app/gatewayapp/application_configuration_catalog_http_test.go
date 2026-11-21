@@ -76,8 +76,11 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 	if len(requests) != 2 {
 		t.Fatalf("Turn produced %d provider requests, want the old callback request and continuation on the newly connected model", len(requests))
 	}
-	assertRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string")
-	assertRevisionPrefix(t, requests[1], "gpt-5.4", "low", "", profile.Instructions, "string")
+	assertRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string", false)
+	assertRevisionPrefix(t, requests[1], "gpt-5.4", "low", "", profile.Instructions, "string", true)
+	if requests[0]["instructions"] != requests[1]["instructions"] {
+		t.Fatal("selecting the newly connected model changed the system instructions")
+	}
 	if !strings.Contains(fmt.Sprint(requests[1]["input"]), "CONFIGURATION_TOOL_SENTINEL") {
 		t.Fatal("new model request lost the callback result from the issued request")
 	}

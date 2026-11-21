@@ -34,7 +34,7 @@ func refreshAdmissionManager(t *testing.T, handler func(context.Context) error) 
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	t.Cleanup(endpoint.Close)
 	spec := ServerSpec{PluginID: "p", Name: "local", Transport: TransportStreamableHTTP, URL: endpoint.URL}
-	client, err := startClientWithCatalog(t.Context(), spec, nil, true)
+	client, err := startClient(t.Context(), spec, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

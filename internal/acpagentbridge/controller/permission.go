@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 )
@@ -19,12 +18,11 @@ func (r *controllerRun) permissionHandler(ctx context.Context, req client.Reques
 	}
 	r.mu.Lock()
 	remoteID := r.remoteSessionID
-	activeSession := session.CloneSession(r.turnSession)
 	mode := strings.TrimSpace(r.turnMode)
 	requester := r.approvalRequester
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
-	return dispatchBoundEndpointPermission(ctx, remoteID, activeSession, agent, mode, requester, req)
+	return dispatchBoundEndpointPermission(ctx, remoteID, agent, mode, requester, req)
 }
 
 func (r *participantRun) permissionHandler(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
@@ -33,12 +31,11 @@ func (r *participantRun) permissionHandler(ctx context.Context, req client.Reque
 	}
 	r.mu.Lock()
 	remoteID := r.remoteSessionID
-	activeSession := session.CloneSession(r.turnSession)
 	mode := strings.TrimSpace(r.turnMode)
 	requester := r.approvalRequester
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
-	return dispatchBoundEndpointPermission(ctx, remoteID, activeSession, agent, mode, requester, req)
+	return dispatchBoundEndpointPermission(ctx, remoteID, agent, mode, requester, req)
 }
 
 // dispatchBoundEndpointPermission fails closed when the local endpoint Session
@@ -49,7 +46,6 @@ func (r *participantRun) permissionHandler(ctx context.Context, req client.Reque
 func dispatchBoundEndpointPermission(
 	ctx context.Context,
 	boundID string,
-	activeSession session.Session,
 	agent string,
 	mode string,
 	requester controller.ApprovalRequester,
@@ -60,7 +56,7 @@ func dispatchBoundEndpointPermission(
 		return client.RequestPermissionResponse{}, errACPPermissionSessionMismatchEndpoint
 	}
 	if requester != nil {
-		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
+		approvalReq, err := translateApprovalRequest(agent, mode, req)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err
 		}

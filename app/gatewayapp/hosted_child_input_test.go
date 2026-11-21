@@ -14,7 +14,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
@@ -449,9 +449,9 @@ func newHostedChildInputTestStack(t *testing.T, provider *hostedChildInputTestPr
 		Sandbox: SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			ImageInput: &imageInput,
-			Provider:   "openai-compatible", API: providers.APIOpenAICompatible,
+			Provider:   "openai-compatible", API: model.APIOpenAICompatible,
 			Model: "hosted-child-input", BaseURL: provider.URL, HTTPClient: provider.Client(),
-			Token: "test-token", AuthType: providers.AuthBearerToken,
+			Token: "test-token", AuthType: model.AuthBearerToken,
 			ContextWindowTokens: 128000, MaxOutputTok: 1024, Timeout: 5 * time.Second,
 		},
 	})

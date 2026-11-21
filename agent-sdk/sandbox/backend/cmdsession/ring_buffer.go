@@ -1,9 +1,6 @@
 package cmdsession
 
-import (
-	"sync"
-	"time"
-)
+import "sync"
 
 // RingBuffer is a thread-safe circular buffer for storing command output.
 // It maintains a fixed capacity and discards oldest data when full.
@@ -14,7 +11,6 @@ type RingBuffer struct {
 	readPos    int
 	full       bool
 	mu         sync.RWMutex
-	lastWrite  time.Time
 	totalBytes int64
 	dropped    int64
 }
@@ -25,9 +21,8 @@ func NewRingBuffer(capacity int) *RingBuffer {
 		capacity = 64 * 1024 // 64KB default
 	}
 	return &RingBuffer{
-		data:      make([]byte, capacity),
-		capacity:  capacity,
-		lastWrite: time.Now(),
+		data:     make([]byte, capacity),
+		capacity: capacity,
 	}
 }
 
@@ -40,7 +35,6 @@ func (rb *RingBuffer) Write(p []byte) (n int, err error) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	rb.lastWrite = time.Now()
 	rb.totalBytes += int64(len(p))
 
 	// If input is larger than capacity, only keep the tail
@@ -98,17 +92,6 @@ func (rb *RingBuffer) readAllLocked() []byte {
 		copy(result, rb.data[rb.readPos:rb.writePos])
 	}
 
-	return result
-}
-
-// ReadAndConsume returns all unread data and marks it as consumed.
-func (rb *RingBuffer) ReadAndConsume() []byte {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
-
-	result := rb.readAllLocked()
-	rb.readPos = rb.writePos
-	rb.full = false
 	return result
 }
 
@@ -181,24 +164,4 @@ func (rb *RingBuffer) EarliestMarker() int64 {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
 	return rb.totalBytes - int64(rb.lenLocked())
-}
-
-// LastWriteTime returns the timestamp of the last write operation.
-func (rb *RingBuffer) LastWriteTime() time.Time {
-	rb.mu.RLock()
-	defer rb.mu.RUnlock()
-	return rb.lastWrite
-}
-
-// Reset clears the buffer.
-func (rb *RingBuffer) Reset() {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
-
-	rb.writePos = 0
-	rb.readPos = 0
-	rb.full = false
-	rb.totalBytes = 0
-	rb.dropped = 0
-	rb.lastWrite = time.Now()
 }

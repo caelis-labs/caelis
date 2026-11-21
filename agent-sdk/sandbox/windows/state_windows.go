@@ -108,30 +108,12 @@ func (r *runtime) workspaceSetupError() string {
 	return strings.TrimSpace(r.lastWorkspaceSetupError)
 }
 
-type cleanupPlan struct {
-	LegacyPaths     []string
-	LegacyProtected []string
-}
-
-func (r *runtime) cleanupPlan() cleanupPlan {
-	var plan cleanupPlan
-	plan.LegacyPaths = pathutil.Dedupe([]string{
+func (r *runtime) workspaceCleanupPaths() []string {
+	return pathutil.Dedupe([]string{
 		filepath.Dir(r.manifestPath()),
 		r.sandboxEnvRoot(r.cfg.CWD),
 		r.legacyWorkspaceSandboxEnvRoot(),
 	})
-	hash := stateRootHash(r.stateRoot)
-	plan.LegacyProtected = dedupeStrings(
-		[]string{
-			"StateDir-wide capability ledger and other workspace manifests/caches",
-			"legacy random-SID ACLs require explicit repair and are never removed by principal scan",
-			"local user CaelisSbxOff" + hash,
-			"local user CaelisSbxOn" + hash,
-			"local group CaelisSandboxUsers",
-			"Windows Firewall rules CaelisSandbox-*",
-		},
-	)
-	return plan
 }
 
 func (r *runtime) sandboxStateDir() string {

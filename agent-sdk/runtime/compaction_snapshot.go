@@ -37,7 +37,7 @@ func (r *Runtime) rememberCompactionRequest(ref session.SessionRef, llm model.LL
 	oldRelease := r.compactionRequests[key].release
 	r.compactionRequests[key] = compactionRequestSnapshot{
 		dispatch: model.CloneRequest(req),
-		model:    llm, request: model.CloneRequest(req), throughSeq: throughSeq, updatedAt: r.compactionSnapshotTime(),
+		model:    llm, request: model.CloneRequest(req), throughSeq: throughSeq, updatedAt: r.now(),
 	}
 	releases := r.trimCompactionRequestsLocked()
 	r.compactionRequestMu.Unlock()
@@ -58,7 +58,7 @@ func (r *Runtime) completeCompactionRequest(ref session.SessionRef, llm model.LL
 	r.compactionRequestMu.Lock()
 	key := compactionSessionKey(ref)
 	snapshot := r.compactionRequests[key]
-	snapshot.model, snapshot.request, snapshot.throughSeq, snapshot.updatedAt = llm, completed, throughSeq, r.compactionSnapshotTime()
+	snapshot.model, snapshot.request, snapshot.throughSeq, snapshot.updatedAt = llm, completed, throughSeq, r.now()
 	snapshot.final = model.CloneMessage(final.Message)
 	snapshot.completed = final.Status != model.ResponseStatusFailed && final.Status != model.ResponseStatusCancelled && (final.FinishReason == model.FinishReasonStop || (!final.FinishReasonReported && final.FinishReason == model.FinishReasonUnknown))
 	r.compactionRequests[key] = snapshot
@@ -99,15 +99,8 @@ func (r *Runtime) advanceCompactionRequest(ref session.SessionRef, throughSeq ui
 		return
 	}
 	snapshot.throughSeq = max(snapshot.throughSeq, throughSeq)
-	snapshot.updatedAt = r.compactionSnapshotTime()
+	snapshot.updatedAt = r.now()
 	r.compactionRequests[key] = snapshot
-}
-
-func (r *Runtime) compactionSnapshotTime() time.Time {
-	if r != nil && r.clock != nil {
-		return r.clock()
-	}
-	return time.Now()
 }
 
 func (r *Runtime) trimCompactionRequestsLocked() []func() {

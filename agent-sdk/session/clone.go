@@ -75,7 +75,7 @@ func CloneEvent(in *Event) *Event {
 	out.SessionID = strings.TrimSpace(in.SessionID)
 	out.MessageID = in.MessageID
 	out.Text = in.Text
-	out.Meta = cloneProtocolAnyMap(in.Meta)
+	out.Meta = CloneState(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)
 	if in.Compaction != nil {
 		compaction := *in.Compaction
@@ -107,14 +107,14 @@ func CloneEvent(in *Event) *Event {
 		notice.Level = strings.TrimSpace(strings.ToLower(notice.Level))
 		notice.Text = strings.TrimSpace(notice.Text)
 		notice.Kind = strings.TrimSpace(notice.Kind)
-		notice.Meta = cloneProtocolAnyMap(notice.Meta)
+		notice.Meta = CloneState(notice.Meta)
 		out.Notice = &notice
 	}
 	if in.Lifecycle != nil {
 		lifecycle := *in.Lifecycle
 		lifecycle.Status = strings.TrimSpace(lifecycle.Status)
 		lifecycle.Reason = strings.TrimSpace(lifecycle.Reason)
-		lifecycle.Meta = cloneProtocolAnyMap(lifecycle.Meta)
+		lifecycle.Meta = CloneState(lifecycle.Meta)
 		out.Lifecycle = &lifecycle
 	}
 	if in.Protocol != nil {
@@ -264,7 +264,7 @@ func CloneEventScope(in EventScope) EventScope {
 func CloneEventTool(in EventTool) EventTool {
 	out := EventTool{
 		Execution: in.Execution, BatchID: in.BatchID, Outcome: in.Outcome, ErrorCode: in.ErrorCode, Error: in.Error,
-		Discovery: in.Discovery, ResultFormat: in.ResultFormat,
+		Discovery: in.Discovery, ResultIncludesReceipt: in.ResultIncludesReceipt,
 		ID:     in.ID,
 		Name:   strings.TrimSpace(in.Name),
 		Kind:   strings.TrimSpace(in.Kind),

@@ -9,7 +9,7 @@ import (
 
 func TestSessionStoreRootLockHonorsContextCancellation(t *testing.T) {
 	root := t.TempDir()
-	first, err := lockSessionStoreRoot(context.Background(), root, storeRootLockExclusive)
+	first, err := lockSessionStoreRoot(context.Background(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestSessionStoreRootLockHonorsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	second, err := lockSessionStoreRoot(ctx, root, storeRootLockExclusive)
+	second, err := lockSessionStoreRoot(ctx, root)
 	if second != nil {
 		_ = unlockSessionStoreRoot(second)
 	}
@@ -39,7 +39,7 @@ func TestSessionStoreRootLockRejectsPreCancelledContextWhenFree(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	file, err := lockSessionStoreRoot(ctx, root, storeRootLockExclusive)
+	file, err := lockSessionStoreRoot(ctx, root)
 	if file != nil {
 		_ = unlockSessionStoreRoot(file)
 		t.Fatal("pre-cancelled root lock returned an acquired file")

@@ -25,7 +25,7 @@ const (
 
 type Options struct {
 	ApprovalPolicy  ApprovalPolicy
-	ResolveApproval func(context.Context, ApprovalRequest) (approval.Decision, error)
+	ResolveApproval func(context.Context, ApprovalRequest) (approval.ReviewResult, error)
 	// ObserveEnvelope receives each target-filtered main-Turn Envelope before
 	// the headless reducer consumes it. It is intended for structured streaming
 	// output; returning an error explicitly cancels the Turn and the reducer
@@ -320,19 +320,19 @@ func envelopeError(env eventstream.Envelope) error {
 	return nil
 }
 
-func resolveApproval(ctx context.Context, opts Options, req ApprovalRequest) (approval.Decision, error) {
+func resolveApproval(ctx context.Context, opts Options, req ApprovalRequest) (approval.ReviewResult, error) {
 	if opts.ResolveApproval != nil {
 		return opts.ResolveApproval(ctx, req)
 	}
 	if opts.ApprovalPolicy == ApprovalPolicyApproveAll {
-		return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
+		return approval.ReviewResult{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 	}
-	return approval.Decision{Approved: false, Outcome: string(approval.StatusRejected)}, nil
+	return approval.ReviewResult{Approved: false, Outcome: string(approval.StatusRejected)}, nil
 }
 
 func controlClientApprovalResolution(
 	req ApprovalRequest,
-	decision approval.Decision,
+	decision approval.ReviewResult,
 ) appserver.ApprovalResolution {
 	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(req.Payload, decision))
 	return appserver.ApprovalResolution{

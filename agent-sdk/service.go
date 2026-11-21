@@ -166,10 +166,10 @@ type Runtime interface {
 	RunState(context.Context, session.SessionRef) (RunState, error)
 }
 
-// RunnerCompletionRuntime guarantees that every successful producer entry
-// point returning a non-nil Runner, including optional participant prompts,
-// also returns a RunnerCompletionWaiter. Control fencing decorators require
-// this capability before starting a producer.
+// RunnerCompletionRuntime guarantees that the Runners returned by every
+// producer entry point, including optional participant prompts, honor the
+// WaitCompletion contract. Control fencing decorators require this guarantee
+// before starting a producer.
 type RunnerCompletionRuntime interface {
 	Runtime
 	RunnerCompletionWaiterGuaranteed()
@@ -237,33 +237,12 @@ type PromptParticipantRequest struct {
 	SourceObserver    SourceEventObserver `json:"-"`
 }
 
-// HandoffControllerRequest switches the active controller for one session. The
-// request is app-owned and not exposed on the LLM-facing tool surface.
-type HandoffControllerRequest struct {
-	SessionRef              session.SessionRef        `json:"session_ref"`
-	ExpectedRevision        *uint64                   `json:"expected_revision,omitempty"`
-	ExpectedControllerEpoch string                    `json:"expected_controller_epoch,omitempty"`
-	Kind                    session.ControllerKind    `json:"kind,omitempty"`
-	Agent                   string                    `json:"agent,omitempty"`
-	Placement               placement.Placement       `json:"placement,omitzero"`
-	Source                  string                    `json:"source,omitempty"`
-	Reason                  string                    `json:"reason,omitempty"`
-	StateUpdate             session.AppendStateUpdate `json:"-"`
-}
-
 // ParticipantControlPlane exposes neutral participant execution capabilities.
 // Host Control owns selection and lifecycle policy around these operations.
 type ParticipantControlPlane interface {
 	AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, PromptParticipantRequest) (RunResult, error)
 	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
-}
-
-// SessionControlPlane is the host-facing composition of neutral participant
-// execution and the Control-owned controller handoff operation.
-type SessionControlPlane interface {
-	ParticipantControlPlane
-	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
 }
 
 // TerminalProvider is one optional runtime capability for command fallback

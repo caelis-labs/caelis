@@ -19,7 +19,7 @@ func TestTerminalReadObservesExitWithoutConsumingTaskResult(t *testing.T) {
 		tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 		task := &commandTask{ref: taskapi.Ref{TaskID: "native-command", SessionID: "session", TerminalID: process.Terminal().TerminalID}, sessionRef: session.SessionRef{SessionID: "session"}, session: process, state: taskapi.StateRunning, running: true, metadata: map[string]any{"command_phase": commandPhaseRunning}, result: map[string]any{}, output: "retained output", outputState: commandOutputState{callback: true}}
 		tm.installCommandTask(task)
-		out, err := newTerminalService(tm).Read(t.Context(), terminal.Ref{SessionID: "session", TaskID: "native-command"})
+		out, err := (&terminalService{tasks: tm}).Read(t.Context(), terminal.Ref{SessionID: "session", TaskID: "native-command"})
 		if err != nil || out.Running || out.ExitCode == nil || *out.ExitCode != code {
 			t.Fatalf("exit=%d snapshot=%+v err=%v", code, out, err)
 		}
@@ -27,7 +27,7 @@ func TestTerminalReadObservesExitWithoutConsumingTaskResult(t *testing.T) {
 			t.Fatal("observation consumed/finalized model Task result")
 		}
 		for range 2 {
-			waited, err := newTerminalService(tm).Wait(t.Context(), terminal.Ref{SessionID: "session", TaskID: "native-command"})
+			waited, err := (&terminalService{tasks: tm}).Wait(t.Context(), terminal.Ref{SessionID: "session", TaskID: "native-command"})
 			if err != nil || waited.ExitCode == nil || *waited.ExitCode != code || waited.Running {
 				t.Fatalf("exit observation: %+v, %v", waited, err)
 			}
@@ -50,11 +50,11 @@ func TestTerminalReadPreservesCommittedTaskOutcome(t *testing.T) {
 			tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 			task := &commandTask{ref: taskapi.Ref{TaskID: "command", SessionID: "session"}, sessionRef: session.SessionRef{SessionID: "session"}, session: process, state: state, metadata: map[string]any{"command_phase": commandPhaseRunning}, result: map[string]any{"result": "retained result", "exit_code": 7}, outputState: commandOutputState{callback: true}}
 			tm.installCommandTask(task)
-			out, err := newTerminalService(tm).Read(t.Context(), terminal.Ref{SessionID: "session", TaskID: "command"})
+			out, err := (&terminalService{tasks: tm}).Read(t.Context(), terminal.Ref{SessionID: "session", TaskID: "command"})
 			if err != nil || out.Running || out.State != string(state) || out.ExitCode == nil || *out.ExitCode != 7 || out.FinalResult != "retained result" {
 				t.Fatalf("committed %s overwritten by process exit: %+v, %v", state, out, err)
 			}
-			waited, err := newTerminalService(tm).Wait(t.Context(), terminal.Ref{SessionID: "session", TaskID: "command"})
+			waited, err := (&terminalService{tasks: tm}).Wait(t.Context(), terminal.Ref{SessionID: "session", TaskID: "command"})
 			if err != nil || waited.State != string(state) || waited.ExitCode == nil || *waited.ExitCode != 7 || waited.FinalResult != "retained result" {
 				t.Fatalf("terminal Wait overwrote committed %s: %+v, %v", state, waited, err)
 			}
@@ -69,7 +69,7 @@ func TestTerminalWaitCancellationAndConcurrentObservationDoNotConsumeTask(t *tes
 		session: process, state: taskapi.StateRunning, running: true, metadata: map[string]any{"command_phase": commandPhaseRunning},
 		result: map[string]any{}, output: "retained output", outputState: commandOutputState{callback: true}}
 	tm.installCommandTask(task)
-	service := newTerminalService(tm)
+	service := &terminalService{tasks: tm}
 	ref := terminal.Ref{SessionID: "session", TaskID: "command"}
 	ctx, cancel := context.WithCancel(t.Context())
 	result := make(chan error, 1)
@@ -113,7 +113,7 @@ func TestTerminalWaitDoesNotInventExitForUnknownOutcome(t *testing.T) {
 	task := &commandTask{ref: taskapi.Ref{TaskID: "unknown", SessionID: "session"}, sessionRef: session.SessionRef{SessionID: "session"},
 		state: taskapi.StateUnknownOutcome, metadata: map[string]any{"command_phase": commandPhaseUnknown}, result: map[string]any{"error": "unconfirmed"}}
 	tm.installCommandTask(task)
-	observed, err := newTerminalService(tm).Wait(t.Context(), terminal.Ref{SessionID: "session", TaskID: "unknown"})
+	observed, err := (&terminalService{tasks: tm}).Wait(t.Context(), terminal.Ref{SessionID: "session", TaskID: "unknown"})
 	if err != nil || observed.State != string(taskapi.StateUnknownOutcome) || observed.ExitCode != nil {
 		t.Fatalf("unknown producer was presented as a settled exit: %+v, %v", observed, err)
 	}

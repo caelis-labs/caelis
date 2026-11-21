@@ -7,11 +7,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
+func TestNewContextProvidesStableEventSnapshot(t *testing.T) {
 	t.Parallel()
 
 	events := []*session.Event{
@@ -20,12 +19,6 @@ func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
 			Type:    session.EventTypeUser,
 			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "hello")),
 			Text:    "hello",
-		},
-	}
-	state := map[string]any{
-		"mode": "chat",
-		"nested": map[string]any{
-			"items": []any{map[string]any{"value": "original"}},
 		},
 	}
 
@@ -40,9 +33,7 @@ func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
 			},
 			CWD: "/tmp/project",
 		},
-		Events:  events,
-		State:   state,
-		Overlay: true,
+		Events: events,
 	})
 
 	if got := ctx.Session().SessionID; got != "sess-1" {
@@ -54,29 +45,9 @@ func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
 	if got := ctx.Events().At(0).Text; got != "hello" {
 		t.Fatalf("Events().At(0).Text = %q, want %q", got, "hello")
 	}
-	if got, ok := ctx.ReadonlyState().Lookup("mode"); !ok || got != "chat" {
-		t.Fatalf("ReadonlyState(mode) = %v, %v", got, ok)
-	}
-	if !ctx.Overlay() {
-		t.Fatal("expected overlay context")
-	}
-
 	events[0].Text = "mutated"
-	state["mode"] = "other"
-	state["nested"].(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "source-mutated"
 	if got := ctx.Events().At(0).Text; got != "hello" {
 		t.Fatalf("context should be isolated from source mutations, got %q", got)
-	}
-	if got, _ := ctx.ReadonlyState().Lookup("mode"); got != "chat" {
-		t.Fatalf("readonly state should be isolated from source mutations, got %v", got)
-	}
-	lookup, _ := ctx.ReadonlyState().Lookup("nested")
-	lookup.(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "lookup-mutated"
-	snapshot := ctx.ReadonlyState().Snapshot()
-	snapshot["nested"].(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "snapshot-mutated"
-	stable, _ := ctx.ReadonlyState().Lookup("nested")
-	if got := stable.(map[string]any)["items"].([]any)[0].(map[string]any)["value"]; got != "original" {
-		t.Fatalf("readonly nested state leaked mutation: %v", got)
 	}
 }
 
@@ -116,14 +87,12 @@ func TestAgentSpecCarriesExecutionCapabilitiesOutsideContext(t *testing.T) {
 
 	model := staticModel{name: "stub"}
 	inspectTool := staticTool{name: "inspect", desc: "inspect state"}
-	runner := staticSubagentRunner{}
 
 	spec := AgentSpec{
-		Name:           "default",
-		Model:          model,
-		Tools:          []tool.Tool{inspectTool},
-		SubagentRunner: runner,
-		Metadata:       map[string]any{"mode": "chat"},
+		Name:     "default",
+		Model:    model,
+		Tools:    []tool.Tool{inspectTool},
+		Metadata: map[string]any{"mode": "chat"},
 	}
 
 	if got := spec.Name; got != "default" {
@@ -134,16 +103,6 @@ func TestAgentSpecCarriesExecutionCapabilitiesOutsideContext(t *testing.T) {
 	}
 	if got := len(spec.Tools); got != 1 {
 		t.Fatalf("len(spec.Tools) = %d, want 1", got)
-	}
-	anchor, _, err := spec.SubagentRunner.Spawn(context.Background(), SubagentSpawnContext{
-		SessionRef: session.SessionRef{SessionID: "sess-1"},
-		CWD:        "/tmp/project",
-	}, delegation.Request{Agent: "helper"})
-	if err != nil {
-		t.Fatalf("Spawn() error = %v", err)
-	}
-	if _, err := spec.SubagentRunner.Wait(context.Background(), anchor, 25); err != nil {
-		t.Fatalf("Wait() error = %v", err)
 	}
 	if got := spec.Metadata["mode"]; got != "chat" {
 		t.Fatalf("spec.Metadata[mode] = %v, want %q", got, "chat")
@@ -174,22 +133,6 @@ func (m staticModel) Name() string { return m.name }
 func (m staticModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(func(*model.StreamEvent, error) bool) {}
 }
-
-type staticSubagentRunner struct{}
-
-func (staticSubagentRunner) Spawn(context.Context, SubagentSpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	return delegation.Anchor{TaskID: "task-sub-1", SessionID: "child-1", Agent: "helper", AgentID: "helper-1"}, delegation.Result{
-		TaskID:        "task-sub-1",
-		State:         delegation.StateRunning,
-		OutputPreview: "helper started",
-	}, nil
-}
-
-func (staticSubagentRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{TaskID: "task-sub-1", State: delegation.StateRunning, OutputPreview: "helper started"}, nil
-}
-
-func (staticSubagentRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
 
 func ptrMessage(message model.Message) *model.Message {
 	return &message

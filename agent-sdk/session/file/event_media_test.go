@@ -98,7 +98,7 @@ func TestSharedMediaSurvivesWALRecoveryPagingAndIdempotentRetry(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("log has %d lines, want 2", len(lines))
 	}
-	isolated, err := decodeIndexedEvent(lines[1], "isolated", 1)
+	isolated, err := decodeEventLogRecord(lines[1], "isolated", 1)
 	if err != nil || !reflect.DeepEqual(isolated.Message, events[1].Message) {
 		t.Fatalf("retained event depends on discarded prefix: %v", err)
 	}
