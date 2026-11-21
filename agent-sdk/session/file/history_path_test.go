@@ -8,12 +8,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func TestHistoryPathIsStableLiveCanonicalLogAcrossReopen(t *testing.T) {
+func TestCanonicalLogIsAppendOnlyAcrossReopen(t *testing.T) {
 	store, active := newEventPageIndexFixture(t, 2)
-	path, err := store.HistoryPath(t.Context(), active.SessionRef)
+	document, err := store.resolveDocumentPath(active.SessionID, active.WorkspaceKey)
 	if err != nil {
 		t.Fatal(err)
 	}
+	path := eventLogPath(document)
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -27,14 +28,14 @@ func TestHistoryPathIsStableLiveCanonicalLogAcrossReopen(t *testing.T) {
 		t.Fatal("log is not append-only")
 	}
 	reopened := NewStore(Config{RootDir: store.rootDir})
-	again, err := reopened.HistoryPath(t.Context(), active.SessionRef)
-	if err != nil || again != path {
+	again, err := reopened.resolveDocumentPath(active.SessionID, active.WorkspaceKey)
+	if err != nil || eventLogPath(again) != path {
 		t.Fatalf("path changed %s %v", again, err)
 	}
 	wrong := active.SessionRef
 	wrong.UserID = "other-user"
-	if _, err := reopened.HistoryPath(t.Context(), wrong); err == nil {
-		t.Fatal("history path ignored Session ownership")
+	if _, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: wrong}); err == nil {
+		t.Fatal("event history ignored Session ownership")
 	}
 	events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil || len(events) != 3 {

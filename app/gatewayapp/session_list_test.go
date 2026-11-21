@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -51,12 +52,13 @@ func TestSessionListIncludesRecentCWDSpellings(t *testing.T) {
 
 func TestSessionListDoesNotReadColdHistoryOrActivateRuntime(t *testing.T) {
 	ctx := context.Background()
+	storeDir := t.TempDir()
 	workspace, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	stack, err := NewLocalStack(Config{
-		StoreDir: t.TempDir(), WorkspaceKey: "workspace", WorkspaceCWD: workspace,
+		StoreDir: storeDir, WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
@@ -67,12 +69,11 @@ func TestSessionListDoesNotReadColdHistoryOrActivateRuntime(t *testing.T) {
 	var ids []string
 	for _, id := range []string{"cold-first", "cold-second"} {
 		ids = append(ids, createWorkspaceRuntimeTestSession(t, client, "create-"+id, id, "workspace", workspace))
-		path, err := stack.composition.sessions.(interface {
-			HistoryPath(context.Context, session.SessionRef) (string, error)
-		}).HistoryPath(ctx, session.SessionRef{SessionID: id})
-		if err != nil {
-			t.Fatal(err)
+		documents, err := filepath.Glob(filepath.Join(storeDir, "sessions", "*", "*", "*", "*", "rollout-*-"+id+".json"))
+		if err != nil || len(documents) != 1 {
+			t.Fatalf("fixture document for %q = %v, %v", id, documents, err)
 		}
+		path := strings.TrimSuffix(documents[0], ".json") + ".events.jsonl"
 		// A directory read must succeed independently of event-log decoding.
 		if err := os.WriteFile(path, []byte("invalid history must only affect explicit resume\n"), 0o600); err != nil {
 			t.Fatal(err)
