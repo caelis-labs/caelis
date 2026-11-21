@@ -198,11 +198,6 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 	return out, nil
 }
 
-func (r *Runtime) updateCompactionUsageFromBatch(_ context.Context, ref session.SessionRef, events []*session.Event) error {
-	r.advanceCompactionRequest(ref, session.LastEventSeq(mainInvocationEvents(events)))
-	return nil
-}
-
 func (r *Runtime) compactAfterOverflow(
 	ctx context.Context,
 	ref session.SessionRef,

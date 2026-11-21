@@ -375,7 +375,6 @@ func (r *Runtime) executeKernelTurn(
 
 	ctx = hookrun.WithRun(ctx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
 	hookrun.FromContext(ctx).Trace = r.lifecycle
-	batch := make([]*session.Event, 0, 4)
 	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
 	if inputErr != nil {
 		handle.publishError(inputErr)
@@ -399,7 +398,7 @@ func (r *Runtime) executeKernelTurn(
 	}
 	lifecycleErr := r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
-			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
+			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, handle)
 			scope := taskScopeFromContext(turnCtx)
 			scope.stopCodeMode()
 			if runErr != nil {
