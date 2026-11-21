@@ -26,11 +26,11 @@ func catalogTool(server *mcpsdk.Server, name, description string, calls *atomic.
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: description}}}, nil
 	})
 }
-func catalogManager(t *testing.T, server *mcpsdk.Server, enabled bool) *Manager {
+func catalogManager(t *testing.T, server *mcpsdk.Server) *Manager {
 	t.Helper()
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	t.Cleanup(endpoint.Close)
-	mgr, err := NewManagerWithOptions(t.Context(), []ServerSpec{{PluginID: "p", Name: "local", Transport: TransportStreamableHTTP, URL: endpoint.URL}}, nil, ManagerOptions{RefreshTools: enabled})
+	mgr, err := NewManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "local", Transport: TransportStreamableHTTP, URL: endpoint.URL}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T)
 		<-release
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "original receipt"}}}, nil
 	})
-	mgr := catalogManager(t, server, true)
+	mgr := catalogManager(t, server)
 	old := mgr.Tools()[0]
 	oldBinding := BindingForDefinition(old.Definition())
 	slow := mgr.Tools()[1]
@@ -187,7 +187,7 @@ func TestCatalogHTTPRefreshReplacesBindingAndRetainsInflightResult(t *testing.T)
 func TestCatalogUnrelatedRefreshKeepsExactBinding(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, nil)
 	catalogTool(server, "look", "stable", nil)
-	mgr := catalogManager(t, server, true)
+	mgr := catalogManager(t, server)
 	retained := mgr.Tools()[0]
 	binding := BindingForDefinition(retained.Definition())
 	if err := mgr.RefreshTools(t.Context(), "p", "local"); err != nil {
@@ -241,7 +241,7 @@ func TestCatalogPaginationFailureCancellationAndNotificationCoalescing(t *testin
 			return next(ctx, method, req)
 		}
 	})
-	mgr := catalogManager(t, server, true)
+	mgr := catalogManager(t, server)
 	before := []tool.Definition{mgr.Tools()[0].Definition(), mgr.Tools()[1].Definition()}
 	for _, failure := range []int32{1, 2} {
 		mode.Store(failure)
@@ -306,7 +306,7 @@ func TestCatalogReconcileRetiresClientAndDrainsBorrowedCall(t *testing.T) {
 			return nil, ctx.Err()
 		}
 	})
-	mgr := catalogManager(t, server, true)
+	mgr := catalogManager(t, server)
 	remote := mgr.Tools()[0].(*MCPTool)
 	call := tool.Call{Input: []byte(`{}`)}
 	done := make(chan error, 1)
@@ -352,7 +352,7 @@ func TestCatalogReconcileRetiresClientAndDrainsBorrowedCall(t *testing.T) {
 func TestCatalogRefreshAlwaysEnabledAndReconnectDoesNotReviveOldHandles(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, nil)
 	catalogTool(server, "a", "a", nil)
-	enabled := catalogManager(t, server, true)
+	enabled := catalogManager(t, server)
 	if enabled.servers[0].client.catalog == nil {
 		t.Fatal("live catalog refresh must be built in")
 	}
@@ -366,7 +366,7 @@ func TestCatalogRefreshAlwaysEnabledAndReconnectDoesNotReviveOldHandles(t *testi
 	if err := enabled.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reconnected := catalogManager(t, server, true)
+	reconnected := catalogManager(t, server)
 	if _, err := old.Call(t.Context(), tool.Call{}); err == nil {
 		t.Fatal("reconnect revived closed handle")
 	}
@@ -401,7 +401,7 @@ func TestCatalogPaginationRacePublishesNoMixedSnapshot(t *testing.T) {
 			return next(ctx, method, req)
 		}
 	})
-	mgr := catalogManager(t, server, true)
+	mgr := catalogManager(t, server)
 	previous := mgr.Tools()[0]
 	block.Store(true)
 	done := make(chan error, 1)
@@ -441,7 +441,7 @@ func TestCatalogCollisionOwnerDoesNotTransferAfterRemoval(t *testing.T) {
 		defer endpoint.Close()
 		specs = append(specs, ServerSpec{PluginID: fmt.Sprintf("p%d", i), Name: "shared", Transport: TransportStreamableHTTP, URL: endpoint.URL})
 	}
-	mgr, err := NewManagerWithOptions(t.Context(), specs, nil, ManagerOptions{RefreshTools: true})
+	mgr, err := NewManager(t.Context(), specs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +482,7 @@ func TestCatalogModernHTTPDoesNotReuseIndependentPageCache(t *testing.T) {
 	})
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{Stateless: true}))
 	defer endpoint.Close()
-	mgr, err := NewManagerWithOptions(t.Context(), []ServerSpec{{PluginID: "p", Name: "modern", URL: endpoint.URL, Transport: TransportStreamableHTTP}}, nil, ManagerOptions{RefreshTools: true})
+	mgr, err := NewManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "modern", URL: endpoint.URL, Transport: TransportStreamableHTTP}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +528,7 @@ func TestCatalogCloseCancelsRefreshAndDrainsWorker(t *testing.T) {
 			return next(ctx, method, req)
 		}
 	})
-	mgr := catalogManager(t, server, true)
+	mgr := catalogManager(t, server)
 	block.Store(true)
 	catalogTool(server, "b", "b", nil)
 	select {
@@ -556,7 +556,7 @@ func TestCatalogCloseCancelsRefreshAndDrainsWorker(t *testing.T) {
 func TestCatalogBindingErrorsAreEntryNeutral(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "entry-neutral", Version: "1"}, nil)
 	catalogTool(server, "read", "v1", nil)
-	manager := catalogManager(t, server, true)
+	manager := catalogManager(t, server)
 	remote := manager.Tools()[0].(*MCPTool)
 	binding := BindingForDefinition(remote.Definition())
 	for _, dirty := range []bool{false, true} {

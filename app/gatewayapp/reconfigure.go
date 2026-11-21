@@ -341,7 +341,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
-	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{})
+	mcpMgr, err := mcp.NewManager(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier())
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)

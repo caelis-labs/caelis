@@ -10,21 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// ManagerOptions is retained for source compatibility. Live catalog refresh is
-// built in and always enabled, so the values here no longer change behaviour.
-type ManagerOptions struct {
-	// RefreshTools is deprecated and ignored: refresh is unconditional.
-	RefreshTools bool
-}
-
-// NewManagerWithOptions starts an activation-owned manager with live catalog
-// refresh always enabled.
-func NewManagerWithOptions(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure), _ ManagerOptions) (*Manager, error) {
-	return newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-		return startClientWithCatalog(ctx, spec, nil, true)
-	}, onFailure)
-}
-
 type clientCatalog struct {
 	mu         sync.Mutex
 	generation uint64

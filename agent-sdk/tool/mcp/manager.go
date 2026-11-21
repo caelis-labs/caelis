@@ -106,9 +106,12 @@ func formatToolName(serverName, toolName string) string {
 
 // NewManager starts each server independently in the background. Connection or
 // listing failures affect only that server and invoke onFailure once, if set.
+// The manager refreshes ready catalogs when servers report changes.
 // ctx owns initialization; Close cancels and drains all initialization work.
 func NewManager(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure)) (*Manager, error) {
-	return NewManagerWithOptions(ctx, specs, onFailure, ManagerOptions{})
+	return newManager(ctx, specs, func(ctx context.Context, spec ServerSpec) (*Client, error) {
+		return startClientWithCatalog(ctx, spec, nil, true)
+	}, onFailure)
 }
 
 type clientStarter func(context.Context, ServerSpec) (*Client, error)

@@ -313,7 +313,7 @@ func TestMCPToolCallFailedReplyRetainsDiagnostics(t *testing.T) {
 					tc.content, &mcpsdk.TextContent{Text: "unchanged diagnostic detail"},
 				}}, nil
 			})
-			mgr := catalogManager(t, server, false)
+			mgr := catalogManager(t, server)
 			tools := mgr.Tools()
 			if len(tools) != 1 {
 				t.Fatalf("got %d tools, want one", len(tools))
