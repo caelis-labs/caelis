@@ -76,17 +76,6 @@ type AsyncOutputChunk struct {
 	Final bool
 }
 
-// SessionInfo provides summary information about a session.
-type SessionInfo struct {
-	ID           string
-	Command      string
-	State        SessionState
-	StartTime    time.Time
-	LastActivity time.Time
-	ExitCode     int
-	HasOutput    bool
-}
-
 // SessionStatus provides detailed status of a session.
 type SessionStatus struct {
 	ID                   string
@@ -483,11 +472,6 @@ func (s *AsyncSession) ReadAllOutput() (stdout, stderr string) {
 	return string(s.stdoutBuffer.ReadAll()), string(s.stderrBuffer.ReadAll())
 }
 
-// ExitChannel returns a channel that receives the exit code when the process exits.
-func (s *AsyncSession) ExitChannel() <-chan int {
-	return s.exitChan
-}
-
 // Status returns the current status of the session. A non-running state is a
 // settled exit: Terminate and the timeouts store SessionStateTerminated before
 // waitForExit drains the output readers and settles the exit code, so Status
@@ -549,19 +533,6 @@ func buildAsyncSessionCommandFromConfig(ctx context.Context, cfg AsyncSessionCon
 	return buildAsyncSessionCommand(ctx, cfg.Command, cfg.TTY)
 }
 
-// Info returns summary information about the session.
-func (s *AsyncSession) Info() SessionInfo {
-	return SessionInfo{
-		ID:           s.ID,
-		Command:      s.Command,
-		State:        s.state.Load().(SessionState),
-		StartTime:    s.StartTime,
-		LastActivity: time.Unix(0, s.lastActivity.Load()),
-		ExitCode:     int(s.exitCode.Load()),
-		HasOutput:    s.stdoutBuffer.Len() > 0 || s.stderrBuffer.Len() > 0,
-	}
-}
-
 // HasExited returns true if the process has exited.
 func (s *AsyncSession) HasExited() bool {
 	return s.exited.Load()
@@ -591,13 +562,6 @@ func (s *AsyncSession) Wait(ctx context.Context) (int, error) {
 	case <-ctx.Done():
 		return -1, ctx.Err()
 	}
-}
-
-// WaitWithTimeout waits for the session to exit with a timeout.
-func (s *AsyncSession) WaitWithTimeout(timeout time.Duration) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	return s.Wait(ctx)
 }
 
 // Terminate forcefully terminates the session.
