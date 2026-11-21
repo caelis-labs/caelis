@@ -125,17 +125,9 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		return compact.Result{}, err
 	}
 	baseEvent, baseData, _ := compact.LatestCompactEvent(req.Events)
-	baseText := stripRuntimeContinuity(compactTextFromEvent(baseEvent))
+	baseText := stripRuntimeContinuity(eventTextForCompaction(baseEvent))
 	delta := compactableEvents(req.Events)
 	if len(delta) == 0 {
-		promptEvents := compact.PromptEventsFromLatestCompact(req.Events)
-		return compact.Result{
-			PromptEvents: promptEvents,
-			Usage:        c.snapshotUsage(req, promptEventsWithPending(promptEvents, req.PendingEvents)),
-		}, nil
-	}
-	summaryEvents := session.CloneEvents(delta)
-	if len(summaryEvents) == 0 {
 		promptEvents := compact.PromptEventsFromLatestCompact(req.Events)
 		return compact.Result{
 			PromptEvents: promptEvents,
@@ -166,7 +158,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		}
 	}
 	if compactText == "" {
-		compactText, err = c.generateCompactMarkdown(ctx, req.Model, baseText, summaryEvents, req.ServiceTier)
+		compactText, err = c.generateCompactMarkdown(ctx, req.Model, baseText, delta, req.ServiceTier)
 		if err != nil {
 			if ctx.Err() != nil {
 				return compact.Result{}, ctx.Err()
@@ -182,10 +174,10 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		Revision:             baseData.Revision + 1,
 		ContractVersion:      compact.CompactContractVersion,
 		SummarizedThroughID:  lastEventID(delta),
-		SummarizedThroughSeq: lastEventSeq(delta),
+		SummarizedThroughSeq: session.LastEventSeq(delta),
 		Generator:            generator,
 		Trigger:              strings.TrimSpace(trigger),
-		SourceEventCount:     len(summaryEvents),
+		SourceEventCount:     len(delta),
 	}
 	compactEvent := buildCompactEvent(req.Session, compactText, data)
 	promptEvents := compact.PromptEventsFromLatestCompact([]*session.Event{compactEvent})
@@ -230,10 +222,6 @@ func classifyCompactionFailure(err error) string {
 	default:
 		return "model_request"
 	}
-}
-
-func lastEventSeq(events []*session.Event) uint64 {
-	return session.LastEventSeq(events)
 }
 
 func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []*session.Event) compact.UsageSnapshot {
