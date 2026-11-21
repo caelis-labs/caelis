@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -56,7 +57,7 @@ func TestControlPreparationPreservesExternalACPDefaults(t *testing.T) {
 			if role == "main" {
 				parent.Controller, err = manager.Activate(ctx, controller.HandoffRequest{Session: parent, Agent: "helper", Placement: frozen})
 				if err == nil {
-					turn, err = manager.RunTurn(ctx, controller.TurnRequest{Session: parent, Input: "review"})
+					turn, err = manager.RunTurn(ctx, controller.TurnRequest{Session: parent, ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "review"}}})
 				}
 			} else {
 				request := controller.AttachRequest{Session: parent, Agent: "helper", Placement: frozen}

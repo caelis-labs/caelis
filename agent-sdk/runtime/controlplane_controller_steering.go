@@ -6,9 +6,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -46,25 +44,6 @@ func (r *Runtime) controllerSteeringHandler(
 			binding.EpochID == "" || binding.RemoteSessionID == "" {
 			return errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime: active main-controller steering target is unavailable")
 		}
-		input := submission.Text
-		parts := submission.ContentParts
-		if submission.Kind == agent.SubmissionKindAgentCommunication {
-			if len(submission.Inputs) > 0 {
-				input, parts = "", nil
-				for _, item := range submission.Inputs {
-					_, itemParts, err := agentcommunication.Prompt(item.Input, item.ContentParts, item.Source)
-					if err != nil {
-						return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: prepare Agent communication steering", err)
-					}
-					parts = append(parts, itemParts...)
-				}
-			} else {
-				input, parts, err = agentcommunication.Prompt(input, parts, submission.Actor)
-				if err != nil {
-					return errorcode.Wrap(errorcode.InvalidArgument, "agent-sdk/runtime: prepare Agent communication steering", err)
-				}
-			}
-		}
 		events, err := buildSteeringInputEvents(currentSession, turnID, submission)
 		if err != nil {
 			return err
@@ -76,22 +55,12 @@ func (r *Runtime) controllerSteeringHandler(
 		if hookrun.FromContext(producerCtx).TakeEarly() != nil {
 			return errorcode.New(errorcode.Unsupported, "external ACP steering cannot enforce an early-response hook decision")
 		}
-		if len(r.hooks.Input) > 0 {
-			input = ""
-			parts = nil
-			for _, e := range events {
-				if e.Message != nil {
-					parts = append(parts, model.ContentPartsFromParts(e.Message.Parts)...)
-				}
-			}
-		}
 		return steerer.SteerController(ctx, controller.ControllerSteerRequest{
 			SessionRef: ref, ControllerID: binding.ControllerID,
 			ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID,
-			TurnID: turnID, Input: input, DisplayInput: submission.DisplayInput,
-			ContentParts: parts,
+			TurnID: turnID, ContentParts: controllerInputParts(events),
 			Commit: func() error {
-				return r.commitControllerSteering(producerCtx, currentSession, ref, turnID, events, handle)
+				return r.commitControllerSteering(producerCtx, ref, events, handle)
 			},
 		})
 	}
@@ -99,9 +68,7 @@ func (r *Runtime) controllerSteeringHandler(
 
 func (r *Runtime) commitControllerSteering(
 	producerCtx context.Context,
-	activeSession session.Session,
 	ref session.SessionRef,
-	turnID string,
 	events []*session.Event,
 	handle *runner,
 ) error {

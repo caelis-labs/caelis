@@ -146,7 +146,6 @@ type TurnRequest struct {
 	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
 	Session           session.Session           `json:"session,omitempty"`
 	TurnID            string                    `json:"turn_id,omitempty"`
-	Input             string                    `json:"input,omitempty"`
 	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
 	Context           agent.ContextTransfer     `json:"context,omitempty"`
 	FreshContext      agent.ContextTransfer     `json:"fresh_context,omitempty"`
@@ -208,8 +207,6 @@ type ControllerSteerRequest struct {
 	ControllerEpoch string              `json:"controller_epoch,omitempty"`
 	RemoteSessionID string              `json:"remote_session_id,omitempty"`
 	TurnID          string              `json:"turn_id,omitempty"`
-	Input           string              `json:"input,omitempty"`
-	DisplayInput    string              `json:"display_input,omitempty"`
 	ContentParts    []model.ContentPart `json:"content_parts,omitempty"`
 	Commit          func() error        `json:"-"`
 }
@@ -302,13 +299,11 @@ func NormalizeTurnRequest(in TurnRequest) TurnRequest {
 	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
 	out.Session = session.CloneSession(in.Session)
 	out.TurnID = strings.TrimSpace(in.TurnID)
-	out.Input = strings.TrimSpace(in.Input)
 	if len(in.ContentParts) > 0 {
 		out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	}
 	out.Context = agent.CloneContextTransfer(in.Context)
 	out.FreshContext = agent.CloneContextTransfer(in.FreshContext)
-	out.ContextSyncSeq = in.ContextSyncSeq
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out
 }
@@ -349,8 +344,6 @@ func NormalizeControllerSteerRequest(in ControllerSteerRequest) ControllerSteerR
 	out.ControllerEpoch = strings.TrimSpace(in.ControllerEpoch)
 	out.RemoteSessionID = strings.TrimSpace(in.RemoteSessionID)
 	out.TurnID = strings.TrimSpace(in.TurnID)
-	out.Input = strings.TrimSpace(in.Input)
-	out.DisplayInput = strings.TrimSpace(in.DisplayInput)
 	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	return out
 }

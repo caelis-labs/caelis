@@ -8,9 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -170,7 +168,6 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(inputErr)
 		return
 	}
-	var lastInputEvent *session.Event
 	persistedInputs, err := r.appendInputEvents(ctx, ref, inputEvents)
 	if err != nil {
 
@@ -179,45 +176,12 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	for _, persisted := range persistedInputs {
 		handle.publishEvent(persisted)
-		lastInputEvent = persisted
-	}
-
-	controllerInput := req.Input
-	controllerParts := append([]model.ContentPart(nil), req.ContentParts...)
-	if normalizeInputKind(req.InputKind) == agent.SubmissionKindAgentCommunication {
-		inputs := communicationInputsFromRunRequest(req)
-		if len(inputs) > 1 {
-			controllerInput = ""
-			controllerParts = nil
-			for _, item := range inputs {
-				_, parts, err := agentcommunication.Prompt(item.Input, item.ContentParts, item.Source)
-				if err != nil {
-
-					handle.publishError(err)
-					return
-				}
-				controllerParts = append(controllerParts, parts...)
-			}
-		} else if lastInputEvent != nil && lastInputEvent.Message != nil {
-			controllerInput = ""
-			controllerParts = model.ContentPartsFromParts(lastInputEvent.Message.Parts)
-		}
-	}
-	if len(r.hooks.Input)+len(r.hooks.TurnStart) > 0 {
-		controllerInput = ""
-		controllerParts = nil
-		for _, e := range persistedInputs {
-			if e.Message != nil {
-				controllerParts = append(controllerParts, model.ContentPartsFromParts(e.Message.Parts)...)
-			}
-		}
 	}
 	turnReq := controller.TurnRequest{
 		SessionRef:        ref,
 		Session:           activeSession,
 		TurnID:            turnID,
-		Input:             controllerInput,
-		ContentParts:      controllerParts,
+		ContentParts:      controllerInputParts(persistedInputs),
 		Stream:            req.Request.StreamEnabled(false),
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},

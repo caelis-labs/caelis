@@ -37,7 +37,6 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 			},
 		},
 		TurnID:       " turn-1 ",
-		Input:        "  prompt  ",
 		ContentParts: []model.ContentPart{part},
 		Context: agent.ContextTransfer{Turns: []agent.ContextTurn{{
 			Executor: session.ActorRef{Name: " helper "}, UserMessages: []string{" prior "}, AssistantSummary: " done ",
@@ -50,7 +49,7 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 	if got.SessionRef.SessionID != "session-1" {
 		t.Fatalf("session ref = %q, want session-1", got.SessionRef.SessionID)
 	}
-	if got.TurnID != "turn-1" || got.Input != "prompt" || got.Mode != "plan" || len(got.Context.Turns) != 1 || got.Context.Turns[0].Executor.Name != "helper" {
+	if got.TurnID != "turn-1" || got.Mode != "plan" || len(got.Context.Turns) != 1 || got.Context.Turns[0].Executor.Name != "helper" {
 		t.Fatalf("trimmed fields = %+v", got)
 	}
 	if got.ContextSyncSeq != 3 {

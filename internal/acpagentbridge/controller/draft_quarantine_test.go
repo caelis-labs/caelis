@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkcontroller "github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
@@ -62,7 +63,7 @@ func TestDraftControllerSteeringReceiptWithoutEchoDoesNotCommitOrReleaseOutput(t
 		t.Fatal(err)
 	}
 	sources := make(chan agent.SourceEvent, 64)
-	turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", Input: "initial input", Stream: true, Observer: agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
+	turn, err := manager.RunTurn(ctx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "initial input"}}, Stream: true, Observer: agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
 		sources <- agent.CloneSourceEvent(event)
 		return nil
 	})})
@@ -84,7 +85,7 @@ func TestDraftControllerSteeringReceiptWithoutEchoDoesNotCommitOrReleaseOutput(t
 	steerCtx, cancelSteer := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancelSteer()
 	var commits atomic.Int32
-	err = manager.SteerController(steerCtx, sdkcontroller.ControllerSteerRequest{SessionRef: parent.SessionRef, ControllerID: binding.ControllerID, ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID, TurnID: "original-turn", Input: "ambiguous input", Commit: func() error { commits.Add(1); return nil }})
+	err = manager.SteerController(steerCtx, sdkcontroller.ControllerSteerRequest{SessionRef: parent.SessionRef, ControllerID: binding.ControllerID, ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "ambiguous input"}}, Commit: func() error { commits.Add(1); return nil }})
 	if !errorcode.Is(err, errorcode.UnknownOutcome) {
 		t.Fatalf("steering receipt missing echo = %v, want unknown", err)
 	}
@@ -166,7 +167,7 @@ func TestDraftControllerAcceptedReceiptFailurePreservesUnknownAndApprovalOwner(t
 			})
 			turnCtx, cancelTurn := context.WithTimeout(ctx, 200*time.Millisecond)
 			defer cancelTurn()
-			turn, err := manager.RunTurn(turnCtx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", Input: "original input", ApprovalRequester: requester})
+			turn, err := manager.RunTurn(turnCtx, sdkcontroller.TurnRequest{Session: parent, SessionRef: parent.SessionRef, TurnID: "original-turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "original input"}}, ApprovalRequester: requester})
 			if err != nil {
 				t.Fatal(err)
 			}

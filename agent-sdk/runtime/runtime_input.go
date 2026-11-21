@@ -50,6 +50,18 @@ func buildSteeringInputEvents(active session.Session, turnID string, submission 
 	return events, err
 }
 
+// controllerInputParts projects the same effective messages passed to Session
+// persistence into content supported by the ACP bridge.
+func controllerInputParts(events []*session.Event) []model.ContentPart {
+	var parts []model.ContentPart
+	for _, event := range events {
+		if event.Message != nil {
+			parts = append(parts, model.ContentPartsFromParts(event.Message.Parts)...)
+		}
+	}
+	return parts
+}
+
 // preserveSteeringCorrelation carries Control's input receipt identity through
 // the canonical append. Correlation is separate from the Session-owned message
 // identity and the typed Actor/Scope; submission metadata cannot replace them.
