@@ -85,12 +85,6 @@ type RunState struct {
 	ApprovalRequestID string             `json:"approval_request_id,omitempty"`
 }
 
-// ContextUsage reports context window usage for one session.
-type ContextUsage struct {
-	CurrentTokens int `json:"current_tokens,omitempty"`
-	MaxTokens     int `json:"max_tokens,omitempty"`
-}
-
 // Runner is one active runtime run handle. Live source observation is installed
 // on the Run request before execution starts; Runner deliberately exposes no
 // pull stream or replay cache.
@@ -342,7 +336,7 @@ func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelReq
 		out.Stream = &value
 	}
 	if o.Output != nil {
-		out.Output = cloneOutputSpec(o.Output)
+		out.Output = model.CloneOutputSpec(o.Output)
 	}
 	if o.ServiceTier != "" {
 		out.ServiceTier = o.ServiceTier
@@ -358,51 +352,8 @@ func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool {
 }
 
 func (o ModelRequestOptions) OutputSpec() *model.OutputSpec {
-	return cloneOutputSpec(o.Output)
+	return model.CloneOutputSpec(o.Output)
 }
-
-func cloneOutputSpec(in *model.OutputSpec) *model.OutputSpec {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	if in.JSONSchema != nil {
-		out.JSONSchema = cloneOutputJSONMap(in.JSONSchema)
-	}
-	return &out
-}
-
-func cloneOutputJSONMap(in map[string]any) map[string]any {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneOutputJSONValue(value)
-	}
-	return out
-}
-
-func cloneOutputJSONValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneOutputJSONMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = cloneOutputJSONValue(item)
-		}
-		return out
-	case []string:
-		return append([]string(nil), typed...)
-	default:
-		return typed
-	}
-}
-
-type SubagentRunRequest = delegation.Request
-type SubagentRunResult = delegation.Result
-type SubagentAnchor = delegation.Anchor
 
 // AgentFactory constructs one runnable agent instance.
 type AgentFactory interface {
