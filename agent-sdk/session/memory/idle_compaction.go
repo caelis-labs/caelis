@@ -17,7 +17,7 @@ type idleStoreMutation struct {
 type idleStoreUpdate func(*session.IdleCompactionState, session.SessionFence, session.LoadedSession) (idleStoreMutation, error)
 
 func (r *record) authorizeMutation(guard session.MutationGuard) error {
-	if err := validateMutationGuard(r.fence, guard); err != nil {
+	if err := session.AuthorizeMutationGuard(r.fence, guard); err != nil {
 		return err
 	}
 	r.idle.Invalidate()

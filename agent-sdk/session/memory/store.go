@@ -456,10 +456,6 @@ func (s *Store) BindController(
 	_ context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(req)
-}
-
-func (s *Store) bindControllerRequest(req session.BindControllerRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -513,10 +509,6 @@ func (s *Store) PutParticipant(
 	_ context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(req)
-}
-
-func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -592,10 +584,6 @@ func (s *Store) RemoveParticipant(
 	_ context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(req)
-}
-
-func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -748,13 +736,6 @@ func (s *Store) LoadSession(
 		State:   cloneState(record.state),
 	}, nil
 }
-
-// SettlePendingApproval atomically settles one still-pending recovery
-// candidate.
-
-// EventsPage returns one bounded forward sequence page.
-
-// EventCheckpoint returns one atomic Session/event high-water cut.
 
 // PendingApprovals returns durable permission requests without a later
 // settlement across the in-memory Store.
