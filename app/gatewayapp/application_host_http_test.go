@@ -439,6 +439,7 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 		t.Fatal("claimed callback was granted twice")
 	}
 	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"APPLICATION_RESULT_SENTINEL"}`)}
+	waitBuiltinDesktopWorldMCP(t, ctx, appA, sessionA)
 	if err := appA.CompleteSessionToolCall(ctx, sessionA, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +510,8 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	}
 	before := provider.snapshotFrom(0)
 	beforeCount := provider.requestCount()
-	beforeSystem, beforeTools := applicationHTTPPrefix(t, provider.requestAt(0))
+	beforeSystem, _ := applicationHTTPPrefix(t, provider.requestAt(0))
+	_, beforeTools := applicationHTTPPrefix(t, provider.requestAt(beforeCount-1))
 	for _, sentinel := range []string{"APPLICATION_INSTRUCTION_SENTINEL", "APPLICATION_RESULT_SENTINEL"} {
 		if !strings.Contains(before, sentinel) {
 			t.Fatalf("provider request missing %s: %s", sentinel, before)
@@ -558,6 +560,7 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	if _, err := appA.ClaimSessionToolCall(ctx, sessionA, calls[0].ID); err != nil {
 		t.Fatal(err)
 	}
+	waitBuiltinDesktopWorldMCP(t, ctx, appA, sessionA)
 	if err := appA.CompleteSessionToolCall(ctx, sessionA, calls[0].ID, result); err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +569,9 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	if after == "" || !strings.Contains(after, "APPLICATION_INSTRUCTION_SENTINEL") || !strings.Contains(after, "APPLICATION_RESULT_SENTINEL") || strings.Contains(after, "WORKSPACE_INSTRUCTION_LEAK_SENTINEL") || strings.Contains(after, "MODEL_CREDENTIAL_LEAK_SENTINEL") {
 		t.Fatalf("reopened provider context lost prefix or leaked workspace/credential: %s", after)
 	}
-	afterSystem, afterTools := applicationHTTPPrefix(t, provider.requestAt(beforeCount))
+	afterSystem, _ := applicationHTTPPrefix(t, provider.requestAt(beforeCount))
+	// Both continuations sample the full catalog after Desktop World is ready.
+	_, afterTools := applicationHTTPPrefix(t, provider.requestAt(provider.requestCount()-1))
 	if !reflect.DeepEqual(beforeSystem, afterSystem) || !reflect.DeepEqual(beforeTools, afterTools) {
 		t.Fatal("immutable application system/tool prefix changed across Host replacement")
 	}

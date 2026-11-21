@@ -106,7 +106,7 @@ func (p *revisionProvider) snapshot() []map[string]any {
 	return result
 }
 
-func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string) {
+func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string, desktopReady bool) {
 	t.Helper()
 	actual, ok := body["instructions"].(string)
 	remainder, hasPrefix := strings.CutPrefix(actual, instructions)
@@ -139,6 +139,11 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier
 	}
 	slices.Sort(names)
 	want := []string{"ApplicationLookup", "ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
+	// The first request may race catalog startup. Once ready, the entire
+	// Desktop World pair belongs in the prefix, including on continuation.
+	if builtinComputerUseSupported() && (desktopReady || slices.Contains(names, "dtw__apps")) {
+		want = slices.Insert(want, len(want)-1, "dtw__apps", "dtw__exec")
+	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("model-facing tools = %v, want %v", names, want)
 	}
@@ -214,6 +219,7 @@ func claimAndCompleteRevisionCall(t *testing.T, ctx context.Context, client *htt
 	if call.ConfigurationRevision != revision || call.ToolsVersion != version || string(call.Arguments) != args || call.State != "pending" {
 		t.Fatalf("wrong pinned callback %+v, want revision %d version %s args %s", call, revision, version, args)
 	}
+	waitBuiltinDesktopWorldMCP(t, ctx, client, session)
 	if _, err = client.ClaimSessionToolCall(ctx, session, call.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -311,8 +317,8 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("old Turn produced %d model requests, want old callback then new completion", len(requests))
 	}
-	assertRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string")
-	assertRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions, "integer")
+	assertRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string", false)
+	assertRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
 	if strings.TrimPrefix(requests[0]["instructions"].(string), profile.Instructions) != strings.TrimPrefix(requests[1]["instructions"].(string), newInstructions) {
 		t.Fatal("hot reload changed guidance outside the profile instructions")
 	}
@@ -342,8 +348,8 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if len(requests) != 4 {
 		t.Fatalf("two Turns produced %d requests, want four", len(requests))
 	}
-	assertRevisionPrefix(t, requests[2], "gpt-5.4", "high", "priority", newInstructions, "integer")
-	assertRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions, "integer")
+	assertRevisionPrefix(t, requests[2], "gpt-5.4", "high", "priority", newInstructions, "integer", false)
+	assertRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
 	history := applicationHTTPHistory(t, ctx, client, session)
 	assertRevisionUserHistory(t, history, 2)
 	for _, bad := range []sessionprofile.UpdateConfigurationRequest{
@@ -405,11 +411,16 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if len(requests) != 6 {
 		t.Fatalf("restarted Turn produced %d model requests, want six", len(requests))
 	}
-	assertRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer")
-	assertRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions, "integer")
+	assertRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer", false)
+	assertRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions, "integer", true)
 	for _, i := range []int{2, 3, 4, 5} {
 		if requests[i]["instructions"] != requests[1]["instructions"] {
 			t.Fatalf("guidance changed across no-op/restart at request %d", i)
+		}
+	}
+	for _, i := range []int{3, 5} {
+		if !reflect.DeepEqual(requests[i]["tools"], requests[1]["tools"]) {
+			t.Fatalf("ready tool declarations changed across no-op/restart at request %d", i)
 		}
 	}
 	last, err := client.SessionConfiguration(ctx, session)
