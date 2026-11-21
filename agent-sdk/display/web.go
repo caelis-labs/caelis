@@ -3,14 +3,14 @@ package display
 import "strconv"
 
 func WebSearchSummary(input map[string]any, output map[string]any) string {
-	return firstNonEmpty(WebSearchDisplayArg(output), WebSearchDisplayArg(input))
+	return firstNonEmpty(webSearchDisplayArg(output), webSearchDisplayArg(input))
 }
 
 func WebFetchSummary(input map[string]any, output map[string]any) string {
 	return firstNonEmpty(WebFetchDisplayArg(input), WebFetchDisplayArg(output))
 }
 
-func WebSearchDisplayArg(raw map[string]any) string {
+func webSearchDisplayArg(raw map[string]any) string {
 	query := firstNonEmpty(displayString(raw["query"]), displayString(raw["pattern"]), displayString(raw["text"]))
 	if query == "" {
 		return ""

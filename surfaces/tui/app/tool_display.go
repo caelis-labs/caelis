@@ -297,13 +297,13 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	// read. Compact the title without rewriting kind=read into the exact
 	// built-in Skill identity.
 	if strings.TrimSpace(name) == "" && strings.EqualFold(strings.TrimSpace(kind), "read") {
-		if skillName := display.SkillContentNameFromTitle(title); skillName != "" {
+		if skillName := skillContentNameFromTitle(title); skillName != "" {
 			return skillName
 		}
 	}
 	switch name {
 	case surfaceToolSkill:
-		return display.SkillContentNameFromTitle(title)
+		return skillContentNameFromTitle(title)
 	case surfaceToolRunCommand:
 		return executeTitleDisplayArgs(title)
 	case surfaceToolGlob:
