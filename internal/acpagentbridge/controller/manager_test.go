@@ -994,10 +994,9 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 		t.Fatalf("status = %#v, want startup model/mode and live commands", status)
 	}
 	turn, err := manager.RunTurn(context.Background(), controller.TurnRequest{
-		SessionRef:   parentSession.SessionRef,
-		Session:      parentSession,
-		TurnID:       "turn-empty",
-		ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: " "}},
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-empty",
 	})
 	if err != nil {
 		t.Fatalf("RunTurn(empty) error = %v", err)
