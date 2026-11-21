@@ -391,7 +391,7 @@ func (j *IdleCompactionJob) FlushAccounting(ctx context.Context) error {
 			}
 			attempt.staged = true
 		}
-		if _, err := store.FinalizeCompactionReceipt(ctx, attempt.ticket); err != nil && !session.IsCommitted(err) {
+		if err := store.FinalizeCompactionReceipt(ctx, attempt.ticket); err != nil && !session.IsCommitted(err) {
 			return err
 		}
 		attempt.finalized = true

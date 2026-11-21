@@ -38,7 +38,7 @@ type CompactionReceiptStore interface {
 	// proving that this exact attempt was never dispatched. It writes no receipt.
 	CancelCompactionReservation(context.Context, BeginCompactionAttemptRequest) error
 	StageCompactionReceipt(context.Context, CompactionReceiptTicket, CompactionAttemptResult) error
-	FinalizeCompactionReceipt(context.Context, CompactionReceiptTicket) (*Event, error)
+	FinalizeCompactionReceipt(context.Context, CompactionReceiptTicket) error
 }
 
 // CompactionAttemptRecord is bounded backend-private pending accounting state.
@@ -115,8 +115,9 @@ func (s *IdleCompactionState) StageReceipt(ticket CompactionReceiptTicket, resul
 	return nil
 }
 
-// ReceiptEvent constructs a fixed journal entry, never a model-visible event.
-func (s *IdleCompactionState) ReceiptEvent(ticket CompactionReceiptTicket, loaded LoadedSession) (*Event, error) {
+// FinalizeReceipt constructs a fixed journal entry and clears its reservation.
+// Stores must persist both changes in the same transaction.
+func (s *IdleCompactionState) FinalizeReceipt(ticket CompactionReceiptTicket, loaded LoadedSession) (*Event, error) {
 	if ticket.token == "" || ticket.ref != NormalizeSessionRef(loaded.Session.SessionRef) {
 		return nil, idleDenied("invalid receipt session")
 	}
@@ -128,6 +129,7 @@ func (s *IdleCompactionState) ReceiptEvent(ticket CompactionReceiptTicket, loade
 		in.Usage = record.Result.Usage
 		in.Outcome = record.Result.Outcome
 		in.FinishedAt = record.Result.FinishedAt
+		delete(s.Attempts, ticket.invocationID)
 		return idleAttemptReceipt(in, record, ticket.ref), nil
 	}
 	for _, event := range loaded.Events {
@@ -166,11 +168,6 @@ func CloneIdleCompactionState(state IdleCompactionState) IdleCompactionState {
 		}
 	}
 	return out
-}
-
-// ForgetReceipt drops pending state only in the transaction that appended it.
-func (s *IdleCompactionState) ForgetReceipt(ticket CompactionReceiptTicket) {
-	delete(s.Attempts, ticket.invocationID)
 }
 
 // RevokeWindow affects only this exact opportunity, never a later activation.
