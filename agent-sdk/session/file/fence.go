@@ -146,10 +146,6 @@ func (s *Store) writeFenceDocument(ctx context.Context, doc persistedDocument) e
 	return s.writeDocumentInternal(ctx, doc, true, false)
 }
 
-func validateFileMutationGuard(active session.SessionFence, guard session.MutationGuard) error {
-	return session.AuthorizeMutationGuard(active, guard)
-}
-
 func activeDocumentFence(doc persistedDocument) session.SessionFence {
 	fence := sessionFenceFromPersisted(doc.Fence)
 	if fence.FenceID == "" {

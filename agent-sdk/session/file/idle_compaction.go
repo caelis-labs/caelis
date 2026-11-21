@@ -17,7 +17,7 @@ type idleStoreMutation struct {
 type idleStoreUpdate func(*session.IdleCompactionState, session.SessionFence, session.LoadedSession) (idleStoreMutation, error)
 
 func authorizeDocumentMutation(doc *persistedDocument, guard session.MutationGuard) error {
-	if err := validateFileMutationGuard(activeDocumentFence(*doc), guard); err != nil {
+	if err := session.AuthorizeMutationGuard(activeDocumentFence(*doc), guard); err != nil {
 		return err
 	}
 	doc.Idle.Invalidate()

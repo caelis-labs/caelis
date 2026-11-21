@@ -51,7 +51,7 @@ type eventMetadataDisk struct {
 func (s *Store) EventMetadataPage(ctx context.Context, req session.EventPageRequest) (session.EventMetadataPage, error) {
 	req = session.NormalizeEventPageRequest(req)
 	var out session.EventMetadataPage
-	err := s.withEventMetadata(ctx, req.SessionRef, func(index *eventMetadataIndex, _ string) error {
+	err := s.withEventMetadata(ctx, req.SessionRef, func(index *eventMetadataIndex) error {
 		out.NextSeq = req.AfterSeq
 		start := sort.Search(len(index.Records), func(n int) bool { return index.Records[n].Seq > req.AfterSeq })
 		for _, record := range index.Records[start:] {
@@ -85,7 +85,7 @@ func (s *Store) EventMetadataPage(ctx context.Context, req session.EventPageRequ
 	return out, err
 }
 
-func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, fn func(*eventMetadataIndex, string) error) error {
+func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, fn func(*eventMetadataIndex) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -106,7 +106,7 @@ func (s *Store) withEventMetadata(ctx context.Context, ref session.SessionRef, f
 		if err != nil {
 			return err
 		}
-		return fn(index, eventLogPath(path))
+		return fn(index)
 	})
 }
 
