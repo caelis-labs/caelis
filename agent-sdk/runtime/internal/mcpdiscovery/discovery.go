@@ -34,17 +34,23 @@ func FromEvents(events []*session.Event) map[string]tool.Binding {
 	return out
 }
 
-// Apply accepts only new-format successful canonical discovery receipts.
+// Apply accepts successful canonical discovery receipts with a trusted marker.
 // Old name-only results and Exposure Active/Pending never grant call eligibility.
 func Apply(out map[string]tool.Binding, event *session.Event) {
 	if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == mcp.SearchToolName && event.Tool.Result != nil && event.Tool.Outcome == session.ToolOutcomeSucceeded && (session.IsMainInvocationVisibleEvent(event) || event.Tool.Parent != nil && event.Tool.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool") {
+		if !event.Tool.Discovery {
+			return
+		}
 		result := event.Tool.Result
-		if event.Tool.Discovery {
-			if value, ok := result.Structured(); ok {
-				var raw map[string]any
-				if json.Unmarshal(value, &raw) == nil {
-					applyEntries(out, mcp.ParseToolSearchOutput(raw))
-				}
+		if value, ok := result.Structured(); ok {
+			applyJSON(out, value)
+			return
+		}
+		// v0.83.1 emitted ordinary JSON parts. The Session decoder lifts the old
+		// receipt marker into Discovery. Keep this until those Stores age out.
+		for _, part := range tool.ModelParts(result.Content) {
+			if part.JSON != nil {
+				applyJSON(out, part.JSON.Value)
 			}
 		}
 		return
@@ -59,6 +65,13 @@ func Apply(out map[string]tool.Binding, event *session.Event) {
 	// The receipt's canonical output owns the binding. The metadata marker
 	// distinguishes this admitted format without storing another binding list.
 	applyEntries(out, mcp.ParseToolSearchOutput(event.Tool.Output))
+}
+
+func applyJSON(out map[string]tool.Binding, value json.RawMessage) {
+	var raw map[string]any
+	if json.Unmarshal(value, &raw) == nil {
+		applyEntries(out, mcp.ParseToolSearchOutput(raw))
+	}
 }
 
 func applyEntries(out map[string]tool.Binding, selected mcp.ToolSearchResult) {

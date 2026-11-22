@@ -116,9 +116,21 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 	call("Read", map[string]any{"path": outside})
 	call("Grep", map[string]any{"path": outside, "pattern": "immutable"})
 	quotedOutside := "'" + strings.ReplaceAll(outside, "'", "''") + "'"
-	call("RunCommand", map[string]any{"command": guardianNativeTestCommand("printf overwritten > '"+strings.ReplaceAll(outside, "'", "'\\''")+"'", "$ErrorActionPreference='Stop'; Set-Content -LiteralPath "+quotedOutside+" -Value overwritten")})
+	overwrite, err := json.Marshal(map[string]any{"command": guardianNativeTestCommand("printf overwritten > '"+strings.ReplaceAll(outside, "'", "'\\''")+"'", "$ErrorActionPreference='Stop'; Set-Content -LiteralPath "+quotedOutside+" -Value overwritten")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied, deniedErr := (guardianQueryTool{q, "RunCommand"}).Call(t.Context(), tool.Call{ID: "overwrite-evidence", Input: overwrite})
 	if raw, err := os.ReadFile(outside); err != nil || string(raw) != "immutable evidence\n" {
 		t.Fatalf("escaped temporary-only write policy: %q %v", raw, err)
+	}
+	raw, ok := denied.Structured()
+	var diagnostic struct {
+		Kind     string `json:"error_kind"`
+		ExitCode int    `json:"exit_code"`
+	}
+	if !tool.HasFailedReply(deniedErr) || !ok || json.Unmarshal(raw, &diagnostic) != nil || diagnostic.Kind != "execution_failed" || diagnostic.ExitCode == 0 {
+		t.Fatalf("overwrite should return a model-visible command failure: %s %v", raw, deniedErr)
 	}
 	call("Read", map[string]any{"path": outside})
 	root := q.root
