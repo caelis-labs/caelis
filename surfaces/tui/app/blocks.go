@@ -87,6 +87,7 @@ type MainACPTurnBlock struct {
 	// narrative-only rendering; a live Turn keeps its full execution trace for
 	// the lifetime of the Session. ParticipantTurnBlock carries the same field.
 	Historical            bool
+	followedByUser        bool
 	id                    string
 	TurnKey               string
 	Status                string
@@ -303,6 +304,7 @@ func (b *MainACPTurnBlock) transcriptRenderOptions() acpTranscriptRenderOptions 
 	return acpTranscriptRenderOptions{
 		UseStatusPlaceholder:    true,
 		PlaceholderAsMeta:       true,
+		FollowedByUser:          b.followedByUser,
 		HideWaitingApprovalRow:  true,
 		HideCompletedRow:        true,
 		HideFailedRow:           true,

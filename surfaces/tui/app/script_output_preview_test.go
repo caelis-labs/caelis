@@ -171,3 +171,29 @@ func TestScriptHeaderHighlightSurvivesDisclosure(t *testing.T) {
 		}
 	}
 }
+
+func TestZeroChildScriptLifecycleKeepsHighlightedSource(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	const source = "const answer = 42; return answer;"
+	for _, state := range []string{"running", "completed", "failed"} {
+		events := scriptPreviewEvents(source, "ReferenceError: fixture", state)
+		label := "• Ran script"
+		if state == "running" {
+			events = events[:1]
+			label = "• Running script"
+		}
+		for _, replay := range []bool{false, true} {
+			m, b := desktopTraceModel(t, events, 80, replay)
+			ctx := m.blockRenderContext(80)
+			ctx.Theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+			rows := b.Render(ctx)
+			keyword := shellSyntaxStyle(tuikit.SyntaxPaletteForTheme(ctx.Theme).Keyword).Render("return")
+			if rows[0].Plain != label+" "+source || !rows[0].PreWrapped || !strings.Contains(rows[0].Styled, keyword) {
+				t.Fatalf("state=%s replay=%v lost standard highlighted header: %q", state, replay, rows[0].Styled)
+			}
+			if state == "failed" && (rows[0].acpHeaderMarkTone != acpHeaderMarkDanger || !strings.Contains(joinRenderedPlain(rows), "ReferenceError")) {
+				t.Fatalf("replay=%v lost zero-child failure:\n%s", replay, joinRenderedPlain(rows))
+			}
+		}
+	}
+}

@@ -1,0 +1,9 @@
+{
+  "104": "const v=await app.look({}); return {windowCount:v.windows.length,controls:v.elements.filter(e=>e.role==='button'||e.role==='text_field').slice(0,25).map(e=>({id:e.id,name:e.name,role:e.role})),semantics:v.semantics};",
+  "113": "const v=await app.look({scope:'menu'}); return v.elements.map(e=>({id:e.id,name:e.name,role:e.role,actions:e.actions}));",
+  "128": "await app.click({target:'w9.e42'}); const v=await app.look({}); return v.elements.filter(e=>e.role==='button'||e.role==='text_field').map(e=>({id:e.id,name:e.name,role:e.role,actions:e.actions}));",
+  "153": "const v=await app.look({role:'text_field'}); return {fields:v.elements.map(e=>({id:e.id,value:e.value})),windows:v.windows.map(w=>({id:w.id,title:w.id==='w8'?w.title:undefined}))};",
+  "158": "await app.keypress({keys:['RETURN']}); const v=await app.look({role:'button',text:'Open'}); return {windows:v.windows.map(w=>w.id),buttons:v.elements.map(e=>({id:e.id,name:e.name,enabled:e.enabled}))};",
+  "173": "const v=await app.look({role:'text_field'}); return {windows:v.windows.map(w=>w.id),fields:v.elements.map(e=>({id:e.id,value:e.value}))};",
+  "309": "const view = await app.look({}); return {running:view.running, windowCount:view.windows.length};"
+}

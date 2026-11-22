@@ -369,7 +369,7 @@ func wrapACPTranscriptHeaderForViewport(
 		return nil, nil, false
 	}
 	verb := strings.TrimSpace(strings.TrimPrefix(prefix, "•"))
-	if verb == "Running script" || verb == "Ran script" {
+	if verb == scriptRunningLabel || verb == scriptRanLabel {
 		return wrapACPScriptHeaderForViewport(prefix, detail, width, ctx, markTone, markDim)
 	}
 	continuationPrefix := strings.Repeat(" ", displayColumns(prefix))
@@ -439,10 +439,8 @@ func splitACPTranscriptHeaderPrefix(plain string) (prefix string, detail string,
 		return "", "", false
 	}
 	rest := strings.TrimPrefix(plain, "• ")
-	for _, action := range []string{"Running script", "Ran script"} {
-		if detail, found := strings.CutPrefix(rest, action+" "); found {
-			return "• " + action + " ", detail, true
-		}
+	if label, source, ok := splitScriptHeader(rest); ok {
+		return "• " + label + " ", source, true
 	}
 	verb, detail, found := strings.Cut(rest, " ")
 	if !found || strings.TrimSpace(verb) == "" {
@@ -871,6 +869,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		builder.addString(b.Text)
 	case *MainACPTurnBlock:
 		builder.addString(b.TurnKey)
+		builder.addBool(b.followedByUser)
 		builder.addString(b.Status)
 		builder.addTime(b.StartedAt)
 		builder.addTime(b.EndedAt)
@@ -972,6 +971,22 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addBool(event.OutputNarrativeBoundary)
 		builder.addBool(event.Terminal)
 		builder.addBool(event.OutputSynthetic)
+		builder.addString(event.ParentToolCallID)
+		builder.addString(event.ParentToolName)
+		builder.addBool(event.desktopWorld != nil)
+		if desktop := event.desktopWorld; desktop != nil {
+			builder.addString(desktop.app)
+			builder.addBool(desktop.search)
+			builder.addString(desktop.query)
+			builder.addBool(desktop.scopedEmpty)
+			builder.addString(desktop.failure)
+			builder.addInt(len(desktop.actions))
+			for _, action := range desktop.actions {
+				builder.addString(action.phrase)
+				builder.addString(action.short)
+				builder.addBool(action.read)
+			}
+		}
 		builder.addString(event.ScriptCompletion)
 		builder.addBool(event.OutputCollection)
 		builder.addBool(event.OutputTerminal)

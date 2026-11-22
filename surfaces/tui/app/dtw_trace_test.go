@@ -17,6 +17,9 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const desktopTraceApp = "C:/Program Files/Example Distribution/Long Browser Install/Chrome.exe"
@@ -86,32 +89,20 @@ func desktopTraceModel(t *testing.T, events []*session.Event, width int, replay 
 	m := newACPEventstreamRegressionModel(t, width, 48)
 	m.currentSessionID = "desktop-fixture"
 	var history []eventstream.Envelope
-	for i, original := range events {
-		ev := session.CloneEvent(original)
-		ev.SessionID = m.currentSessionID
-		ev.ID, ev.Seq = fmt.Sprintf("desktop-event-%d", i), uint64(i+1)
-		if ev.Visibility == "" {
-			ev.Visibility = session.VisibilityCanonical
-			if ev.Tool != nil && ev.Tool.Parent != nil {
-				ev.Visibility = session.VisibilityMirror
-			}
+	for _, envelope := range desktopTraceEnvelopes(events, m.currentSessionID) {
+		if !replay {
+			m.Update(envelope)
+			continue
 		}
-		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: ev.SessionID}, ev, projection.SessionEventTransport{TurnID: "turn"})
-		for _, envelope := range projection.ProjectSessionEventEnvelope(base, ev) {
-			if !replay {
-				m.Update(envelope)
-				continue
-			}
-			wire, err := wirev1.MarshalEnvelope(envelope)
-			if err != nil {
-				t.Fatal(err)
-			}
-			decoded, err := wirev1.UnmarshalEnvelope(wire)
-			if err != nil {
-				t.Fatal(err)
-			}
-			history = append(history, decoded)
+		wire, err := wirev1.MarshalEnvelope(envelope)
+		if err != nil {
+			t.Fatal(err)
 		}
+		decoded, err := wirev1.UnmarshalEnvelope(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		history = append(history, decoded)
 	}
 	if replay {
 		m.beginSessionHistory(sessionViewStartMsg{state: appserver.SessionState{SessionID: m.currentSessionID}})
@@ -120,6 +111,24 @@ func desktopTraceModel(t *testing.T, events []*session.Event, width int, replay 
 	}
 	b := requireMainACPTurnBlockForTest(t, m)
 	return m, b
+}
+
+func desktopTraceEnvelopes(events []*session.Event, sessionID string) []eventstream.Envelope {
+	var out []eventstream.Envelope
+	for i, original := range events {
+		ev := session.CloneEvent(original)
+		ev.SessionID = sessionID
+		ev.ID, ev.Seq = fmt.Sprintf("desktop-event-%d", i), uint64(i+1)
+		if ev.Visibility == "" {
+			ev.Visibility = session.VisibilityCanonical
+			if ev.Tool != nil && ev.Tool.Parent != nil {
+				ev.Visibility = session.VisibilityMirror
+			}
+		}
+		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: sessionID}, ev, projection.SessionEventTransport{TurnID: "turn"})
+		out = append(out, projection.ProjectSessionEventEnvelope(base, ev)...)
+	}
+	return out
 }
 
 func TestDesktopWorldTraceGoldenAndDisclosure(t *testing.T) {
@@ -148,11 +157,12 @@ func TestDesktopWorldTraceGoldenAndDisclosure(t *testing.T) {
 				if collapsed != string(want) {
 					t.Fatalf("replay=%v rendered rows differ from %s:\n%s", replay, path, collapsed)
 				}
-				for _, hidden := range []string{"unknown", "coverage", "RESULT_DETAIL", "OUTER_SOURCE", "await app", "approved", "permission denied"} {
+				for _, hidden := range []string{"unknown", "coverage", "RESULT_DETAIL", "OUTER_SOURCE", "await app", "approved", "Plan to", "Run a script", "more"} {
 					if strings.Contains(collapsed, hidden) {
 						t.Fatalf("collapsed trace exposes detail %q:\n%s", hidden, collapsed)
 					}
 				}
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("computer:native"))
 				for _, callID := range []string{"native", "nested"} {
 					ctx := m.blockRenderContext(44)
 					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(callID))
@@ -205,17 +215,18 @@ func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
 				m, b := desktopTraceModel(t, events, 24, replay)
 				ctx := m.blockRenderContext(24)
 				got := joinRenderedPlain(b.Render(ctx))
-				for _, want := range []string{"App1", "App2", "App5", "+2 more"} {
+				for _, want := range []string{"App4", "App5"} {
 					if !strings.Contains(got, want) {
 						t.Fatalf("replay=%v missing %s in running group:\n%s", replay, want, got)
 					}
 				}
-				if strings.Contains(got, "App3") || strings.Contains(got, "App4") {
-					t.Fatalf("running group exceeds three default calls:\n%s", got)
+				if strings.Contains(got, "App1") || strings.Contains(got, "App2") || strings.Contains(got, "App3") ||
+					strings.Contains(got, "more") || strings.Count(got, "└") != 1 {
+					t.Fatalf("running group should show only two recent calls:\n%s", got)
 				}
 				label, key := "Using computer", "computer:1"
 				if nested {
-					label, key = "Running script", "tools:script"
+					key = "computer:script"
 				}
 				if !strings.Contains(got, label) {
 					t.Fatalf("missing active group label %q:\n%s", label, got)
@@ -226,7 +237,7 @@ func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
 				}
 				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken(key))
 				expanded := joinRenderedPlain(b.Render(ctx))
-				if !strings.Contains(expanded, "App3") || !strings.Contains(expanded, "App4") || strings.Contains(expanded, "+2 more") {
+				if !strings.Contains(expanded, "App1") || !strings.Contains(expanded, "App3") || strings.Count(expanded, "└") != 1 {
 					t.Fatalf("group disclosure lost calls:\n%s", expanded)
 				}
 			}
@@ -234,7 +245,7 @@ func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
 	}
 }
 
-func TestDesktopWorldTraceTerminalIntent(t *testing.T) {
+func TestDesktopWorldTraceTerminalActions(t *testing.T) {
 	const beforeKey = `await app.look({role:'text_field',text:'Search inventory'});
 await app.click({selector:{role:'text_field',text:'Search inventory'}});
 await app.look({role:'text_field',text:'Search inventory'});
@@ -245,30 +256,30 @@ await app.look({role:'text_field',text:'Search inventory'});
 		name, source, status, result string
 		wide, narrow, forbidden      string
 	}{
-		{"straight-line source remains a plan", beforeKey + key, "completed", twoDispatches,
-			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
-		{"no dispatch evidence still permits intent", beforeKey + key, "completed", `{"execution_id":"fixture"}`,
-			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+		{"straight-line input hides observations", beforeKey + key, "completed", twoDispatches,
+			"Click Search inventory, press META+A in fixture.desktop", "Click", "Inspect"},
+		{"straight-line input without dispatch counters", beforeKey + key, "completed", `{"execution_id":"fixture"}`,
+			"Click Search inventory, press META+A in fixture.desktop", "Click", "Inspect"},
 		{"B09 literal chord in straight-line source", "const chord = ['META','A'];\n" + beforeKey + "await app.keypress({keys:chord});", "completed", twoDispatches,
-			"fixture.desktop: To click Search inventory, press META+A", "To click", "Inspect"},
+			"Click Search inventory, press META+A in fixture.desktop", "Click", "Inspect"},
 		{"S02 guarded read", `const view = await app.look({role:'text_area',text:'Handoff note'});
 if (view.elements.length !== 1) return null;
 return await app.readText({target:view.elements[0].id});`, "completed", `{"execution_id":"fixture"}`,
-			"look for “Handoff note”", "To inspect", "press"},
+			"Look for “Handoff note”", "Inspect", "press"},
 		{"S06 read after dead branch", `const text = "app.keypress()";
 if (false) await app.quit({});
 await app.look({text:'order number'});
 return {text};`, "completed", `{"execution_id":"fixture"}`,
-			"look for “order number”", "To inspect", "press"},
+			"Look for “order number”", "Inspect", "press"},
 		{"interrupted", beforeKey + key, "failed", `{"execution_id":"fixture","error":{"code":"execution_interrupted"}}`,
-			"Script failed", "Failed", "press"},
+			"execution_interrupted", "execution_interrupt", "press"},
 		{"early return", beforeKey + "return 42;\n" + key, "completed", `{"execution_id":"fixture","result":42}`,
-			"Plan to click “Search inventory”", "To click", "press"},
+			"Click “Search inventory” in fixture.desktop", "Click", "press"},
 		{"refused input caught by script", beforeKey + "try { " + key + " } catch (e) { return e.code; }", "completed",
 			`{"execution_id":"fixture","effects":{"dispatch":{"dispatched":1,"not_dispatched":1}},"result":"input_not_ready"}`,
-			"Run a script", "Run script", "press"},
+			"", "", "Using computer"},
 		{"B04 argument evaluation order", `await app.keypress({keys: (await app.click({selector:{role:'text_field',text:'Search inventory'}}), ['META','A'])});`,
-			"completed", twoDispatches, "Run a script", "Run script", "press"},
+			"completed", twoDispatches, "", "", "Using computer"},
 		{"B05 uninstantiated class", `class Clicker {
   effect = app.click({selector:{role:'text_field',text:'Search inventory'}});
 }
@@ -276,13 +287,16 @@ class Unused {
   effect = app.keypress({keys:['META','A']});
 }
 await new Clicker().effect;
-await new Clicker().effect;`, "completed", twoDispatches, "Run a script", "Run script", "press"},
+await new Clicker().effect;`, "completed", twoDispatches, "", "", "Using computer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for _, nested := range []bool{false, true} {
 				fact := desktopTraceFact("desktop", "dtw", "exec", "desktop-world", map[string]any{"app": "fixture.desktop", "source": test.source})
 				final := desktopTraceResult(fact, test.status, test.result)
 				events := desktopTracePlacement(t, fact, final, nested, "")
+				if nested && test.status == "failed" {
+					final.Tool.Content = []session.EventToolContent{{Type: "content", Text: test.result}}
+				}
 				for _, width := range []int{24, 112} {
 					want := test.wide
 					if width == 24 {
@@ -355,7 +369,7 @@ func TestDesktopWorldAppsResultBelongsToItsCall(t *testing.T) {
 				}
 				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(fact.ID))
 				got = joinRenderedPlain(b.Render(ctx))
-				if !strings.Contains(got, "Arguments") || strings.Contains(got, "└ Result") != test.childOutput ||
+				if !strings.Contains(got, "Arguments") || strings.Contains(got, "Result") != test.childOutput ||
 					strings.Contains(got, "Fixture Desktop") {
 					t.Fatalf("replay=%t wrong result ownership in disclosure:\n%s", replay, got)
 				}
@@ -373,7 +387,7 @@ func TestDesktopWorldTraceGroupsAdjacentDirectCalls(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		m, b := desktopTraceModel(t, events, 112, replay)
 		text := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
-		if strings.Count(text, "Used computer") != 2 || strings.Count(text, "Ran script") != 1 {
+		if strings.Count(text, "Used computer") != 1 || strings.Count(text, "Using computer") != 1 || strings.Contains(text, " script") {
 			t.Fatalf("replay=%v unrelated invocation merged adjacent computer groups:\n%s", replay, text)
 		}
 	}
@@ -397,7 +411,7 @@ func TestDesktopWorldTraceUsesGenericDisplayForUnknownSource(t *testing.T) {
 			{Type: session.EventTypeToolCall, Visibility: session.VisibilityUIOnly, Tool: transient},
 		}, 90, replay)
 		text := joinRenderedPlain(b.Render(m.blockRenderContext(90)))
-		if !strings.Contains(text, "dtw__exec") || strings.Contains(text, "Using computer") || strings.Contains(text, "Peer · Click") {
+		if !strings.Contains(text, "dtw__exec") || strings.Contains(text, "Using computer") || strings.Contains(text, "Click “Pretend” in Peer") {
 			t.Fatalf("replay=%t unknown source selected native presentation:\n%s", replay, text)
 		}
 		for _, ev := range scriptBlockEvents(b) {
@@ -414,6 +428,253 @@ func TestDesktopWorldTraceReadyWithPhysicalSize(t *testing.T) {
 	for _, row := range b.Render(m.blockRenderContext(m.viewport.Width())) {
 		if displayColumns(row.Plain) > m.viewport.Width() {
 			t.Fatalf("row wider than TUI viewport: %q", row.Plain)
+		}
+	}
+}
+
+// These are selected scripts from s-s7jj2vjwb4hlq4gn7vyynbulwk. Window IDs and
+// selector text are anonymized in the fixture. Only Obsidian 309 is read live.
+func desktopWorldSessionScripts(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/desktop_world_session_scripts.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scripts map[string]string
+	if err := json.Unmarshal(raw, &scripts); err != nil {
+		t.Fatal(err)
+	}
+	return scripts
+}
+
+func desktopTraceToolStart(tool *session.EventTool) *session.Event {
+	return &session.Event{Type: session.EventTypeToolCall, Tool: tool}
+}
+
+func TestDesktopWorldSessionScriptsLiveReplay(t *testing.T) {
+	scripts := desktopWorldSessionScripts(t)
+	for _, test := range []struct {
+		seq, action, compact string
+	}{
+		{"104", "Inspect the window", "Inspect"},
+		{"113", "Inspect the menu", "Inspect"},
+		{"128", "Click the observed control", "Click"},
+		{"153", "Look for text field controls", "Inspect"},
+		{"158", "Press RETURN", "Press RETURN"},
+		{"173", "Look for text field controls", "Inspect"},
+		{"309", "Inspect the window", "Inspect"},
+	} {
+		t.Run(test.seq, func(t *testing.T) {
+			for _, width := range []int{24, 60, 112} {
+				call := desktopTraceFact("real", "dtw", "exec", "desktop-world", map[string]any{"app": "md.obsidian", "source": scripts[test.seq]})
+				events := desktopTracePlacement(t, call, desktopTraceResult(call, "completed", desktopTraceResultJSON), test.seq != "309", "")
+				for _, replay := range []bool{false, true} {
+					m, b := desktopTraceModel(t, events, width, replay)
+					rows := b.Render(m.blockRenderContext(width))
+					action := test.action
+					if width == 24 && test.seq != "158" {
+						action = test.compact
+					}
+					if len(rows) != 2 || rows[0].Plain != "• Using computer" || !strings.HasPrefix(rows[1].Plain, "  └ "+action) ||
+						!strings.Contains(rows[1].Plain, " in md.") || displayColumns(rows[1].Plain) > width {
+						t.Fatalf("width=%d replay=%t: %s", width, replay, joinRenderedPlain(rows))
+					}
+				}
+			}
+		})
+	}
+}
+
+func desktopWorldAsyncEvents(t *testing.T) []*session.Event {
+	t.Helper()
+	scripts := desktopWorldSessionScripts(t)
+	direct := func(id, sequence string) *session.EventTool {
+		return desktopTraceFact(id, "dtw", "exec", "desktop-world", map[string]any{"app": "Obsidian", "source": scripts[sequence]})
+	}
+	source := "const note = await Read({path:'fixture.md'}); return note.title;"
+	root := &session.EventTool{ID: "current", Name: "js_exec", Status: "pending", Input: map[string]any{"code": source}}
+	child := direct("nested", "128")
+	child.Parent = &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
+	mixed := &session.EventTool{ID: "unrelated-child", Name: "Read", Status: "pending", Input: map[string]any{"path": "fixture.md"}, Parent: child.Parent}
+	first, repeated, last := direct("first", "309"), direct("repeat", "309"), direct("last", "113")
+	independent := &session.EventTool{ID: "independent", Name: "RunCommand", Status: "pending", Input: map[string]any{"command": "echo independent"}}
+	final := desktopTraceResult(root, "failed", `{"error":"ReferenceError: note.title is unavailable"}`)
+	final.Meta = map[string]any{"code_mode_script_completion": "failed"}
+	return []*session.Event{
+		desktopTraceToolStart(first), desktopTraceResult(first, "completed", desktopTraceResultJSON),
+		desktopTraceToolStart(repeated), desktopTraceResult(repeated, "completed", desktopTraceResultJSON),
+		desktopTraceToolStart(root), desktopTraceToolStart(child),
+		desktopTraceResult(child, "completed", desktopTraceResultJSON),
+		desktopTraceToolStart(independent),
+		desktopTraceToolStart(last), desktopTraceResult(last, "completed", desktopTraceResultJSON),
+		desktopTraceToolStart(mixed), final,
+	}
+}
+
+func TestDesktopWorldTraceAsyncReclassificationAndReplay(t *testing.T) {
+	events := desktopWorldAsyncEvents(t)
+	for _, width := range []int{24, 112} {
+		m := newACPEventstreamRegressionModel(t, width, 48)
+		m.currentSessionID = "desktop-fixture"
+		for index, env := range desktopTraceEnvelopes(events, m.currentSessionID) {
+			m.Update(env)
+			if env.Position == nil || env.Position.Durable == nil {
+				continue
+			}
+			b := requireMainACPTurnBlockForTest(t, m)
+			rows := b.Render(m.blockRenderContext(width))
+			text := joinRenderedPlain(rows)
+			seq := env.Position.Durable.Seq
+			switch seq {
+			case 4:
+				if len(rows) != 2 || strings.Count(text, "Inspect") != 1 {
+					t.Fatalf("duplicate observation survived at %d:\n%s", index, text)
+				}
+			case 5:
+				if strings.Count(text, "• Running script") != 1 || !strings.Contains(text, "• Used computer") {
+					t.Fatalf("zero observed children should use the standard row:\n%s", text)
+				}
+			case 6, 7:
+				if len(rows) != 3 || !strings.Contains(text, "• Using computer") || !strings.Contains(text, "Click") || strings.Contains(text, " script") || strings.Count(text, "└") != 1 {
+					t.Fatalf("trusted child should extend the group:\n%s", text)
+				}
+			case 10:
+				if strings.Count(text, "• Used computer") != 1 || strings.Count(text, "• Using computer") != 1 {
+					t.Fatalf("the independent message should close the first group:\n%s", text)
+				}
+			case 11, 12:
+				title := "• Running script"
+				if seq == 12 {
+					title = "• Ran script"
+				}
+				script := strings.Index(text, title)
+				message := strings.Index(text, "echo independent")
+				tail := strings.Index(text, "• Using computer")
+				if strings.Count(text, title) != 1 || strings.Count(text, "Click") != 1 || strings.Count(text, "• Used computer") != 1 ||
+					script < 0 || message <= script || tail <= message || !strings.Contains(text, "Read") ||
+					!strings.Contains(text, "dtw__exec · Click") {
+					t.Fatalf("mixed script must change at its original position:\n%s", text)
+				}
+				if width == 112 && !strings.Contains(text, events[4].Tool.Input["code"].(string)) {
+					t.Fatalf("script must show its invocation source:\n%s", text)
+				}
+				if seq == 12 && !strings.Contains(text, "ReferenceError") {
+					t.Fatalf("outer error disappeared:\n%s", text)
+				}
+			}
+		}
+		replayed, b := desktopTraceModel(t, events, width, true)
+		replayText := joinRenderedPlain(b.Render(replayed.blockRenderContext(width)))
+		liveText := joinRenderedPlain(requireMainACPTurnBlockForTest(t, m).Render(m.blockRenderContext(width)))
+		if replayText != liveText {
+			t.Fatalf("width=%d replay differs from live:\n%s\n%s", width, liveText, replayText)
+		}
+	}
+}
+
+func TestDesktopWorldTracePreservesOuterFailureAfterPureChildren(t *testing.T) {
+	events := desktopWorldAsyncEvents(t)
+	events = append(events[:7:7], events[len(events)-1])
+	for _, replay := range []bool{false, true} {
+		m, b := desktopTraceModel(t, events, 112, replay)
+		text := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
+		if strings.Count(text, "• Ran script") != 1 || strings.Count(text, "Click") != 1 ||
+			!strings.Contains(text, "ReferenceError") || !strings.Contains(text, "• Used computer") {
+			t.Fatalf("replay=%v lost the outer failure:\n%s", replay, text)
+		}
+	}
+}
+
+func TestDesktopWorldTraceClosesOnNextUserMessage(t *testing.T) {
+	call := desktopTraceFact("read", "dtw", "exec", "desktop-world", map[string]any{"app": "Obsidian", "source": "return await app.look();"})
+	start := desktopTraceToolStart(call)
+	result := desktopTraceResult(call, "completed", desktopTraceResultJSON)
+	later := model.NewMessage(model.RoleUser, model.NewTextPart("Next request"))
+	for _, replay := range []bool{false, true} {
+		m, b := desktopTraceModel(t, []*session.Event{start, result}, 80, replay)
+		b.(*MainACPTurnBlock).SetStatus("completed", "", "", start.Time)
+		if got := joinRenderedPlain(b.Render(m.blockRenderContext(80))); !strings.Contains(got, "• Using computer") {
+			t.Fatalf("completion changed the activity label: %s", got)
+		}
+		m, b = desktopTraceModel(t, []*session.Event{start, result, {Type: session.EventTypeUser, Message: &later}}, 80, replay)
+		if got := joinRenderedPlain(b.Render(m.blockRenderContext(80))); !strings.Contains(got, "• Used computer") {
+			t.Fatalf("replay=%v later user message did not close group: %s", replay, got)
+		}
+	}
+}
+
+func TestDesktopWorldTraceKeepsEarlierFailureVisible(t *testing.T) {
+	events := desktopTraceEvents()
+	events = append(events[4:6:6], append(events[:4:4], events[6:]...)...)
+	for _, replay := range []bool{false, true} {
+		m, b := desktopTraceModel(t, events, 112, replay)
+		ctx := m.blockRenderContext(112)
+		text := joinRenderedPlain(b.Render(ctx))
+		if !strings.Contains(text, "  └ No apps in scope") || !strings.Contains(text, "fixture permission denied") ||
+			strings.Count(text, "└") != 1 || strings.Count(text, "Click") != 1 {
+			t.Fatalf("replay=%v earlier error lost its diagnostic or displaced a recent summary:\n%s", replay, text)
+		}
+		clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("failed"))
+		if got := joinRenderedPlain(b.Render(ctx)); !strings.Contains(got, "Error details") {
+			t.Fatalf("replay=%v earlier error cannot disclose its result:\n%s", replay, got)
+		}
+	}
+}
+
+func TestDesktopWorldMixedScriptSourceAndNamedAction(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	const source = "const answer = await Read({path:'fixture.md'}); return answer;"
+	for _, server := range []string{"dtw", "desktop-world"} {
+		for _, completion := range []string{"running", "completed", "failed"} {
+			t.Run(server+"/"+completion, func(t *testing.T) {
+				root := &session.EventTool{ID: "mixed", Name: "js_exec", Status: "pending", Input: map[string]any{"code": source}}
+				parent := &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
+				desktop := desktopTraceFact("desktop", server, "exec", "desktop-world", map[string]any{"app": "Obsidian", "source": `return await app.click("Continue");`})
+				desktop.Parent = parent
+				ordinary := &session.EventTool{ID: "ordinary", Name: "Read", Status: "pending", Parent: parent, Input: map[string]any{"path": "fixture.md"}}
+				events := []*session.Event{desktopTraceToolStart(root), desktopTraceToolStart(desktop), desktopTraceToolStart(ordinary)}
+				label := "• Running script"
+				if completion != "running" {
+					label = "• Ran script"
+					output := `{"answer":42}`
+					if completion == "failed" {
+						output = `{"error":"ReferenceError: fixture"}`
+					}
+					result := desktopTraceResult(root, completion, output)
+					result.Meta = map[string]any{"code_mode_script_completion": completion}
+					events = append(events, result)
+				}
+				for _, width := range []int{22, 24, 112} {
+					for _, replay := range []bool{false, true} {
+						m, b := desktopTraceModel(t, events, width, replay)
+						ctx := m.blockRenderContext(width)
+						ctx.Theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+						rows := b.Render(ctx)
+						text := joinRenderedPlain(rows)
+						if !strings.HasPrefix(rows[0].Plain, label+" ") || !rows[0].PreWrapped || strings.Contains(text, "Using computer") ||
+							strings.Contains(text, "ReferenceError") != (completion == "failed") {
+							t.Fatalf("width=%d replay=%v:\n%s", width, replay, text)
+						}
+						name := strings.Index(text, desktop.Name)
+						action := strings.Index(text, "Click")
+						if name < 0 || action <= name || strings.Count(text, "└") != 1 {
+							t.Fatalf("width=%d replay=%v tool name must precede its action:\n%s", width, replay, text)
+						}
+						for _, row := range rows {
+							if ansi.StringWidth(row.Styled) > width {
+								t.Fatalf("width=%d replay=%v overflowing row %q", width, replay, row.Plain)
+							}
+						}
+						if width == 112 {
+							const action = " · Click “Continue” in Obsidian"
+							keyword := shellSyntaxStyle(tuikit.SyntaxPaletteForTheme(ctx.Theme).Keyword).Render("return")
+							if rows[0].Plain != label+" "+source || !strings.Contains(rows[0].Styled, keyword) || !strings.Contains(text, desktop.Name+action) {
+								t.Fatalf("replay=%v lost source highlighting or named action:\n%s", replay, text)
+							}
+						}
+					}
+				}
+			})
 		}
 	}
 }

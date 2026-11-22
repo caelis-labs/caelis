@@ -39,9 +39,8 @@ func TestScriptActionNameContrastAndWholeTitle(t *testing.T) {
 	ctx.Theme = tuikit.ResolveThemeFromOptions(false, colorprofile.TrueColor)
 	for _, title := range []string{"Running script", "Ran script"} {
 		row := renderACPTranscriptHeaderRowMarked("b", "• "+title, 60, ctx, "", acpHeaderMarkDefault, false)
-		_, styled, _ := wrapACPTranscriptHeaderForViewport(row.Plain, 60, ctx, acpHeaderMarkDefault, false)
-		if !strings.Contains(styled[0], ctx.Theme.Tokens().ToolName.Render(title)) {
-			t.Fatalf("whole phrase not highlighted: %q", styled)
+		if !strings.Contains(row.Styled, ctx.Theme.Tokens().ToolName.Render(title)) {
+			t.Fatalf("whole phrase not highlighted: %q", row.Styled)
 		}
 	}
 	for _, tc := range []struct{ name, action string }{

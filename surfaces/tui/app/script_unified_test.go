@@ -136,7 +136,7 @@ func TestUnifiedJSUsesSingleLineSummaryColumns(t *testing.T) {
 			{Kind: SEToolCall, CallID: "task", Name: "Task", Args: "Read task-handle", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 			{Kind: SEToolCall, CallID: "two", Name: "Read", Args: "docs/second.txt", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 		}
-		rows, _, _ := renderInvocationToolGroupRows("b", events, 0, width, ctx, acpTranscriptRenderOptions{})
+		rows, _, _ := renderInvocationToolGroupRows("b", events[0], events[1:], 0, width, ctx, acpTranscriptRenderOptions{})
 		want := "  └ Read " + compactSingleLineHeader("first.txt, second.txt", width-9)
 		if len(rows) != 2 || rows[1].Plain != want || !rows[1].PreWrapped {
 			t.Fatalf("width %d: %#v", width, rows)

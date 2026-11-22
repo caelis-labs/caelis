@@ -1,7 +1,7 @@
 package tuiapp
 
 import (
-	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -9,109 +9,149 @@ import (
 )
 
 const desktopWorldSummaryColumns = 60
-const desktopWorldVisibleCalls = 3
+const desktopWorldVisibleCalls = 2
 
-func renderDesktopWorldGroupRows(blockID string, events []SubagentEvent, start, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+func computerActivityCalls(event SubagentEvent, children []SubagentEvent) ([]SubagentEvent, bool) {
+	if event.Kind != SEToolCall {
+		return nil, false
+	}
+	if event.desktopWorld != nil {
+		return []SubagentEvent{event}, true
+	}
+	if !isScriptToolEvent(event) || len(children) == 0 || scriptExecutionFailed(event, children) {
+		return nil, false
+	}
+	for _, child := range children {
+		if child.desktopWorld == nil {
+			return nil, false
+		}
+	}
+	return children, true
+}
+
+func renderDesktopWorldGroupRows(blockID string, events []SubagentEvent, parents map[string]string, children map[string][]SubagentEvent, start, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	first := events[start]
-	if first.Kind != SEToolCall || first.desktopWorld == nil {
+	calls, ok := computerActivityCalls(first, children[first.CallID])
+	if !ok {
 		return nil, start, false
 	}
-	// A normally routed Code Mode child is rendered by its script's group.
-	// An orphaned child can still disclose its own invocation.
-	if first.ParentToolName == "js_exec" {
-		return renderDesktopWorldCallRows(blockID, first, "• ", width, ctx, opts), start, true
-	}
-	var calls []SubagentEvent
-	done, failed := true, false
+	calls = slices.Clip(calls)
+	done := first.Done
 	end := start
-	for i := start; i < len(events); i++ {
+	for i := start + 1; i < len(events); i++ {
 		ev := events[i]
-		if ev.Kind == SEApproval && approvalReviewHasTool(events, ev) {
+		if ev.Kind == SESemanticBoundary || ev.Kind == SEToolCall && parents[ev.CallID] != "" ||
+			ev.Kind == SEApproval && approvalReviewHasTool(events, ev) {
 			continue
 		}
-		if ev.Kind != SEToolCall || ev.desktopWorld == nil || ev.ParentToolName == "js_exec" {
+		additional, ok := computerActivityCalls(ev, children[ev.CallID])
+		if !ok {
 			break
 		}
-		calls = append(calls, ev)
+		calls = append(calls, additional...)
 		done = done && ev.Done
-		failed = failed || ev.Err
 		end = i
 	}
-	label := "• Using computer"
-	if done {
-		label = "• Used computer"
+
+	var visible, collapsed []SubagentEvent
+	var previous *desktopWorldDisplay
+	failed := false
+	for _, call := range calls {
+		done = done && call.Done
+		failed = failed || call.Err
+		display := call.desktopWorld
+		if !display.visible(call.Err) {
+			previous = nil
+			continue
+		}
+		visible = append(visible, call)
+		if !call.Err && call.Done {
+			if previous != nil && previous.sameObservation(display) {
+				collapsed[len(collapsed)-1] = call
+				continue
+			}
+			previous = display
+		} else {
+			previous = nil
+		}
+		collapsed = append(collapsed, call)
+	}
+	if len(visible) == 0 {
+		return nil, end, true
 	}
 	key := "computer:" + first.CallID
-	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
 	token := ""
-	if len(calls) > desktopWorldVisibleCalls {
+	if len(visible) > desktopWorldVisibleCalls || len(visible) != len(collapsed) {
 		token = acpStableExplorationClickToken(key)
 	}
-	rows := []RenderedRow{renderACPToolHeaderRow(blockID, ansi.Truncate(label, width, "…"), width, ctx, token, failed, done)}
-	hidden := desktopWorldHiddenCalls(calls, expanded)
-	for index, call := range calls {
-		if !hidden[index] {
-			prefix := explorationChildPrefix(len(rows) == 1)
-			rows = append(rows, renderDesktopWorldCallRows(blockID, call, prefix, width, ctx, opts)...)
-		}
+	rows := []RenderedRow{renderACPToolHeaderRow(blockID, ansi.Truncate("• Using computer", width, "…"), width, ctx, token, failed, done)}
+	var earlier []SubagentEvent
+	if opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key) {
+		collapsed = visible
+	} else if skip := len(collapsed) - desktopWorldVisibleCalls; skip > 0 {
+		earlier, collapsed = collapsed[:skip], collapsed[skip:]
 	}
-	if len(hidden) > 0 {
-		rows = append(rows, renderDesktopWorldMoreRow(blockID, len(hidden), width, ctx, token))
+	for i, call := range collapsed {
+		rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(i == 0), width, ctx, opts, false)...)
+	}
+	for _, call := range earlier {
+		if !call.Err {
+			continue
+		}
+		if opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(call.CallID) {
+			rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(false), width, ctx, opts, false)...)
+		} else {
+			rows = append(rows, renderDesktopWorldFailureRow(blockID, call, width, ctx, opts))
+		}
 	}
 	return rows, end, true
 }
 
-// Leave room for the newest running call even after the group has filled its
-// preview. The selected rows retain their chronological order.
-func desktopWorldHiddenCalls(calls []SubagentEvent, expanded bool) map[int]bool {
-	if expanded {
-		return nil
+func renderDesktopWorldFailureRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) RenderedRow {
+	detail := ev.desktopWorld.failure
+	if detail == "" {
+		detail = ev.desktopWorld.label(maxInt(1, width-4), true)
 	}
-	var indices []int
-	running := -1
-	for i, call := range calls {
-		if call.desktopWorld != nil {
-			if !call.Done {
-				running = len(indices)
+	line := ansi.Truncate("    "+detail, width, "…")
+	return StyledPlainClickablePreWrappedRow(blockID, line, ctx.Theme.ErrorStyle().Render(line), acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev)))
+}
+
+func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions, showToolName bool) []RenderedRow {
+	budget := width
+	if !showToolName {
+		budget = minInt(budget, desktopWorldSummaryColumns)
+	}
+	prefix = ansi.Truncate(prefix, maxInt(0, budget-1), "")
+	available := maxInt(1, budget-displayColumns(prefix))
+	header := ev.desktopWorld.label(available, ev.Err)
+	token := acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev))
+	var rows []RenderedRow
+	if showToolName {
+		lead := ev.Name + " · "
+		remaining := available - displayColumns(lead)
+		action := ev.desktopWorld.label(maxInt(1, remaining), ev.Err)
+		if remaining > 0 && action != "" && !strings.HasSuffix(action, "…") {
+			header = lead + action
+		} else {
+			// A continuation leaves room for the action when the name uses most of the row.
+			namePrefix := prefix
+			if extra := displayColumns(ev.Name) - available; extra > 0 {
+				padding := len(prefix) - len(strings.TrimLeft(prefix, " "))
+				namePrefix = prefix[minInt(extra, padding):]
 			}
-			indices = append(indices, i)
+			name := ansi.Truncate(ev.Name, budget-displayColumns(namePrefix), "…")
+			rows = append(rows, renderDesktopWorldSummaryRow(blockID, ev, namePrefix, name, ctx, token))
+			prefix = strings.Repeat(" ", displayColumns(prefix))
 		}
 	}
-	if len(indices) <= desktopWorldVisibleCalls {
-		return nil
+	rows = append(rows, renderDesktopWorldSummaryRow(blockID, ev, prefix, header, ctx, token))
+	if ev.Err && ev.desktopWorld.failure != "" {
+		rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, width, ctx, opts))
 	}
-	if running >= desktopWorldVisibleCalls {
-		indices[desktopWorldVisibleCalls-1], indices[running] = indices[running], indices[desktopWorldVisibleCalls-1]
-	}
-	hidden := make(map[int]bool, len(indices)-desktopWorldVisibleCalls)
-	for _, i := range indices[desktopWorldVisibleCalls:] {
-		hidden[i] = true
-	}
-	return hidden
-}
-
-func renderDesktopWorldMoreRow(blockID string, count, width int, ctx BlockRenderContext, token string) RenderedRow {
-	line := ansi.Truncate(fmt.Sprintf("    +%d more", count), width, "…")
-	return StyledPlainClickablePreWrappedRow(blockID, line, ctx.Theme.TranscriptMetaStyle().Render(line), token)
-}
-
-func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
-	budget := minInt(width, desktopWorldSummaryColumns)
-	prefix = ansi.Truncate(prefix, maxInt(0, budget-1), "")
-	header := ev.desktopWorld.label(maxInt(1, budget-displayColumns(prefix)), ev.Err, ev.Done)
-	line := prefix + header
-	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
-	styled := styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)
-	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header))
-	if ev.Err {
-		styled = ctx.Theme.ErrorStyle().Render(line)
-	}
-	token := acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev))
-	rows := []RenderedRow{StyledPlainClickablePreWrappedRow(blockID, line, styled, token)}
 	if token == "" || opts.ToolPanelFullOutput == nil || !opts.ToolPanelFullOutput(ev.CallID) {
 		return rows
 	}
-	const detailPrefix = "    └ "
+	const detailPrefix = "    "
 	if renderableTextHasContent(ev.FullArgs) {
 		rows = append(rows, renderACPToolOutputRowsWithToken(blockID, detailPrefix, "Arguments\n"+ev.FullArgs, width, ctx, ctx.Theme.ToolArgsStyle(), token)...)
 	}
@@ -129,4 +169,15 @@ func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string,
 		rows = append(rows, renderACPToolOutputRowsWithToken(blockID, detailPrefix, text, width, ctx, ctx.Theme.TranscriptMetaStyle(), token)...)
 	}
 	return rows
+}
+
+func renderDesktopWorldSummaryRow(blockID string, ev SubagentEvent, prefix, header string, ctx BlockRenderContext, token string) RenderedRow {
+	line := prefix + header
+	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
+	styled := styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)
+	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header))
+	if ev.Err {
+		styled = ctx.Theme.ErrorStyle().Render(line)
+	}
+	return StyledPlainClickablePreWrappedRow(blockID, line, styled, token)
 }

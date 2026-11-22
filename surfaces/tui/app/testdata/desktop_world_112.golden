@@ -1,7 +1,4 @@
-• Used computer
-  └ Chrome · Plan to click “New tab” and press META+L
-    No apps in scope for “Chrome”
-    com.example.Editor · Script failed
-
-• Ran script
-  └ Chrome · Plan to click “New tab” and press META+L
+• Using computer
+  └ Desktop action failed in com.example.Editor
+    fixture permission denied
+    Click “New tab” and press META+L in Chrome

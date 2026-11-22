@@ -32,6 +32,18 @@ func (m *Model) slashCommandEcho(execLine, displayLine string) string {
 
 // appendUserNarrativeBlock appends a user line to the transcript.
 func (m *Model) appendUserNarrativeBlock(block *UserNarrativeBlock) {
+	if renderableTextHasContent(block.Raw) {
+		blocks := m.doc.Blocks()
+		for index := len(blocks) - 1; index >= 0; index-- {
+			if _, previousUser := blocks[index].(*UserNarrativeBlock); previousUser {
+				break
+			}
+			if turn, ok := blocks[index].(*MainACPTurnBlock); ok && !turn.followedByUser {
+				turn.followedByUser = true
+				m.markViewportBlockDirty(turn.BlockID())
+			}
+		}
+	}
 	m.mainTimelineBarrier()
 	userLine := userNarrativePrefix + block.Raw
 	if m.hasCommittedLine {

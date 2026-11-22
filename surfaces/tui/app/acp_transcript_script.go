@@ -13,6 +13,23 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
+const (
+	scriptRunningLabel = "Running script"
+	scriptRanLabel     = "Ran script"
+)
+
+func splitScriptHeader(text string) (label, source string, ok bool) {
+	for _, label := range [...]string{scriptRunningLabel, scriptRanLabel} {
+		if text == label {
+			return label, "", true
+		}
+		if source, ok := strings.CutPrefix(text, label+" "); ok {
+			return label, source, true
+		}
+	}
+	return "", "", false
+}
+
 func styleScriptSourcePreview(ctx BlockRenderContext, source string, budget, finalBudget int) string {
 	source = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(source, "\r\n", "\n"), "\r", "\n"))
 	lines := strings.Split(source, "\n")
