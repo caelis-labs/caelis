@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -72,7 +73,7 @@ func collectFinalResponse(
 	if watchdog != nil {
 		watchdog.beginModelStep()
 	}
-	for event, err := range model.Generate(ctx, llm, req) {
+	for event, err := range model.Generate(modelinvocation.WithToolRepair(ctx, req), llm, req) {
 		if err != nil {
 			return nil, nil, err
 		}

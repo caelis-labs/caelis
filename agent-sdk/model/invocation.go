@@ -138,12 +138,13 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
 	}
+	allowToolRepair := modelinvocation.AllowsToolRepair(ctx, req)
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
 	middleware, _ := ctx.Value(modelinvocation.MiddlewareKey{}).(func(context.Context, Invocation, *Request, func(context.Context) error) error)
 	if admit == nil && observer == nil && start == nil && middleware == nil {
-		return generatePrepared(ctx, llm, CloneRequest(req))
+		return generatePrepared(ctx, llm, CloneRequest(req), allowToolRepair)
 	}
 	return func(yield func(*StreamEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
@@ -201,7 +202,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				return &invocationGateError{cause: errors.New("model continuation already consumed")}
 			}
 			attemptCtx = context.WithValue(callCtx, invocationUsageKey{}, usage)
-			for event, err := range generateAttempt(attemptCtx, llm, prepared) {
+			for event, err := range generateAttempt(attemptCtx, llm, prepared, allowToolRepair) {
 				if event != nil && event.Response != nil {
 					cloned := *event
 					response := *event.Response

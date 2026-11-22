@@ -5,6 +5,8 @@ import (
 	"errors"
 	"iter"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 )
 
 // DefaultRequestTimeout bounds one actual generation, never retry waiting or a
@@ -41,10 +43,13 @@ type RetryAfterError interface {
 
 // generateAttempt is the single actual-generation budget boundary, shared by
 // accounted and unobserved calls. Retry wrappers never time their wait here.
-func generateAttempt(parent context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent, error] {
+func generateAttempt(parent context.Context, llm LLM, req *Request, allowToolRepair bool) iter.Seq2[*StreamEvent, error] {
 	return func(yield func(*StreamEvent, error) bool) {
 		ctx, cancel := context.WithTimeout(parent, requestAttemptTimeout(parent, llm))
 		defer cancel()
+		if allowToolRepair {
+			ctx = modelinvocation.WithToolRepair(ctx, req)
+		}
 		completed := false
 		for event, err := range llm.Generate(ctx, req) {
 			// Consumer processing runs inside yield. Once a complete response

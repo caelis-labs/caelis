@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -86,7 +87,7 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 			if event.Type == "response.incomplete" {
 				event.Response.Status = "incomplete"
 			}
-			response, err := cfg.response(req, event.Response, accumulator)
+			response, err := cfg.response(ctx, req, event.Response, accumulator)
 			if err != nil {
 				return err
 			}
@@ -112,11 +113,12 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 	}
 }
 
-func (cfg responsesStreamConfig) response(req *model.Request, wire *openAICodexResponseWire, accumulator *openAICodexAccumulator) (*model.Response, error) {
+func (cfg responsesStreamConfig) response(ctx context.Context, req *model.Request, wire *openAICodexResponseWire, accumulator *openAICodexAccumulator) (*model.Response, error) {
 	for index, item := range wire.Output {
 		accumulator.applyItem(item, index)
 	}
-	message, err := accumulator.message(len(req.Tools) > 0 && !req.DisableTools)
+	allowToolRepair := len(req.Tools) > 0 && !req.DisableTools && modelinvocation.AllowsToolRepair(ctx, req)
+	message, err := accumulator.message(allowToolRepair)
 	if err != nil {
 		return nil, err
 	}

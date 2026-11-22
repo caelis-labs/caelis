@@ -152,7 +152,7 @@ func (l *openAIResponsesLLM) Generate(ctx context.Context, req *model.Request) i
 		}
 		accumulator := newOpenAIResponsesAccumulator(l.provider)
 		accumulator.plainReasoning = true
-		response, err := cfg.response(req, &wire, accumulator)
+		response, err := cfg.response(runCtx, req, &wire, accumulator)
 		if err != nil {
 			yield(nil, err)
 			return

@@ -44,7 +44,7 @@ type preparedImagePart struct {
 // results, so resuming a session repairs its wire input without rewriting
 // canonical history. Notices stay beside their image inside the same content
 // container; inserting messages here could break parallel tool-call pairing.
-func generatePrepared(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent, error] {
+func generatePrepared(ctx context.Context, llm LLM, req *Request, allowToolRepair bool) iter.Seq2[*StreamEvent, error] {
 	return func(yield func(*StreamEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
@@ -58,7 +58,7 @@ func generatePrepared(ctx context.Context, llm LLM, req *Request) iter.Seq2[*Str
 			yield(nil, err)
 			return
 		}
-		for event, err := range generateAttempt(ctx, llm, req) {
+		for event, err := range generateAttempt(ctx, llm, req, allowToolRepair) {
 			if !yield(event, err) {
 				return
 			}
