@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.84.1](https://github.com/caelis-labs/caelis/compare/v0.84.0...v0.84.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **tui:** group Desktop World activity by observed calls ([#276](https://github.com/caelis-labs/caelis/issues/276)) ([a57566a](https://github.com/caelis-labs/caelis/commit/a57566a63584187e2003ae6a46cba9d177470a08))
+
 ## [0.84.0](https://github.com/caelis-labs/caelis/compare/v0.83.1...v0.84.0) (2026-11-22)
 
 
