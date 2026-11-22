@@ -372,7 +372,7 @@ func TestDraftOutboundRejectsIncompatibleProfileWithoutStableFallback(t *testing
 				case "schema":
 					response.Meta[acpdraft.SchemaMetaKey] = json.RawMessage(`"schema-v2.0.0-alpha.7"`)
 				case "previousSchema":
-					response.Meta[acpdraft.SchemaMetaKey] = json.RawMessage(`"schema-v2.0.0-alpha.10"`)
+					response.Meta[acpdraft.SchemaMetaKey] = json.RawMessage(`"schema-v2.0.0-alpha.17"`)
 				case "guard":
 					delete(response.Meta, acpdraft.ConditionalPromptMetaKey)
 				case "idleGuard":

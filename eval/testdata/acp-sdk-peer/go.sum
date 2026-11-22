@@ -6,3 +6,5 @@ github.com/caelis-labs/acp-go-sdk v1.7.0 h1:q0XXTCV/g2oNW1o9BowJLnH5NVA33b/Dwl1p
 github.com/caelis-labs/acp-go-sdk v1.7.0/go.mod h1:e7QRdJfJFrPtixgiJBRwqQMLCrwV7X6e2X2ZDF06ohg=
 github.com/caelis-labs/acp-go-sdk v1.8.0 h1:Nb/L53UKn4tAFO+DgGReXSQgqqmiL/cR9P3lrz1Jf2o=
 github.com/caelis-labs/acp-go-sdk v1.8.0/go.mod h1:e7QRdJfJFrPtixgiJBRwqQMLCrwV7X6e2X2ZDF06ohg=
+github.com/caelis-labs/acp-go-sdk v1.9.0 h1:77jd13AfPdqkYdTv9Jv42PjLZdU5lYR0DA2/8TmI2q4=
+github.com/caelis-labs/acp-go-sdk v1.9.0/go.mod h1:e7QRdJfJFrPtixgiJBRwqQMLCrwV7X6e2X2ZDF06ohg=

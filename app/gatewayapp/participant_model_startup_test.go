@@ -70,7 +70,7 @@ func TestDirectParticipantPinsProviderModelBeforeACPStartup(t *testing.T) {
 				t.Fatal("fixture does not exercise distinct durable and public model IDs")
 			}
 			if cfg.ACPDraftSchema != acpdraft.SchemaTag {
-				t.Fatalf("self participant schema = %q, want explicit alpha.8", cfg.ACPDraftSchema)
+				t.Fatalf("self participant schema = %q, want %q", cfg.ACPDraftSchema, acpdraft.SchemaTag)
 			}
 			cfg.Command = os.Args[0]
 			cfg.Args = []string{"-test.run=^TestParticipantModelStartupHelperProcess$", "--"}
