@@ -94,6 +94,42 @@ func TestApplicationReceiptPersistsOnOriginalCall(t *testing.T) {
 		t.Fatalf("projected callback content = %+v, %v", projected, err)
 	}
 }
+
+func TestLegacyCallbackReceiptAfterSQLiteReopen(t *testing.T) {
+	ctx := t.Context()
+	s, path := testStore(t)
+	b := contentBinding(t, s, testOwner(t, s, 9123), "legacy-callback-session")
+	legacy := claimContent(t, s, b, "legacy")
+	const raw = `{"outcome":"succeeded","content":[{"type":"text","text":"recorded"}],"turn_complete":true,"result_format":"content-v1","structuredContent":{"n":9007199254740993}}`
+	// Install the historical result exactly as the v0.83.1 completion writer did.
+	if _, err := s.db.ExecContext(ctx, `UPDATE client_tool_calls SET state='completed',result=? WHERE call=?`, []byte(raw), legacy.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var request CallResult
+	assertError(t, json.Unmarshal([]byte(raw), &request), ErrInvalid)
+	current := claimContent(t, reopened, b, "current")
+	updated := contentResult(t)
+	if err := reopened.CompleteCall(ctx, b.Scope, b.SessionID, current.ID, updated); err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.GetCall(ctx, b.Scope, b.SessionID, legacy.ID)
+	want := &CallResult{Outcome: "succeeded", Content: json.RawMessage(`[{"type":"text","text":"recorded"}]`), ResultFormat: ResultFormatContentV1, StructuredContent: map[string]any{"n": json.Number("9007199254740993")}}
+	if err != nil || got.ID != legacy.ID || got.State != "completed" || !reflect.DeepEqual(got.Result, want) {
+		t.Fatalf("historical call = %+v, result = %+v, error = %v", got, got.Result, err)
+	}
+	calls, err := reopened.ListCalls(ctx, b.Scope, b.SessionID)
+	if err != nil || len(calls) != 2 || !reflect.DeepEqual(calls[0], got) || calls[1].ID != current.ID || !reflect.DeepEqual(calls[1].Result, &updated) {
+		t.Fatalf("mixed history = %+v, %v", calls, err)
+	}
+}
 func assertError(t *testing.T, err, want error) {
 	t.Helper()
 	if !errors.Is(err, want) {

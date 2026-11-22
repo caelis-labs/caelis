@@ -166,16 +166,27 @@ func (s *Store) call(ctx context.Context, scope Scope, session, id string) (Call
 	if err != nil {
 		return Call{}, notFound(err)
 	}
+	return decodeStoredCall(raw, state, result)
+}
+
+func decodeStoredCall(raw []byte, state string, result []byte) (Call, error) {
 	var call Call
-	if err = json.Unmarshal(raw, &call); err != nil {
+	if err := json.Unmarshal(raw, &call); err != nil {
 		return Call{}, err
 	}
 	call.State = state
 	if len(result) > 0 {
-		call.Result = new(CallResult)
-		if err = json.Unmarshal(result, call.Result); err != nil {
+		// v0.83.1 stored turn_complete on completed receipts. Accept and discard
+		// it here until those Stores age out of the supported upgrade window.
+		var value struct {
+			callResultJSON
+			TurnComplete bool `json:"turn_complete,omitempty"`
+		}
+		if err := decodeCallResultJSON(result, &value); err != nil {
 			return Call{}, err
 		}
+		decoded := CallResult(value.callResultJSON)
+		call.Result = &decoded
 	}
 	return call, nil
 }
@@ -225,19 +236,12 @@ func (s *Store) queryCalls(ctx context.Context, scope Scope, session, query stri
 	for rows.Next() {
 		var raw, result []byte
 		var state string
-		var call Call
 		if err = rows.Scan(&raw, &state, &result); err != nil {
 			return nil, err
 		}
-		if err = json.Unmarshal(raw, &call); err != nil {
+		call, err := decodeStoredCall(raw, state, result)
+		if err != nil {
 			return nil, err
-		}
-		call.State = state
-		if len(result) > 0 {
-			call.Result = new(CallResult)
-			if err = json.Unmarshal(result, call.Result); err != nil {
-				return nil, err
-			}
 		}
 		calls = append(calls, call)
 	}

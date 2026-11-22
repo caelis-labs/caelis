@@ -48,9 +48,20 @@ type ContentBlock struct {
 	SHA256   string  `json:"sha256,omitempty"`
 }
 
+type callResultJSON CallResult
+
 // UnmarshalJSON rejects null format/structured data rather than allowing an
 // explicit null to downgrade the negotiated content contract.
 func (r *CallResult) UnmarshalJSON(data []byte) error {
+	var value callResultJSON
+	if err := decodeCallResultJSON(data, &value); err != nil {
+		return err
+	}
+	*r = CallResult(value)
+	return nil
+}
+
+func decodeCallResultJSON(data []byte, value any) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
 		return ErrInvalid
@@ -60,15 +71,12 @@ func (r *CallResult) UnmarshalJSON(data []byte) error {
 			return ErrInvalid
 		}
 	}
-	type plain CallResult
-	var value plain
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	if err := decoder.Decode(value); err != nil {
 		return ErrInvalid
 	}
-	*r = CallResult(value)
 	return nil
 }
 
