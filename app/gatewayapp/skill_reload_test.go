@@ -55,7 +55,7 @@ func TestSkillInstructionsRejectedAdmissionDoesNotPinNewSummary(t *testing.T) {
 	var instructions string
 	ctx = model.WithInvocationStart(ctx, func(_ context.Context, _ model.Invocation, req *model.Request) error {
 		starts++
-		if req.BaseInstructionCount != 1 || len(req.Instructions) != 2 || req.Instructions[0].Text.Text != "configured base" {
+		if req.BaseInstructionCount != 2 || len(req.Instructions) != 2 || req.Instructions[0].Text.Text != "configured base" {
 			t.Fatalf("configured base or Skill guidance changed: %+v", req)
 		}
 		instructions = req.Instructions[1].Text.Text
@@ -150,6 +150,9 @@ func TestNativeSkillInstructionsReloadOnFirstRequestUsingCompact(t *testing.T) {
 		t.Fatal(err)
 	}
 	write("next-skill", "New description.")
+	if err := stack.sessionRuntimes.releaseSession(ctx, active.SessionID); err != nil {
+		t.Fatal(err)
+	}
 	if current, _ := prompt("second-skill-prompt", "Continue with the same system prompt."); current != before {
 		t.Fatal("ordinary Turn changed the system prompt after a Skill directory edit")
 	}

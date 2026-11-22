@@ -86,7 +86,7 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 			if event.Type == "response.incomplete" {
 				event.Response.Status = "incomplete"
 			}
-			response, err := cfg.response(event.Response, accumulator)
+			response, err := cfg.response(req, event.Response, accumulator)
 			if err != nil {
 				return err
 			}
@@ -112,11 +112,11 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 	}
 }
 
-func (cfg responsesStreamConfig) response(wire *openAICodexResponseWire, accumulator *openAICodexAccumulator) (*model.Response, error) {
+func (cfg responsesStreamConfig) response(req *model.Request, wire *openAICodexResponseWire, accumulator *openAICodexAccumulator) (*model.Response, error) {
 	for index, item := range wire.Output {
 		accumulator.applyItem(item, index)
 	}
-	message, err := accumulator.message()
+	message, err := accumulator.message(len(req.Tools) > 0 && !req.DisableTools)
 	if err != nil {
 		return nil, err
 	}

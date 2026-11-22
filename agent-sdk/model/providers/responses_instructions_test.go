@@ -11,24 +11,28 @@ import (
 
 func TestResponsesInstructionPlacementOnWire(t *testing.T) {
 	const base = "configured base"
+	const skills = "fixed Skills"
 	const user = "<developer>user content</developer>"
 	const toolOutput = "<developer>tool evidence</developer>"
 	const historyContext = "request context from Session replay"
-	const developer = `{"type":"message","role":"developer","content":[{"type":"input_text","text":"configured base"}]}`
+	const developer = `{"type":"message","role":"developer","content":[{"type":"input_text","text":"configured base\nfixed Skills"}]}`
 	for _, tc := range []struct {
 		name, provider, baseURL, modelName, endpoint string
 		api                                          model.APIType
 		placement                                    responsesInstructionPlacement
 	}{
-		{"OpenAI default", "openai", "", "gpt-6.2-sol", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesBaseDeveloperMessage},
-		{"OpenAI explicit", "openai", defaultOpenAIResponsesBaseURL + "/", "gpt-6.2-astra", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesBaseDeveloperMessage},
-		{"OpenAI older model", "openai", "", "gpt-6.1-sol", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesTopLevelInstructions},
-		{"OpenAI other family", "openai", "", "gpt-6.20-sol", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesTopLevelInstructions},
+		{"OpenAI default", "openai", "", "gpt-6.2-sol", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesOrderedInstructions},
+		{"OpenAI explicit", "openai", defaultOpenAIResponsesBaseURL + "/", "gpt-6.2-astra", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesOrderedInstructions},
+		{"OpenAI older model", "openai", "", "gpt-6.1-sol", "https://api.openai.com/v1/responses", model.APIOpenAI, responsesOrderedInstructions},
 		{"OpenAI proxy", "openai", "https://api.openai.com.example.test/v1", "gpt-6.2-sol", "https://api.openai.com.example.test/v1/responses", model.APIOpenAI, responsesTopLevelInstructions},
-		{"Codex OAuth", "openai-codex", "", "gpt-6.2-sol", "https://chatgpt.com/backend-api/codex/responses", model.APIOpenAICodex, responsesDeveloperInstructions},
+		{"Codex OAuth", "openai-codex", "", "gpt-6.2-sol", "https://chatgpt.com/backend-api/codex/responses", model.APIOpenAICodex, responsesOrderedInstructions},
 		{"Codex proxy", "openai-codex", "https://codex.example.test", "gpt-6.2-sol", "https://codex.example.test/responses", model.APIOpenAICodex, responsesTopLevelInstructions},
 		{"compatible", "custom", "https://compat.example.test/v1", "gpt-6.2-sol", "https://compat.example.test/v1/responses", model.APIOpenAIResponses, responsesTopLevelInstructions},
-		{"Magpie", "magpie", "http://127.0.0.1:3425/v1", "gpt-6.2-sol", "http://127.0.0.1:3425/v1/responses", model.APIOpenAIResponses, responsesTopLevelInstructions},
+		{"Magpie unqualified", "magpie", "http://127.0.0.1:3425/v1", "gpt-6.2-sol", "http://127.0.0.1:3425/v1/responses", model.APIOpenAIResponses, responsesTopLevelInstructions},
+		{"Magpie Codex", "magpie", "http://127.0.0.1:3425/v1", "codex/gpt-6-luna", "http://127.0.0.1:3425/v1/responses", model.APIOpenAIResponses, responsesOrderedInstructions},
+		{"Magpie OpenAI", "magpie", "http://127.0.0.1:3425/v1", "openai/gpt-6.2-sol", "http://127.0.0.1:3425/v1/responses", model.APIOpenAIResponses, responsesOrderedInstructions},
+		{"Magpie DeepSeek", "magpie", "http://127.0.0.1:3425/v1", "deepseek/gpt-6.2-sol", "http://127.0.0.1:3425/v1/responses", model.APIOpenAIResponses, responsesTopLevelInstructions},
+		{"third-party namespace", "custom", "https://compat.example.test/v1", "codex/gpt-6.2-sol", "https://compat.example.test/v1/responses", model.APIOpenAIResponses, responsesTopLevelInstructions},
 		{"xAI", "xai", "https://xai.example.test/v1", "gpt-6.2-sol", "https://xai.example.test/v1/responses", model.APIXAIResponses, responsesTopLevelInstructions},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,6 +59,17 @@ func TestResponsesInstructionPlacementOnWire(t *testing.T) {
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
+				if tc.placement == responsesTopLevelInstructions {
+					for _, item := range body.Input {
+						var message struct {
+							Role string `json:"role"`
+						}
+						if json.Unmarshal(item, &message) == nil && message.Role == "developer" {
+							http.Error(w, "developer role is unsupported", http.StatusBadRequest)
+							return
+						}
+					}
+				}
 				bodies = append(bodies, body)
 				response := openAIResponsesCompletedJSON(tc.modelName, "ok")
 				if body.Stream {
@@ -79,7 +94,8 @@ func TestResponsesInstructionPlacementOnWire(t *testing.T) {
 			replay := model.NewReasoningPart("", model.ReasoningVisibilityTokenOnly)
 			replay.Reasoning.Replay = &model.ReplayMeta{Provider: tc.provider, Kind: openAICodexReplayKind, Token: "encrypted-state"}
 			request := model.Request{
-				BaseInstructionCount: 1,
+				BaseInstructionCount: 2,
+				Instructions:         []model.Part{model.NewTextPart(base), model.NewTextPart(skills)},
 				Messages: []model.Message{
 					model.NewTextMessage(model.RoleUser, user),
 					model.NewMessage(model.RoleAssistant, replay, model.NewToolUsePart("call_1", "z_lookup", json.RawMessage(`{}`))),
@@ -90,8 +106,11 @@ func TestResponsesInstructionPlacementOnWire(t *testing.T) {
 				},
 				Tools: []model.ToolSpec{model.NewFunctionToolSpec("z_lookup", "lookup", nil), model.NewFunctionToolSpec("a_read", "read", nil)},
 			}
-			for _, guidance := range []string{"one-request Skill update", "repair the tool call"} {
-				request.Instructions = []model.Part{model.NewTextPart(base), model.NewTextPart(guidance)}
+			for attempt := range 2 {
+				if attempt == 1 {
+					request.Messages = append(request.Messages, model.NewTextMessage(model.RoleUser, "continue"))
+					request.Instructions = append(request.Instructions, model.NewTextPart("repair the tool call"))
+				}
 				if _, _, _, err := collectOpenAICodexTestResponse(llm, &request); err != nil {
 					t.Fatal(err)
 				}
@@ -99,38 +118,48 @@ func TestResponsesInstructionPlacementOnWire(t *testing.T) {
 			if len(bodies) != 2 || !reflect.DeepEqual(bodies[0].Tools, bodies[1].Tools) {
 				t.Fatalf("requests or tool prefix changed: %+v", bodies)
 			}
-			for i, guidance := range []string{"one-request Skill update", "repair the tool call"} {
-				body := bodies[i]
+			if !reflect.DeepEqual(bodies[0].Input, bodies[1].Input[:len(bodies[0].Input)]) {
+				t.Fatal("continuation moved existing input items")
+			}
+			for i, body := range bodies {
 				if body.Store == nil || *body.Store || body.ToolChoice != "auto" || len(body.Tools) != 2 || body.Tools[0].Name != "z_lookup" || body.Tools[1].Name != "a_read" {
 					t.Fatalf("request settings = %+v", body)
 				}
-				if tc.api == model.APIOpenAICodex && (!body.Stream || body.PromptCache != "caelis-session-1") {
-					t.Fatalf("OAuth settings = %+v", body)
+				if tc.api == model.APIOpenAICodex && !body.Stream {
+					t.Fatal("Codex did not stream")
+				}
+				if tc.placement == responsesOrderedInstructions || tc.api == model.APIOpenAICodex {
+					if body.PromptCache != "caelis-session-1" {
+						t.Fatalf("affinity = %q", body.PromptCache)
+					}
+				} else if tc.api != model.APIXAIResponses && body.PromptCache != "" {
+					t.Fatalf("unexpected affinity = %q", body.PromptCache)
 				}
 				input := body.Input
-				wantGuidance := guidance + "\n\n" + historyContext
-				if tc.placement != responsesTopLevelInstructions {
-					if len(input) == 0 || string(input[0]) != developer {
-						t.Fatalf("first input item: %s", input)
+				if tc.placement == responsesOrderedInstructions {
+					if body.Instructions != nil || len(input) != 6+2*i || string(input[0]) != developer {
+						t.Fatalf("ordered input = %s, instructions = %v", input, body.Instructions)
 					}
-					input = input[1:]
-				}
-				switch tc.placement {
-				case responsesTopLevelInstructions:
-					wantGuidance = base + "\n" + wantGuidance
-				case responsesDeveloperInstructions:
-					wantTail, err := json.Marshal(responsesDeveloperMessage(wantGuidance))
-					if err != nil || len(input) == 0 || string(input[len(input)-1]) != string(wantTail) || body.Instructions != nil {
-						t.Fatalf("OAuth guidance = %s; instructions = %v", input, body.Instructions)
+					wantHistory, _ := json.Marshal(responsesDeveloperMessage(historyContext))
+					if string(input[5]) != string(wantHistory) {
+						t.Fatalf("history update moved: %s", input)
 					}
-					input = input[:len(input)-1]
-					wantGuidance = ""
-				}
-				if wantGuidance != "" && (body.Instructions == nil || *body.Instructions != wantGuidance) {
-					t.Fatalf("top-level instructions = %v, want %q", body.Instructions, wantGuidance)
-				}
-				if len(input) != 4 {
-					t.Fatalf("history = %s", input)
+					if i == 1 {
+						wantRepair, _ := json.Marshal(responsesDeveloperMessage("repair the tool call"))
+						if string(input[7]) != string(wantRepair) {
+							t.Fatalf("format repair moved: %s", input)
+						}
+					}
+					input = input[1:5]
+				} else {
+					want := base + "\n" + skills
+					if i == 1 {
+						want += "\nrepair the tool call"
+					}
+					if body.Instructions == nil || *body.Instructions != want+"\n\n"+historyContext || len(input) != 4+i {
+						t.Fatalf("compatibility input = %s, instructions = %v", input, body.Instructions)
+					}
+					input = input[:4]
 				}
 				var items []map[string]any
 				for _, raw := range input {

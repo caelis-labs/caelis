@@ -114,7 +114,7 @@ func (l *xAIResponsesLLM) SearchWeb(ctx context.Context, req model.WebSearchRequ
 	for index, item := range out.Output {
 		accumulator.applyItem(item, index)
 	}
-	message, err := accumulator.message()
+	message, err := accumulator.message(false)
 	if err != nil {
 		return model.WebSearchResponse{}, err
 	}

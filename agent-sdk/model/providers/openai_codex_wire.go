@@ -111,10 +111,8 @@ func (l *openAICodexLLM) buildRequest(req *model.Request) (openAICodexRequest, e
 		}
 	}
 	placement := responsesTopLevelInstructions
-	if l.baseURL == defaultOpenAICodexBaseURL && isGPT62(l.name) {
-		// The official Codex client uses developer input messages on this
-		// endpoint and its current request schema omits top-level instructions.
-		placement = responsesDeveloperInstructions
+	if l.baseURL == defaultOpenAICodexBaseURL {
+		placement = responsesOrderedInstructions
 	}
 	instructions, input, err := openAIResponsesRequestInputs(req, openAICodexReplayProvider, placement)
 	if err != nil {
@@ -166,13 +164,8 @@ type responsesInstructionPlacement uint8
 
 const (
 	responsesTopLevelInstructions responsesInstructionPlacement = iota
-	responsesBaseDeveloperMessage
-	responsesDeveloperInstructions
+	responsesOrderedInstructions
 )
-
-func isGPT62(name string) bool {
-	return name == "gpt-6.2" || strings.HasPrefix(name, "gpt-6.2-")
-}
 
 func openAIResponsesRequestInputs(req *model.Request, replayProvider string, placement responsesInstructionPlacement) (string, []any, error) {
 	parts := req.Instructions
@@ -185,14 +178,14 @@ func openAIResponsesRequestInputs(req *model.Request, replayProvider string, pla
 		}
 		parts = parts[count:]
 	}
-	instructions, input, err := openAIResponsesInputs(parts, req.Messages, replayProvider)
+	instructions, input, err := encodeResponsesInputs(parts, req.Messages, replayProvider, placement)
 	if err != nil {
 		return "", nil, err
 	}
 	if prefix != "" {
 		input = append([]any{responsesDeveloperMessage(prefix)}, input...)
 	}
-	if placement == responsesDeveloperInstructions && instructions != "" {
+	if placement == responsesOrderedInstructions && instructions != "" {
 		input = append(input, responsesDeveloperMessage(instructions))
 		instructions = ""
 	}
@@ -207,6 +200,10 @@ func responsesDeveloperMessage(text string) openAICodexMessageInput {
 }
 
 func openAIResponsesInputs(instructionParts []model.Part, messages []model.Message, replayProvider string) (string, []any, error) {
+	return encodeResponsesInputs(instructionParts, messages, replayProvider, responsesTopLevelInstructions)
+}
+
+func encodeResponsesInputs(instructionParts []model.Part, messages []model.Message, replayProvider string, placement responsesInstructionPlacement) (string, []any, error) {
 	out := make([]any, 0, len(messages))
 	instructions := make([]string, 0, 1)
 	seenToolCalls := map[string]struct{}{}
@@ -226,7 +223,12 @@ func openAIResponsesInputs(instructionParts []model.Part, messages []model.Messa
 			if err != nil {
 				return "", nil, err
 			}
-			if text != "" {
+			if text == "" {
+				continue
+			}
+			if placement == responsesOrderedInstructions {
+				out = append(out, responsesDeveloperMessage(text))
+			} else {
 				instructions = append(instructions, text)
 			}
 		case model.RoleUser:
@@ -715,7 +717,7 @@ func (a *openAICodexAccumulator) appendArguments(event openAICodexStreamWire) {
 	a.slot(event.OutputIndex, event.ItemID, "function_call").arguments.WriteString(event.Delta)
 }
 
-func (a *openAICodexAccumulator) message() (model.Message, error) {
+func (a *openAICodexAccumulator) message(allowToolRepair bool) (model.Message, error) {
 	indexes := make([]int, 0, len(a.slots))
 	for index := range a.slots {
 		indexes = append(indexes, index)
@@ -753,16 +755,18 @@ func (a *openAICodexAccumulator) message() (model.Message, error) {
 		case "function_call":
 			callID := strings.TrimSpace(entry.callID)
 			name := strings.TrimSpace(entry.name)
-			if callID == "" || name == "" {
+			if !allowToolRepair && (callID == "" || name == "") {
 				return model.Message{}, errorcode.New(errorcode.InvalidArgument, "openai codex: streamed tool call requires id and name")
 			}
 			arguments := strings.TrimSpace(entry.arguments.String())
 			if arguments == "" {
 				arguments = "{}"
 			}
-			if !json.Valid([]byte(arguments)) {
+			if !allowToolRepair && !json.Valid([]byte(arguments)) {
 				return model.Message{}, errorcode.New(errorcode.InvalidArgument, "openai codex: streamed tool arguments are not valid JSON")
 			}
+			// Preserve malformed proposals for Chat's pre-dispatch validation.
+			// NewToolUsePart wraps invalid raw JSON for safe transport in the SDK.
 			parts = append(parts, model.NewToolUsePart(callID, name, json.RawMessage(arguments)))
 		}
 	}

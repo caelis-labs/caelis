@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 
@@ -376,7 +377,8 @@ func (a *Agent) collectCanonicalModelStep(
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 			}
 			if instructions != "" {
-				request.Instructions = append(request.Instructions, model.NewTextPart(instructions))
+				request.Instructions = slices.Insert(request.Instructions, request.BaseInstructionCount, model.NewTextPart(instructions))
+				request.BaseInstructionCount++
 			}
 			persistInstructions = persist
 		}

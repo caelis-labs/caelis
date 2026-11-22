@@ -714,8 +714,8 @@ type Request struct {
 	// choice; protocols without one omit declarations from the wire request.
 	DisableTools bool `json:"disable_tools,omitempty"`
 	// BaseInstructionCount marks the leading Instructions supplied by stable
-	// configuration. Providers may place that prefix in a reusable wire message.
-	// The remaining parts apply only to this request. Zero opts out of splitting.
+	// configuration and frozen Session guidance. Providers may place that prefix
+	// before ordered history. The remaining parts apply only to this request.
 	BaseInstructionCount int             `json:"base_instruction_count,omitempty"`
 	Instructions         []Part          `json:"instructions,omitempty"`
 	Messages             []Message       `json:"messages,omitempty"`
