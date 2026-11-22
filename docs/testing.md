@@ -293,8 +293,8 @@ ACP release compatibility has a deterministic stdio gate:
 GOWORK=off go test -tags=e2e ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
 ```
 
-It independently compiles SDK v1.5.2, v1.6.0, v1.7.0 and v1.8.0 peers and tests each against
-the Core client and ACP Surface in both directions. It covers stable v1
+It independently compiles SDK v1.5.2, v1.6.0, v1.7.0, v1.8.0 and v1.9.0 peers.
+Each runs against the Core client and ACP Surface in both directions. It covers stable v1
 initialization, Session creation, ordered updates, reverse permission requests
 and completion. The peers use temporary module graphs with pinned checksums;
 they need a Go module cache or network access and make no model requests.
