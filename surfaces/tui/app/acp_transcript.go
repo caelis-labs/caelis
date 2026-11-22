@@ -19,6 +19,7 @@ type acpTranscriptRenderOptions struct {
 	EmptyPlaceholder        string
 	UseStatusPlaceholder    bool
 	PlaceholderAsMeta       bool
+	FollowedByUser          bool
 	HideWaitingApprovalRow  bool
 	HideCompletedRow        bool
 	HideFailedRow           bool
@@ -64,23 +65,41 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 		opts.StableExplorationPrep(visible, status)
 	}
 	parents := invocationToolParents(visible)
+	children := invocationToolChildren(visible, parents)
 	rows := make([]RenderedRow, 0, len(visible)+2)
 	hasContent := false
 	pendingSemanticGap := false
 	lastGroup := acpTranscriptGroupNone
+	computerHeader, computerEnd := -1, 0
+	closeComputerGroup := func(followedByUser bool) {
+		if computerHeader < 0 || !followedByUser && len(rows) <= computerEnd {
+			return
+		}
+		row := &rows[computerHeader]
+		row.Plain = ansi.Truncate("• Used computer", width, "…")
+		row.Styled = styleACPTranscriptHeaderWithMark(ctx, row.Plain, row.acpHeaderMarkTone, false)
+		row.acpHeaderMarkDim = false
+		computerHeader = -1
+	}
 	for i := 0; i < len(visible); i++ {
+		closeComputerGroup(false)
 		ev := visible[i]
 		if ev.Kind == SEToolCall && parents[ev.CallID] != "" {
 			continue
 		}
-		groupRows, end, grouped := renderInvocationToolGroupRows(blockID, visible, i, width, ctx, opts)
+		groupRows, end, computer := renderDesktopWorldGroupRows(blockID, visible, parents, children, i, width, ctx, opts)
+		grouped := computer
 		if !grouped {
-			groupRows, end, grouped = renderDesktopWorldGroupRows(blockID, visible, i, width, ctx, opts)
+			groupRows, end, grouped = renderInvocationToolGroupRows(blockID, ev, children[ev.CallID], i, width, ctx, opts)
 		}
 		if grouped {
 			if len(groupRows) > 0 {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
 				rows = appendACPTranscriptSemanticRows(rows, blockID, groupRows, &pendingSemanticGap)
+				closeComputerGroup(false)
+				if computer {
+					computerHeader, computerEnd = len(rows)-len(groupRows), len(rows)
+				}
 				hasContent, lastGroup = true, acpTranscriptGroupTool
 			}
 			i = end
@@ -209,6 +228,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			rows = append(rows, StyledPlainRow(blockID, placeholder, style.Render(placeholder)))
 		}
 	}
+	closeComputerGroup(opts.FollowedByUser)
 	statusRows := renderACPStatusRows(blockID, status, width, ctx, opts)
 	if len(statusRows) > 0 {
 		if hasContent && isACPInterruptedStatus(status) {
@@ -410,14 +430,12 @@ func styleACPTranscriptHeaderWithMark(
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "•"))
 	verb, detail, _ := strings.Cut(rest, " ")
-	for _, action := range []string{"Running script", "Ran script"} {
-		if rest == action || strings.HasPrefix(rest, action+" ") {
-			styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(action)
-			if source := strings.TrimPrefix(rest, action); source != "" {
-				styled += styleJavaScriptText(ctx, source)
-			}
-			return styled
+	if action := scriptToolLabel; rest == action || strings.HasPrefix(rest, action+" ") {
+		styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(action)
+		if source := strings.TrimPrefix(rest, action); source != "" {
+			styled += styleJavaScriptText(ctx, source)
 		}
+		return styled
 	}
 	styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim)
 	if verb != "" {

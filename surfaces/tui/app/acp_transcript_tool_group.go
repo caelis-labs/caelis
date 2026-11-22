@@ -25,95 +25,89 @@ func invocationToolParents(events []SubagentEvent) map[string]string {
 	return parents
 }
 
-func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	root := events[start]
+func invocationToolChildren(events []SubagentEvent, parents map[string]string) map[string][]SubagentEvent {
+	children := make(map[string][]SubagentEvent)
+	for _, event := range events {
+		if parent := parents[event.CallID]; event.Kind == SEToolCall && parent != "" {
+			children[parent] = append(children[parent], event)
+		}
+	}
+	return children
+}
+
+const scriptToolLabel = "js_exec"
+
+func scriptExecutionFailed(root SubagentEvent, children []SubagentEvent) bool {
+	// A parent's cumulative error can come from a child even after the
+	// JavaScript itself finished successfully.
+	return root.ScriptCompletion == "failed" || root.ScriptCompletion == "" && root.Err && len(children) == 0
+}
+
+func renderInvocationToolGroupRows(blockID string, root SubagentEvent, children []SubagentEvent, start, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	if !isScriptToolEvent(root) {
 		return nil, start, false
 	}
-	parents := invocationToolParents(events)
-	var children []SubagentEvent
-	hasChildren := false
-	hasDesktopWorld := false
-	for _, event := range events {
-		if event.Kind == SEToolCall && parents[event.CallID] == root.CallID {
-			// Task controls count as invocations even when their rows are hidden.
-			hasChildren = true
-			hasDesktopWorld = hasDesktopWorld || event.desktopWorld != nil
-			if !isTaskControlEvent(event) {
-				children = append(children, event)
-			}
-		}
-	}
 	key := "tools:" + root.CallID
 	foldToken := acpStableExplorationClickToken(key)
-	tone, dim := acpToolHeaderMark(ctx, root.ScriptCompletion == "failed", root.Done)
-	title := "• Running script"
-	if root.Done {
-		title = "• Ran script"
-	}
+	failed := scriptExecutionFailed(root, children)
+	tone, dim := acpToolHeaderMark(ctx, failed, root.Done)
+	title := "• " + scriptToolLabel
 	source := sanitizeRenderableText(root.FullArgs)
-	preview := root.Title
-	// A DTW invocation can embed the desktop script in the outer source too.
-	// Keep the script's normal disclosure, using typed children to select it.
-	if preview == "" && !hasDesktopWorld {
-		preview = root.Args
-		if source != "" {
-			preview, _ = longCommandDisplayPreview(source, maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1))
-		}
-	}
+	file := strings.Join(strings.Fields(sanitizeRenderableText(root.Title)), " ")
 	sourceExpanded := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(root.CallID)
-	if sourceExpanded && source != "" {
-		preview = source
-		if root.Title != "" {
-			preview = root.Title + "\n" + source
+	headerText, styled := title, ""
+	switch {
+	case sourceExpanded && source != "":
+		headerText += " " + source
+		if file != "" {
+			headerText = title + " " + file + "\n" + source
 		}
-	}
-	headerText := title
-	if preview != "" {
-		headerText += " " + preview
+	case file != "":
+		headerText += " " + compactSingleLineHeader(file, width-displayColumns(title)-1)
+	case source != "" && width > displayColumns(title)+1:
+		initialBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1)
+		finalBudget := width - displayColumns(title) - 1
+		preview := styleScriptSourcePreview(ctx, source, initialBudget, finalBudget)
+		headerText += " " + ansi.Strip(preview)
+		styled = styleACPTranscriptHeaderWithMark(ctx, title, tone, dim) + " " + preview
+	case root.StartArgs != "":
+		args := strings.Join(strings.Fields(sanitizeRenderableText(root.StartArgs)), " ")
+		headerText += " " + compactSingleLineHeader(args, width-displayColumns(title)-1)
 	}
 	if !sourceExpanded {
-		if preview != "" {
-			headerText = title + " " + compactSingleLineHeader(preview, maxInt(1, width-displayColumns(title)-1))
-		} else {
-			headerText = title
-		}
-		if width <= displayColumns(title)+1 {
-			headerText = truncateDisplayCells(title, width)
-		}
 		headerText = truncateDisplayCells(headerText, width)
 	}
 	header := renderACPTranscriptHeaderRowMarked(blockID, headerText, width, ctx, foldToken, tone, dim)
-	if !sourceExpanded && !hasDesktopWorld && source != "" && root.Title == "" && width > displayColumns(title)+1 {
-		initialBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1)
-		finalBudget := maxInt(1, width-displayColumns(title)-1)
-		header.Styled = styleACPTranscriptHeaderWithMark(ctx, title, tone, dim) + " " + styleScriptSourcePreview(ctx, source, initialBudget, finalBudget)
+	if styled != "" {
+		header.Styled = styled
 		header.PreWrapped = true
 	}
-	if source != "" || !hasChildren && root.Done && root.Output != "" && !root.OutputSynthetic {
+	showOutput := (failed || len(children) == 0) && root.Done && !root.OutputSynthetic && renderableTextHasContent(root.Output)
+	if source != "" || showOutput {
 		header.ClickTokenAlt = acpToolPanelClickToken(root.CallID)
 		header.ClickStartCol = 2
 		header.ClickEndCol = displayColumns(title)
 	}
 	rows := []RenderedRow{header}
-	if !hasChildren && root.Done && !root.OutputSynthetic && renderableTextHasContent(root.Output) {
+	if showOutput {
 		token := acpToolPanelClickToken(root.CallID)
 		output := root.Output
 		if !sourceExpanded {
+			if failed {
+				output = firstNonEmpty(structuredToolFailureMessage(output), output)
+			}
 			output = summarizeACPToolPanelText(output, true, maxInt(1, width-displayColumns("  └ ")))
 		}
-		rows = append(rows, renderACPFullTerminalPanelRows(blockID, root.CallID, output, width, ctx, root.ScriptCompletion == "failed", token)...)
+		rows = append(rows, renderACPFullTerminalPanelRows(blockID, root.CallID, output, width, ctx, failed, token)...)
 	}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
-	hiddenDesktop := desktopWorldHiddenCalls(children, expanded)
+	children = visibleScriptChildren(children)
 	for i := 0; i < len(children); {
 		end := i + 1
 		child := children[i]
-		if child.desktopWorld != nil {
-			if !hiddenDesktop[i] {
-				prefix := explorationChildPrefix(len(rows) == 1)
-				rows = append(rows, renderDesktopWorldCallRows(blockID, child, prefix, width, ctx, opts)...)
-			}
+		if child.desktopWorld != nil && child.desktopWorld.visible(child.Err) {
+			prefix := explorationChildPrefix(len(rows) == 1)
+			rows = append(rows, renderDesktopWorldCallRows(blockID, child, prefix, width, ctx, opts)...)
 			i++
 			continue
 		}
@@ -136,10 +130,17 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		rows = append(rows, renderScriptInvocationRows(blockID, children[i:end], width, ctx, token, len(rows) == 1, fullArgs)...)
 		i = end
 	}
-	if len(hiddenDesktop) > 0 {
-		rows = append(rows, renderDesktopWorldMoreRow(blockID, len(hiddenDesktop), width, ctx, foldToken))
-	}
 	return rows, start, true
+}
+
+func visibleScriptChildren(children []SubagentEvent) []SubagentEvent {
+	var visible []SubagentEvent
+	for _, child := range children {
+		if !isTaskControlEvent(child) {
+			visible = append(visible, child)
+		}
+	}
+	return visible
 }
 
 func scriptExplorationGroupVerb(ev SubagentEvent) string {

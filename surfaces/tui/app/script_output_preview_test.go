@@ -108,7 +108,7 @@ func TestScriptHeaderJavaScriptSyntaxAndWidth(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	code := "const label = `桌面 value`; /* comment\nCOMMENT_CONTINUATION */\nreturn {label, count: 42};"
 	for _, dark := range []bool{false, true} {
-		for _, action := range []string{"Running script", "Ran script"} {
+		for _, action := range []string{scriptToolLabel} {
 			m := NewModel(Config{})
 			ctx := m.blockRenderContext(80)
 			ctx.Theme = tuikit.ResolveThemeWithState(dark, false, colorprofile.TrueColor)

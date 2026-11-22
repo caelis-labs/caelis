@@ -37,8 +37,8 @@ type desktopWorldBinding struct {
 	observation bool
 }
 
-// Summarize intent from straight-line input calls and read-only observations.
-// Keep the two lists separate so mixed scripts only preview the input calls.
+// Only direct calls in the straight-line prefix can describe what the script
+// does. Result formatting can end that prefix without erasing earlier calls.
 func desktopWorldScriptActions(source string) []desktopWorldAction {
 	if source == "" || len(source) > 64<<10 {
 		return nil
@@ -52,64 +52,59 @@ func desktopWorldScriptActions(source string) []desktopWorldAction {
 		return nil
 	}
 	fn, ok := stmt.Expression.(*ast.FunctionLiteral)
-	if !ok || !fn.Async {
+	if !ok || !fn.Async || desktopWorldShadowsApp(fn) {
 		return nil
 	}
 
 	bindings := make(map[string]desktopWorldBinding)
 	var reads, inputs []desktopWorldAction
-	returned, guardedRead := false, false
 	record := func(expr ast.Expression) (desktopWorldBinding, bool) {
 		if desktopWorldLiteral(expr, nil) {
 			return desktopWorldBinding{literal: expr}, true
 		}
+		if desktopWorldReadPath(expr, bindings) {
+			return desktopWorldBinding{observation: true}, true
+		}
 		action, ok := desktopWorldCallAction(expr, bindings)
-		if !ok || guardedRead && !action.read {
+		if !ok {
 			return desktopWorldBinding{}, false
 		}
-		// Later declarations still need validation because they may shadow
-		// an earlier app or constant reference.
-		if !returned {
-			actions := &inputs
-			if action.read {
-				actions = &reads
-			}
-			if len(*actions) < 2 && !slices.Contains(*actions, action) {
-				*actions = append(*actions, action)
-			}
+		actions := &inputs
+		if action.read {
+			actions = &reads
+		}
+		if len(*actions) < 2 && !slices.Contains(*actions, action) {
+			*actions = append(*actions, action)
 		}
 		return desktopWorldBinding{observation: action.read}, true
 	}
+scan:
 	for _, stmt := range fn.Body.List {
 		switch node := stmt.(type) {
 		case *ast.EmptyStatement:
 		case *ast.ExpressionStatement:
 			if _, ok := record(node.Expression); !ok {
-				return nil
+				break scan
 			}
 		case *ast.ReturnStatement:
-			if !desktopWorldLiteralReturn(node.Argument, bindings) {
-				if _, ok := record(node.Argument); !ok {
-					return nil
-				}
-			}
-			returned = true
+			record(node.Argument)
+			break scan
 		case *ast.LexicalDeclaration:
 			if node.Token != token.CONST {
-				return nil
+				break scan
 			}
 			for _, binding := range node.List {
 				id, ok := binding.Target.(*ast.Identifier)
-				if !ok || id.Name == "app" {
-					return nil
+				if !ok {
+					break scan
 				}
 				name := id.Name.String()
 				if _, exists := bindings[name]; exists {
-					return nil
+					break scan
 				}
 				value, ok := record(binding.Initializer)
 				if !ok {
-					return nil
+					break scan
 				}
 				bindings[name] = value
 			}
@@ -118,18 +113,49 @@ func desktopWorldScriptActions(source string) []desktopWorldAction {
 				node.Alternate == nil && desktopWorldDeadStatements(node.Consequent) {
 				continue
 			}
-			if len(inputs) > 0 || !desktopWorldReadGuard(node, bindings) {
-				return nil
-			}
-			guardedRead = true
+			break scan
 		default:
-			return nil
+			break scan
 		}
 	}
 	if len(inputs) > 0 {
 		return inputs
 	}
 	return reads
+}
+
+func desktopWorldShadowsApp(fn *ast.FunctionLiteral) bool {
+	shadows := func(list []*ast.Binding) bool {
+		for _, binding := range list {
+			id, ok := binding.Target.(*ast.Identifier)
+			if !ok || id.Name == "app" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, decl := range fn.DeclarationList {
+		if shadows(decl.List) {
+			return true
+		}
+	}
+	for _, stmt := range fn.Body.List {
+		switch decl := stmt.(type) {
+		case *ast.LexicalDeclaration:
+			if shadows(decl.List) {
+				return true
+			}
+		case *ast.FunctionDeclaration:
+			if decl.Function.Name.Name == "app" {
+				return true
+			}
+		case *ast.ClassDeclaration:
+			if decl.Class.Name.Name == "app" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // A literal false test skips these statements without hiding declarations.
@@ -148,19 +174,6 @@ func desktopWorldDeadStatements(stmt ast.Statement) bool {
 	return false
 }
 
-// A simple early exit based on a prior read can limit subsequent observations.
-// Keep describing read intent without evaluating the predicate.
-func desktopWorldReadGuard(node *ast.IfStatement, bindings map[string]desktopWorldBinding) bool {
-	ret, returns := node.Consequent.(*ast.ReturnStatement)
-	test, compares := node.Test.(*ast.BinaryExpression)
-	if node.Alternate != nil || !returns || !compares ||
-		(test.Operator != token.STRICT_EQUAL && test.Operator != token.STRICT_NOT_EQUAL) {
-		return false
-	}
-	return (ret.Argument == nil || desktopWorldLiteral(ret.Argument, nil)) &&
-		desktopWorldReadPath(test.Left, bindings) && desktopWorldLiteral(test.Right, nil)
-}
-
 func desktopWorldReadPath(expr ast.Expression, bindings map[string]desktopWorldBinding) bool {
 	switch node := expr.(type) {
 	case *ast.Identifier:
@@ -174,23 +187,6 @@ func desktopWorldReadPath(expr ast.Expression, bindings map[string]desktopWorldB
 		}
 	}
 	return false
-}
-
-func desktopWorldLiteralReturn(expr ast.Expression, bindings map[string]desktopWorldBinding) bool {
-	if expr == nil || desktopWorldLiteral(expr, nil) {
-		return true
-	}
-	object, ok := expr.(*ast.ObjectLiteral)
-	if !ok {
-		return false
-	}
-	for _, property := range object.Value {
-		shorthand, ok := property.(*ast.PropertyShort)
-		if !ok || shorthand.Initializer != nil || bindings[shorthand.Name.Name.String()].literal == nil {
-			return false
-		}
-	}
-	return true
 }
 
 func desktopWorldCallAction(expr ast.Expression, bindings map[string]desktopWorldBinding) (desktopWorldAction, bool) {
@@ -295,6 +291,12 @@ func desktopWorldActionPhrase(method, phrase string, arg ast.Expression) string 
 		if method == "look" && target == "" {
 			if filter := desktopWorldString(desktopWorldField(arg, "text")); filter != "" {
 				return "look for “" + filter + "”"
+			}
+			if scope := desktopWorldString(desktopWorldField(arg, "scope")); scope == "menu" {
+				return "inspect the menu"
+			}
+			if role := desktopWorldString(desktopWorldField(arg, "role")); role != "" {
+				return "look for " + strings.ReplaceAll(role, "_", " ") + " controls"
 			}
 		}
 		if target != "" {

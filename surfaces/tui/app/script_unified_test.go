@@ -34,7 +34,7 @@ func TestUnifiedJSTrajectoryNeverRendersDetails(t *testing.T) {
 				}
 				rows := b.Render(ctx)
 				text := joinRenderedPlain(rows)
-				if !strings.HasPrefix(text, "• Ran script") || !strings.Contains(text, "Read script1Read.txt") {
+				if !strings.HasPrefix(text, "• js_exec") || !strings.Contains(text, "Read script1Read.txt") {
 					t.Fatal(text)
 				}
 				for _, hidden := range []string{"Called tools", "Script error", "failed", "Result", "completed", "CHILD_ERROR_PRIVATE_DETAIL", "FINAL_RETURN_PRIVATE_DETAIL", "│"} {
@@ -53,7 +53,7 @@ func TestUnifiedJSMarkUsesExecutionObservationNotCumulativeError(t *testing.T) {
 	for _, completion := range []string{"completed", "failed", ""} {
 		m, b := groupedCanonicalModel(t, unifiedScriptEvents(completion), "main", true)
 		rows := b.Render(m.blockRenderContext(60))
-		if !strings.HasPrefix(rows[0].Plain, "• Ran script") {
+		if !strings.HasPrefix(rows[0].Plain, "• js_exec") {
 			t.Fatal(rows[0].Plain)
 		}
 		if (rows[0].acpHeaderMarkTone == acpHeaderMarkDanger) != (completion == "failed") {
@@ -79,7 +79,7 @@ func TestUnifiedJSIndependentGroupsHistoryAndNarrow(t *testing.T) {
 						}
 					}
 					text := joinRenderedPlain(rows)
-					if strings.Count(text, "• Ran script") != 2 || !strings.Contains(text, "script1Read") || !strings.Contains(text, "script2Read") || (!historical && !strings.Contains(text, "BETWEEN_SCRIPT_STEPS")) {
+					if strings.Count(text, "• js_exec") != 2 || !strings.Contains(text, "script1Read") || !strings.Contains(text, "script2Read") || (!historical && !strings.Contains(text, "BETWEEN_SCRIPT_STEPS")) {
 						t.Fatal(text)
 					}
 					if strings.Count(text, "└") != 2 || strings.Contains(text, "FINAL_SUMMARY") {
@@ -102,10 +102,7 @@ func TestUnifiedJSZeroChildrenAndActualTargetReview(t *testing.T) {
 	for _, done := range []bool{false, true} {
 		b.UpdateToolWithMeta("zero", "js_exec", "", "OWN_SCRIPT_STACK", done, true, ToolUpdateMeta{ScriptCompletion: "failed"})
 		text := joinRenderedPlain(b.Render(m.blockRenderContext(60)))
-		want := "• Running script"
-		if done {
-			want = "• Ran script"
-		}
+		want := "• js_exec"
 		if !strings.HasPrefix(text, want) || (strings.Contains(text, "OWN_SCRIPT_STACK") != done) {
 			t.Fatal(text)
 		}
@@ -136,7 +133,7 @@ func TestUnifiedJSUsesSingleLineSummaryColumns(t *testing.T) {
 			{Kind: SEToolCall, CallID: "task", Name: "Task", Args: "Read task-handle", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 			{Kind: SEToolCall, CallID: "two", Name: "Read", Args: "docs/second.txt", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 		}
-		rows, _, _ := renderInvocationToolGroupRows("b", events, 0, width, ctx, acpTranscriptRenderOptions{})
+		rows, _, _ := renderInvocationToolGroupRows("b", events[0], events[1:], 0, width, ctx, acpTranscriptRenderOptions{})
 		want := "  └ Read " + compactSingleLineHeader("first.txt, second.txt", width-9)
 		if len(rows) != 2 || rows[1].Plain != want || !rows[1].PreWrapped {
 			t.Fatalf("width %d: %#v", width, rows)

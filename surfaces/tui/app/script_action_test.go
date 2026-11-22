@@ -14,10 +14,7 @@ func TestScriptActionTitlesAndNoDetails(t *testing.T) {
 		root := b.(*MainACPTurnBlock)
 		root.Events[0].Done = done
 		rows := root.Render(m.blockRenderContext(60))
-		want := "• Running script"
-		if done {
-			want = "• Ran script"
-		}
+		want := "• js_exec"
 		if !strings.HasPrefix(rows[0].Plain, want) {
 			t.Fatalf("title %q want %q", rows[0].Plain, want)
 		}
@@ -37,11 +34,10 @@ func TestScriptActionNameContrastAndWholeTitle(t *testing.T) {
 	m := NewModel(Config{})
 	ctx := m.blockRenderContext(60)
 	ctx.Theme = tuikit.ResolveThemeFromOptions(false, colorprofile.TrueColor)
-	for _, title := range []string{"Running script", "Ran script"} {
+	for _, title := range []string{scriptToolLabel} {
 		row := renderACPTranscriptHeaderRowMarked("b", "• "+title, 60, ctx, "", acpHeaderMarkDefault, false)
-		_, styled, _ := wrapACPTranscriptHeaderForViewport(row.Plain, 60, ctx, acpHeaderMarkDefault, false)
-		if !strings.Contains(styled[0], ctx.Theme.Tokens().ToolName.Render(title)) {
-			t.Fatalf("whole phrase not highlighted: %q", styled)
+		if !strings.Contains(row.Styled, ctx.Theme.Tokens().ToolName.Render(title)) {
+			t.Fatalf("tool name not highlighted: %q", row.Styled)
 		}
 	}
 	for _, tc := range []struct{ name, action string }{
