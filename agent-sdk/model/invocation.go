@@ -121,6 +121,21 @@ func (e *invocationGateError) Error() string { return e.cause.Error() }
 func (e *invocationGateError) Unwrap() error { return e.cause }
 func (*invocationGateError) Retryable() bool { return false }
 
+// GenerateWithRequestTransform delegates the wrapper's current generation
+// after applying transform to a private request copy. A nil request or
+// transform passes through unchanged. Use Generate for independent requests.
+func GenerateWithRequestTransform(ctx context.Context, llm LLM, req *Request, transform func(*Request)) iter.Seq2[*StreamEvent, error] {
+	if req == nil || transform == nil {
+		return Generate(ctx, llm, req)
+	}
+	transformed := CloneRequest(req)
+	transform(transformed)
+	if modelinvocation.AllowsToolRepair(ctx, req) {
+		ctx = modelinvocation.WithToolRepair(ctx, transformed)
+	}
+	return Generate(ctx, llm, transformed)
+}
+
 // Generate observes each actual attempt, including unwrapped providers. Nested
 // gates must implement InvocationTracker and delegate through Generate.
 // Inline images in messages and tool results are validated on a private request
