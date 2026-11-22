@@ -1,3 +1,3 @@
-• js_exec return await Read({path:'input.txt'});
+• Ran script return await Rea...h:'input.txt'});
   └ context7__query_docs "context details...ontext detai..."
     desktop_world__exec {"app":"fixture.a...it app.look();"}

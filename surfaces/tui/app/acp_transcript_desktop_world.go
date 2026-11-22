@@ -92,14 +92,14 @@ func renderDesktopWorldGroupRows(blockID string, events []SubagentEvent, parents
 		earlier, collapsed = collapsed[:skip], collapsed[skip:]
 	}
 	for i, call := range collapsed {
-		rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(i == 0), width, ctx, opts)...)
+		rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(i == 0), width, ctx, opts, false)...)
 	}
 	for _, call := range earlier {
 		if !call.Err {
 			continue
 		}
 		if opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(call.CallID) {
-			rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(false), width, ctx, opts)...)
+			rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(false), width, ctx, opts, false)...)
 		} else {
 			rows = append(rows, renderDesktopWorldFailureRow(blockID, call, width, ctx, opts))
 		}
@@ -116,19 +116,35 @@ func renderDesktopWorldFailureRow(blockID string, ev SubagentEvent, width int, c
 	return StyledPlainClickablePreWrappedRow(blockID, line, ctx.Theme.ErrorStyle().Render(line), acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev)))
 }
 
-func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
-	budget := minInt(width, desktopWorldSummaryColumns)
-	prefix = ansi.Truncate(prefix, maxInt(0, budget-1), "")
-	header := ev.desktopWorld.label(maxInt(1, budget-displayColumns(prefix)), ev.Err)
-	line := prefix + header
-	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
-	styled := styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)
-	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header))
-	if ev.Err {
-		styled = ctx.Theme.ErrorStyle().Render(line)
+func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions, showToolName bool) []RenderedRow {
+	budget := width
+	if !showToolName {
+		budget = minInt(budget, desktopWorldSummaryColumns)
 	}
+	prefix = ansi.Truncate(prefix, maxInt(0, budget-1), "")
+	available := maxInt(1, budget-displayColumns(prefix))
+	header := ev.desktopWorld.label(available, ev.Err)
 	token := acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev))
-	rows := []RenderedRow{StyledPlainClickablePreWrappedRow(blockID, line, styled, token)}
+	var rows []RenderedRow
+	if showToolName {
+		lead := ev.Name + " · "
+		remaining := available - displayColumns(lead)
+		action := ev.desktopWorld.label(maxInt(1, remaining), ev.Err)
+		if remaining > 0 && action != "" && !strings.HasSuffix(action, "…") {
+			header = lead + action
+		} else {
+			// A continuation leaves room for the action when the name uses most of the row.
+			namePrefix := prefix
+			if extra := displayColumns(ev.Name) - available; extra > 0 {
+				padding := len(prefix) - len(strings.TrimLeft(prefix, " "))
+				namePrefix = prefix[minInt(extra, padding):]
+			}
+			name := ansi.Truncate(ev.Name, budget-displayColumns(namePrefix), "…")
+			rows = append(rows, renderDesktopWorldSummaryRow(blockID, ev, namePrefix, name, ctx, token))
+			prefix = strings.Repeat(" ", displayColumns(prefix))
+		}
+	}
+	rows = append(rows, renderDesktopWorldSummaryRow(blockID, ev, prefix, header, ctx, token))
 	if ev.Err && ev.desktopWorld.failure != "" {
 		rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, width, ctx, opts))
 	}
@@ -153,4 +169,15 @@ func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string,
 		rows = append(rows, renderACPToolOutputRowsWithToken(blockID, detailPrefix, text, width, ctx, ctx.Theme.TranscriptMetaStyle(), token)...)
 	}
 	return rows
+}
+
+func renderDesktopWorldSummaryRow(blockID string, ev SubagentEvent, prefix, header string, ctx BlockRenderContext, token string) RenderedRow {
+	line := prefix + header
+	tone, dim := acpToolHeaderMark(ctx, ev.Err, ev.Done)
+	styled := styleACPTranscriptHeaderWithMark(ctx, "• "+header, tone, dim)
+	styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ansi.Cut(styled, 2, 2+displayColumns(header))
+	if ev.Err {
+		styled = ctx.Theme.ErrorStyle().Render(line)
+	}
+	return StyledPlainClickablePreWrappedRow(blockID, line, styled, token)
 }

@@ -35,8 +35,6 @@ func invocationToolChildren(events []SubagentEvent, parents map[string]string) m
 	return children
 }
 
-const scriptToolLabel = "js_exec"
-
 func scriptExecutionFailed(root SubagentEvent, children []SubagentEvent) bool {
 	// A parent's cumulative error can come from a child even after the
 	// JavaScript itself finished successfully.
@@ -51,28 +49,32 @@ func renderInvocationToolGroupRows(blockID string, root SubagentEvent, children 
 	foldToken := acpStableExplorationClickToken(key)
 	failed := scriptExecutionFailed(root, children)
 	tone, dim := acpToolHeaderMark(ctx, failed, root.Done)
-	title := "• " + scriptToolLabel
+	title := "• " + scriptRunningLabel
+	if root.Done {
+		title = "• " + scriptRanLabel
+	}
 	source := sanitizeRenderableText(root.FullArgs)
 	file := strings.Join(strings.Fields(sanitizeRenderableText(root.Title)), " ")
 	sourceExpanded := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(root.CallID)
 	headerText, styled := title, ""
+	argWidth := width - displayColumns(title) - 1
 	switch {
 	case sourceExpanded && source != "":
 		headerText += " " + source
 		if file != "" {
 			headerText = title + " " + file + "\n" + source
 		}
-	case file != "":
-		headerText += " " + compactSingleLineHeader(file, width-displayColumns(title)-1)
-	case source != "" && width > displayColumns(title)+1:
+	case file != "" && argWidth > 0:
+		headerText += " " + compactSingleLineHeader(file, argWidth)
+	case source != "" && argWidth > 0:
 		initialBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1)
-		finalBudget := width - displayColumns(title) - 1
-		preview := styleScriptSourcePreview(ctx, source, initialBudget, finalBudget)
-		headerText += " " + ansi.Strip(preview)
-		styled = styleACPTranscriptHeaderWithMark(ctx, title, tone, dim) + " " + preview
-	case root.StartArgs != "":
+		if preview := styleScriptSourcePreview(ctx, source, initialBudget, argWidth); preview != "" {
+			headerText += " " + ansi.Strip(preview)
+			styled = styleACPTranscriptHeaderWithMark(ctx, title, tone, dim) + " " + preview
+		}
+	case root.StartArgs != "" && argWidth > 0:
 		args := strings.Join(strings.Fields(sanitizeRenderableText(root.StartArgs)), " ")
-		headerText += " " + compactSingleLineHeader(args, width-displayColumns(title)-1)
+		headerText += " " + compactSingleLineHeader(args, argWidth)
 	}
 	if !sourceExpanded {
 		headerText = truncateDisplayCells(headerText, width)
@@ -107,7 +109,7 @@ func renderInvocationToolGroupRows(blockID string, root SubagentEvent, children 
 		child := children[i]
 		if child.desktopWorld != nil && child.desktopWorld.visible(child.Err) {
 			prefix := explorationChildPrefix(len(rows) == 1)
-			rows = append(rows, renderDesktopWorldCallRows(blockID, child, prefix, width, ctx, opts)...)
+			rows = append(rows, renderDesktopWorldCallRows(blockID, child, prefix, width, ctx, opts, true)...)
 			i++
 			continue
 		}

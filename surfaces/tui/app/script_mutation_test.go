@@ -37,7 +37,7 @@ func TestScriptMutationRowsUseFinalDiffCounts(t *testing.T) {
 				ctx := m.blockRenderContext(width)
 				ctx.Theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 				rows := block.Render(ctx)
-				if len(rows) != 3 || !strings.HasPrefix(rows[0].Plain, "• js_exec") {
+				if len(rows) != 3 || !strings.HasPrefix(rows[0].Plain, "• Ran script") {
 					t.Fatal(joinRenderedPlain(rows))
 				}
 				for i, name := range []string{"write", "patch"} {

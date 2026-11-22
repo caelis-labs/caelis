@@ -429,14 +429,14 @@ func styleACPTranscriptHeaderWithMark(
 		return ctx.Theme.ToolStyle().Render(plain)
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "•"))
-	verb, detail, _ := strings.Cut(rest, " ")
-	if action := scriptToolLabel; rest == action || strings.HasPrefix(rest, action+" ") {
-		styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(action)
-		if source := strings.TrimPrefix(rest, action); source != "" {
-			styled += styleJavaScriptText(ctx, source)
+	if label, source, ok := splitScriptHeader(rest); ok {
+		styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, label).Render(label)
+		if source != "" {
+			styled += " " + styleJavaScriptText(ctx, source)
 		}
 		return styled
 	}
+	verb, detail, _ := strings.Cut(rest, " ")
 	styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim)
 	if verb != "" {
 		styled += " " + toolActionStyle(ctx, verb).Render(verb)

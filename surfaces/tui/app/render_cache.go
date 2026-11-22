@@ -369,7 +369,7 @@ func wrapACPTranscriptHeaderForViewport(
 		return nil, nil, false
 	}
 	verb := strings.TrimSpace(strings.TrimPrefix(prefix, "•"))
-	if verb == scriptToolLabel {
+	if verb == scriptRunningLabel || verb == scriptRanLabel {
 		return wrapACPScriptHeaderForViewport(prefix, detail, width, ctx, markTone, markDim)
 	}
 	continuationPrefix := strings.Repeat(" ", displayColumns(prefix))
@@ -439,6 +439,9 @@ func splitACPTranscriptHeaderPrefix(plain string) (prefix string, detail string,
 		return "", "", false
 	}
 	rest := strings.TrimPrefix(plain, "• ")
+	if label, source, ok := splitScriptHeader(rest); ok {
+		return "• " + label + " ", source, true
+	}
 	verb, detail, found := strings.Cut(rest, " ")
 	if !found || strings.TrimSpace(verb) == "" {
 		return "", "", false

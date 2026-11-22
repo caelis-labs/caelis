@@ -19,7 +19,7 @@ func TestScriptSourceAndZeroChildResult(t *testing.T) {
 	for _, r := range rows {
 		text += r.Plain + "\n"
 	}
-	if !strings.Contains(text, "js_exec workflow.js") || !strings.Contains(text, "42") {
+	if !strings.Contains(text, "Ran script workflow.js") || !strings.Contains(text, "42") {
 		t.Fatalf("missing source/result: %s", text)
 	}
 }
@@ -59,7 +59,7 @@ func TestScriptTaskTerminalUpdateWithoutTaskRead(t *testing.T) {
 			for _, r := range b.Render(m.blockRenderContext(70)) {
 				text += r.Plain + "\n"
 			}
-			if !strings.Contains(text, "• js_exec") || !b.(*MainACPTurnBlock).Events[0].Done {
+			if strings.Contains(text, "Running script") || !strings.Contains(text, "Ran script") {
 				t.Fatalf("terminal Task without Task.read: %s", text)
 			}
 		})
@@ -87,7 +87,7 @@ func TestScriptSourceDisclosesFrozenBytesOnFirstClick(t *testing.T) {
 func TestScriptExpandedSourceKeepsCommonColumnsWithoutRail(t *testing.T) {
 	m := NewModel(Config{})
 	ctx := m.blockRenderContext(44)
-	for _, action := range []string{scriptToolLabel} {
+	for _, action := range []string{"Ran script", "Running script"} {
 		lines, _, ok := wrapACPTranscriptHeaderForViewport("• "+action+" const first=1;\nreturn first;", 44, ctx, acpHeaderMarkDefault, false)
 		if !ok || len(lines) != 2 || strings.Contains(strings.Join(lines, "\n"), "│") || !strings.HasSuffix(lines[1], "return first;") {
 			t.Fatalf("expanded source must share header columns without a rail: %q", lines)

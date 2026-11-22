@@ -17,6 +17,9 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const desktopTraceApp = "C:/Program Files/Example Distribution/Long Browser Install/Chrome.exe"
@@ -384,7 +387,7 @@ func TestDesktopWorldTraceGroupsAdjacentDirectCalls(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		m, b := desktopTraceModel(t, events, 112, replay)
 		text := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
-		if strings.Count(text, "Used computer") != 1 || strings.Count(text, "Using computer") != 1 || strings.Contains(text, "js_exec") {
+		if strings.Count(text, "Used computer") != 1 || strings.Count(text, "Using computer") != 1 || strings.Contains(text, " script") {
 			t.Fatalf("replay=%v unrelated invocation merged adjacent computer groups:\n%s", replay, text)
 		}
 	}
@@ -528,11 +531,11 @@ func TestDesktopWorldTraceAsyncReclassificationAndReplay(t *testing.T) {
 					t.Fatalf("duplicate observation survived at %d:\n%s", index, text)
 				}
 			case 5:
-				if strings.Count(text, "• js_exec") != 1 || !strings.Contains(text, "• Used computer") {
+				if strings.Count(text, "• Running script") != 1 || !strings.Contains(text, "• Used computer") {
 					t.Fatalf("zero observed children should use the standard row:\n%s", text)
 				}
 			case 6, 7:
-				if len(rows) != 3 || !strings.Contains(text, "• Using computer") || !strings.Contains(text, "Click") || strings.Contains(text, "js_exec") || strings.Count(text, "└") != 1 {
+				if len(rows) != 3 || !strings.Contains(text, "• Using computer") || !strings.Contains(text, "Click") || strings.Contains(text, " script") || strings.Count(text, "└") != 1 {
 					t.Fatalf("trusted child should extend the group:\n%s", text)
 				}
 			case 10:
@@ -540,11 +543,16 @@ func TestDesktopWorldTraceAsyncReclassificationAndReplay(t *testing.T) {
 					t.Fatalf("the independent message should close the first group:\n%s", text)
 				}
 			case 11, 12:
-				script := strings.Index(text, "• js_exec")
+				title := "• Running script"
+				if seq == 12 {
+					title = "• Ran script"
+				}
+				script := strings.Index(text, title)
 				message := strings.Index(text, "echo independent")
 				tail := strings.Index(text, "• Using computer")
-				if strings.Count(text, "• js_exec") != 1 || strings.Count(text, "Click") != 1 || strings.Count(text, "• Used computer") != 1 ||
-					script < 0 || message <= script || tail <= message || !strings.Contains(text, "Read") {
+				if strings.Count(text, title) != 1 || strings.Count(text, "Click") != 1 || strings.Count(text, "• Used computer") != 1 ||
+					script < 0 || message <= script || tail <= message || !strings.Contains(text, "Read") ||
+					!strings.Contains(text, "dtw__exec · Click") {
 					t.Fatalf("mixed script must change at its original position:\n%s", text)
 				}
 				if width == 112 && !strings.Contains(text, events[4].Tool.Input["code"].(string)) {
@@ -570,7 +578,7 @@ func TestDesktopWorldTracePreservesOuterFailureAfterPureChildren(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		m, b := desktopTraceModel(t, events, 112, replay)
 		text := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
-		if strings.Count(text, "• js_exec") != 1 || strings.Count(text, "Click") != 1 ||
+		if strings.Count(text, "• Ran script") != 1 || strings.Count(text, "Click") != 1 ||
 			!strings.Contains(text, "ReferenceError") || !strings.Contains(text, "• Used computer") {
 			t.Fatalf("replay=%v lost the outer failure:\n%s", replay, text)
 		}
@@ -609,6 +617,64 @@ func TestDesktopWorldTraceKeepsEarlierFailureVisible(t *testing.T) {
 		clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("failed"))
 		if got := joinRenderedPlain(b.Render(ctx)); !strings.Contains(got, "Error details") {
 			t.Fatalf("replay=%v earlier error cannot disclose its result:\n%s", replay, got)
+		}
+	}
+}
+
+func TestDesktopWorldMixedScriptSourceAndNamedAction(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	const source = "const answer = await Read({path:'fixture.md'}); return answer;"
+	for _, server := range []string{"dtw", "desktop-world"} {
+		for _, completion := range []string{"running", "completed", "failed"} {
+			t.Run(server+"/"+completion, func(t *testing.T) {
+				root := &session.EventTool{ID: "mixed", Name: "js_exec", Status: "pending", Input: map[string]any{"code": source}}
+				parent := &session.EventParentTool{Kind: "code_mode", CallID: root.ID, Name: root.Name}
+				desktop := desktopTraceFact("desktop", server, "exec", "desktop-world", map[string]any{"app": "Obsidian", "source": `return await app.click("Continue");`})
+				desktop.Parent = parent
+				ordinary := &session.EventTool{ID: "ordinary", Name: "Read", Status: "pending", Parent: parent, Input: map[string]any{"path": "fixture.md"}}
+				events := []*session.Event{desktopTraceToolStart(root), desktopTraceToolStart(desktop), desktopTraceToolStart(ordinary)}
+				label := "• Running script"
+				if completion != "running" {
+					label = "• Ran script"
+					output := `{"answer":42}`
+					if completion == "failed" {
+						output = `{"error":"ReferenceError: fixture"}`
+					}
+					result := desktopTraceResult(root, completion, output)
+					result.Meta = map[string]any{"code_mode_script_completion": completion}
+					events = append(events, result)
+				}
+				for _, width := range []int{22, 24, 112} {
+					for _, replay := range []bool{false, true} {
+						m, b := desktopTraceModel(t, events, width, replay)
+						ctx := m.blockRenderContext(width)
+						ctx.Theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+						rows := b.Render(ctx)
+						text := joinRenderedPlain(rows)
+						if !strings.HasPrefix(rows[0].Plain, label+" ") || !rows[0].PreWrapped || strings.Contains(text, "Using computer") ||
+							strings.Contains(text, "ReferenceError") != (completion == "failed") {
+							t.Fatalf("width=%d replay=%v:\n%s", width, replay, text)
+						}
+						name := strings.Index(text, desktop.Name)
+						action := strings.Index(text, "Click")
+						if name < 0 || action <= name || strings.Count(text, "└") != 1 {
+							t.Fatalf("width=%d replay=%v tool name must precede its action:\n%s", width, replay, text)
+						}
+						for _, row := range rows {
+							if ansi.StringWidth(row.Styled) > width {
+								t.Fatalf("width=%d replay=%v overflowing row %q", width, replay, row.Plain)
+							}
+						}
+						if width == 112 {
+							const action = " · Click “Continue” in Obsidian"
+							keyword := shellSyntaxStyle(tuikit.SyntaxPaletteForTheme(ctx.Theme).Keyword).Render("return")
+							if rows[0].Plain != label+" "+source || !strings.Contains(rows[0].Styled, keyword) || !strings.Contains(text, desktop.Name+action) {
+								t.Fatalf("replay=%v lost source highlighting or named action:\n%s", replay, text)
+							}
+						}
+					}
+				}
+			})
 		}
 	}
 }
