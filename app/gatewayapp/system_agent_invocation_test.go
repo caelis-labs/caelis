@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"iter"
 	"net/http"
@@ -10,10 +11,79 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
+
+func TestSystemAgentReasoningWrapperPreservesChatToolRepair(t *testing.T) {
+	var requests, repairs, dispatches int
+	client := &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body struct {
+			Input      json.RawMessage
+			ToolChoice string `json:"tool_choice"`
+			Reasoning  struct{ Effort string }
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		if body.Reasoning.Effort != "high" || body.ToolChoice != "auto" {
+			t.Errorf("request effort = %q, tool choice = %q", body.Reasoning.Effort, body.ToolChoice)
+		}
+		if strings.Contains(string(body.Input), "None of its calls were dispatched") {
+			repairs++
+		}
+		requests++
+		output := `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}`
+		switch requests {
+		case 1, 2:
+			output = `{"type":"function_call","call_id":"malformed","name":"Read","arguments":"{"}`
+		case 3:
+			output = `{"type":"function_call","call_id":"corrected","name":"Read","arguments":"{}"}`
+		}
+		data := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[" + output + "]}}\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(data))}, nil
+	})}
+	inner, err := providers.New(providers.Config{
+		API: model.APIOpenAI, Model: "gpt-5.4",
+		Auth: providers.AuthConfig{Type: model.AuthAPIKey, Token: "fixture"}, HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	llm := withSystemAgentReasoningEffort(kernel.ModelResolution{Model: inner, ReasoningEffort: "high"})
+	public := &model.Request{
+		Stream: true, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "public SDK request")},
+		Tools: []model.ToolSpec{model.NewFunctionToolSpec("Read", "fixture tool", nil)},
+	}
+	var failure error
+	for event, err := range model.Generate(t.Context(), llm, public) {
+		if event != nil && event.Response != nil {
+			t.Fatal("public model.Generate accepted malformed JSON through the wrapper")
+		}
+		if err != nil {
+			failure = err
+		}
+	}
+	if errorcode.CodeOf(failure) != errorcode.InvalidArgument || !strings.Contains(failure.Error(), "tool arguments are not valid JSON") {
+		t.Fatalf("public model.Generate error = %v", failure)
+	}
+	probe := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		dispatches++
+		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "fixture file is missing")
+	}}
+	parent := session.Session{SessionRef: session.SessionRef{AppName: "caelis", UserID: "owner", SessionID: "parent", WorkspaceKey: "fixture"}}
+	result, err := newSystemManagedAgentRuntime(nil).Run(t.Context(), systemManagedAgentRunRequest{
+		AgentID: guardianSceneID, Model: llm, ParentSession: parent, CapabilityProfile: systemManagedAgentCapabilityReadOnly,
+		Tools: []tool.Tool{probe}, Input: "Read a synthetic file.",
+	})
+	if err != nil || result.Text != "done" || requests != 4 || repairs != 1 || dispatches != 1 {
+		t.Fatalf("text = %q, requests = %d, repairs = %d, dispatches = %d, error = %v", result.Text, requests, repairs, dispatches, err)
+	}
+}
 
 func TestProductionReasoningWrapperCountsHTTPAttempts(t *testing.T) {
 	for _, mode := range []string{"success", "retry", "malformed", "cancel"} {

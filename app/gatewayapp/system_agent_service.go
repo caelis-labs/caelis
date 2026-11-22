@@ -42,19 +42,15 @@ func (m *systemAgentReasoningModel) Generate(ctx context.Context, req *model.Req
 			yield(nil, fmt.Errorf("gatewayapp: system Agent model is unavailable"))
 		}
 	}
-	if req == nil {
-		return model.Generate(ctx, m.inner, nil)
-	}
-	cloned := *req
-	if m.effort != "" {
-		cloned.Reasoning.Effort = m.effort
-	}
-	if m.fast {
-		cloned.ServiceTier = model.ServiceTierPriority
-	} else {
-		cloned.ServiceTier = ""
-	}
-	return model.Generate(ctx, m.inner, &cloned)
+	return model.GenerateWithRequestTransform(ctx, m.inner, req, func(request *model.Request) {
+		if m.effort != "" {
+			request.Reasoning.Effort = m.effort
+		}
+		request.ServiceTier = ""
+		if m.fast {
+			request.ServiceTier = model.ServiceTierPriority
+		}
+	})
 }
 
 func (m *systemAgentReasoningModel) Capabilities() model.Capabilities {

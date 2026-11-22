@@ -24,9 +24,10 @@ experimental.
 
 ## Runtime and capabilities
 
-`AgentSpec.ResolveSessionInstructions` appends embedding-owned instructions when
-Chat assembles a main model request. The resolver receives the ID of the
-compaction summary in that request's history. A speculative candidate has no
+`AgentSpec.ResolveSessionInstructions` adds embedding-owned guidance to the
+stable instruction prefix when Chat assembles a main model request. The resolver
+receives the ID of the compaction summary in that request's history. A speculative
+candidate has no
 effect until Runtime adopts it and Chat builds from the new history. The
 optional persist callback runs at provider start after admission accepts the
 request. Auxiliary requests use their own assembly or the frozen source request.

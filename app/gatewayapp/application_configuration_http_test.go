@@ -106,14 +106,56 @@ func (p *revisionProvider) snapshot() []map[string]any {
 	return result
 }
 
-func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string, desktopReady bool) {
+func revisionWirePrefix(t *testing.T, body map[string]any) string {
 	t.Helper()
-	actual, ok := body["instructions"].(string)
+	if _, ok := body["instructions"]; ok {
+		t.Fatal("ordered OpenAI route sent top-level instructions")
+	}
+	input, ok := body["input"].([]any)
+	if !ok || len(input) == 0 {
+		t.Fatal("no ordered input")
+	}
+	first, ok := input[0].(map[string]any)
+	if !ok || first["type"] != "message" || first["role"] != "developer" {
+		t.Fatal("first input must be a developer message")
+	}
+	content, ok := first["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatal("expected a single prefix content item")
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok || part["type"] != "input_text" {
+		t.Fatal("expected prefix input_text")
+	}
+	text, ok := part["text"].(string)
+	if !ok || text == "" {
+		t.Fatal("expected nonempty developer prefix text")
+	}
+	return text
+}
+
+func assertOrderedRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string, desktopReady bool) {
+	t.Helper()
+	assertRevisionPrefix(t, body, revisionWirePrefix(t, body), model, effort, tier, instructions, schemaType, desktopReady)
+}
+
+func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effort, tier, instructions, schemaType string, desktopReady bool) {
+	t.Helper()
 	remainder, hasPrefix := strings.CutPrefix(actual, instructions)
-	if body["model"] != model || !ok || !hasPrefix || !strings.HasPrefix(remainder, "\n") {
+	if body["model"] != model || !hasPrefix || !strings.HasPrefix(remainder, "\n") {
 		t.Fatalf("wrong model/profile-instructions prefix: %#v", body)
 	}
 	before, after, hasGuidance := strings.Cut(remainder, codemode.Guidance)
+	// A Session may freeze a DTW hint alongside its Code Mode guidance.
+	const hintHeader = "\n\nPartial tool hint snapshot; use tools.search for other capabilities.\n"
+	if snapshot, ok := strings.CutPrefix(after, hintHeader); ok {
+		raw, rest, _ := strings.Cut(snapshot, "\n")
+		var hints []struct{ Name string }
+		if err := json.Unmarshal([]byte(raw), &hints); err != nil || len(hints) != 1 || hints[0].Name != "dtw__apps" {
+			t.Fatalf("unexpected Desktop World hint snapshot: %q (%v)", raw, err)
+		}
+		after = rest
+	}
 	isSkillSection := func(text string) bool {
 		text = strings.TrimSpace(text)
 		return text == "" || strings.HasPrefix(text, "## Skills\n")
@@ -317,9 +359,9 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("old Turn produced %d model requests, want old callback then new completion", len(requests))
 	}
-	assertRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string", false)
-	assertRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
-	if strings.TrimPrefix(requests[0]["instructions"].(string), profile.Instructions) != strings.TrimPrefix(requests[1]["instructions"].(string), newInstructions) {
+	assertOrderedRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string", false)
+	assertOrderedRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
+	if strings.TrimPrefix(revisionWirePrefix(t, requests[0]), profile.Instructions) != strings.TrimPrefix(revisionWirePrefix(t, requests[1]), newInstructions) {
 		t.Fatal("hot reload changed guidance outside the profile instructions")
 	}
 	if inputs, _ := requests[1]["input"].([]any); len(inputs) == 0 || !strings.Contains(fmt.Sprint(inputs), "CONFIGURATION_TOOL_SENTINEL") {
@@ -348,8 +390,8 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if len(requests) != 4 {
 		t.Fatalf("two Turns produced %d requests, want four", len(requests))
 	}
-	assertRevisionPrefix(t, requests[2], "gpt-5.4", "high", "priority", newInstructions, "integer", false)
-	assertRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
+	assertOrderedRevisionPrefix(t, requests[2], "gpt-5.4", "high", "priority", newInstructions, "integer", false)
+	assertOrderedRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
 	history := applicationHTTPHistory(t, ctx, client, session)
 	assertRevisionUserHistory(t, history, 2)
 	for _, bad := range []sessionprofile.UpdateConfigurationRequest{
@@ -411,10 +453,10 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if len(requests) != 6 {
 		t.Fatalf("restarted Turn produced %d model requests, want six", len(requests))
 	}
-	assertRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer", false)
-	assertRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions, "integer", true)
+	assertOrderedRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer", false)
+	assertOrderedRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions, "integer", true)
 	for _, i := range []int{2, 3, 4, 5} {
-		if requests[i]["instructions"] != requests[1]["instructions"] {
+		if revisionWirePrefix(t, requests[i]) != revisionWirePrefix(t, requests[1]) {
 			t.Fatalf("guidance changed across no-op/restart at request %d", i)
 		}
 	}

@@ -78,6 +78,11 @@ func (l *openAIResponsesLLM) Generate(ctx context.Context, req *model.Request) i
 			yield(nil, err)
 			return
 		}
+		if l.instructionPlacement() == responsesOrderedInstructions {
+			if metadata, ok := model.ProviderRequestMetadataFromContext(ctx); ok {
+				payload.PromptCache = openAICodexRequestAffinity(metadata.SessionAffinity)
+			}
+		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			yield(nil, err)
@@ -147,7 +152,7 @@ func (l *openAIResponsesLLM) Generate(ctx context.Context, req *model.Request) i
 		}
 		accumulator := newOpenAIResponsesAccumulator(l.provider)
 		accumulator.plainReasoning = true
-		response, err := cfg.response(&wire, accumulator)
+		response, err := cfg.response(runCtx, req, &wire, accumulator)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -172,6 +177,21 @@ type openAIResponsesTextFormat struct {
 	Schema map[string]any `json:"schema,omitempty"`
 }
 
+// Only maintained routes opt into ordered developer messages. A model name or
+// a Responses-shaped endpoint alone does not establish role support.
+func (l *openAIResponsesLLM) instructionPlacement() responsesInstructionPlacement {
+	if l.baseURL == defaultOpenAIResponsesBaseURL {
+		return responsesOrderedInstructions
+	}
+	if l.provider == "magpie" {
+		group, name, _ := strings.Cut(l.name, "/")
+		if name != "" && (group == "codex" || group == "openai") {
+			return responsesOrderedInstructions
+		}
+	}
+	return responsesTopLevelInstructions
+}
+
 func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRequest, error) {
 	if req == nil {
 		return openAIResponsesRequest{}, fmt.Errorf("model: request is nil")
@@ -184,11 +204,7 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 			return openAIResponsesRequest{}, errorcode.New(errorcode.Unsupported, "openai responses: only function tools are supported")
 		}
 	}
-	placement := responsesTopLevelInstructions
-	if l.api == model.APIOpenAI && l.baseURL == defaultOpenAIResponsesBaseURL && isGPT62(l.name) {
-		placement = responsesBaseDeveloperMessage
-	}
-	instructions, input, err := openAIResponsesRequestInputs(req, l.provider, placement)
+	instructions, input, err := openAIResponsesRequestInputs(req, l.provider, l.instructionPlacement())
 	if err != nil {
 		return openAIResponsesRequest{}, err
 	}

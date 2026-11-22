@@ -121,6 +121,21 @@ func (e *invocationGateError) Error() string { return e.cause.Error() }
 func (e *invocationGateError) Unwrap() error { return e.cause }
 func (*invocationGateError) Retryable() bool { return false }
 
+// GenerateWithRequestTransform delegates the wrapper's current generation
+// after applying transform to a private request copy. A nil request or
+// transform passes through unchanged. Use Generate for independent requests.
+func GenerateWithRequestTransform(ctx context.Context, llm LLM, req *Request, transform func(*Request)) iter.Seq2[*StreamEvent, error] {
+	if req == nil || transform == nil {
+		return Generate(ctx, llm, req)
+	}
+	transformed := CloneRequest(req)
+	transform(transformed)
+	if modelinvocation.AllowsToolRepair(ctx, req) {
+		ctx = modelinvocation.WithToolRepair(ctx, transformed)
+	}
+	return Generate(ctx, llm, transformed)
+}
+
 // Generate observes each actual attempt, including unwrapped providers. Nested
 // gates must implement InvocationTracker and delegate through Generate.
 // Inline images in messages and tool results are validated on a private request
@@ -138,12 +153,13 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
 	}
+	allowToolRepair := modelinvocation.AllowsToolRepair(ctx, req)
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
 	middleware, _ := ctx.Value(modelinvocation.MiddlewareKey{}).(func(context.Context, Invocation, *Request, func(context.Context) error) error)
 	if admit == nil && observer == nil && start == nil && middleware == nil {
-		return generatePrepared(ctx, llm, CloneRequest(req))
+		return generatePrepared(ctx, llm, CloneRequest(req), allowToolRepair)
 	}
 	return func(yield func(*StreamEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
@@ -201,7 +217,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				return &invocationGateError{cause: errors.New("model continuation already consumed")}
 			}
 			attemptCtx = context.WithValue(callCtx, invocationUsageKey{}, usage)
-			for event, err := range generateAttempt(attemptCtx, llm, prepared) {
+			for event, err := range generateAttempt(attemptCtx, llm, prepared, allowToolRepair) {
 				if event != nil && event.Response != nil {
 					cloned := *event
 					response := *event.Response
