@@ -327,8 +327,13 @@ func connectDraftNative(t *testing.T, f *draftNativeFixture, wrapClient ...func(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := acpdraft.ValidatePeer(response); err != nil {
-		t.Fatal(err)
+	profileErr := acpdraft.ValidatePeer(response)
+	if f.legacyHost {
+		if profileErr == nil {
+			t.Fatal("bridge advertised idle-only admission for the legacy Host")
+		}
+	} else if profileErr != nil {
+		t.Fatal(profileErr)
 	}
 	return client, agent, peer
 }
@@ -663,11 +668,15 @@ func TestDraftIdleOnlyCommandRequiresHostAdmissionCapability(t *testing.T) {
 		t.Fatalf("legacy Host admitted guarded command: %+v, %v, effects=%d", resp, err, svc.effects)
 	}
 	peer.mu.Lock()
-	defer peer.mu.Unlock()
-	for _, n := range peer.updates {
+	updates := append([]v2.UpdateSessionNotification(nil), peer.updates...)
+	peer.mu.Unlock()
+	for _, n := range updates {
 		if n.Update.UserMessage != nil {
 			t.Fatal("rejected command emitted an echo")
 		}
+	}
+	if resp, err := client.Prompt(t.Context(), draftNativePrompt(id, "/status")); err != nil || resp.MessageId == "" || svc.effects != 1 {
+		t.Fatalf("ordinary command on legacy Host: %+v, %v, effects=%d", resp, err, svc.effects)
 	}
 }
 

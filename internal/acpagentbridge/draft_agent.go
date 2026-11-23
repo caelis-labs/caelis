@@ -154,7 +154,7 @@ func (a *DraftAgent) Initialize(ctx context.Context, req v2.InitializeRequest) (
 		prompt.Image = &v2.PromptImageCapabilities{}
 	}
 	a.initialized = true
-	return v2.InitializeResponse{ProtocolVersion: 2, Info: v2.Implementation{Name: a.inner.agentInfo.Name, Title: a.inner.agentInfo.Title, Version: a.inner.agentInfo.Version}, Meta: acpdraft.InitializeMeta(), Capabilities: v2.AgentCapabilities{Session: &v2.SessionCapabilities{Prompt: &prompt}}}, nil
+	return v2.InitializeResponse{ProtocolVersion: 2, Info: v2.Implementation{Name: a.inner.agentInfo.Name, Title: a.inner.agentInfo.Title, Version: a.inner.agentInfo.Version}, Meta: acpdraft.InitializeMetaWithIdleOnly(a.idleCommandAdmission), Capabilities: v2.AgentCapabilities{Session: &v2.SessionCapabilities{Prompt: &prompt}}}, nil
 }
 
 func (a *DraftAgent) admitted() error {
@@ -328,6 +328,14 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 	guard, err := acpdraft.ParseActiveOnly(req.Meta)
 	if err != nil {
 		return v2.PromptResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})
+	}
+	if guard != nil && guard.IdleOnly {
+		a.mu.Lock()
+		supported := a.idleCommandAdmission
+		a.mu.Unlock()
+		if !supported {
+			return v2.PromptResponse{}, errorcode.New(errorcode.Unsupported, "Control Host does not support idle-only admission")
+		}
 	}
 	input, contentParts, err := draftPromptContent(req)
 	if err != nil {
@@ -512,12 +520,6 @@ func (a *DraftAgent) routePrompt(ctx context.Context, s *draftSession, state app
 		Submission: controlprompt.Submission{Text: input, Attachments: promptRouterAttachmentsFromContentParts(input, parts)},
 		BeforeCommand: func(ctx context.Context) error {
 			if requireIdle {
-				a.mu.Lock()
-				supported := a.idleCommandAdmission
-				a.mu.Unlock()
-				if !supported {
-					return errorcode.New(errorcode.Unsupported, "Control Host does not support idle-only command admission")
-				}
 				current, err := a.inner.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: s.id, RequireIdle: true})
 				if errorcode.Is(err, errorcode.Conflict) || (err == nil && current.Run.Active) {
 					return appserver.NewOutcomeError(appserver.OutcomeConflicted, acpdraft.InactivePromptError())
