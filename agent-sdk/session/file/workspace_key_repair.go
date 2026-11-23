@@ -192,7 +192,7 @@ func (s *Store) repairSessionWorkspaceKey(ctx context.Context, repair WorkspaceK
 }
 
 func (s *Store) taskWorkspaceKeys(sessionID string) ([]string, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (s *Store) taskWorkspaceKeys(sessionID string) ([]string, error) {
 }
 
 func (s *Store) repairTaskWorkspaceKeys(repair WorkspaceKeyRepair) (int, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return 0, err
 	}

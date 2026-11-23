@@ -16,6 +16,40 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
+func TestSessionOpensTaskTableOnlyOnTaskAccess(t *testing.T) {
+	store := NewStore(Config{RootDir: t.TempDir()})
+	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", store.sessionIndexPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hasTaskTable := func() bool {
+		t.Helper()
+		var found bool
+		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks')").Scan(&found); err != nil {
+			t.Fatal(err)
+		}
+		return found
+	}
+	tasks := NewTaskStore(store)
+	if hasTaskTable() {
+		t.Fatal("Session access initialized Task storage")
+	}
+	if _, err := tasks.ListSession(t.Context(), active.SessionRef); err != nil {
+		t.Fatal(err)
+	}
+	if !hasTaskTable() {
+		t.Fatal("Task access did not initialize Task storage")
+	}
+}
+
 func TestTaskStoreRevisionCAS(t *testing.T) {
 	t.Parallel()
 
@@ -54,7 +88,7 @@ func TestTaskStoreRevisionCAS(t *testing.T) {
 		t.Fatalf("stale Put error = %v, want revision conflict at 2", err)
 	}
 
-	db, err := backing.openSessionIndex()
+	db, err := backing.openTaskIndex()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,7 +35,7 @@ func (s *TaskStore) ReadTaskStates(ctx context.Context, ref session.SessionRef, 
 }
 
 func (s *Store) readTaskStates(ctx context.Context, ref session.SessionRef, taskIDs []string) ([]task.StateSnapshot, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return nil, err
 	}

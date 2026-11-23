@@ -1,8 +1,9 @@
 // Package file provides a durable file-backed runtime store. Canonical session
 // events are stored in JSONL logs, session/state documents use atomic rename,
 // and compound event/document updates use a fsynced write-ahead transaction
-// record recovered before any later read or write. SQLite stores secondary
-// session metadata and task control indexes.
+// record recovered before any later read or write. SQLite indexes Session
+// documents by identity and summary. The optional Task store owns durable
+// Task records in a separate table in the same database.
 //
 // Forward JSONL paging uses bounded in-memory sequence checkpoints, and active
 // append preparation may reuse a bounded decoded-history cache. Both are
@@ -15,5 +16,4 @@
 // and pause records remain individually addressable. Run-state reads decode only
 // the selected journal payloads. Cache persistence is best effort, and neither
 // listing Sessions nor opening the Store prewarms these indexes.
-// WAL and event-log files remain the only recovery truth.
 package file

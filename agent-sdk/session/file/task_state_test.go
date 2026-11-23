@@ -81,7 +81,7 @@ func TestTaskStateSteeringMatchesFullMetadataDecoder(t *testing.T) {
 			if err := store.Upsert(t.Context(), &task.Entry{TaskID: "target", Kind: task.KindSubagent, Session: ref, State: task.StateRunning}); err != nil {
 				t.Fatal(err)
 			}
-			db, err := store.store.openSessionIndex()
+			db, err := store.store.openTaskIndex()
 			if err != nil {
 				t.Fatal(err)
 			}
