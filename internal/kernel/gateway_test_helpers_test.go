@@ -577,15 +577,6 @@ func (s staticSessionService) Events(context.Context, session.EventsRequest) ([]
 func (s staticSessionService) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, nil
 }
-func (s staticSessionService) BindController(context.Context, session.BindControllerRequest) (session.Session, error) {
-	return s.session, nil
-}
-func (s staticSessionService) PutParticipant(context.Context, session.PutParticipantRequest) (session.Session, error) {
-	return s.session, nil
-}
-func (s staticSessionService) RemoveParticipant(context.Context, session.RemoveParticipantRequest) (session.Session, error) {
-	return s.session, nil
-}
 func (s staticSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return cloneMap(s.state), nil
 }
@@ -684,18 +675,6 @@ func (s *recordingSessionService) ListSessions(_ context.Context, req session.Li
 		return s.listSessionsFn(req), nil
 	}
 	return s.listSessionsResult, nil
-}
-
-func (s *recordingSessionService) BindController(context.Context, session.BindControllerRequest) (session.Session, error) {
-	return s.sessionResult, nil
-}
-
-func (s *recordingSessionService) PutParticipant(context.Context, session.PutParticipantRequest) (session.Session, error) {
-	return s.sessionResult, nil
-}
-
-func (s *recordingSessionService) RemoveParticipant(context.Context, session.RemoveParticipantRequest) (session.Session, error) {
-	return s.sessionResult, nil
 }
 
 func (s *recordingSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {

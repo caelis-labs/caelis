@@ -122,7 +122,7 @@ func constructGuardianScreenFixture(t *testing.T, ctx context.Context, c guardia
 		result := session.CloneEvent(call)
 		result.Type = session.EventTypeToolResult
 		result.Tool.Output = history.Output
-		if _, err := service.(session.EventBatchService).AppendEvents(ctx, session.AppendEventsRequest{SessionRef: active.SessionRef, Events: []*session.Event{call, result}}); err != nil {
+		if _, err := service.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: active.SessionRef, Events: []*session.Event{call, result}}); err != nil {
 			t.Fatalf("append screen history: %v", err)
 		}
 	}

@@ -253,18 +253,11 @@ func decodePersistedTransactionWithReport(data []byte) (persistedTransaction, Mi
 	record.Document = document
 	record.Events = make([]*session.Event, 0, len(raw.Events))
 	for index, eventRaw := range raw.Events {
-		migrated, err := session.MigrateEventJSON(eventRaw)
+		event, err := session.UnmarshalEventJSON(eventRaw)
 		if err != nil {
-			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("migrate event %d: %w", index, err)
-		}
-		var event session.Event
-		if err := json.Unmarshal(migrated, &event); err != nil {
 			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("decode event %d: %w", index, err)
 		}
-		if err := session.ValidateDurableCoreEvent(&event); err != nil {
-			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("validate event %d: %w", index, err)
-		}
-		record.Events = append(record.Events, &event)
+		record.Events = append(record.Events, event)
 	}
 	return record, report, nil
 }

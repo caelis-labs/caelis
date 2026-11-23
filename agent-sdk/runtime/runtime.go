@@ -29,7 +29,7 @@ type Config struct {
 	Hooks agent.Hooks
 	// HookPurpose names this independently assembled model loop. Empty means chat.
 	HookPurpose    agent.HookPurpose
-	Sessions       session.Service
+	Sessions       session.RunStore
 	AgentFactory   agent.AgentFactory
 	RunIDGenerator func() string
 	Clock          func() time.Time
@@ -76,7 +76,8 @@ type Runtime struct {
 	codeModeMu               sync.Mutex
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   approval.Requester
-	sessions                 session.Service
+	sessions                 session.RunStore
+	participantBindings      session.ParticipantBindingStore
 	agentFactory             agent.AgentFactory
 	runIDGenerator           func() string
 	clock                    func() time.Time
@@ -178,8 +179,12 @@ func New(cfg Config) (*Runtime, error) {
 	if r.policies != nil {
 		r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	}
+	r.participantBindings, _ = cfg.Sessions.(session.ParticipantBindingStore)
 	if err := validateControllerForwarder(cfg); err != nil {
 		return nil, err
+	}
+	if (r.controllers != nil || r.subagents != nil) && r.participantBindings == nil {
+		return nil, errors.New("agent-sdk/runtime: controllers and subagents require Session participant binding storage")
 	}
 	r.compactor = cfg.Compactor
 	if r.compactor == nil {

@@ -46,6 +46,8 @@ shows a minimal external consumer. Only paths listed in
 other non-`internal` packages are bundled implementations or experimental
 helpers.
 
+For a custom Session backend, see [Session storage for embedders](../docs/agent-sdk-boundary.md#session-storage-for-embedders).
+
 ## Code Mode executable entry
 
 `builtin.BuildCoreTools` includes `js_exec`, which reexecutes the current Go

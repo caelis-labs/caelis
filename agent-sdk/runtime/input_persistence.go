@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -22,9 +21,5 @@ func (r *Runtime) appendInputEvents(ctx context.Context, ref session.SessionRef,
 		}
 		return []*session.Event{event}, nil
 	}
-	batch, ok := r.sessions.(session.EventBatchService)
-	if !ok {
-		return nil, errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: batched input requires atomic Session append")
-	}
-	return batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: guard, Events: events})
+	return r.sessions.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: guard, Events: events})
 }

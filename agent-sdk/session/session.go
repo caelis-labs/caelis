@@ -722,15 +722,26 @@ type StateStore interface {
 	StateWriter
 }
 
+// RunStore persists an Agent turn in an existing Session. LoadSession reads the
+// Session, state and ordered history at one committed revision. BindController
+// records the native controller on first use. AppendEvents commits each model
+// tool batch or multi-message input atomically before dispatch.
+type RunStore interface {
+	Reader
+	StateReader
+	EventAppender
+	EventBatchService
+	ControllerBindingStore
+	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
+}
+
 // Service is the full reference session service. Consumers should accept the
 // narrow interfaces above unless they genuinely need the aggregate.
 type Service interface {
+	RunStore
 	Lifecycle
-	Reader
-	EventAppender
-	ControllerBindingStore
 	ParticipantBindingStore
-	StateStore
+	StateWriter
 }
 
 // ParticipantLifecycleService is implemented by stores that can atomically

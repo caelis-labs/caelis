@@ -227,41 +227,11 @@ func decodeEventLogRecord(data []byte, path string, lineNo int) (*session.Event,
 	if lineNo > 0 {
 		label = fmt.Sprintf("%s line %d", path, lineNo)
 	}
-	if err := rejectUnsupportedLegacyEventLogLine(data, label); err != nil {
-		return nil, err
-	}
-	migratedRaw, err := session.MigrateEventJSON(json.RawMessage(data))
+	event, err := session.UnmarshalEventJSON(data)
 	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s: %w", label, err)
-	}
-	var event session.Event
-	if err := json.Unmarshal(migratedRaw, &event); err != nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s: %w", label, err)
 	}
-	if err := session.ValidateDurableCoreEvent(&event); err != nil {
-		return nil, fmt.Errorf("agent-sdk/session/file: invalid event log %s: %w", label, err)
-	}
-	return &event, nil
-}
-
-func rejectUnsupportedLegacyEventLogLine(data []byte, label string) error {
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		//nolint:nilerr // This legacy-field probe defers malformed JSON to the authoritative event decoder.
-		return nil
-	}
-	for _, key := range []string{
-		"user_message",
-		"assistant_message",
-		"system_context",
-		"tool_call",
-		"tool_result",
-	} {
-		if raw, ok := root[key]; ok && len(raw) > 0 && strings.TrimSpace(string(raw)) != "null" {
-			return fmt.Errorf("agent-sdk/session/file: %w: event log %s contains legacy semantic field %q", session.ErrUnsupportedLegacyFormat, label, key)
-		}
-	}
-	return nil
+	return event, nil
 }
 
 func truncatePartialEventLogTail(durability durabilityOps, path string) error {

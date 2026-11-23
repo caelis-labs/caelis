@@ -236,11 +236,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		return systemManagedAgentRunResult{}, err
 	}
 	if len(seed) > 0 {
-		batch, ok := staging.(session.EventBatchService)
-		if !ok {
-			return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
-		}
-		if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(seed)}); err != nil {
+		if _, err := staging.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(seed)}); err != nil {
 			return systemManagedAgentRunResult{}, err
 		}
 	}

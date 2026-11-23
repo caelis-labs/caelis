@@ -45,6 +45,14 @@ func (r *Runtime) reconcileTurnPlan(ctx context.Context, ref session.SessionRef,
 }
 
 func (r *Runtime) clearTurnPlan(ctx context.Context, ref session.SessionRef, turnID string, orphan bool) error {
+	// Most turns have no plan. Only load its source history when state names one.
+	state, err := r.sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if _, ok := state["plan"].(map[string]any); !ok {
+		return nil
+	}
 	var original map[string]any
 	var identity string
 	for {

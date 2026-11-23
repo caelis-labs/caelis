@@ -304,6 +304,36 @@ written by the retired Continue saga. It never repeats the old remote effect.
 Remove it only after the supported upgrade floor reaches the first release that
 no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
+## Session storage for embedders
+
+A host supplies `runtime.Config.Sessions` for runs on existing Sessions.
+`session.RunStore` covers seven operations. `Session`, `Events` and
+`SnapshotState` read individual views. `LoadSession` returns the Session,
+state and ordered events at one committed revision. `BindController` records
+the native controller epoch on first use. `AppendEvent` and `AppendEvents`
+commit facts. A model's complete tool-call batch must be durable before
+the first tool is dispatched.
+
+A database backend can store the Session header, revision and state in a
+Session row and the history in event rows keyed by Session and sequence.
+Serialize writers for one Session. Check the requested revision and compare
+existing event identities and idempotency keys with their full payloads in
+the same transaction that assigns sequence numbers, inserts the batch and
+advances the revision. An identical retry returns the original facts.
+`session.PrepareAppendTransaction` implements the shared append rules.
+`session.MarshalEventJSON` and `session.UnmarshalEventJSON` provide the
+durable encoding, including supported schema upgrades and inline media.
+`sessiontest.ToolRunConformance` exercises the native loop and compares the
+entire model conversation across backend reopen.
+
+Hosts that create or browse Sessions can add `session.Lifecycle`. Code Mode
+uses `session.StateWriter` to initialize its catalog. Controllers and subagents
+use participant bindings, and durable Plans use an atomic event-and-state
+commit. A host running concurrent producers for one Session needs shared
+fencing across the whole Turn, including tool effects. Per-append transactions
+alone serialize database writes. The ownership and recovery contracts below
+apply when those capabilities are enabled.
+
 ## Durable facts and replay
 
 `session.Event` and guarded Session state are durable truth:

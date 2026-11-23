@@ -155,6 +155,23 @@ func MigrateEvent(in Event) (Event, error) {
 	return out, nil
 }
 
+// UnmarshalEventJSON reads one durable event written by a supported Session
+// schema. It upgrades the record before decoding and checks its durable fields.
+func UnmarshalEventJSON(raw []byte) (*Event, error) {
+	migrated, err := MigrateEventJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	var event Event
+	if err := json.Unmarshal(migrated, &event); err != nil {
+		return nil, err
+	}
+	if err := ValidateDurableCoreEvent(&event); err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
 // MigrateEventJSON upgrades raw durable event JSON before typed decoding so
 // every migration step can preserve fields introduced by newer writers.
 // Current schemas return an independent copy without re-encoding the payload;
@@ -163,6 +180,11 @@ func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, err
+	}
+	for _, key := range []string{"user_message", "assistant_message", "system_context", "tool_call", "tool_result"} {
+		if value := object[key]; len(value) != 0 && string(value) != "null" {
+			return nil, fmt.Errorf("%w: legacy semantic field %q", ErrUnsupportedLegacyFormat, key)
+		}
 	}
 	source, err := rawSchemaVersion(SchemaKindEvent, object, EventSchemaVersion)
 	if err != nil {

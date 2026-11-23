@@ -16,7 +16,7 @@ import (
 // complete outcome are Session tool facts, never a second execution lifecycle.
 type dispatchTool struct {
 	base       tool.Tool
-	sessions   session.Service
+	sessions   session.Reader
 	sessionRef session.SessionRef
 	writes     *sessionWriteQueue
 }

@@ -214,7 +214,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 		restoreErr := r.restoreDetachedParticipant(context.WithoutCancel(ctx), ref, latest, binding, req.Source, mutationGuard)
 		return session.Session{}, errors.Join(err, restoreErr)
 	}
-	_, err = r.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+	_, err = r.participantBindings.RemoveParticipant(ctx, session.RemoveParticipantRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &activeSession.Revision,
 		MutationGuard:    mutationGuard,
@@ -255,7 +255,7 @@ func (r *Runtime) restoreDetachedParticipant(
 	if participantLifecycleJSONEqual(reattached, previous) {
 		return nil
 	}
-	updated, persistErr := r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	updated, persistErr := r.participantBindings.PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef:           ref,
 		ExpectedRevision:     &latest.Revision,
 		MutationGuard:        mutationGuard,
@@ -612,7 +612,7 @@ func (r *Runtime) ensureACPParticipantRun(
 	if reflect.DeepEqual(attached, binding) {
 		return activeSession, attached, nil
 	}
-	updated, err := r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	updated, err := r.participantBindings.PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef:           ref,
 		ExpectedRevision:     &activeSession.Revision,
 		MutationGuard:        session.RuntimeMutationGuard(ctx),

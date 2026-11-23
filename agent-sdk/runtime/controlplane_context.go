@@ -102,7 +102,7 @@ func (r *Runtime) updateParticipantContextCheckpoint(ctx context.Context, ref se
 	if err != nil {
 		return err
 	}
-	_, err = r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	_, err = r.participantBindings.PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef:           ref,
 		ExpectedRevision:     &activeSession.Revision,
 		MutationGuard:        session.RuntimeMutationGuard(ctx),

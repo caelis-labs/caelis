@@ -16,8 +16,16 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlplane"
 )
 
+// SessionStore supplies the Session lifecycle, history and settings used by Gateway.
+type SessionStore interface {
+	session.Lifecycle
+	session.Reader
+	session.EventAppender
+	session.StateStore
+}
+
 type Config struct {
-	Sessions session.Service
+	Sessions SessionStore
 	Runtime  agent.Runtime
 	// TurnStartGate is a Control-owned readiness barrier checked before any
 	// main or participant Turn can mutate runtime state.
@@ -45,7 +53,7 @@ type Config struct {
 }
 
 type Gateway struct {
-	sessions             session.Service
+	sessions             SessionStore
 	runtime              agent.Runtime
 	turnStartGate        TurnStartGate
 	control              controlplane.SessionControlPlane

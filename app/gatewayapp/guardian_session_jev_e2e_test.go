@@ -74,7 +74,7 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 			t.Fatal("replay limited to eight approvals")
 		}
 		if len(pending) > 0 {
-			if _, err := service.(session.EventBatchService).AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: pending}); err != nil {
+			if _, err := service.AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: pending}); err != nil {
 				t.Fatal(err)
 			}
 			pending = nil

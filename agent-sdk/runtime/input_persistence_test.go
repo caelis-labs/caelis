@@ -9,7 +9,6 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -288,9 +287,7 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 	}
 }
 
-type singularInputStore struct{ session.Service }
-
-func TestInputBatchPersistenceRequiresAtomicStoreAndExactFence(t *testing.T) {
+func TestInputBatchPersistenceRequiresExactFence(t *testing.T) {
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "batch-test"})
 	if err != nil {
@@ -306,10 +303,6 @@ func TestInputBatchPersistenceRequiresAtomicStoreAndExactFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt := &Runtime{sessions: singularInputStore{store}}
-	if _, err = rt.appendInputEvents(t.Context(), active.SessionRef, inputs); !errorcode.Is(err, errorcode.Unsupported) {
-		t.Fatalf("singular store error = %v", err)
-	}
 	fence, err := store.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "host"})
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +311,7 @@ func TestInputBatchPersistenceRequiresAtomicStoreAndExactFence(t *testing.T) {
 	if err = store.ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(fence)); err != nil {
 		t.Fatal(err)
 	}
-	rt.sessions = store
+	rt := &Runtime{sessions: store}
 	if _, err = rt.appendInputEvents(ctx, active.SessionRef, inputs); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("stale fence error = %v", err)
 	}

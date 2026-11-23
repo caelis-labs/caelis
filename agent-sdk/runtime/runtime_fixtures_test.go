@@ -575,7 +575,7 @@ func (testRecoveryCoordinator) ReattachController(_ context.Context, req control
 }
 
 type testContextRouter struct {
-	sessions session.Service
+	sessions session.Reader
 }
 
 func (r testContextRouter) ControllerContext(ctx context.Context, req controller.ControllerContextRequest) (controller.ContextRoute, error) {
@@ -691,7 +691,7 @@ func (r testContextRouter) contextTransfer(ctx context.Context, ref session.Sess
 }
 
 type testControllerForwarder struct {
-	sessions session.Service
+	sessions session.EventAppender
 }
 
 func (f testControllerForwarder) BeginControllerEvents(_ context.Context, req agent.ControllerEventForwardRequest) (agent.ControllerEventSession, error) {
@@ -898,7 +898,7 @@ func userTextEvent(text string) *session.Event {
 	}
 }
 
-func appendTestEvent(t *testing.T, sessions session.Service, ref session.SessionRef, event *session.Event) {
+func appendTestEvent(t *testing.T, sessions session.EventAppender, ref session.SessionRef, event *session.Event) {
 	t.Helper()
 	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: ref,

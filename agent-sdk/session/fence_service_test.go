@@ -312,8 +312,7 @@ func assertFenceGuardedMutations(
 	}); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("stale AppendEvent error = %v, want ErrFenceConflict", err)
 	}
-	batch := service.(session.EventBatchService)
-	if _, err := batch.AppendEvents(context.Background(), session.AppendEventsRequest{
+	if _, err := service.AppendEvents(context.Background(), session.AppendEventsRequest{
 		SessionRef: ref, MutationGuard: stale, Events: []*session.Event{{Type: session.EventTypeUser, Message: &user}},
 	}); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("stale AppendEvents error = %v, want ErrFenceConflict", err)

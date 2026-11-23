@@ -22,11 +22,6 @@ func (r *Runtime) controllerSteeringHandler(
 		if submission.Kind != agent.SubmissionKindConversation && submission.Kind != agent.SubmissionKindAgentCommunication {
 			return errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: active main controller accepts only conversation or Agent communication steering")
 		}
-		if len(submission.Inputs) > 1 {
-			if _, ok := r.sessions.(session.EventBatchService); !ok {
-				return errorcode.New(errorcode.Unsupported, "agent-sdk/runtime: batched steering requires atomic Session append")
-			}
-		}
 		steerer, ok := r.controllers.(controller.ControllerSteerer)
 		if !ok {
 			return controller.ErrControllerSteeringUnsupported

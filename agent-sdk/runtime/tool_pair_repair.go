@@ -74,11 +74,7 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 	if len(fixes) == 0 {
 		return nil
 	}
-	batch, ok := r.sessions.(session.EventBatchService)
-	if !ok {
-		return fmt.Errorf("tool pairing repair requires atomic Session batch append")
-	}
-	_, err = batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), ExpectedRevision: &loaded.Session.Revision, Events: fixes})
+	_, err = r.sessions.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), ExpectedRevision: &loaded.Session.Revision, Events: fixes})
 	if err != nil {
 		for _, fact := range fixes {
 			confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, fact)
@@ -93,11 +89,7 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 func mustRepairJSON(value any) json.RawMessage { raw, _ := json.Marshal(value); return raw }
 
 func (r *Runtime) appendToolCallBatch(ctx context.Context, ref session.SessionRef, events []*session.Event) ([]*session.Event, error) {
-	service, ok := r.sessions.(session.EventBatchService)
-	if !ok {
-		return nil, fmt.Errorf("frozen tool batch requires atomic Session append")
-	}
-	persisted, err := service.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Events: events})
+	persisted, err := r.sessions.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Events: events})
 	if err == nil {
 		return persisted, nil
 	}
