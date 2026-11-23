@@ -90,7 +90,7 @@ func TestNativeApprovalResolutionValidatesPrivateRecoveredOptionsBeforeCommit(t 
 					// Public projection cannot supply a choice missing privately.
 					Presentation: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "forged-option", Kind: "allow_once"}}},
 				}
-				if err := runtime.appendApprovalRecord(t.Context(), active.SessionRef, pending); err != nil {
+				if err := runtime.appendApprovalRecord(t.Context(), active.SessionRef, pending, session.MutationGuard{}); err != nil {
 					t.Fatal(err)
 				}
 				// Reconstruct Runtime from durable Session truth, with no live

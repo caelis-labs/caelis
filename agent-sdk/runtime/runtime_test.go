@@ -523,6 +523,16 @@ func TestRuntimeAdmitsOnePromptPerSession(t *testing.T) {
 	if conflict.ActiveRunID != first.Handle.RunID() {
 		t.Fatalf("conflict.ActiveRunID = %q, want %q", conflict.ActiveRunID, first.Handle.RunID())
 	}
+	for _, wrong := range []session.SessionRef{
+		{SessionID: activeSession.SessionID, UserID: "another-user"},
+		{SessionID: activeSession.SessionID, WorkspaceKey: "another-workspace"},
+		{SessionID: activeSession.SessionID, AppName: "another-app"},
+	} {
+		_, err := runtime.Run(t.Context(), agent.RunRequest{SessionRef: wrong, Input: "second", Agent: blocking})
+		if !errors.Is(err, session.ErrSessionNotFound) || errors.As(err, &conflict) {
+			t.Fatalf("out-of-scope request returned %v", err)
+		}
+	}
 	other, err := sessions.StartSession(t.Context(), session.StartSessionRequest{
 		AppName: activeSession.AppName, UserID: activeSession.UserID, PreferredSessionID: "other",
 	})

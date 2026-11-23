@@ -70,6 +70,9 @@ type EventTool struct {
 	Error     string           `json:"error,omitempty"`
 	ErrorCode string           `json:"error_code,omitempty"`
 	Parent    *EventParentTool `json:"parent,omitempty"`
+	// LegacyModelCall preserves the model envelope of routed MCP history through
+	// v0.84.1. Remove when those Sessions leave the supported resume window.
+	LegacyModelCall *model.ToolCall `json:"model_call,omitempty"`
 	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
 	ProposedCall *model.ToolCall `json:"proposed_call,omitempty"`
 	ID           string          `json:"id,omitempty"`
@@ -96,16 +99,15 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 	// float64 (which can reject a valid JSON number such as 1e1000).
 	fields := struct {
 		*toolAlias
-		Input              json.RawMessage  `json:"input"`
-		Result             json.RawMessage  `json:"result"`
-		RetiredModelCall   *json.RawMessage `json:"model_call"`
-		LegacyResultFormat string           `json:"result_format"`
+		Input              json.RawMessage `json:"input"`
+		Result             json.RawMessage `json:"result"`
+		LegacyResultFormat string          `json:"result_format"`
 	}{toolAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	if fields.RetiredModelCall != nil {
-		return coreEventValidationError("unsupported historical routed tool record (model_call)")
+	if call := decoded.LegacyModelCall; call != nil && (call.Name != "mcp_call" || call.ID == "" || call.ID != decoded.ID || call.Args == "") {
+		return coreEventValidationError("invalid historical MCP envelope")
 	}
 	if len(fields.Input) > 0 && string(fields.Input) != "null" {
 		decoder := json.NewDecoder(bytes.NewReader(fields.Input))

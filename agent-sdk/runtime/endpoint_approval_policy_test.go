@@ -91,6 +91,64 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 	}
 }
 
+func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
+	for _, cancelApproval := range []bool{false, true} {
+		t.Run(map[bool]string{false: "settle_after_parent_starts", true: "register_and_cancel_during_parent"}[cancelApproval], func(t *testing.T) {
+			store, active := newTestSessionService(t, "parent")
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous, release, err := store.AcquireWriter(t.Context(), active.SessionRef, "spawn-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = release(); err != nil {
+				t.Fatal(err)
+			}
+			startParent := func() {
+				t.Helper()
+				blocking := &blockingTestAgent{started: make(chan struct{})}
+				run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Agent: blocking, Input: "next"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					_ = run.Handle.Close()
+					_ = run.Handle.WaitCompletion(context.Background())
+				})
+				<-blocking.started
+			}
+			if cancelApproval {
+				startParent()
+			}
+			var requestID string
+			bridge := newSubagentApprovalRequester(rt, presets.ModeWorkspaceWrite, approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+				requestID = req.ApprovalRequestID
+				if cancelApproval {
+					return approval.Response{}, context.Canceled
+				}
+				startParent()
+				return approval.Response{Outcome: "selected", OptionID: "allow_once"}, nil
+			}), active, active.SessionRef)
+			resp, err := bridge.RequestSubagentApproval(previous, subagent.ApprovalRequest{TaskID: "child", ParentCallID: "spawn", ToolCall: subagent.ApprovalToolCall{ID: "req", Name: "lookup"}, Options: endpointApprovalTestOptions()})
+			want := session.ApprovalRecordResolved
+			if cancelApproval {
+				want = session.ApprovalRecordCancelled
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancel: %v", err)
+				}
+			} else if err != nil || !resp.Approved {
+				t.Fatalf("settle: %+v, %v", resp, err)
+			}
+			record, err := rt.approvalRecord(t.Context(), active.SessionRef, requestID)
+			if err != nil || record.Status != want || record.Revision != 2 {
+				t.Fatalf("durable record=%+v err=%v", record, err)
+			}
+		})
+	}
+}
+
 func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *testing.T) {
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "subagent")
 	requesterCalls := 0

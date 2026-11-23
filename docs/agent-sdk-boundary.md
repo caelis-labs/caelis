@@ -592,6 +592,10 @@ Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
 
+Session replay preserves the original `mcp_call` envelope, call ID and paired
+reply from v0.84.1 histories. The stored execution target remains available for
+display. This reader is needed while routed MCP histories are supported for resume.
+
 Code Mode Sessions expose a fixed `js_exec` definition. Its async body can call
 known-schema Session tools using original function or method syntax, such as
 `await Read(args)` or `await dtw.apps(args)`, without search. Special names and

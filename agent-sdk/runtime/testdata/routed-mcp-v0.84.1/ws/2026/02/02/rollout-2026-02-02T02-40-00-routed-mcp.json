@@ -1,0 +1,22 @@
+{
+  "idle_compaction": {
+    "epoch": 2
+  },
+  "kind": "caelis.sdk.session",
+  "version": 2,
+  "session": {
+    "app_name": "test",
+    "user_id": "reader",
+    "session_id": "routed-mcp",
+    "workspace_key": "ws",
+    "revision": 2,
+    "cwd": "/workspace",
+    "controller": {
+      "attached_at": "0001-01-01T00:00:00Z"
+    },
+    "created_at": "2026-02-02T02:40:00Z",
+    "updated_at": "2026-02-02T02:40:00Z"
+  },
+  "state": {},
+  "pending_approvals": {}
+}

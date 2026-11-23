@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -15,6 +16,41 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+func TestPolicyAndApprovalReceiveResolvedSessionIdentity(t *testing.T) {
+	store, active := newTestSessionService(t, "by-id")
+	var policyRef, approvalRef, approvalSession session.SessionRef
+	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "ask", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		policyRef = input.Session.SessionRef
+		return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Call.Name}}}, nil
+	}}}
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, DefaultPolicyMode: "ask", Hooks: hook.Set{ToolPolicy: registry}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{{ID: "call", Name: "lookup", Args: "{}"}}
+		}
+		return nil
+	}}
+	probe := tool.NamedTool{Def: tool.Definition{Name: "lookup", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { return tool.Result{}, nil }}
+	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: session.SessionRef{SessionID: active.SessionID}, Input: "start", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{probe}},
+		ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+			approvalRef, approvalSession = req.SessionRef, req.Session.SessionRef
+			return approval.Response{Outcome: "selected", OptionID: "reject_once"}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if policyRef != active.SessionRef || approvalRef != active.SessionRef || approvalSession != active.SessionRef {
+		t.Fatalf("stored=%+v policy=%+v approval=%+v approval session=%+v", active.SessionRef, policyRef, approvalRef, approvalSession)
+	}
+}
 
 func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 	for _, synthetic := range []bool{false, true} {

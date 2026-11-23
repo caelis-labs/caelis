@@ -611,7 +611,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 	var resp approval.Response
 	var err error
 	if r.runtime != nil {
-		resp, err = r.runtime.requestDurableApproval(ctx, runtimeRequest, r.requester)
+		resp, err = r.runtime.requestApprovalWithGuard(ctx, runtimeRequest, r.requester, session.ControlMutationGuard(session.ControlMutationPurposeApproval))
 	} else {
 		resp, err = r.requester.RequestApproval(ctx, runtimeRequest)
 	}

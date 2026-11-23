@@ -169,6 +169,9 @@ func validateDurableCoreToolMessageOutput(event *Event) error {
 		return coreEventValidationError("tool message result does not match durable Event.Tool id")
 	}
 	expectedName := event.Tool.Name
+	if call := event.Tool.LegacyModelCall; call != nil {
+		expectedName = call.Name
+	}
 	if expectedName != "" && strings.TrimSpace(matched.Name) != "" && strings.TrimSpace(matched.Name) != strings.TrimSpace(expectedName) {
 		return coreEventValidationError("tool message result does not match durable Event.Tool name")
 	}

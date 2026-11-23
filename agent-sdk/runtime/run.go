@@ -33,6 +33,9 @@ func (r *Runtime) Run(
 		turnID = r.nextID("turn", nil)
 	}
 	if err := r.beginRun(ref, runID); err != nil {
+		if _, lookupErr := r.sessions.Session(ctx, ref); lookupErr != nil {
+			return agent.RunResult{}, lookupErr
+		}
 		return agent.RunResult{}, err
 	}
 	runCtx, releaseWriter, err := r.sessions.AcquireWriter(ctx, ref, runID)
@@ -61,6 +64,7 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
+	ref = activeSession.SessionRef
 	isACP := activeSession.Controller.Kind == session.ControllerKindACP
 	if isACP && r.controllers == nil {
 		return agent.RunResult{}, errors.New("agent-sdk/runtime: ACP controller backend is not configured")
@@ -140,9 +144,12 @@ func (r *Runtime) beginRun(ref session.SessionRef, runID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for id, current := range r.activeRunners {
-		if current.ref.SessionID == ref.SessionID || id == runID {
+		if current.ref.SessionID == ref.SessionID {
 			return &agent.RunConflictError{SessionRef: ref, ActiveRunID: id}
 		}
+	}
+	if _, exists := r.activeRunners[runID]; exists {
+		return errorcode.New(errorcode.Conflict, "run ID already in use")
 	}
 	r.activeRunners[runID] = activeRun{ref: ref}
 

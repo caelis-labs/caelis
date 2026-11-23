@@ -61,7 +61,11 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 		event.Tool.Status = "failed"
 		event.Tool.Output = payload
 		if session.IsMainInvocationVisibleEvent(call) {
-			message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: call.Tool.ID, Name: call.Tool.Name, Content: tool.ModelParts(result.Content), IsError: true}}}}
+			name := call.Tool.Name
+			if legacy := call.Tool.LegacyModelCall; legacy != nil {
+				name = legacy.Name
+			}
+			message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: call.Tool.ID, Name: name, Content: tool.ModelParts(result.Content), IsError: true}}}}
 			event.Message = &message
 		}
 		fixes = append(fixes, event)

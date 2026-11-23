@@ -56,7 +56,6 @@ func (r *Runtime) bindToolDispatch(active session.Session, ref session.SessionRe
 	if name != "" {
 		admission.mode, admission.policy = r.policyForName(approval.ctx, name)
 		admission.session = session.CloneSession(active)
-		admission.session.SessionRef = session.NormalizeSessionRef(ref)
 		admission.state = session.CloneState(state)
 		admission.options = modeOptionsFromSession(active, spec)
 		admission.sandboxPolicy = sandbox.ClonePolicySnapshot(r.sandboxPolicy)

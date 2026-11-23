@@ -1282,11 +1282,11 @@ func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T
 	}
 }
 
-func TestDecodeRetiredRoutedToolHistory(t *testing.T) {
+func TestDecodeMalformedRoutedToolHistory(t *testing.T) {
 	var event Event
 	err := json.Unmarshal([]byte(`{"type":"tool_call","tool":{"id":"1","name":"docs__read","model_call":{"id":"1","name":"mcp_call","arguments":"{}"}}}`), &event)
 	if !errors.Is(err, ErrInvalidEvent) {
-		t.Fatalf("retired tool history: got %v, want ErrInvalidEvent", err)
+		t.Fatalf("malformed model envelope: got %v, want ErrInvalidEvent", err)
 	}
 }
 

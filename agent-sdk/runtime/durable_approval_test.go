@@ -342,7 +342,7 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 		RunID: "run-redelivery", TurnID: "turn-redelivery", ToolCallID: "call-redelivery", ToolName: "Write",
 		Revision: 1, Status: session.ApprovalRecordPending, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, pending); err != nil {
+	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, pending, session.MutationGuard{}); err != nil {
 		t.Fatalf("appendApprovalRecord(pending) error = %v", err)
 	}
 	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
@@ -353,7 +353,7 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 	resolved.OptionID = decision.OptionID
 	resolved.Approved = decision.Approved
 	resolved.UpdatedAt = now.Add(time.Second)
-	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, resolved); err != nil {
+	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, resolved, session.MutationGuard{}); err != nil {
 		t.Fatalf("appendApprovalRecord(resolved) error = %v", err)
 	}
 
