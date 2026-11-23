@@ -72,7 +72,7 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 	_, err = r.sessions.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), ExpectedRevision: &loaded.Session.Revision, Events: fixes})
 	if err != nil {
 		for _, fact := range fixes {
-			confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, fact)
+			confirmed, readErr := r.reconcileEventAppend(ctx, ref, fact)
 			if confirmed == nil {
 				return errors.Join(err, readErr)
 			}
@@ -90,7 +90,7 @@ func (r *Runtime) appendToolCallBatch(ctx context.Context, ref session.SessionRe
 	}
 	confirmed := make([]*session.Event, 0, len(events))
 	for _, event := range events {
-		found, readErr := r.reconcileCompactionAppend(ctx, ref, event)
+		found, readErr := r.reconcileEventAppend(ctx, ref, event)
 		if found == nil {
 			return nil, errors.Join(err, readErr)
 		}

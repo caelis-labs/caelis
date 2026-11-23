@@ -332,7 +332,7 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 		return persisted, nil
 	}
 	if event.Type == session.EventTypeToolCall || event.Type == session.EventTypeToolResult || event.Type == session.EventTypeContext && strings.HasPrefix(event.ID, "hook-feedback:") {
-		confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, event)
+		confirmed, readErr := r.reconcileEventAppend(ctx, ref, event)
 		if confirmed != nil {
 			return confirmed, nil
 		}

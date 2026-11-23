@@ -157,26 +157,17 @@ func (r *Runtime) executeKernelTurn(
 	req agent.RunRequest,
 	handle *runner,
 ) {
-	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
-	if inputErr != nil {
-		handle.publishError(inputErr)
+	inputEvents, err := r.prepareTurnInputs(ctx, activeSession, turnID, req)
+	if err != nil {
+		handle.publishError(err)
 		return
 	}
-	inputEvents, inputErr = r.prepareHookInputs(ctx, inputEvents)
-	if inputErr == nil {
-		var start []*session.Event
-		start, inputErr = r.runTurnStartHooks(ctx)
-		inputEvents = append(inputEvents, start...)
-	}
-	if inputErr == nil && hookrun.FromContext(ctx).HasEarly() {
+	if hookrun.FromContext(ctx).HasEarly() {
 		_, supports := r.agentFactory.(interface{ SupportsLoopHooks() })
 		if req.Agent != nil || !supports {
-			inputErr = errorcode.New(errorcode.Unsupported, "this external Agent cannot enforce an early-response hook decision")
+			handle.publishError(errorcode.New(errorcode.Unsupported, "this external Agent cannot enforce an early-response hook decision"))
+			return
 		}
-	}
-	if inputErr != nil {
-		handle.publishError(inputErr)
-		return
 	}
 	lifecycleErr := r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {

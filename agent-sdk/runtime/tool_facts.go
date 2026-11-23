@@ -104,7 +104,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 	persisted, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 	if err != nil {
 		var readErr error
-		persisted, readErr = r.reconcileCompactionAppend(cleanup, ref, event)
+		persisted, readErr = r.reconcileEventAppend(cleanup, ref, event)
 		if persisted == nil {
 			return errors.Join(err, readErr)
 		}

@@ -6,69 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 )
-
-func buildRunInputEvents(
-	activeSession session.Session,
-	turnID string,
-	req agent.RunRequest,
-) ([]*session.Event, error) {
-	inputs := communicationInputsFromRunRequest(req)
-	if len(inputs) == 0 {
-		return nil, nil
-	}
-	events := make([]*session.Event, 0, len(inputs))
-	for index, item := range inputs {
-		event, err := runtimeinput.NewEvent(normalizeInputKind(req.InputKind), item, nil)
-		if err != nil {
-			return nil, err
-		}
-		if event == nil {
-			continue
-		}
-		scope := defaultScope(activeSession, turnID)
-		event.Scope = &scope
-		event.IdempotencyKey = "turn-input:" + strings.TrimSpace(turnID)
-		if req.InputCompaction != nil {
-			cloned := *req.InputCompaction
-			cloned.UserEvidence = append([]string(nil), cloned.UserEvidence...)
-			event.Compaction = &cloned
-		}
-		if len(inputs) > 1 {
-			event.IdempotencyKey = fmt.Sprintf("turn-input:%s:%d", strings.TrimSpace(turnID), index)
-		}
-		events = append(events, event)
-	}
-	return events, nil
-}
-
-func communicationInputsFromRunRequest(req agent.RunRequest) []agent.AgentCommunicationInput {
-	if len(req.Inputs) > 0 {
-		return agent.CloneAgentCommunicationInputs(req.Inputs)
-	}
-	if strings.TrimSpace(req.Input) == "" && len(req.ContentParts) == 0 {
-		return nil
-	}
-	return []agent.AgentCommunicationInput{{
-		Source:       session.CloneActorRef(req.InputActor),
-		Input:        req.Input,
-		DisplayInput: req.DisplayInput,
-		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
-	}}
-}
-
-func normalizeInputKind(kind agent.SubmissionKind) agent.SubmissionKind {
-	if kind == "" {
-		return agent.SubmissionKindConversation
-	}
-	return kind
-}
 
 func normalizeEvent(activeSession session.Session, turnID string, event *session.Event) *session.Event {
 	event = session.CloneEvent(event)
@@ -356,4 +298,31 @@ func entriesToState(entries []plan.Entry) []map[string]any {
 		})
 	}
 	return out
+}
+
+// A failed write may already have committed. Read back the original ID/key and
+// compare through the Store's full-payload idempotency contract. Absence is not
+// permission to replay with a new identity. This function never writes.
+func (r *Runtime) reconcileEventAppend(ctx context.Context, ref session.SessionRef, want *session.Event) (*session.Event, error) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	loaded, err := r.sessions.LoadSession(cleanup, session.LoadSessionRequest{SessionRef: ref, IncludeTransient: true})
+	if err != nil {
+		return nil, err
+	}
+	for _, event := range loaded.Events {
+		if event.ID != want.ID && (want.IdempotencyKey == "" || event.IdempotencyKey != want.IdempotencyKey) {
+			continue
+		}
+		prepared, err := session.PrepareEventsForAppend(session.PrepareEventsForAppendRequest{
+			SessionID: ref.SessionID, Events: []*session.Event{want}, ExistingEvents: []*session.Event{event}, Now: r.now(),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(prepared.Persisted) == 0 && len(prepared.Events) == 1 {
+			return prepared.Events[0], nil
+		}
+	}
+	return nil, nil
 }

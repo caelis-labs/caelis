@@ -69,23 +69,13 @@ func (r *Runtime) executeACPControllerTurn(
 	// fence until their cancellation cleanup and terminal receipts have settled.
 	defer handle.controllerCalls.closeAndWait()
 
-	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
-	if inputErr != nil {
-
-		handle.publishError(inputErr)
+	inputEvents, err := r.prepareTurnInputs(ctx, activeSession, turnID, req)
+	if err != nil {
+		handle.publishError(err)
 		return
 	}
-	inputEvents, inputErr = r.prepareHookInputs(ctx, inputEvents)
-	if inputErr == nil {
-		var start []*session.Event
-		start, inputErr = r.runTurnStartHooks(ctx)
-		inputEvents = append(inputEvents, start...)
-	}
-	if inputErr == nil && hookrun.FromContext(ctx).TakeEarly() != nil {
-		inputErr = errorcode.New(errorcode.Unsupported, "external ACP Agent cannot enforce an early-response hook decision")
-	}
-	if inputErr != nil {
-		handle.publishError(inputErr)
+	if hookrun.FromContext(ctx).TakeEarly() != nil {
+		handle.publishError(errorcode.New(errorcode.Unsupported, "external ACP Agent cannot enforce an early-response hook decision"))
 		return
 	}
 	persistedInputs, err := r.appendInputEvents(ctx, ref, inputEvents)
@@ -122,7 +112,7 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	var toolFactOrdinal uint64
 	newForwarding := func(forwardCtx context.Context) (agent.ControllerEventSession, error) {
-		return r.beginControllerEvents(forwardCtx, agent.ControllerEventForwardRequest{
+		return r.controllerEventForwarder.BeginControllerEvents(forwardCtx, agent.ControllerEventForwardRequest{
 			ActiveSession: activeSession,
 			SessionRef:    ref,
 			MutationGuard: session.RuntimeMutationGuard(ctx),

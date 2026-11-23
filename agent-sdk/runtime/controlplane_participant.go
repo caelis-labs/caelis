@@ -484,7 +484,7 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishEvent(persisted)
 	}
 	var toolFactOrdinal uint64
-	forwarding, err := r.beginControllerEvents(ctx, agent.ControllerEventForwardRequest{
+	forwarding, err := r.controllerEventForwarder.BeginControllerEvents(ctx, agent.ControllerEventForwardRequest{
 		ActiveSession: activeSession,
 		SessionRef:    ref,
 		MutationGuard: session.RuntimeMutationGuard(ctx),
