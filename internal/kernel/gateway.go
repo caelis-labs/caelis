@@ -167,7 +167,7 @@ func (g *Gateway) Terminals() terminal.Controller {
 	if g == nil || g.runtime == nil {
 		return nil
 	}
-	provider, ok := g.runtime.(agent.TerminalProvider)
+	provider, ok := g.runtime.(terminal.Provider)
 	if !ok {
 		return nil
 	}

@@ -22,7 +22,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 // Config defines one baseline local runtime instance.
@@ -110,7 +109,6 @@ type Runtime struct {
 	approvalWaiters         map[string]approvalWaiter
 	tasks                   *taskRuntime
 	taskOutput              output.Binder
-	terminals               *terminalService
 	lifecycle               agent.TraceOptions
 }
 
@@ -192,7 +190,6 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	r.tasks = newTaskRuntime(r, cfg.TaskStore, cfg.TaskActivityChanged)
 	r.tasks.taskCommitted = cfg.TaskCommitted
-	r.terminals = &terminalService{tasks: r.tasks}
 	return r, nil
 }
 
@@ -217,15 +214,6 @@ func validateControllerForwarder(cfg Config) error {
 		return errors.New("agent-sdk/runtime: controller recovery coordinator is required when ACP controllers are configured")
 	}
 	return nil
-}
-
-// Terminals returns the command fallback/control surface for this Runtime.
-// Transient Task output subscription is owned by product Control.
-func (r *Runtime) Terminals() terminal.Controller {
-	if r == nil {
-		return nil
-	}
-	return r.terminals
 }
 
 // Run executes one agent turn for one existing session.

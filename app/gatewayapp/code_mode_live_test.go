@@ -183,16 +183,6 @@ func TestCodeModeLive(t *testing.T) {
 			}}
 		}
 	}
-	if mode == "baseline" {
-		kept := tools[:0]
-		for _, one := range tools {
-			if one.Definition().Name != codemode.ToolName {
-				kept = append(kept, one)
-			}
-		}
-		tools = kept
-	}
-
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(stateRoot, "sessions")})
 	var active session.Session
 	if resume {
@@ -289,7 +279,7 @@ func TestCodeModeLive(t *testing.T) {
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
 	})
-	route := "Use native filesystem tools and the existing tool_search/mcp_call extension entries."
+	route := "Use native filesystem tools directly. Use js_exec for extension calls."
 	if mode == "js_exec" {
 		route = "Use js_exec with tools.search and tools.call for extensions and JS orchestration. Native filesystem calls may write/edit workflow.js; execute the actual saved file with js_exec file. Select only the aggregate/documentation and screenshot outputs. Shell must remain native and is forbidden for this task."
 	}

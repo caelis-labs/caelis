@@ -7,7 +7,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -176,7 +175,6 @@ func (a *Agent) executeStepToolCallsOrdered(
 					a.yieldedResults = map[*session.Event]bool{}
 				}
 				a.yieldedResults[event] = true
-				mcpdiscovery.Apply(a.discoveries, event)
 			}
 		}
 		if err != nil {

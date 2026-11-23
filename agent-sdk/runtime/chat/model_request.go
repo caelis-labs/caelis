@@ -28,7 +28,6 @@ func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	next.models = snapshot.Models
 	next.modelRevision = snapshot.Revision
 	next.validateModelRequest = snapshot.Validate
-	next.deferredTools = snapshot.DeferredTools
 	next.instructions, next.reasoning, next.request = snapshot.Instructions, snapshot.Reasoning, snapshot.Request
 	next.admitModelRequest = snapshot.Admit
 	next.releaseModelRequest = snapshot.Release
@@ -36,7 +35,6 @@ func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	next.resolveSessionInstructions = a.resolveSessionInstructions
 	next.summaryID = a.summaryID
 	next.toolResultArtifacts = a.toolResultArtifacts
-	next.discoveries = a.discoveries
 	*a = *next
 	return nil
 }

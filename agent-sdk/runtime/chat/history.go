@@ -190,9 +190,6 @@ func toolCallFromEventTool(event *session.Event) (model.ToolCall, bool) {
 	if toolPayload == nil {
 		return model.ToolCall{}, false
 	}
-	if toolPayload.ModelCall != nil {
-		return *toolPayload.ModelCall, true
-	}
 	call := model.ToolCall{
 		ID:   strings.TrimSpace(toolPayload.ID),
 		Name: session.CanonicalToolName(event, nil),
@@ -345,9 +342,6 @@ func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 			return model.Message{}, false
 		}
 		name := session.CanonicalToolName(event, nil)
-		if toolPayload.ModelCall != nil {
-			name = toolPayload.ModelCall.Name
-		}
 		if toolPayload.ID == "" || name == "" {
 			return model.Message{}, false
 		}

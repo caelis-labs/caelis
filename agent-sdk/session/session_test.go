@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestSessionFenceJSONUsesFenceTerminology(t *testing.T) {
@@ -1283,25 +1282,11 @@ func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T
 	}
 }
 
-func TestValidateDurableCoreEventRejectsUntruncatedToolOutput(t *testing.T) {
-	t.Parallel()
-
-	err := ValidateDurableCoreEvent(&Event{
-		Type:       EventTypeToolResult,
-		Visibility: VisibilityCanonical,
-		Tool: &EventTool{
-			ID:   "call-1",
-			Name: "RunCommand",
-			Output: map[string]any{
-				"result": strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2),
-			},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateDurableCoreEvent() error = nil, want truncation rejection")
-	}
-	if detail := EventValidationDetail(err); !strings.Contains(detail, "not canonical-truncated") {
-		t.Fatalf("validation detail = %q, want truncation detail", detail)
+func TestDecodeRetiredRoutedToolHistory(t *testing.T) {
+	var event Event
+	err := json.Unmarshal([]byte(`{"type":"tool_call","tool":{"id":"1","name":"docs__read","model_call":{"id":"1","name":"mcp_call","arguments":"{}"}}}`), &event)
+	if !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("retired tool history: got %v, want ErrInvalidEvent", err)
 	}
 }
 

@@ -245,7 +245,9 @@ only while idle. Model-visible communication preserves the body and media first,
 then appends one `From` footer. Durable ActorRef values retain the full source
 identity; footer text does not grant routing or execution authority.
 
-The internal Task service remains the lifecycle and final-result abstraction. Command stdin is a
+Hosts can discover command inspection and process control through the optional
+`task/terminal.Provider` interface. The internal Task service owns the command
+lifecycle and final result. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
 The SDK may expose a bounded current/final command result and ACP child final
 result, but it does not retain Surface replay history or understand how a
@@ -315,7 +317,8 @@ no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
 ToolCall facts freeze the complete model batch before dispatch, including an
 occurrence identity independent of provider call IDs, effective arguments, parent
-and target binding. ToolResult stores the complete returned `tool.Result`; its
+and target binding. Model history keeps the declared tool name and call ID.
+ToolResult stores the complete returned `tool.Result`; its
 `Message` is the checked model view. Code Mode nested facts retain complete body
 and binding without introducing tool messages the model did not request.
 
@@ -509,8 +512,9 @@ activity identity is limited to the first activity.
 
 ## Tools and instruction authority
 
-All tool sources use the same serialized result budget before model delivery and
-durable event validation. When truncation needs a recovery artifact, the bounded
+The chat loop applies its serialized result budget before model delivery.
+Session persists and replays the recorded model view independently of the
+current budget. When truncation needs a recovery artifact, the bounded
 private artifact store retains the original content. A single text or structured
 JSON block is saved as-is; other results use the result codec's ordered `content`
 array, preserving media and resource blocks. The model receives bounded content
@@ -539,17 +543,15 @@ Code Mode reconstructs MCP bindings from canonical search receipts and typed nes
 and resume. A
 first direct call with no prior binding pins the current real Tool identity/version.
 A later change to the bound MCP source/schema fails stale until a successful
-`tools.search({name})` explicitly reloads the schema and binding. Historical name-only discovery does not
-authorize non-Code Mode `mcp_call`. Search grants no execution permission, and an
+`tools.search({name})` explicitly reloads the schema and binding. Search grants no execution permission, and an
 unknown effect is never replayed. Manager name-collision losers are absent from the
 Session tool set and cannot be restored through qualified paths.
 
 Runtime resolves every route to a real Tool, validates the accepted schema and
 arguments, and enters the same policy, Guardian/approval, cancellation, dispatch admission,
 invocation owners and typed hooks as other calls. Display and approval data name
-the real target and arguments. The effective ModelCall envelope keeps non-Code
-Mode history paired under the outer call ID and `mcp_call` name; ProposedCall
-retains the original proposal separately. MCP schemas never join model
+the real target and arguments. Calls inside `js_exec` carry their own parent-linked execution facts. The model
+receives the result under the outer `js_exec` call ID. Deferred MCP schemas never join model
 `tools`, and no per-run exposure limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md)
 describes refresh and final dispatch. The stable-tools contract does not promise
 that the entire model request prefix is unchanged.

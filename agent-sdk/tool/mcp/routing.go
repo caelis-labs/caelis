@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -37,27 +36,9 @@ func IsSearchDefinition(def tool.Definition) bool {
 	return definitionKind(def) == SearchToolName && def.Name == SearchToolName
 }
 
-// IsCallDefinition identifies the fixed MCP invocation envelope.
-func IsCallDefinition(def tool.Definition) bool {
-	return definitionKind(def) == CallToolName && def.Name == CallToolName
-}
-
 func definitionKind(def tool.Definition) string {
 	kind, _ := def.Metadata[MetadataKind].(string)
 	return strings.ToLower(strings.TrimSpace(kind))
-}
-
-const CallToolName = "mcp_call"
-
-// NewCallTool declares the fixed MCP invocation envelope. Runtime resolves
-// it to an already discovered real Tool before entering its execution wrappers.
-func NewCallTool() tool.Tool {
-	return tool.NamedTool{Def: tool.Definition{Name: CallToolName, Description: "Call a previously bound MCP tool by exact name using arguments matching its input_schema.", InputSchema: map[string]any{
-		"type": "object", "additionalProperties": false, "required": []any{"tool_name", "arguments"}, "properties": map[string]any{
-			"tool_name": map[string]any{"type": "string", "minLength": 1}, "arguments": map[string]any{"type": "object", "additionalProperties": true},
-		}}, Metadata: map[string]any{MetadataKind: CallToolName}}, Invoke: func(_ context.Context, _ tool.Call) (tool.Result, error) {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "mcp_call requires Runtime discovery and routing")
-	}}
 }
 
 // BindingForDefinition returns an opaque source identity and definition version.

@@ -2,22 +2,11 @@ package tool
 
 import (
 	"testing"
-
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-func TestMCPCallEnvelopeAndExactSchemaValidation(t *testing.T) {
+func TestMCPArgumentSchemaValidation(t *testing.T) {
 	def := Definition{InputSchema: map[string]any{"type": "object", "additionalProperties": false, "required": []any{"count"}, "properties": map[string]any{"count": map[string]any{"type": "integer", "minimum": 1}}}}
-	for _, raw := range []string{`null`, `{}`, `{"tool_name":" x","arguments":{}}`, `{"tool_name":"x","arguments":null}`, `{"tool_name":"x","arguments":{},"identity":"forged"}`, `{"tool_name":"x","arguments":{}} {}`} {
-		if _, err := ParseMCPCall(model.ToolCall{ID: "call", Args: raw}); err == nil {
-			t.Fatalf("accepted envelope %s", raw)
-		}
-	}
-	actual, err := ParseMCPCall(model.ToolCall{ID: "call", Args: `{"tool_name":"exact__name","arguments":{"count":2}}`})
-	if err != nil || actual.ID != "call" || actual.Name != "exact__name" {
-		t.Fatalf("route=%+v err=%v", actual, err)
-	}
-	if err = ValidateMCPArguments(def, []byte(actual.Args)); err != nil {
+	if err := ValidateMCPArguments(def, []byte(`{"count":2}`)); err != nil {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{`{}`, `{"count":0}`, `{"count":"2"}`, `{"count":2,"extra":true}`, `[]`, `null`} {

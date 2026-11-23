@@ -13,12 +13,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	"github.com/google/uuid"
 )
 
@@ -42,7 +40,6 @@ type Agent struct {
 	name                string
 	model               model.LLM
 	tools               []tool.Tool
-	deferredTools       toolset.Source
 	toolsByName         map[string]tool.Tool
 	systemPrompt        string
 	reasoning           model.ReasoningConfig
@@ -52,8 +49,6 @@ type Agent struct {
 	instructions        []model.Part
 	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
 	releaseModelRequest func()
-	discoveries         map[string]tool.Binding
-	boundCalls          map[string]boundMCPCall
 
 	resolveSessionInstructions agent.SessionInstructionsResolver
 	summaryID                  string
@@ -129,7 +124,6 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 		return nil, err
 	}
 	chatAgent.models = spec.Models
-	chatAgent.deferredTools = spec.DeferredTools
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})
 	chatAgent.resolveSessionInstructions = spec.ResolveSessionInstructions
@@ -157,14 +151,10 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			yield(nil, historyErr)
 			return
 		}
-		a.discoveries = mcpdiscovery.FromContext(ctx)
 		a.summaryID = ""
 		events := ctx.Events()
 		if a.resolveSessionInstructions != nil && events.Len() > 0 {
 			a.summaryID = promptSummaryID(events.At(0))
-		}
-		for event := range events.All() {
-			mcpdiscovery.Apply(a.discoveries, event)
 		}
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := newToolVisibility(a.tools)
@@ -291,8 +281,6 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				if !a.yieldedResults[toolEvent] && !yield(toolEvent, nil) {
 					return
 				}
-				// yield returns only after Runtime confirms the canonical append.
-				mcpdiscovery.Apply(a.discoveries, toolEvent)
 			}
 			if err != nil {
 				yield(nil, err)

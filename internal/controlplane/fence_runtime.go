@@ -12,10 +12,11 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 var (
-	_ agent.TerminalProvider        = (*FencedRuntime)(nil)
+	_ terminal.Provider             = (*FencedRuntime)(nil)
 	_ agent.LiveRunAttacher         = (*FencedRuntime)(nil)
 	_ agent.ApprovalResolver        = (*FencedRuntime)(nil)
 	_ agent.ParticipantControlPlane = (*FencedRuntime)(nil)

@@ -68,9 +68,9 @@ binding before a subsequent call. Search grants no policy or approval authority;
 The resolved Tool enters the existing lifecycle, invocation, policy/approval and
 dispatch-admission wrappers. It is never dispatched directly through Manager.
 Policy, approvals, display events and the canonical ToolCall/ToolResult use the real name
-and arguments. Without Code Mode, the model-facing call/result retain the original `mcp_call`
-name and call ID; a typed original-call field preserves that pairing through
-Store round trips and unknown-result recovery. Recovery never replays an unknown MCP
+and arguments. Code Mode records each nested invocation under its `js_exec` parent.
+Model history pairs each result with the tool name and call ID seen by the model.
+Recovery never replays an unknown MCP
 effect or invents a recoverer. At borrow, the Manager checks that the selected
 callable still matches the exact published entry and that its client and catalog
 are ready. A changed or removed entry makes old handles stale, even if the same

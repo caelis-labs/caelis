@@ -113,7 +113,7 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 			phase++
 		}
 	}
-	name := "mcp_call"
+	var name string
 	if idle {
 		phase = 99
 	}
@@ -126,20 +126,23 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 		name = "Skill"
 		args = map[string]any{"name": "desktop-world:desktop-world"}
 	case 2:
-		args = map[string]any{"tool_name": "desktop_world__apps", "arguments": map[string]any{}}
+		name = "desktop_world__apps"
 	case 3, 4:
-		args = map[string]any{"tool_name": "desktop_world__look", "arguments": map[string]any{"app": app}}
+		name, args = "desktop_world__look", map[string]any{"app": app}
 	default:
 		name = ""
 	}
 	if name != "" {
 		encoded, _ := json.Marshal(args)
-		hasJS := false
-		for _, one := range payload.Tools {
-			hasJS = hasJS || one.Function.Name == "js_exec"
+		encodedArgs := string(encoded)
+		switch name {
+		case "tool_search":
+			encodedArgs = gatewayapp.CodeModeFixtureArgs("return await tools.search(" + encodedArgs + ");")
+			name = "js_exec"
+		case "desktop_world__apps", "desktop_world__look":
+			encodedArgs = gatewayapp.CodeModeFixtureArgs(fmt.Sprintf("await tools.search({name:%q});return await tools.call(%q,%s);", name, name, encodedArgs))
+			name = "js_exec"
 		}
-		var encodedArgs string
-		name, encodedArgs = gatewayapp.CodeModeFixtureCall(hasJS, name, string(encoded))
 		message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": fmt.Sprintf("native-%d", phase), "index": 0, "type": "function", "function": map[string]any{"name": name, "arguments": encodedArgs}}}}
 		finish = "tool_calls"
 	}

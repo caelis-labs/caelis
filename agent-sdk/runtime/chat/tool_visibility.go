@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"fmt"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -36,4 +38,20 @@ func (v *toolVisibility) lookupTool(name string) (tool.Tool, bool) {
 
 func (v toolVisibility) modelSpecs() []model.ToolSpec {
 	return tool.ModelSpecs(v.tools)
+}
+
+func (a *Agent) lookupModelTool(name string, visibility *toolVisibility) (tool.Tool, *tool.Binding, error) {
+	target, ok := a.lookupRunTool(name, visibility)
+	if !ok {
+		return nil, nil, tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", name))
+	}
+	def := target.Definition()
+	if mcp.IsModelFunction(def) {
+		binding := mcp.BindingForDefinition(def)
+		if binding.Identity == "" {
+			return nil, nil, tool.NewError(tool.ErrorCodeStaleRevision, "MCP source identity is incomplete")
+		}
+		return target, &binding, nil
+	}
+	return target, nil, nil
 }

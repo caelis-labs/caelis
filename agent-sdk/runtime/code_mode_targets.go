@@ -37,7 +37,7 @@ func codeModeAvailableTools(static []tool.Tool, source toolset.Source) []tool.To
 
 // Search results and accepted ToolCalls share the canonical binding order.
 // An accepted Code Mode intent retains its binding even if its outcome is unknown;
-// reading that binding never replays the child or grants legacy mcp_call access.
+// reading that binding never replays the child.
 func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 	bindings := map[string]tool.Binding{}
 	for _, event := range events {
@@ -59,7 +59,7 @@ func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 }
 
 func (h *codeModeHost) eligibleTarget(one tool.Tool, def tool.Definition) bool {
-	return def.Name != h.parent.Name && !mcp.IsCallDefinition(def) && !mcp.IsSearchDefinition(def) &&
+	return def.Name != h.parent.Name && !mcp.IsSearchDefinition(def) &&
 		!codemode.IsDefinition(def) && !toolbinding.HideViewImage(one, h.owner.producingModel) &&
 		(!mcp.IsDefinition(def) || mcp.BindingForDefinition(def).Identity != "")
 }

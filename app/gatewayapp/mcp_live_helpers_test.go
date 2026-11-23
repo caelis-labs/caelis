@@ -40,7 +40,7 @@ func (w *liveMCPWire) RoundTrip(r *http.Request) (*http.Response, error) {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(body, &fields) == nil {
 			raw := fields["tools"]
-			if bytes.Contains(raw, []byte(`"mcp_call"`)) {
+			if bytes.Contains(raw, []byte(`"js_exec"`)) {
 				sum := sha256.Sum256(raw)
 				w.mu.Lock()
 				w.hashes = append(w.hashes, hex.EncodeToString(sum[:]))

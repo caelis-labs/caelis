@@ -1,7 +1,6 @@
 package mcpdiscovery
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -10,29 +9,6 @@ import (
 )
 
 const MetadataKey = "caelis.mcp.discovery.v1"
-
-type contextKey struct{}
-
-// WithEvents carries a detached projection of complete canonical history past
-// prompt compaction. This cache has no writer or independent durable authority.
-func WithEvents(ctx context.Context, events []*session.Event) context.Context {
-	return context.WithValue(ctx, contextKey{}, FromEvents(events))
-}
-func FromContext(ctx context.Context) map[string]tool.Binding {
-	source, _ := ctx.Value(contextKey{}).(map[string]tool.Binding)
-	out := map[string]tool.Binding{}
-	for k, v := range source {
-		out[k] = v
-	}
-	return out
-}
-func FromEvents(events []*session.Event) map[string]tool.Binding {
-	out := map[string]tool.Binding{}
-	for _, event := range events {
-		Apply(out, event)
-	}
-	return out
-}
 
 // Apply accepts successful canonical discovery receipts with a trusted marker.
 // Old name-only results and Exposure Active/Pending never grant call eligibility.

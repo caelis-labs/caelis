@@ -401,7 +401,7 @@ Evidence records all binary hashes and reported versions. No daily Store or
 provider credential is used. Fixture tests additionally cover detached commands,
 concurrent replacement and explicit-stop/instance fences.
 
-## MCP fixed entry points and lifecycle
+## MCP tools and Code Mode
 
 Fixtures cover paginated name/description summaries, exact schemas, stable
 model declarations, binding refresh, source approval and unknown-effect recovery.
@@ -411,7 +411,7 @@ GOWORK=off go test ./agent-sdk/tool/... ./agent-sdk/runtime/chat ./agent-sdk/mod
 GOWORK=off go test ./agent-sdk/runtime -run 'TestCodeModeSearchContract|TestCodeModeDirectBinding|TestMCP' -count=1 -timeout=8m
 go test ./control/toolpolicy ./agent-sdk/runtime -run 'TestProductPolicy|TestPolicyIsOnlyMCP|TestAuthorization|TestSessionConsent' -count=1
 go test -race ./control/toolpolicy ./agent-sdk/runtime -run 'TestProductPolicy|TestAuthorization' -count=1
-GOWORK=off go test ./control/appserver/projection ./surfaces/tui/app -run 'TestRoutedMCP' -count=1
+GOWORK=off go test ./control/appserver/projection ./surfaces/tui/app -run 'TestEventProjectorProjectsEventToolSemanticName|TestScriptActionShowsActualNestedTools' -count=1
 GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sessionprofile -run 'TestExperimental|TestAsyncCompaction|TestCatalog|TestMCP|TestConfigurationCheckpoint' -count=1
 ```
 

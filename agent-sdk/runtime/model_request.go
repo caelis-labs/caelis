@@ -154,7 +154,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	if discovery != nil {
 		visible := make([]tool.Tool, 0, len(spec.Tools))
 		for _, candidate := range spec.Tools {
-			if candidate != nil && !mcp.IsSearchDefinition(candidate.Definition()) && !mcp.IsCallDefinition(candidate.Definition()) {
+			if candidate != nil && !mcp.IsSearchDefinition(candidate.Definition()) {
 				visible = append(visible, candidate)
 			}
 		}

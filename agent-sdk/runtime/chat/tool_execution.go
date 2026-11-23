@@ -68,7 +68,6 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				}
 				canonical, truncationMeta := canonicalToolResult(progress.Result, nil)
 				event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
-				a.applyPreparedFact(event)
 				_ = yieldProgress(event)
 			default:
 				return done.message, done.event, done.err
@@ -83,7 +82,6 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 			}
 			canonical, truncationMeta := canonicalToolResult(progress.Result, nil)
 			event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
-			a.applyPreparedFact(event)
 			if !yieldProgress(event) {
 				cancel()
 				<-doneCh

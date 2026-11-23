@@ -33,6 +33,11 @@ type Snapshot struct {
 	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
+// Provider exposes optional command inspection and process control to the host.
+type Provider interface {
+	Terminals() Controller
+}
+
 // Controller owns explicit command inspection and process control only.
 type Controller interface {
 	Read(context.Context, Ref) (Snapshot, error)

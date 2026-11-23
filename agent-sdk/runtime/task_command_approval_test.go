@@ -375,7 +375,7 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 				if err != nil || pending.State != taskapi.StateWaitingApproval || pending.SupportsInput {
 					t.Fatalf("pending read = %#v, %v", pending, err)
 				}
-				terminalSnapshot, err := r.terminals.Read(owner, terminal.Ref{SessionID: active.SessionID, TaskID: id})
+				terminalSnapshot, err := r.Terminals().Read(owner, terminal.Ref{SessionID: active.SessionID, TaskID: id})
 				if err != nil || terminalSnapshot.State != "waiting_approval" || !terminalSnapshot.Running || !terminalSnapshot.StartedAt.IsZero() {
 					t.Fatalf("pending terminal fallback = %#v, %v", terminalSnapshot, err)
 				}

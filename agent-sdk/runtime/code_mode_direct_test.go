@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -69,10 +70,28 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 	// Compare rebuilt model context with the actual prior request frontier.
 	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	resumed := run(reopened, `return await tools.plugins.fixture.docs.read({value:3});`)
-	before, _ := json.Marshal(first.requests[len(first.requests)-1].Messages)
-	after, _ := json.Marshal(resumed.requests[0].Messages)
-	if !strings.Contains(string(after), string(before[1:len(before)-1])) {
-		t.Fatal("reopened model context lost the Runtime-produced messages")
+	live := first.requests[len(first.requests)-1].Messages
+	var callIDs, replyIDs []string
+	for _, msg := range live {
+		for _, call := range msg.ToolCalls() {
+			if call.Name != codemode.ToolName {
+				t.Fatalf("model history exposed child tool %q", call.Name)
+			}
+			callIDs = append(callIDs, call.ID)
+		}
+		for _, reply := range msg.ToolResults() {
+			if reply.Name != codemode.ToolName {
+				t.Fatalf("model history exposed child result %q", reply.Name)
+			}
+			replyIDs = append(replyIDs, reply.ToolUseID)
+		}
+	}
+	if len(callIDs) != 2 || !slices.Equal(callIDs, replyIDs) {
+		t.Fatalf("model call IDs %v, reply IDs %v", callIDs, replyIDs)
+	}
+	want := append(model.CloneMessages(live), model.NewTextMessage(model.RoleAssistant, "done"), model.NewTextMessage(model.RoleUser, "synthetic Code Mode task"))
+	if !reflect.DeepEqual(resumed.requests[0].Messages, want) {
+		t.Fatal("reopening the Session changed the runtime-produced model context")
 	}
 	if effects != 3 {
 		t.Fatalf("same binding did not resume: effects=%d", effects)
@@ -91,21 +110,6 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 		t.Fatalf("explicit refresh did not admit new arguments: effects=%d", effects)
 	}
 	assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)
-}
-
-func TestCodeModeDirectBindingDoesNotGrantLegacyMCPDiscovery(t *testing.T) {
-	def := fixtureMCPDefinition("direct-v1")
-	binding := mcp.BindingForDefinition(def)
-	events := []*session.Event{{Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{
-		Name: def.Name, Binding: &binding, Status: "pending",
-		Parent: &session.EventParentTool{Kind: codemode.ToolKind},
-	}}}
-	if codeModeBindings(events)[def.Name] != binding {
-		t.Fatal("Code Mode failed to retain its actual binding")
-	}
-	if len(mcpdiscovery.FromEvents(events)) != 0 {
-		t.Fatal("direct child Journal granted legacy discovery eligibility")
-	}
 }
 
 func TestCodeModeNativeOwnerSupersedesHistoricalMCPBinding(t *testing.T) {

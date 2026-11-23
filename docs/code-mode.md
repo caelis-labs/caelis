@@ -155,8 +155,7 @@ Each VM snapshots current Session names; a later VM sees newly ready tools, and 
 search result's `call_path` can resolve a name that became ready during the current
 execution. Explicit search can refresh a tool already declared to the model by
 reading the current directory of the same request's MCP source. It does not
-rewrite existing prompt slices or model tool arrays. Outside Code Mode,
-`mcp_call` still requires prior discovery.
+rewrite existing prompt slices or model tool arrays.
 
 Tool-specific error codes and effect details stay in the reply's original content.
 Catching does not erase failed records. An uncaught script exception produces

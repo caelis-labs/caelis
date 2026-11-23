@@ -293,10 +293,6 @@ func CloneEventTool(in EventTool) EventTool {
 		value := *in.ProposedCall
 		out.ProposedCall = &value
 	}
-	if in.ModelCall != nil {
-		value := *in.ModelCall
-		out.ModelCall = &value
-	}
 	if len(in.Content) > 0 {
 		out.Content = make([]EventToolContent, 0, len(in.Content))
 		for _, item := range in.Content {

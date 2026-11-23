@@ -46,7 +46,7 @@ func (f *runtimeFacade) RunState(ctx context.Context, ref session.SessionRef) (a
 }
 
 func (f *runtimeFacade) Terminals() terminal.Controller {
-	provider, _ := f.inner.(agent.TerminalProvider)
+	provider, _ := f.inner.(terminal.Provider)
 	if provider == nil {
 		return nil
 	}

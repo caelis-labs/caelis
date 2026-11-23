@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -243,11 +242,4 @@ type ParticipantControlPlane interface {
 	AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, PromptParticipantRequest) (RunResult, error)
 	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
-}
-
-// TerminalProvider is one optional runtime capability for command fallback
-// reads and process control. Transient Task stream consumption belongs to
-// product Control.
-type TerminalProvider interface {
-	Terminals() terminal.Controller
 }
