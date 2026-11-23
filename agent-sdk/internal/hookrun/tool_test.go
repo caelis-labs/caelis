@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -15,13 +15,13 @@ func TestInvokeProducerFailureRemainsOriginal(t *testing.T) {
 	for _, around := range []bool{false, true} {
 		t.Run(map[bool]string{false: "without-middleware", true: "passthrough"}[around], func(t *testing.T) {
 			original := errors.New("producer persistence failed")
-			hooks := agent.Hooks{}
+			hooks := hook.Set{}
 			if around {
-				hooks.ToolInvoke = []agent.ToolInvokeHook{{Name: "pass", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+				hooks.ToolInvoke = []hook.ToolInvoke{{Name: "pass", Apply: func(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 					return next(ctx)
 				}}}
 			}
-			ctx := WithRun(t.Context(), hooks, agent.HookContext{})
+			ctx := WithRun(t.Context(), hooks, hook.TurnContext{})
 			calls := 0
 			result, err := InvokeTool(ctx, tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) {
 				calls++
@@ -48,17 +48,17 @@ func TestFullResultRejectsDuplicateBusinessBlocksWithoutLosingEffect(t *testing.
 }
 
 func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
-	hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "invalid-content", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	hooks := hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "invalid-content", Apply: func(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 		r, e := next(ctx)
 		r.Content = []tool.ContentBlock{tool.StructuredContent{Value: []byte("invalid")}}
 		return r, e
 	}}}}
 	calls := 0
-	r, err := InvokeTool(WithRun(t.Context(), hooks, agent.HookContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) {
+	r, err := InvokeTool(WithRun(t.Context(), hooks, hook.TurnContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) {
 		calls++
 		return tool.Result{Content: []tool.ContentBlock{tool.Text("known committed business value")}}, nil
 	})
-	var phase *agent.HookError
+	var phase *hook.Error
 	var processing *ProcessingError
 	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "invalid-content" || !errors.As(err, &processing) || EffectError(err) != nil || calls != 1 || len(r.Content) != 1 || strings.Contains(string(r.Content[0].(tool.Text)), "known committed business value") {
 		t.Fatalf("known effect lost: calls=%d result=%+v err=%v", calls, r, err)
@@ -68,13 +68,13 @@ func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
 func TestInvokeCannotSuppressProducerFailure(t *testing.T) {
 	for _, cause := range []error{context.Canceled, errors.New("authority revoked"), errors.New("store write failed"), tool.FailedReply("tool reported failure")} {
 		t.Run(cause.Error(), func(t *testing.T) {
-			hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "suppress", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+			hooks := hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "suppress", Apply: func(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 				r, _ := next(ctx)
 				return r, nil
 			}}}}
 			calls := 0
-			_, err := InvokeTool(WithRun(t.Context(), hooks, agent.HookContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) { calls++; return tool.Result{}, cause })
-			var phase *agent.HookError
+			_, err := InvokeTool(WithRun(t.Context(), hooks, hook.TurnContext{}), tool.Definition{Name: "Effect"}, tool.Call{ID: "one", Name: "Effect"}, func(context.Context) (tool.Result, error) { calls++; return tool.Result{}, cause })
+			var phase *hook.Error
 			effectErr := EffectError(err)
 			if !errors.Is(err, cause) || !errors.As(err, &phase) || phase.Name != "suppress" || !errors.Is(effectErr, cause) || calls != 1 {
 				t.Fatalf("producer failure suppressed: calls=%d err=%v effectErr=%v", calls, err, effectErr)

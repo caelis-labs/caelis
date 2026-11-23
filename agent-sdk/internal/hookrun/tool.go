@@ -7,23 +7,23 @@ import (
 	"errors"
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func toolEvidence(ctx context.Context, def tool.Definition, call tool.Call) agent.HookContext {
-	e := FromContext(ctx).Evidence
+func toolEvidence(ctx context.Context, def tool.Definition, call tool.Call) hook.ToolContext {
+	e := hook.ToolContext{TurnContext: FromContext(ctx).Evidence}
 	e.ToolExecution = tool.InvocationFromContext(ctx)
 	e.ToolParent = tool.ParentFromContext(ctx)
-	// Call and InvokeTool detach this evidence before invoking extensions.
-	e.Tool = &call
-	e.ToolDefinition = &def
+	e.Tool = tool.CloneCall(call)
+	e.Tool.Metadata = nil
+	e.ToolDefinition = tool.CloneDefinition(def)
 	return e
 }
 
-func clonePreparation(in agent.ToolPreparation) agent.ToolPreparation {
+func clonePreparation(in hook.ToolPreparation) hook.ToolPreparation {
 	in.Input = append(json.RawMessage(nil), in.Input...)
 	if in.Result != nil {
 		r, _ := tool.CloneResult(*in.Result, nil)
@@ -38,30 +38,29 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 	failure := func(err error) (tool.Call, *tool.Result, error) {
 		entries := FromContext(ctx).Hooks.ToolPrepare
 		if len(entries) > 0 {
-			err = &agent.HookError{Phase: "tool_prepare", Name: entries[len(entries)-1].Name, Cause: err}
+			err = &hook.Error{Phase: "tool_prepare", Name: entries[len(entries)-1].Name, Cause: err}
 		}
 		return call, nil, err
 	}
-	p := agent.ToolPreparation{Kind: agent.ToolPrepareContinue, Input: append(json.RawMessage(nil), call.Input...)}
-	e := toolEvidence(ctx, def, call)
+	p := hook.ToolPreparation{Kind: hook.ToolPrepareContinue, Input: append(json.RawMessage(nil), call.Input...)}
 	for _, h := range FromContext(ctx).Hooks.ToolPrepare {
-		next, err := Call(ctx, "tool_prepare", h, e, p, clonePreparation, clonePreparation)
+		next, err := Call(ctx, "tool_prepare", h, toolEvidence(ctx, def, call), p, clonePreparation, clonePreparation)
 		if err != nil {
 			return call, nil, err
 		}
 		bad := func(reason string) (tool.Call, *tool.Result, error) {
-			return call, nil, &agent.HookError{Phase: "tool_prepare", Name: h.Name, Cause: fmt.Errorf("%s", reason)}
+			return call, nil, &hook.Error{Phase: "tool_prepare", Name: h.Name, Cause: fmt.Errorf("%s", reason)}
 		}
 		switch next.Kind {
-		case agent.ToolPrepareContinue:
+		case hook.ToolPrepareContinue:
 			if next.Result != nil {
 				return bad("continue cannot carry a result")
 			}
-		case agent.ToolPrepareRespond:
+		case hook.ToolPrepareRespond:
 			if next.Result == nil {
 				return bad("respond requires a result")
 			}
-		case agent.ToolPrepareBlock:
+		case hook.ToolPrepareBlock:
 			if next.Result != nil {
 				return bad("block cannot carry a result")
 			}
@@ -77,7 +76,7 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 	// A rejected model proposal is a recoverable tool error. A hook that
 	// supplied invalid arguments or a synthetic decision fails preparation.
 	invalidInput := func(err error) (tool.Call, *tool.Result, error) {
-		if p.Kind == agent.ToolPrepareContinue && unchanged {
+		if p.Kind == hook.ToolPrepareContinue && unchanged {
 			return call, nil, err
 		}
 		return failure(err)
@@ -92,7 +91,7 @@ func PrepareTool(ctx context.Context, def tool.Definition, call tool.Call) (tool
 		}
 	}
 	call.Input = append(json.RawMessage(nil), p.Input...)
-	if p.Kind == agent.ToolPrepareBlock {
+	if p.Kind == hook.ToolPrepareBlock {
 		const message = "Tool preparation blocked this call"
 		r := tool.Result{Content: []tool.ContentBlock{tool.Text(message)}}
 		return call, &r, tool.FailedReply(message)
@@ -175,10 +174,9 @@ func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result
 	if err := tool.ValidateContent(result.Content); err != nil {
 		return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: cause}
 	}
-	e := toolEvidence(ctx, def, call)
 	for _, h := range FromContext(ctx).Hooks.ToolResult {
-		input := agent.ToolOutcome{Result: result, Error: cause}
-		next, err := Call(ctx, "tool_result", h, e, input, func(o agent.ToolOutcome) agent.ToolOutcome { o.Result, _ = tool.CloneResult(o.Result, nil); return o }, func(r tool.Result) tool.Result { r, _ = tool.CloneResult(r, nil); return r })
+		input := hook.ToolOutcome{Result: result, Error: cause}
+		next, err := Call(ctx, "tool_result", h, toolEvidence(ctx, def, call), input, func(o hook.ToolOutcome) hook.ToolOutcome { o.Result, _ = tool.CloneResult(o.Result, nil); return o }, func(r tool.Result) tool.Result { r, _ = tool.CloneResult(r, nil); return r })
 		if err == nil {
 			_, hadStructured := result.Structured()
 			_, hasStructured := next.Structured()
@@ -192,7 +190,7 @@ func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result
 		if err != nil {
 			// Never fall back to raw content after a failed redaction. The error
 			// preserves that an effect may have succeeded; callers never replay.
-			return failedProcessingResult(), &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause}
+			return failedProcessingResult(), &ProcessingError{Cause: &hook.Error{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause}
 		}
 		result = next
 	}
@@ -209,7 +207,6 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 	if len(entries) == 0 {
 		return base(ctx)
 	}
-	e := toolEvidence(ctx, def, call)
 	var invoked bool
 	var actualErr error
 	chain := func(ctx context.Context) (tool.Result, error) {
@@ -222,8 +219,9 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 		h := entries[i]
 		following := chain
 		chain = func(ctx context.Context) (tool.Result, error) {
+			evidence := toolEvidence(ctx, def, call)
 			return Around(ctx, "tool_invoke", h.Name, h.Timeout, func(ctx context.Context, next func(context.Context) (tool.Result, error)) (tool.Result, error) {
-				return h.Invoke(ctx, cloneContext(e), agent.ToolNext(next))
+				return h.Apply(ctx, evidence, hook.ToolNext(next))
 			}, following)
 		}
 	}
@@ -234,7 +232,7 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 	if err == nil {
 		err = validateResult(def, r, nil)
 		if err != nil {
-			err = &agent.HookError{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
+			err = &hook.Error{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
 			if invoked {
 				return failedProcessingResult(), &ProcessingError{Cause: err, EffectError: actualErr}
 			}
@@ -247,9 +245,8 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 // ModelView returns a safe reply with the original envelope if any transformation fails.
 func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model.Message) (model.Message, error) {
 	original := m
-	e := toolEvidence(ctx, def, call)
 	for _, h := range FromContext(ctx).Hooks.ModelView {
-		next, err := Call(ctx, "model_view", h, e, m, model.CloneMessage, model.CloneMessage)
+		next, err := Call(ctx, "model_view", h, toolEvidence(ctx, def, call), m, model.CloneMessage, model.CloneMessage)
 		if err == nil {
 			if next.Role != m.Role || len(next.Parts) != 1 || len(m.Parts) != 1 || next.Parts[0].ToolResult == nil || m.Parts[0].ToolResult == nil {
 				err = fmt.Errorf("model view must preserve tool result envelope")
@@ -263,7 +260,7 @@ func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model
 			}
 		}
 		if err != nil {
-			return failedView(original), &agent.HookError{Phase: "model_view", Name: h.Name, Cause: err}
+			return failedView(original), &hook.Error{Phase: "model_view", Name: h.Name, Cause: err}
 		}
 		m = next
 	}
@@ -276,7 +273,7 @@ type ProcessingError struct {
 }
 
 func (e *ProcessingError) Error() string {
-	var h *agent.HookError
+	var h *hook.Error
 	if errors.As(e.Cause, &h) {
 		return fmt.Sprintf("hook %s/%s: result processing failed; effect outcome retained", h.Phase, h.Name)
 	}
@@ -301,7 +298,7 @@ func failedView(message model.Message) model.Message {
 }
 
 func ProcessingFailure(err error) *session.ToolProcessingFailure {
-	var h *agent.HookError
+	var h *hook.Error
 	if errors.As(err, &h) {
 		return &session.ToolProcessingFailure{Phase: h.Phase, Name: h.Name, Error: err.Error()}
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -23,7 +24,7 @@ func (r *finalOutputRedactor) Finish(ctx context.Context) (string, error) {
 }
 
 func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
-	for _, mode := range []agent.StreamMode{agent.StreamBuffered, agent.StreamIncremental} {
+	for _, mode := range []hook.StreamMode{hook.StreamBuffered, hook.StreamIncremental} {
 		for _, branch := range []string{"provider", "cache", "input-early", "turn-early", "model-result", "completion-replace"} {
 			t.Run(string(mode)+"/"+branch, func(t *testing.T) {
 				root := t.TempDir()
@@ -35,9 +36,9 @@ func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
 				synthetic := branch == "cache" || branch == "input-early" || branch == "turn-early"
 				var providers atomic.Int64
 				var mu sync.Mutex
-				var evidence []agent.HookContext
+				var evidence []hook.OutputContext
 				var chunks strings.Builder
-				h := agent.Hooks{StreamMode: mode, Stream: []agent.Hook[struct{}, agent.StreamTransformer]{{Name: "final-redact", Apply: func(_ context.Context, e agent.HookContext, _ struct{}) (agent.StreamTransformer, error) {
+				h := hook.Set{StreamMode: mode, Stream: []hook.Stream{{Name: "final-redact", Apply: func(_ context.Context, e hook.OutputContext) (hook.StreamTransformer, error) {
 					mu.Lock()
 					evidence = append(evidence, e)
 					mu.Unlock()
@@ -46,30 +47,30 @@ func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
 				secret := model.NewTextMessage(model.RoleAssistant, "secret 你好")
 				switch branch {
 				case "cache":
-					h.ModelPrepare = []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "cache", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+					h.ModelPrepare = []hook.ModelPrepare{{Name: "cache", Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 						p.Response = textResponse(secret.TextContent(), model.Usage{TotalTokens: 999})
 						return p, nil
 					}}}
 				case "input-early":
-					h.Input = []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "early", Apply: func(_ context.Context, _ agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
-						return agent.InputDecision{Message: v.Message, Response: &secret}, nil
+					h.Input = []hook.Input{{Name: "early", Apply: func(_ context.Context, _ hook.InputContext, v hook.InputView) (hook.InputDecision, error) {
+						return hook.InputDecision{Message: v.Message, Response: &secret}, nil
 					}}}
 				case "turn-early":
-					h.TurnStart = []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "early", Apply: func(context.Context, agent.HookContext, struct{}) (agent.TurnStartDecision, error) {
-						return agent.TurnStartDecision{Response: &secret}, nil
+					h.TurnStart = []hook.TurnStart{{Name: "early", Apply: func(context.Context, hook.TurnContext) (hook.TurnStartDecision, error) {
+						return hook.TurnStartDecision{Response: &secret}, nil
 					}}}
 				case "model-result":
-					h.ModelResult = []agent.Hook[model.Response, model.Response]{{Name: "replace", Apply: func(_ context.Context, _ agent.HookContext, r model.Response) (model.Response, error) {
+					h.ModelResult = []hook.ModelResult{{Name: "replace", Apply: func(_ context.Context, _ hook.OutputContext, r model.Response) (model.Response, error) {
 						r.Message = secret
 						return r, nil
 					}}}
 				case "completion-replace":
-					h.Completion = []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "replace", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
-						return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &secret}, nil
+					h.Completion = []hook.Completion{{Name: "replace", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
+						return hook.CompletionDecision{Kind: hook.CompletionReplace, Message: &secret}, nil
 					}}}
 				}
 				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: h})
-				if mode == agent.StreamIncremental && (branch == "model-result" || branch == "completion-replace") {
+				if mode == hook.StreamIncremental && (branch == "model-result" || branch == "completion-replace") {
 					if err == nil {
 						t.Fatal("unsupported incremental mutator assembled")
 					}
@@ -141,14 +142,14 @@ func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
 				if finals != 1 || len(evidence) != 1 {
 					t.Fatalf("finals=%d factories=%d", finals, len(evidence))
 				}
-				expectedSource := agent.HookOutputProvider
+				expectedSource := hook.OutputProvider
 				switch branch {
 				case "cache":
-					expectedSource = agent.HookOutputCache
+					expectedSource = hook.OutputCache
 				case "input-early":
-					expectedSource = agent.HookOutputInputEarly
+					expectedSource = hook.OutputInputEarly
 				case "turn-early":
-					expectedSource = agent.HookOutputTurnEarly
+					expectedSource = hook.OutputTurnEarly
 				}
 				e := evidence[0]
 				if e.OutputSource != expectedSource {
@@ -161,7 +162,7 @@ func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
 				} else if providers.Load() != 1 || receipts != 1 || e.InvocationID == "" || e.AttemptOrdinal != 1 {
 					t.Fatalf("actual evidence: %+v providers=%d receipts=%d", e, providers.Load(), receipts)
 				}
-				if mode == agent.StreamIncremental && !synthetic {
+				if mode == hook.StreamIncremental && !synthetic {
 					if chunks.String() != want {
 						t.Fatalf("live=%q final=%q", chunks.String(), want)
 					}

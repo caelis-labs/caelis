@@ -16,6 +16,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -337,7 +338,7 @@ func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
 			}
 			secondDone := make(chan struct{})
 			var overtook atomic.Bool
-			hook := agent.ToolInvokeHook{Name: "delay-first-mutation", Invoke: func(ctx context.Context, info agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+			delay := hook.ToolInvoke{Name: "delay-first-mutation", Apply: func(ctx context.Context, info hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 				if info.Tool.ID == "first" {
 					// Simulate the first call reaching the file lock late. In a
 					// serial batch the second cannot arrive until we proceed.
@@ -359,7 +360,7 @@ func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
 				}
 				return nil
 			}}
-			events := runNativeOrdering(t, store, active, driver, []tool.Tool{target}, Config{Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{hook}}})
+			events := runNativeOrdering(t, store, active, driver, []tool.Tool{target}, Config{Hooks: hook.Set{ToolInvoke: []hook.ToolInvoke{delay}}})
 			contents, err := os.ReadFile(file)
 			if err != nil || string(contents) != "second" || overtook.Load() {
 				t.Fatalf("model order lost: file=%q, second overtook first=%v, err=%v", contents, overtook.Load(), err)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -22,7 +23,7 @@ func TestHooksTypedSchemaLateMutationCannotChangeBinding(t *testing.T) {
 			baseline := tool.CloneDefinition(target.Definition())
 			release, finished := make(chan struct{}), make(chan struct{})
 			var providers atomic.Int64
-			h := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "typed-mutation", Timeout: 10 * time.Millisecond, Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+			h := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "typed-mutation", Timeout: 10 * time.Millisecond, Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 				defer close(finished)
 				if late {
 					<-release

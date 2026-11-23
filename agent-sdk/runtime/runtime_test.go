@@ -16,6 +16,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -811,7 +812,7 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	}
 	runtime, err := New(Config{
 		Sessions: sessions,
-		Hooks:    agent.Hooks{StreamMode: agent.StreamIncremental},
+		Hooks:    hook.Set{StreamMode: hook.StreamIncremental},
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Be terse.",
 		},

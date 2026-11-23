@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -155,8 +156,8 @@ func (r *Runtime) appendInputEvents(ctx context.Context, ref session.SessionRef,
 type localInputContext struct {
 	agent.Context
 	runner        *runner
-	contextSource func() (agent.ContextSource, error)
-	contextEdit   func(string, string, agent.ContextEdit, func(context.Context) (func(), error)) ([]*session.Event, error)
+	contextSource func() (hook.ContextSource, error)
+	contextEdit   func(string, string, hook.ContextEdit, func(context.Context) (func(), error)) ([]*session.Event, error)
 	commit        func(agent.Submission) ([]model.Message, error)
 }
 
@@ -177,9 +178,9 @@ func (c *localInputContext) CommitSubmission(s agent.Submission) ([]model.Messag
 	return c.commit(s)
 }
 
-func (c *localInputContext) ContextEditSource() (agent.ContextSource, error) {
+func (c *localInputContext) ContextEditSource() (hook.ContextSource, error) {
 	return c.contextSource()
 }
-func (c *localInputContext) CommitContextEdit(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+func (c *localInputContext) CommitContextEdit(logical, name string, edit hook.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
 	return c.contextEdit(logical, name, edit, validate)
 }

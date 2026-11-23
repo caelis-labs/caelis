@@ -14,6 +14,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -481,7 +482,7 @@ func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 
 type repeatedToolContinuation struct{}
 
-func (repeatedToolContinuation) Invoke(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+func (repeatedToolContinuation) Invoke(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 	first, err := next(ctx)
 	if err != nil {
 		return first, err
@@ -503,7 +504,7 @@ func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "repeat", Invoke: repeatedToolContinuation{}.Invoke}}}})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "repeat", Apply: repeatedToolContinuation{}.Invoke}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

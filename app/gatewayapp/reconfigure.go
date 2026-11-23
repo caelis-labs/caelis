@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -403,7 +403,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	localCfg := runtime.Config{
 		Sessions:                 s.sessions,
 		AgentFactory:             localChatFactory,
-		Hooks:                    agent.Hooks{StreamMode: agent.StreamIncremental},
+		Hooks:                    hook.Set{StreamMode: hook.StreamIncremental},
 		DefaultPolicyMode:        effectivePolicyProfile,
 		SandboxPolicy:            sandboxPolicySnapshot,
 		PolicyRegistry:           policyRegistry,

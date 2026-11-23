@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -35,12 +35,12 @@ func TestProgressBelongsToActiveInvocation(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	transform := agent.Hook[tool.Result, tool.Result]{Name: "test transform isolation", Apply: func(ctx context.Context, _ agent.HookContext, result tool.Result) (tool.Result, error) {
+	transform := hook.BaseHook[func(context.Context, hook.TurnContext, tool.Result) (tool.Result, error)]{Name: "test transform isolation", Apply: func(ctx context.Context, _ hook.TurnContext, result tool.Result) (tool.Result, error) {
 		ReportProgress(ctx, tool.Result{Content: []tool.ContentBlock{tool.Text("transform")}})
 		return result, nil
 	}}
 	identity := func(result tool.Result) tool.Result { return result }
-	if _, err := hookrun.Call(child, "ToolResult", transform, agent.HookContext{}, tool.Result{}, identity, identity); err != nil {
+	if _, err := hookrun.Call(child, "ToolResult", transform, hook.TurnContext{}, tool.Result{}, identity, identity); err != nil {
 		t.Fatal(err)
 	}
 	cancel()

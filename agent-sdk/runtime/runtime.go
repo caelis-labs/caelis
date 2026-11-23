@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -23,9 +24,9 @@ import (
 
 // Config defines one baseline local runtime instance.
 type Config struct {
-	Hooks agent.Hooks
+	Hooks hook.Set
 	// HookPurpose names this independently assembled model loop. Empty means chat.
-	HookPurpose agent.HookPurpose
+	HookPurpose hook.Purpose
 	// Sessions is shared across runs. Each RunRequest selects one Session by its ref.
 	Sessions       session.Service
 	AgentFactory   agent.AgentFactory
@@ -69,8 +70,8 @@ type Config struct {
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
-	hooks                    agent.Hooks
-	hookPurpose              agent.HookPurpose
+	hooks                    hook.Set
+	hookPurpose              hook.Purpose
 	codeModeMu               sync.Mutex
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   approval.Requester
@@ -128,15 +129,15 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 	if cfg.HookPurpose == "" {
-		cfg.HookPurpose = agent.HookPurposeChat
+		cfg.HookPurpose = hook.PurposeChat
 	}
 	switch cfg.HookPurpose {
-	case agent.HookPurposeChat, agent.HookPurposeCompaction, agent.HookPurposeSystemAgent:
+	case hook.PurposeChat, hook.PurposeCompaction, hook.PurposeSystemAgent:
 	default:
 		return nil, fmt.Errorf("runtime: invalid hook purpose %q", cfg.HookPurpose)
 	}
 	r := &Runtime{
-		hooks:                    agent.CloneHooks(cfg.Hooks),
+		hooks:                    cfg.Hooks.Clone(),
 		hookPurpose:              cfg.HookPurpose,
 		sessions:                 cfg.Sessions,
 		agentFactory:             cfg.AgentFactory,

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -50,8 +51,8 @@ func TestHooksFeedbackBudgetConsumesOnlyConfirmedCommits(t *testing.T) {
 				providers.Add(1)
 				return textResponse("candidate", model.Usage{})
 			}}
-			h := agent.Hooks{CompletionLimit: 2, Completion: []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "continue", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
-				return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: []model.Part{model.NewTextPart("feedback")}}, nil
+			h := hook.Set{CompletionLimit: 2, Completion: []hook.Completion{{Name: "continue", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
+				return hook.CompletionDecision{Kind: hook.CompletionContinue, Feedback: []model.Part{model.NewTextPart("feedback")}}, nil
 			}}}}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: h})
 			if err != nil {

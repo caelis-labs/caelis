@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -158,7 +159,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
 		Sessions: sessions, AgentFactory: localChatFactory, Compaction: compaction,
-		Hooks:       agent.Hooks{StreamMode: agent.StreamIncremental},
+		Hooks:       hook.Set{StreamMode: hook.StreamIncremental},
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules}, DefaultPolicyMode: mode,
 		PersistPolicyConsent: instance.persistPolicyConsent,
 		SandboxPolicy:        sandboxPolicy,

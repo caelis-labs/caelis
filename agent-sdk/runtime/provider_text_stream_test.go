@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -38,7 +39,7 @@ data: [DONE]
 				t.Fatal(err)
 			}
 			store, active := newTestSessionService(t, "provider-stream")
-			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{StreamMode: agent.StreamIncremental}})
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{StreamMode: hook.StreamIncremental}})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -14,6 +14,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	sdkchat "github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -670,7 +671,7 @@ func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.To
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime, err := sdkruntime.New(sdkruntime.Config{
-		Hooks:    agent.Hooks{StreamMode: agent.StreamIncremental},
+		Hooks:    hook.Set{StreamMode: hook.StreamIncremental},
 		Sessions: sessions,
 		AgentFactory: sdkchat.Factory{
 			SystemPrompt: "Answer tersely.",

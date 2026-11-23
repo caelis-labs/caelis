@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -31,8 +32,8 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 				effects.Add(1)
 				return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, nil
 			}}
-			hooks := agent.Hooks{
-				ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "redact-business", Apply: func(_ context.Context, e agent.HookContext, o agent.ToolOutcome) (tool.Result, error) {
+			hooks := hook.Set{
+				ToolResult: []hook.ToolResult{{Name: "redact-business", Apply: func(_ context.Context, e hook.ToolContext, o hook.ToolOutcome) (tool.Result, error) {
 					if e.Tool.Name != "ReadFact" {
 						return o.Result, nil
 					}
@@ -56,7 +57,7 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 					}
 					return o.Result, nil
 				}}},
-				ModelView: []agent.Hook[model.Message, model.Message]{{Name: "summary", Apply: func(_ context.Context, e agent.HookContext, m model.Message) (model.Message, error) {
+				ModelView: []hook.ModelView{{Name: "summary", Apply: func(_ context.Context, e hook.ToolContext, m model.Message) (model.Message, error) {
 					if e.Tool.Name != "ReadFact" {
 						return m, nil
 					}

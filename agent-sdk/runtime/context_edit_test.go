@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -34,8 +35,8 @@ func TestContextEditDurableProjectionAndUnknownCommit(t *testing.T) {
 					return textResponse("done", model.Usage{})
 				}}
 				parts := []model.Part{model.NewTextPart("durable context"), model.NewJSONPart([]byte(`{"big":9007199254740993123456789}`)), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.invalid/image.png"}, "image/png", "image")}
-				hooks := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "edit", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
-					edit := &agent.ContextEdit{Source: e.ContextSource}
+				hooks := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "edit", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
+					edit := &hook.ContextEdit{Source: e.ContextSource}
 					if replace {
 						edit.ReplacePrefix = []model.Message{{Role: model.RoleUser, Parts: model.CloneParts(parts)}}
 						if mode == "replace-empty" {
@@ -154,9 +155,9 @@ func TestContextEditStaleAssemblyDoesNotAppendTwice(t *testing.T) {
 		providers++
 		return textResponse("done", model.Usage{})
 	}}
-	hooks := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "append", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+	hooks := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "append", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 		hookCalls++
-		p.ContextEdit = &agent.ContextEdit{Source: e.ContextSource, Append: []model.Part{model.NewTextPart("once")}}
+		p.ContextEdit = &hook.ContextEdit{Source: e.ContextSource, Append: []model.Part{model.NewTextPart("once")}}
 		return p, nil
 	}}}}
 	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hooks})

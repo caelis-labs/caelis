@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
@@ -193,17 +194,17 @@ func assertNestedMutationDisplay(t *testing.T, event *session.Event, wantDisplay
 	}
 }
 
-func mutationDisplayHooks(mode string) agent.Hooks {
+func mutationDisplayHooks(mode string) hook.Set {
 	redacted := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"redacted":true}`)}}}
-	return agent.Hooks{
-		ToolInvoke: []agent.ToolInvokeHook{{Name: "invoke", Invoke: func(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	return hook.Set{
+		ToolInvoke: []hook.ToolInvoke{{Name: "invoke", Apply: func(ctx context.Context, e hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 			result, err := next(ctx)
 			if err == nil && mode == "invoke-redacted" && e.Tool.Name == filesystem.WriteToolName {
 				return redacted, nil
 			}
 			return result, err
 		}}},
-		ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "result", Apply: func(_ context.Context, e agent.HookContext, outcome agent.ToolOutcome) (tool.Result, error) {
+		ToolResult: []hook.ToolResult{{Name: "result", Apply: func(_ context.Context, e hook.ToolContext, outcome hook.ToolOutcome) (tool.Result, error) {
 			if e.Tool.Name == filesystem.WriteToolName {
 				switch mode {
 				case "result-redacted":
@@ -214,7 +215,7 @@ func mutationDisplayHooks(mode string) agent.Hooks {
 			}
 			return outcome.Result, nil
 		}}},
-		ModelView: []agent.Hook[model.Message, model.Message]{{Name: "view", Apply: func(_ context.Context, e agent.HookContext, message model.Message) (model.Message, error) {
+		ModelView: []hook.ModelView{{Name: "view", Apply: func(_ context.Context, e hook.ToolContext, message model.Message) (model.Message, error) {
 			if mode == "view-failed" && e.Tool.Name == filesystem.WriteToolName {
 				return model.Message{}, errors.New("fixture view redactor failed")
 			}

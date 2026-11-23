@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -14,8 +15,8 @@ type runKey struct{}
 // Session, policy, producer lifetime and commits retain their existing owners.
 type Run struct {
 	Trace     agent.TraceOptions
-	Hooks     agent.Hooks
-	Evidence  agent.HookContext
+	Hooks     hook.Set
+	Evidence  hook.TurnContext
 	mu        sync.Mutex
 	early     *Early
 	requestID string
@@ -79,8 +80,8 @@ func (r *Run) CommitFeedback(id string) {
 	r.feedback[id] = true
 }
 
-func WithRun(ctx context.Context, h agent.Hooks, e agent.HookContext) context.Context {
-	return context.WithValue(ctx, runKey{}, &Run{Hooks: agent.CloneHooks(h), Evidence: e})
+func WithRun(ctx context.Context, h hook.Set, e hook.TurnContext) context.Context {
+	return context.WithValue(ctx, runKey{}, &Run{Hooks: h.Clone(), Evidence: e})
 }
 func FromContext(ctx context.Context) *Run {
 	r, _ := ctx.Value(runKey{}).(*Run)
@@ -92,17 +93,17 @@ func FromContext(ctx context.Context) *Run {
 
 // Early keeps the detached candidate origin for final output transformation.
 type Early struct {
-	Message  model.Message
-	Evidence agent.HookContext
+	Message model.Message
+	Source  hook.OutputSource
 }
 
-func (r *Run) SetEarly(m *model.Message, e agent.HookContext) {
+func (r *Run) SetEarly(m *model.Message, source hook.OutputSource) {
 	if m == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.early = &Early{Message: model.CloneMessage(*m), Evidence: e}
+	r.early = &Early{Message: model.CloneMessage(*m), Source: source}
 }
 func (r *Run) HasEarly() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.early != nil }
 func (r *Run) TakeEarly() *Early {
@@ -120,13 +121,13 @@ func CloneMessagePointer(m *model.Message) *model.Message {
 	c := model.CloneMessage(*m)
 	return &c
 }
-func CloneInput(in agent.InputDecision) agent.InputDecision {
+func CloneInput(in hook.InputDecision) hook.InputDecision {
 	in.Message = model.CloneMessage(in.Message)
 	in.Context = model.CloneParts(in.Context)
 	in.Response = CloneMessagePointer(in.Response)
 	return in
 }
-func CloneTurn(in agent.TurnStartDecision) agent.TurnStartDecision {
+func CloneTurn(in hook.TurnStartDecision) hook.TurnStartDecision {
 	in.Context = model.CloneParts(in.Context)
 	in.Response = CloneMessagePointer(in.Response)
 	return in
@@ -134,12 +135,12 @@ func CloneTurn(in agent.TurnStartDecision) agent.TurnStartDecision {
 
 type requestKey struct{}
 
-func WithRequest(ctx context.Context, e agent.HookContext) context.Context {
+func WithRequest(ctx context.Context, e hook.RequestContext) context.Context {
 	return context.WithValue(ctx, requestKey{}, e)
 }
-func RequestEvidence(ctx context.Context) agent.HookContext {
-	if e, ok := ctx.Value(requestKey{}).(agent.HookContext); ok {
+func RequestEvidence(ctx context.Context) hook.RequestContext {
+	if e, ok := ctx.Value(requestKey{}).(hook.RequestContext); ok {
 		return e
 	}
-	return FromContext(ctx).Evidence
+	return hook.RequestContext{TurnContext: FromContext(ctx).Evidence}
 }

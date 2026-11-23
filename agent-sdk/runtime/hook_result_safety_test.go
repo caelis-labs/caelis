@@ -13,6 +13,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -50,7 +51,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 				if mode == "timeout" {
 					timeout = 500 * time.Millisecond
 				}
-				hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "redact", Timeout: timeout, Invoke: func(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+				hooks := hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "redact", Timeout: timeout, Apply: func(ctx context.Context, e hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 					r, err := next(ctx)
 					if e.Tool.Name != "ReadSecret" {
 						return r, err
@@ -71,7 +72,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 					r.Content = []tool.ContentBlock{tool.StructuredContent{Value: accepted}, tool.Resource{URI: "https://example.invalid/accepted", MIMEType: "image/png", Name: "fixture"}}
 					return r, err
 				}}}}
-				hooks.ModelView = []agent.Hook[model.Message, model.Message]{{Name: "summary", Apply: func(_ context.Context, e agent.HookContext, m model.Message) (model.Message, error) {
+				hooks.ModelView = []hook.ModelView{{Name: "summary", Apply: func(_ context.Context, e hook.ToolContext, m model.Message) (model.Message, error) {
 					if e.Tool.Name == "ReadSecret" && len(m.ToolResults()) > 0 {
 						r := m.Parts[0].ToolResult
 						r.Content = append([]model.Part(nil), r.Content[:1]...)
@@ -103,7 +104,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 					t.Fatal(err)
 				}
 				completion := run.Handle.WaitCompletion(t.Context())
-				var hookErr *agent.HookError
+				var hookErr *hook.Error
 				if errors.As(completion, &hookErr) {
 					t.Logf("hook %s/%s cause=%v deadline=%v", hookErr.Phase, hookErr.Name, hookErr.Cause, errors.Is(completion, context.DeadlineExceeded))
 				}

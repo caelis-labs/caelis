@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -74,8 +75,8 @@ func TestRuntimeViewImageUsesModelSelectedByPrepareHook(t *testing.T) {
 			defaultModel := &viewImageRuntimeModel{name: name, imageInput: !imageInput}
 			selected := &viewImageRuntimeModel{name: name, imageInput: imageInput}
 			tools := []tool.Tool{viewImage, tool.NamedTool{Def: tool.Definition{Name: "ordinary"}}}
-			core, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{
-				ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "select", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+			core, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{
+				ModelPrepare: []hook.ModelPrepare{{Name: "select", Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 					p.ModelName = name
 					p.Request.Tools = tool.ModelSpecs(tools)
 					return p, nil

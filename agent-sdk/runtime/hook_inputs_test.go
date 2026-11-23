@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -22,24 +23,24 @@ func TestInputHooksEarlyCompletionFileReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	var inputCalls, turnCalls, providerCalls, completeCalls atomic.Int64
-	hooks := agent.Hooks{
-		Input: []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "normalize", Apply: func(ctx context.Context, e agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
+	hooks := hook.Set{
+		Input: []hook.Input{{Name: "normalize", Apply: func(ctx context.Context, e hook.InputContext, v hook.InputView) (hook.InputDecision, error) {
 			inputCalls.Add(1)
 			if e.RunID == "" || e.TurnID == "" {
 				t.Error("missing trusted identity")
 			}
 			m := model.NewTextMessage(model.RoleAssistant, "early")
 			v.Message.Parts[0].Text.Text = "effective"
-			return agent.InputDecision{Message: v.Message, Response: &m}, nil
+			return hook.InputDecision{Message: v.Message, Response: &m}, nil
 		}}},
-		TurnStart: []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "start", Apply: func(context.Context, agent.HookContext, struct{}) (agent.TurnStartDecision, error) {
+		TurnStart: []hook.TurnStart{{Name: "start", Apply: func(context.Context, hook.TurnContext) (hook.TurnStartDecision, error) {
 			turnCalls.Add(1)
-			return agent.TurnStartDecision{}, nil
+			return hook.TurnStartDecision{}, nil
 		}}},
-		Completion: []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "review", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
+		Completion: []hook.Completion{{Name: "review", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
 			completeCalls.Add(1)
 			m := model.NewTextMessage(model.RoleAssistant, "accepted")
-			return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &m}, nil
+			return hook.CompletionDecision{Kind: hook.CompletionReplace, Message: &m}, nil
 		}}},
 	}
 	llm := scriptedTestModel{generate: func(context.Context, *model.Request) *model.Response {
@@ -92,8 +93,8 @@ func TestCompletionFeedbackHasSharedBoundAndNoRejectedFinal(t *testing.T) {
 		calls.Add(1)
 		return textResponse("rejected candidate", model.Usage{})
 	}}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{Completion: []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "continue", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
-		return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: []model.Part{model.NewTextPart("try again")}}, nil
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{Completion: []hook.Completion{{Name: "continue", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
+		return hook.CompletionDecision{Kind: hook.CompletionContinue, Feedback: []model.Part{model.NewTextPart("try again")}}, nil
 	}}}}})
 	if err != nil {
 		t.Fatal(err)

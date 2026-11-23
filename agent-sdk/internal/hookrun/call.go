@@ -8,9 +8,7 @@ import (
 	"sync"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 )
 
 var slots = make(chan struct{}, 32)
@@ -38,50 +36,37 @@ func wrap(phase, name string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return &agent.HookError{Phase: phase, Name: name, Cause: err}
-}
-
-func cloneContext(in agent.HookContext) agent.HookContext {
-	in.InputSource = session.CloneActorRef(in.InputSource)
-	if in.ToolParent != nil {
-		parent := *in.ToolParent
-		in.ToolParent = &parent
-	}
-	if in.ToolDefinition != nil {
-		d := tool.CloneDefinition(*in.ToolDefinition)
-		in.ToolDefinition = &d
-	}
-	if in.Tool != nil {
-		c := tool.CloneCall(*in.Tool)
-		c.Metadata = nil
-		in.Tool = &c
-	}
-	return in
+	return &hook.Error{Phase: phase, Name: name, Cause: err}
 }
 
 // Call bounds outstanding pure transforms. No Store, continuation or authority
 // bearer is included in the detached value. Late results cannot update owners.
-func Call[I, O any](ctx context.Context, phase string, h agent.Hook[I, O], evidence agent.HookContext, input I, cloneInput func(I) I, cloneOutput func(O) O) (O, error) {
+func Call[C, I, O any](ctx context.Context, phase string, h hook.BaseHook[func(context.Context, C, I) (O, error)], evidence C, input I, cloneInput func(I) I, cloneOutput func(O) O) (O, error) {
+	input = cloneInput(input)
+	return Transform(ctx, phase, h.Name, h.Timeout, func(ctx context.Context) (O, error) { return h.Apply(ctx, evidence, input) }, cloneOutput)
+}
+
+// Transform runs a callback with detached inputs and discards late output.
+func Transform[O any](ctx context.Context, phase, name string, timeout time.Duration, apply func(context.Context) (O, error), cloneOutput func(O) O) (O, error) {
 	var zero O
 	if err := ctx.Err(); err != nil {
-		return zero, wrap(phase, h.Name, err)
+		return zero, wrap(phase, name, err)
 	}
-	callCtx, cancel := deadline(ctx, h.Timeout)
+	callCtx, cancel := deadline(ctx, timeout)
 	defer cancel()
 	extensionCtx, release := privateContext(callCtx)
 	defer release()
 	select {
 	case slots <- struct{}{}:
 	default:
-		return zero, wrap(phase, h.Name, errors.New("outstanding transformation limit reached"))
+		return zero, wrap(phase, name, errors.New("outstanding transformation limit reached"))
 	}
 	type outcome struct {
 		value O
 		err   error
 	}
 	done := make(chan outcome, 1)
-	input = cloneInput(input)
-	evidence = cloneContext(evidence)
+
 	go func() {
 		out := outcome{}
 		defer func() {
@@ -91,19 +76,19 @@ func Call[I, O any](ctx context.Context, phase string, h agent.Hook[I, O], evide
 			<-slots
 			done <- out
 		}()
-		out.value, out.err = h.Apply(extensionCtx, evidence, input)
+		out.value, out.err = apply(extensionCtx)
 		if out.err == nil {
 			out.value = cloneOutput(out.value)
 		}
 	}()
 	select {
 	case <-callCtx.Done():
-		return zero, wrap(phase, h.Name, callCtx.Err())
+		return zero, wrap(phase, name, callCtx.Err())
 	case out := <-done:
 		if err := callCtx.Err(); err != nil {
-			return zero, wrap(phase, h.Name, err)
+			return zero, wrap(phase, name, err)
 		}
-		return out.value, wrap(phase, h.Name, out.err)
+		return out.value, wrap(phase, name, out.err)
 	}
 }
 

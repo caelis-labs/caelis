@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -82,7 +83,7 @@ func (r *Runtime) Run(
 		return agent.RunResult{}, err
 	}
 	runCtx = withLifecycleScope(runCtx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
-	runCtx = hookrun.WithRun(runCtx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
+	runCtx = hookrun.WithRun(runCtx, r.hooks, hook.TurnContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
 	hookrun.FromContext(runCtx).Trace = r.lifecycle
 	if !isACP {
 		runCtx = context.WithValue(runCtx, taskScopeKey{}, newTaskContinuationScope())

@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -20,10 +21,10 @@ import (
 func TestModelCanCorrectInvalidReadArguments(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		hooks agent.Hooks
+		hooks hook.Set
 	}{
 		{name: "without-hook"},
-		{name: "observing-hook", hooks: agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "observe", Apply: func(_ context.Context, _ agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
+		{name: "observing-hook", hooks: hook.Set{ToolPrepare: []hook.ToolPrepare{{Name: "observe", Apply: func(_ context.Context, _ hook.ToolContext, p hook.ToolPreparation) (hook.ToolPreparation, error) {
 			return p, nil
 		}}}}},
 	} {
@@ -124,7 +125,7 @@ func TestRecoverableToolFailuresContinueBatchAndLoop(t *testing.T) {
 					return nil
 				}
 			}}
-			hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "observe", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+			hooks := hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "observe", Apply: func(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 				return next(ctx)
 			}}}}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hooks})

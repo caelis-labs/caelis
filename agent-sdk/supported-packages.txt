@@ -3,6 +3,7 @@
 github.com/caelis-labs/caelis/agent-sdk
 github.com/caelis-labs/caelis/agent-sdk/approval
 github.com/caelis-labs/caelis/agent-sdk/errorcode
+github.com/caelis-labs/caelis/agent-sdk/hook
 github.com/caelis-labs/caelis/agent-sdk/judgment
 github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe
 github.com/caelis-labs/caelis/agent-sdk/model

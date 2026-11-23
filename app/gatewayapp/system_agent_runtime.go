@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -149,7 +150,7 @@ func systemManagedHistoryExtends(previous, next []*session.Event) bool {
 
 type systemManagedAgentRuntimeConfig struct {
 	AgentFactory    agent.AgentFactory
-	Hooks           agent.Hooks
+	Hooks           hook.Set
 	StagingSessions func() session.ManagedService
 	TraceSink       agent.TraceSink
 	Diagnostics     *slog.Logger
@@ -178,7 +179,7 @@ func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConf
 			return inmemory.NewStore(inmemory.Config{})
 		}
 	}
-	config.Hooks = agent.CloneHooks(config.Hooks)
+	config.Hooks = config.Hooks.Clone()
 	return &systemManagedAgentRuntime{config: config}
 }
 
@@ -273,7 +274,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 			Compaction:     plan.Compaction,
 			TraceSink:      config.TraceSink,
 			Hooks:          config.Hooks,
-			HookPurpose:    agent.HookPurposeSystemAgent,
+			HookPurpose:    hook.PurposeSystemAgent,
 			Diagnostics:    config.Diagnostics,
 		})
 		if err != nil {

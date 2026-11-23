@@ -14,6 +14,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -64,13 +65,13 @@ func (f requesterFunc) RequestApproval(ctx context.Context, req approval.Request
 	return f(ctx, req)
 }
 
-func runPolicyScript(t *testing.T, store session.Service, active session.Session, code string, targets []tool.Tool, requester approval.Requester, hooks ...agent.Hooks) {
+func runPolicyScript(t *testing.T, store session.Service, active session.Session, code string, targets []tool.Tool, requester approval.Requester, hooks ...hook.Set) {
 	t.Helper()
 	registry, err := policy.NewMemory(Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var configured agent.Hooks
+	var configured hook.Set
 	if len(hooks) > 0 {
 		configured = hooks[0]
 	}
@@ -249,14 +250,14 @@ func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
 				}
 				return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 			}))
-			hooks := agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "target-B", Apply: func(_ context.Context, e agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
+			hooks := hook.Set{ToolPrepare: []hook.ToolPrepare{{Name: "target-B", Apply: func(_ context.Context, e hook.ToolContext, p hook.ToolPreparation) (hook.ToolPreparation, error) {
 				if e.Tool.Name != "dtw__click" {
 					return p, nil
 				}
 				prepares.Add(1)
 				p.Input = json.RawMessage(`{"app":"com.example.B"}`)
 				if synthetic {
-					p.Kind = agent.ToolPrepareRespond
+					p.Kind = hook.ToolPrepareRespond
 					p.Result = &tool.Result{Content: []tool.ContentBlock{tool.Text("synthetic success")}}
 				}
 				return p, nil

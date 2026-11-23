@@ -32,7 +32,7 @@ effect until Runtime adopts it and Chat builds from the new history. The
 optional persist callback runs at provider start after admission accepts the
 request. Auxiliary requests use their own assembly or the frozen source request.
 
-`runtime.Config.Hooks` fixes typed registrations for each Run. Every entry has
+`runtime.Config.Hooks` accepts a `hook.Set` from `agent-sdk/hook` and snapshots its registrations for each Run. Each stage declares its own callback signature. Input hooks receive the source, tool hooks receive detached occurrences and definitions, and model preparation and actual attempts have separate contexts. Every entry has
 an explicit name and timeout (five seconds by default). Independent private
 loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
 `system_agent` and does not inherit main-conversation hooks.
@@ -107,7 +107,7 @@ Buffered output is the SDK default: provider fragments remain private. The
 existing final output owner transforms the accepted candidate after ModelResult
 and Completion replacements and before canonical publication. Cache and Input
 or TurnStart early responses use that same boundary. Their factories identify
-`cache`, `input_early` or `turn_start_early` in HookContext.OutputSource and have
+`cache`, `input_early` or `turn_start_early` in hook.OutputContext.OutputSource and have
 no InvocationID, attempt ordinal, provider receipt or provider usage. Actual
 attempt factories identify `provider` and retain their real invocation identity,
 including attempts discarded by transport retry. A discarded candidate never

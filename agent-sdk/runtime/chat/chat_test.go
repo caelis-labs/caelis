@@ -16,6 +16,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -3271,7 +3272,7 @@ func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
+		Context: hookrun.WithRun(t.Context(), hook.Set{StreamMode: hook.StreamIncremental}, hook.TurnContext{}),
 		Session: session.Session{
 			SessionRef: session.SessionRef{SessionID: "sess-stream"},
 		},
@@ -4232,7 +4233,7 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
+		Context: hookrun.WithRun(t.Context(), hook.Set{StreamMode: hook.StreamIncremental}, hook.TurnContext{}),
 		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-retry-tool"}},
 		Events: []*session.Event{{
 			Type:    session.EventTypeUser,

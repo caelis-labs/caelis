@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -173,7 +173,7 @@ func (a *Agent) executeToolCallAdmitted(
 			event.Tool.Status = "completed"
 		}
 	}
-	var hookErr *agent.HookError
+	var hookErr *hook.Error
 	if errors.As(err, &hookErr) {
 		return message, event, err
 	}

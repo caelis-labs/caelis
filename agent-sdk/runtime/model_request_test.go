@@ -15,6 +15,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -302,7 +303,7 @@ type snapshotLifecycleBarrier struct {
 	once    sync.Once
 }
 
-func (b *snapshotLifecycleBarrier) Prepare(ctx context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+func (b *snapshotLifecycleBarrier) Prepare(ctx context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 	b.once.Do(func() {
 		close(b.entered)
 		select {
@@ -322,7 +323,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 	oldSnapshot.Release = func() { oldReleases.Add(1) }
 	source.set(oldSnapshot)
 	barrier := &snapshotLifecycleBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "snapshot-barrier", Apply: barrier.Prepare}}}})
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "snapshot-barrier", Apply: barrier.Prepare}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

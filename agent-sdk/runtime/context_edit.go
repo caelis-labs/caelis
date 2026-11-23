@@ -6,25 +6,26 @@ import (
 	"reflect"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (r *Runtime) contextEditSource(ctx context.Context, ref session.SessionRef, observed []*session.Event) (agent.ContextSource, error) {
+func (r *Runtime) contextEditSource(ctx context.Context, ref session.SessionRef, observed []*session.Event) (hook.ContextSource, error) {
 	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
 	if err != nil {
-		return agent.ContextSource{}, err
+		return hook.ContextSource{}, err
 	}
 	if !contextSourceEventsEqual(mainInvocationEvents(loaded.Events), observed) {
-		return agent.ContextSource{}, agent.ErrModelRequestSnapshotStale
+		return hook.ContextSource{}, agent.ErrModelRequestSnapshotStale
 	}
 	stamp, err := session.CheckpointSourceStamp(loaded)
-	return agent.ContextSource{Stamp: stamp, ThroughID: lastEventID(observed), ThroughSeq: session.LastEventSeq(observed)}, err
+	return hook.ContextSource{Stamp: stamp, ThroughID: lastEventID(observed), ThroughSeq: session.LastEventSeq(observed)}, err
 }
 
-func (r *Runtime) commitContextEdit(ctx context.Context, ref session.SessionRef, turnID, runID, logical, name string, edit agent.ContextEdit, observed []*session.Event, validate checkpointValidator) ([]*session.Event, error) {
+func (r *Runtime) commitContextEdit(ctx context.Context, ref session.SessionRef, turnID, runID, logical, name string, edit hook.ContextEdit, observed []*session.Event, validate checkpointValidator) ([]*session.Event, error) {
 	if edit.Source.Stamp == "" || edit.Source.ThroughID == "" || edit.Source.ThroughSeq == 0 || logical == "" || name == "" {
 		return nil, fmt.Errorf("context edit requires exact source and logical identity")
 	}

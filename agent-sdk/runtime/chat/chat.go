@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -175,7 +176,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					yield(nil, err)
 					return
 				}
-				evidence := early.Evidence
+				evidence := hook.OutputContext{RequestContext: hook.RequestContext{TurnContext: hookrun.FromContext(ctx).Evidence}, OutputSource: early.Source}
 				evidence.ConfigurationRevision = a.modelRevision
 				a.outputStream, err = newTextStream(ctx, evidence)
 				if err != nil {
@@ -346,11 +347,8 @@ func (a *Agent) collectCanonicalModelStep(
 
 		run := hookrun.FromContext(ctx)
 		logicalID, assembly := run.RequestAssembly(uuid.NewString)
-		evidence := run.Evidence
-		evidence.ConfigurationRevision = a.modelRevision
-		evidence.LogicalRequestID = logicalID
-		evidence.AssemblyRevision = assembly
-		prepared, cached, prepareErr := a.prepareModel(ctx, evidence, request)
+		requestContext := hook.RequestContext{TurnContext: run.Evidence, ConfigurationRevision: a.modelRevision, LogicalRequestID: logicalID, AssemblyRevision: assembly}
+		prepared, cached, prepareErr := a.prepareModel(ctx, hook.PrepareContext{RequestContext: requestContext}, request)
 		// ContextEdit updates the same Run context before tools, feedback or a
 		// stale assembly can continue. Only the checkpoint owner mutates it.
 		*messages = model.CloneMessages(request.Messages)
@@ -392,14 +390,15 @@ func (a *Agent) collectCanonicalModelStep(
 				return persistErr
 			})
 		}
-		modelCtx = modelHookContext(modelCtx, evidence)
+		modelCtx = modelHookContext(modelCtx, requestContext)
+		evidence := hook.OutputContext{RequestContext: requestContext}
 		final := cached
 		var err error
 		if final == nil {
-			evidence.OutputSource = agent.HookOutputProvider
+			evidence.OutputSource = hook.OutputProvider
 			final, a.outputStream, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
 		} else {
-			evidence.OutputSource = agent.HookOutputCache
+			evidence.OutputSource = hook.OutputCache
 			a.outputStream, err = newTextStream(ctx, evidence)
 		}
 		for _, receipt := range receipts {
@@ -421,7 +420,7 @@ func (a *Agent) collectCanonicalModelStep(
 		if err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		if hookrun.FromContext(ctx).Hooks.StreamMode != agent.StreamIncremental {
+		if hookrun.FromContext(ctx).Hooks.StreamMode != hook.StreamIncremental {
 			final.Message = normalizeAssistantCitations(final.Message, *messages)
 		}
 

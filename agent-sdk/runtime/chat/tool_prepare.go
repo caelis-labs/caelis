@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -48,7 +48,7 @@ func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, vi
 		var prepareErr error
 		call, synthetic, prepareErr = toolbinding.PrepareArguments(toolbinding.WithOccurrence(ctx, prepared.execution, nil, prepared.binding), target, call)
 		if prepareErr != nil && synthetic == nil {
-			var hookErr *agent.HookError
+			var hookErr *hook.Error
 			if errorcode.Is(prepareErr, tool.ErrorCodeInvalidInput) && !errors.As(prepareErr, &hookErr) {
 				prepared.err = prepareErr
 				a.preparedCalls[protocol.ID] = prepared

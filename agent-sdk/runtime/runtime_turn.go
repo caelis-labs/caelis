@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
@@ -190,8 +191,8 @@ func (r *Runtime) runAttempt(
 	var pendingCalls []*session.Event
 	pendingCount := 0
 	runCtx := &localInputContext{Context: baseCtx, runner: sink,
-		contextSource: func() (agent.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
-		contextEdit: func(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+		contextSource: func() (hook.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
+		contextEdit: func(logical, name string, edit hook.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
 			events, err := r.commitContextEdit(ctx, ref, turnID, runID, logical, name, edit, source.Events(), validate)
 			if err != nil {
 				return nil, err

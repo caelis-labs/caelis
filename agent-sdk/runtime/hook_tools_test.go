@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -41,21 +42,21 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 					}
 					return policy.Decision{Action: action}, nil
 				}}}
-				hooks := agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "target", Apply: func(_ context.Context, e agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
+				hooks := hook.Set{ToolPrepare: []hook.ToolPrepare{{Name: "target", Apply: func(_ context.Context, e hook.ToolContext, p hook.ToolPreparation) (hook.ToolPreparation, error) {
 					prepares.Add(1)
-					if e.Tool == nil || e.ToolExecution.ItemID == "" || e.ToolDefinition.Name != "operate" {
+					if e.ToolExecution.ItemID == "" || e.ToolDefinition.Name != "operate" {
 						t.Error("missing frozen identity/definition")
 					}
 					p.Input = json.RawMessage(`{"app":"B"}`)
 					if synthetic {
-						p.Kind = agent.ToolPrepareRespond
+						p.Kind = hook.ToolPrepareRespond
 						p.Result = &tool.Result{Content: []tool.ContentBlock{tool.Text("cached")}}
 					}
 					return p, nil
-				}}}, ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "full", Apply: func(_ context.Context, _ agent.HookContext, o agent.ToolOutcome) (tool.Result, error) {
+				}}}, ToolResult: []hook.ToolResult{{Name: "full", Apply: func(_ context.Context, _ hook.ToolContext, o hook.ToolOutcome) (tool.Result, error) {
 					results.Add(1)
 					return o.Result, nil
-				}}}, ModelView: []agent.Hook[model.Message, model.Message]{{Name: "view", Apply: func(_ context.Context, _ agent.HookContext, m model.Message) (model.Message, error) {
+				}}}, ModelView: []hook.ModelView{{Name: "view", Apply: func(_ context.Context, _ hook.ToolContext, m model.Message) (model.Message, error) {
 					m.Parts[0].ToolResult.Content = []model.Part{model.NewTextPart("model view")}
 					return m, nil
 				}}}}
@@ -115,7 +116,7 @@ func TestHooksPrepareInvalidSchemaNeverCommitsOrDispatches(t *testing.T) {
 		return []model.ToolCall{{ID: "one", Name: "operate", Args: `{"app":"A"}`}, {ID: "two", Name: "operate", Args: `{"app":"A"}`}}
 	}}
 	calls := 0
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "invalid-second", Apply: func(_ context.Context, _ agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPrepare: []hook.ToolPrepare{{Name: "invalid-second", Apply: func(_ context.Context, _ hook.ToolContext, p hook.ToolPreparation) (hook.ToolPreparation, error) {
 		calls++
 		if calls == 2 {
 			p.Input = json.RawMessage(`{}`)
@@ -157,7 +158,7 @@ func TestHooksModelCacheAndResultKeepActualAccounting(t *testing.T) {
 		return textResponse("provider", model.Usage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12})
 	}}
 	for _, cached := range []bool{false, true} {
-		hooks := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "prepare", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+		hooks := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "prepare", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 			if e.LogicalRequestID == "" || e.AssemblyRevision != 1 {
 				t.Error("missing logical/assembly identity")
 			}
@@ -167,7 +168,7 @@ func TestHooksModelCacheAndResultKeepActualAccounting(t *testing.T) {
 				p.Response = textResponse("cache", model.Usage{TotalTokens: 999})
 			}
 			return p, nil
-		}}}, ModelResult: []agent.Hook[model.Response, model.Response]{{Name: "replace", Apply: func(_ context.Context, _ agent.HookContext, r model.Response) (model.Response, error) {
+		}}}, ModelResult: []hook.ModelResult{{Name: "replace", Apply: func(_ context.Context, _ hook.OutputContext, r model.Response) (model.Response, error) {
 			r.Message = model.NewTextMessage(model.RoleAssistant, "accepted")
 			r.Usage = model.Usage{TotalTokens: 999}
 			return r, nil
