@@ -21,6 +21,12 @@ import (
 )
 
 func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Setenv("DISPLAY", ":41")
+		t.Setenv("XAUTHORITY", "/fixture/Xauthority")
+		t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/fixture/bus")
+		t.Setenv("CAELIS_TEST_PRIVATE_ENV", "keep out of MCP")
+	}
 	store := t.TempDir()
 	first, err := ProductContributions(RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session-one")})
 	if err != nil {
@@ -49,6 +55,11 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || !slices.Equal(a.Args, []string{"mcp"}) ||
 		!slices.Equal(a.PrefixTools, []string{"apps", "exec"}) {
 		t.Fatal("fixed package did not use its standard stdio executable")
+	}
+	if runtime.GOOS == "linux" && (!a.CleanEnvironment || a.Env["DISPLAY"] != ":41" ||
+		a.Env["XAUTHORITY"] != "/fixture/Xauthority" || a.Env["DBUS_SESSION_BUS_ADDRESS"] != "unix:path=/fixture/bus" ||
+		a.Env["CAELIS_TEST_PRIVATE_ENV"] != "") {
+		t.Fatal("Linux builtin did not retain the clean environment and forward the X11 session")
 	}
 }
 

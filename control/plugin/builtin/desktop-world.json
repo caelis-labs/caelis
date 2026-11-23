@@ -1,37 +1,65 @@
 {
   "schema": 1,
   "repository": "caelis-labs/desktop-world",
-  "version": "0.5.3",
-  "tag": "v0.5.3",
+  "version": "0.6.0",
+  "tag": "v0.6.0",
   "platforms": [
     {
       "target": "aarch64-apple-darwin",
-      "archive": "desktop-world-0.5.3-aarch64-apple-darwin.zip",
-      "archive_sha256": "99d2dc109bc2a6a0fd1f9f743dba40e683e4ec106f4f26ff8eb1ab52457e7b47",
-      "binary_sha256": "48c0b3ecf15dd638edbd2777d00e87a705dec8db958f2e041816d5631f26d3b0",
+      "archive": "desktop-world-0.6.0-aarch64-apple-darwin.zip",
+      "archive_sha256": "6aa3bcb160dd3936fb95480dd6d1a6a659f2ee7865a7c5f89fce1e3eaf0432b3",
+      "binary_sha256": "4e1eef80138416478918f09b109fdcd2433ce3c992763bed02cc859d92f9d925",
       "source": {
-        "commit": "d2c5a67b0f4c709cde5766a68366923d6d8480a5",
-        "tree": "4481f21fa8cf01008c61b35f3942294cb5d31914",
-        "commit_unix_seconds": 1795069323,
-        "cargo_lock_sha256": "1211e9681cd4e34361bd93bffcf04c37ed77d117a7384c41377f05cbade1d56f"
+        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
+        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
+        "commit_unix_seconds": 1795443800,
+        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
       },
-      "skill_sha256": "29c85b0dfded6471509b0a74a3220982cc74ca15997b1750fd4c2b2b8f844563",
-      "build_sha256": "002f7c730286ed30d8a2409dc358200b67d8fc35bcd5fe3399204fe37d61ee6e"
+      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
+      "build_sha256": "1ce95ca11c078569473d574e82b7f67ca6b486327c1e18aa7444b75015f5fbe4"
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "archive": "desktop-world-0.6.0-x86_64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "b78fd1212522b36f5f91dba711c706cce4df03ff6194e640594349074ddd4163",
+      "binary_sha256": "5b3cdda0ef3f43493e0d4023622708c028a099560640b64ef413a494620defa8",
+      "source": {
+        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
+        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
+        "commit_unix_seconds": 1795443800,
+        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
+      },
+      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
+      "build_sha256": "f5d87fb7bca5d2ab6e568144265434545207a4f5ec4b1fd862f3328fd48efdb1"
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "archive": "desktop-world-0.6.0-aarch64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "d71530b2beb0af2e0582dcbec6509d3c9984284e020248784eeea63ff15b9a59",
+      "binary_sha256": "99cf5bc1c4c1f3ba83c60020169b761e0c53c1db5f3c648bc5b51672bdefeb19",
+      "source": {
+        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
+        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
+        "commit_unix_seconds": 1795443800,
+        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
+      },
+      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
+      "build_sha256": "71fc33f6d6535cd739398f0b0976f2880ff8f56ad4c3404f4c638a03af4ebce8"
     },
     {
       "target": "x86_64-pc-windows-msvc",
-      "archive": "desktop-world-0.5.3-x86_64-pc-windows-msvc.zip",
-      "archive_sha256": "d22dee8f02056b34383757dd95d25f57c9b5b7828ad47b7c89e1b85096fec36c",
-      "binary_sha256": "039150ff57515c227642328b4446ed43016cab92c8eca27064963cc323cb229f",
+      "archive": "desktop-world-0.6.0-x86_64-pc-windows-msvc.zip",
+      "archive_sha256": "8797041e8eb3a79e96405ad13e7fbca78cae80ba9d612d1de2de05e2028f5d84",
+      "binary_sha256": "6c6c2493df178e0b9284016ce471ac162481594acf88385122ec620b19bdbe52",
       "source": {
-        "commit": "d2c5a67b0f4c709cde5766a68366923d6d8480a5",
-        "tree": "4481f21fa8cf01008c61b35f3942294cb5d31914",
-        "commit_unix_seconds": 1795069323,
-        "cargo_lock_sha256": "1211e9681cd4e34361bd93bffcf04c37ed77d117a7384c41377f05cbade1d56f"
+        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
+        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
+        "commit_unix_seconds": 1795443800,
+        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
       },
-      "skill_sha256": "29c85b0dfded6471509b0a74a3220982cc74ca15997b1750fd4c2b2b8f844563",
-      "build_sha256": "100faee0ce64aec43b01074751d25b7b0be4d29c5f42996e2fa6fd73d5465762"
+      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
+      "build_sha256": "a3c73c9216ae8d6fbd7217ee6625521c6702f3d8b01c85079758bb009f604c7a"
     }
   ],
-  "release_sha256": "d7a9d676cb23166094b3f1699a8567f72abe82d6b3d30aab63b5c585f2fd56e5"
+  "release_sha256": "6d4fc19e3c53c04ec3961e9c1214f67b4e20b5c3750a14f86df778e0bf9ae115"
 }

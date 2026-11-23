@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -24,11 +25,21 @@ def fixture(extra=None, name='desktop-world', identity='desktop-world', target='
              '.mcp.json': json.dumps({'mcpServers': {identity: {'command': '${CLAUDE_PLUGIN_ROOT}/' + binary, 'args': ['mcp']}}}).encode()}
     files.update(extra or {})
     out = io.BytesIO()
-    with zipfile.ZipFile(out, 'w') as archive:
-        for key, value in files.items():
-            archive.writestr(f'desktop-world-0.2.3-{target}/' + key, value)
+    root = f'desktop-world-0.2.3-{target}'
+    if target.endswith('-linux-gnu'):
+        suffix = '.tar.gz'
+        with tarfile.open(fileobj=out, mode='w:gz') as archive:
+            for key, value in files.items():
+                entry = tarfile.TarInfo(f'{root}/{key}')
+                entry.size = len(value)
+                archive.addfile(entry, io.BytesIO(value))
+    else:
+        suffix = '.zip'
+        with zipfile.ZipFile(out, 'w') as archive:
+            for key, value in files.items():
+                archive.writestr(f'{root}/{key}', value)
     data = out.getvalue()
-    platform = {'target': target, 'archive': f'desktop-world-0.2.3-{target}.zip', 'source': source,
+    platform = {'target': target, 'archive': root + suffix, 'source': source,
                 'archive_sha256': prepare.sha(data), 'binary_sha256': prepare.sha(files[binary]),
                 'skill_sha256': prepare.sha(files[skill]), 'build_sha256': prepare.sha(build)}
     return {'version': '0.2.3'}, platform, data
@@ -42,9 +53,9 @@ class PrepareBuiltinTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'provenance'):
             prepare.verify(pin, target, data)
 
-    def test_coherent_identities_on_both_platforms_without_version_threshold(self):
+    def test_coherent_identities_on_all_platforms_without_version_threshold(self):
         for identity in ('desktop-world', 'dtw'):
-            for target in ('aarch64-apple-darwin', 'x86_64-pc-windows-msvc'):
+            for target in prepare.TARGETS.values():
                 with self.subTest(identity=identity, target=target):
                     pin, platform, data = fixture(identity=identity, target=target)
                     evidence = prepare.verify(pin, platform, data)
@@ -114,9 +125,21 @@ class PrepareBuiltinTests(unittest.TestCase):
             prepare.verify(pin, target, data)
 
     def test_parent_traversal_cannot_escape_a_pinned_package(self):
-        pin, target, data = fixture({'../outside': b'bad'})
-        with self.assertRaisesRegex(ValueError, 'unsafe'):
-            prepare.verify(pin, target, data)
+        for target in ('aarch64-apple-darwin', 'aarch64-unknown-linux-gnu'):
+            pin, platform, data = fixture({'../outside': b'bad'}, target=target)
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, 'unsafe'):
+                prepare.verify(pin, platform, data)
+
+    def test_tar_links_are_rejected(self):
+        for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+            out = io.BytesIO()
+            with tarfile.open(fileobj=out, mode='w:gz') as archive:
+                entry = tarfile.TarInfo('package/bin/dtw')
+                entry.type = kind
+                entry.linkname = 'package/BUILD.json'
+                archive.addfile(entry)
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, 'unsafe entry'):
+                prepare.package_files('package.tar.gz', out.getvalue())
 
     def test_binary_and_skill_are_independently_checked(self):
         pin, target, data = fixture()

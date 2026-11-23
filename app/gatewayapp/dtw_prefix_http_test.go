@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -75,6 +77,12 @@ func TestDTWPrefixProviderAndMCPInvocation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if !builtinComputerUseSupported() {
 				t.Skip("this build has no embedded DTW capability")
+			}
+			headless := !fixture && runtime.GOOS == "linux"
+			if headless {
+				t.Setenv("DISPLAY", "")
+				t.Setenv("WAYLAND_DISPLAY", "")
+				t.Setenv("XDG_SESSION_TYPE", "x11")
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
@@ -207,6 +215,25 @@ return await %s(%s);`, target, "globalThis."+target+"(args)", string(mustDTWJSON
 			if top == nil || child == nil || scriptResult == nil || child.Parent.CallID != scriptResult.ID ||
 				top.Binding == nil || child.Binding == nil || *top.Binding != *child.Binding {
 				t.Fatalf("canonical MCP occurrences lost source or relation: top=%+v child=%+v script=%+v", top, child, scriptResult)
+			}
+			if headless {
+				// Both paths reach the real embedded service even when it cannot open X11.
+				for _, fact := range []*session.EventTool{top, child} {
+					var diagnostic struct {
+						Error struct{ Code string }
+					}
+					if err := json.Unmarshal([]byte(fact.Error), &diagnostic); err != nil ||
+						fact.Outcome != session.ToolOutcomeFailed || fact.Result == nil || diagnostic.Error.Code != "display_unavailable" {
+						t.Fatalf("tool %s lost the headless DTW diagnostic: %+v", fact.Name, fact)
+					}
+				}
+				if top.Error != child.Error || !reflect.DeepEqual(top.Result, child.Result) {
+					t.Fatalf("headless DTW diagnostic changed across invocations: %v / %v", top.Result, child.Result)
+				}
+				if scriptResult.Outcome != session.ToolOutcomeFailed || scriptResult.ErrorCode != string(codemode.ErrorCodeJavaScript) {
+					t.Fatalf("js_exec did not report the failed child call: %+v", scriptResult)
+				}
+				return
 			}
 			for _, fact := range []*session.EventTool{top, child, scriptResult} {
 				if fact.Outcome != session.ToolOutcomeSucceeded || fact.Result == nil {

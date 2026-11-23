@@ -16,4 +16,5 @@ case "${FULL}" in
 esac
 expect govulncheck "${VULN_RESULT}" "${code_result}"
 expect go-quality "${GO_RESULT}" "${code_result}"
+expect linux-sandbox "${SANDBOX_RESULT}" "${code_result}"
 echo 'All checks selected for this change passed.'

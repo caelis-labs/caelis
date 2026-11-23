@@ -67,6 +67,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare built-in plugins
+        run: make prepare-builtin-plugins
+
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
@@ -76,9 +79,7 @@ jobs:
   go-quality:
     needs: changes
     if: needs.changes.outputs.full == 'true'
-    # Native bwrap tests need unprivileged user namespaces without the 24.04
-    # AppArmor restriction; do not disable that restriction runner-wide.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -87,6 +88,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Prepare built-in plugins
+        run: make prepare-builtin-plugins
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9.3.0
@@ -102,6 +106,27 @@ jobs:
         env:
           GOFLAGS: -race
         run: go test -tags=e2e -timeout=2m ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
+
+      - name: Build
+        run: make build
+
+  linux-sandbox:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    # Both native sandbox and application execution need bubblewrap and
+    # unprivileged user namespaces without the 24.04 AppArmor restriction.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare built-in plugins
+        run: make prepare-builtin-plugins
 
       - name: Install bubblewrap
         timeout-minutes: 5
@@ -135,11 +160,8 @@ jobs:
           CAELIS_TEST_APPLICATION_NATIVE: '1'
         run: bash scripts/go_test_nonempty.sh ./app/gatewayapp '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|ExternalExecutionClientHTTP|SharedWorkerNativeHTTP)' linux-application-native -count=1
 
-      - name: Build
-        run: make build
-
   quality:
-    needs: [changes, govulncheck, go-quality]
+    needs: [changes, govulncheck, go-quality, linux-sandbox]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -151,4 +173,5 @@ jobs:
           FULL: ${{ needs.changes.outputs.full }}
           VULN_RESULT: ${{ needs.govulncheck.result }}
           GO_RESULT: ${{ needs.go-quality.result }}
+          SANDBOX_RESULT: ${{ needs.linux-sandbox.result }}
         run: bash scripts/ci_result.sh

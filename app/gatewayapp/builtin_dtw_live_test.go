@@ -149,7 +149,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 	if _, err := host.host.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: created.SessionID, OperationID: "live-task-prompt"}, Input: prompt, SourceKind: "user"}); err != nil {
 		t.Fatal(redact(err))
 	}
-	const expectedVersion = "0.5.3"
+	expectedVersion := builtinComputerUseVersion(t)
 	approvals := 0
 	selectedRoot := os.Getenv("CAELIS_DTW_LIVE_PLUGIN")
 	for {
