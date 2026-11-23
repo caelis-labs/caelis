@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -47,7 +48,7 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 				t.Fatal("MCP fixture did not initialize")
 			}
 			var stale atomic.Bool
-			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				approvals.Add(1)
 				if req.Tool.Name != "live__read" || req.Parent == nil || req.Parent.ID != "script" || req.Execution.ItemID == "" {
 					t.Errorf("approval lost real identity: %+v", req.Call)
@@ -56,11 +57,11 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 				case "schema":
 					publish("string")
 					if err := manager.RefreshTools(ctx, "fixture", "live"); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
 				case "revoke":
 					if err := manager.RevokeServer("fixture", "live"); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
 				case "generation":
 					stale.Store(true)
@@ -69,7 +70,7 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 				if mode == "deny" {
 					option = "cancel"
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: option, Approved: mode != "deny"}, nil
+				return approval.Response{Outcome: "selected", OptionID: option, Approved: mode != "deny"}, nil
 			})
 			var checked atomic.Bool
 			declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {

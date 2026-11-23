@@ -1231,7 +1231,7 @@ func (c *permissionCountingCallbacks) RequestPermission(_ context.Context, req a
 }
 
 type approvalReviewRuntime struct {
-	response agent.ApprovalResponse
+	response approval.Response
 	mode     string
 }
 
@@ -1240,7 +1240,7 @@ func (r *approvalReviewRuntime) Run(ctx context.Context, req agent.RunRequest) (
 		SessionRef: req.SessionRef,
 	}
 	if req.ApprovalRequester != nil {
-		resp, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
+		resp, err := req.ApprovalRequester.RequestApproval(ctx, approval.Request{
 			SessionRef: req.SessionRef,
 			Session:    activeSession,
 			RunID:      "run-1",

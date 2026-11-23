@@ -4,13 +4,12 @@ import (
 	"maps"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
-func canonicalOriginFromApproval(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string) *EventOrigin {
+func canonicalOriginFromApproval(req *approval.Request, fallbackRef session.SessionRef, fallbackTurnID string) *EventOrigin {
 	if req == nil {
 		return nil
 	}
@@ -40,7 +39,7 @@ func metadataString(meta map[string]any, key string) string {
 	return strings.TrimSpace(text)
 }
 
-func canonicalApprovalPayload(req *agent.ApprovalRequest) *ApprovalPayload {
+func canonicalApprovalPayload(req *approval.Request) *ApprovalPayload {
 	if req == nil {
 		return nil
 	}

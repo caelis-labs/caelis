@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -25,10 +26,10 @@ var ErrControllerSteeringUnsupported = errorcode.New(errorcode.Unsupported, "age
 
 // ApprovalOption is one controller-side approval choice surfaced by a remote
 // ACP controller.
-type ApprovalOption = agent.ApprovalOption
+type ApprovalOption = approval.Option
 
 // ApprovalToolCall describes the remote tool invocation asking for approval.
-type ApprovalToolCall = agent.EndpointApprovalToolCall
+type ApprovalToolCall = session.ProtocolToolCall
 
 // ApprovalRequest is the runtime-owned approval bridge payload used by remote
 // ACP controllers. It is system-controlled and never exposed to the model.
@@ -44,7 +45,7 @@ type ApprovalRequest struct {
 }
 
 // ApprovalResponse is one bridged controller approval outcome.
-type ApprovalResponse = agent.ApprovalResponse
+type ApprovalResponse = approval.Response
 
 // ApprovalRequester bridges a remote controller approval request into the
 // parent runtime's approval surface.

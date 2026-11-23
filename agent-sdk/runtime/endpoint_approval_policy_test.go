@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -18,9 +19,9 @@ import (
 func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t *testing.T) {
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "controller")
 	requesterCalls := 0
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		requesterCalls++
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	bridge := controllerApprovalRequester{
 		runtime:    runtime,
@@ -57,9 +58,9 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
 		runtime: runtime,
-		requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 			requesterCalls++
-			return agent.ApprovalResponse{}, nil
+			return approval.Response{}, nil
 		}),
 		sessionRef:           activeSession.SessionRef,
 		session:              activeSession,
@@ -92,9 +93,9 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *testing.T) {
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "subagent")
 	requesterCalls := 0
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		requesterCalls++
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	bridge := newSubagentApprovalRequester(runtime, presets.ModeDangerFullAccess, requester, activeSession, activeSession.SessionRef)
 	response, err := bridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
@@ -123,14 +124,14 @@ func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T)
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
 		runtime: runtime,
-		requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 			requesterCalls++
-			return agent.ApprovalResponse{Approved: true}, nil
+			return approval.Response{Approved: true}, nil
 		}),
 		sessionRef: activeSession.SessionRef,
 		session:    activeSession,
 	}
-	tests := map[string][]agent.ApprovalOption{
+	tests := map[string][]approval.Option{
 		"unknown kind":   {{ID: "allow_once", Name: "Allow once", Kind: "vendor_custom"}},
 		"uppercase kind": {{ID: "allow_once", Name: "Allow once", Kind: "ALLOW_ONCE"}},
 		"spaced kind":    {{ID: "allow_once", Name: "Allow once", Kind: " allow_once "}},
@@ -180,9 +181,9 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 	}
 	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "sess-unregistered-danger"}}
 	requesterCalls := 0
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		requesterCalls++
-		return agent.ApprovalResponse{Approved: true}, nil
+		return approval.Response{Approved: true}, nil
 	})
 
 	for _, participant := range []bool{false, true} {
@@ -229,7 +230,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 func TestDangerFullAccessEndpointPolicyRegistryFailureFailsClosed(t *testing.T) {
 	wantErr := errors.New("registry unavailable")
 	runtime := &Runtime{policies: errorPolicyRegistry{err: wantErr}}
-	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), presets.ModeDangerFullAccess, agent.ApprovalRequest{
+	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), presets.ModeDangerFullAccess, approval.Request{
 		Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}}},
 	})
 	if !handled {
@@ -277,8 +278,8 @@ func newDangerFullAccessEndpointTestRuntime(t *testing.T, suffix string) (*Runti
 	return runtime, activeSession
 }
 
-func endpointApprovalTestOptions() []agent.ApprovalOption {
-	return []agent.ApprovalOption{
+func endpointApprovalTestOptions() []approval.Option {
+	return []approval.Option{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 	}

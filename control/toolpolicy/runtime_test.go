@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -57,13 +58,13 @@ func (m *scriptModel) Generate(_ context.Context, _ *model.Request) iter.Seq2[*m
 	}
 }
 
-type requesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type requesterFunc func(context.Context, approval.Request) (approval.Response, error)
 
-func (f requesterFunc) RequestApproval(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f requesterFunc) RequestApproval(ctx context.Context, req approval.Request) (approval.Response, error) {
 	return f(ctx, req)
 }
 
-func runPolicyScript(t *testing.T, store session.Service, active session.Session, code string, targets []tool.Tool, requester agent.ApprovalRequester, hooks ...agent.Hooks) {
+func runPolicyScript(t *testing.T, store session.Service, active session.Session, code string, targets []tool.Tool, requester approval.Requester, hooks ...agent.Hooks) {
 	t.Helper()
 	registry, err := policy.NewMemory(Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"})
 	if err != nil {
@@ -121,14 +122,14 @@ func TestProductPolicyCodeModeSharesAPPAndRebuildsAfterStoreReopen(t *testing.T)
 	}
 	var effects, approvals atomic.Int32
 	targets := policyEffectTools(t, &effects)
-	requester := requesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := requesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 		approvals.Add(1)
 		if req.Parent == nil || req.Parent.ItemID == "" || req.Execution.ItemID == "" || req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.A" {
 			t.Error("approval lost actual child identity or APP")
 		} else {
 			assertCodeModeCallDigest(t, ctx, req)
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 	})
 	code := `const results=await Promise.all([tools.call("dtw__look",{app:"com.example.A"}),tools.call("dtw__click",{app:"com.example.A"})]);return {count:results.length};`
 	runPolicyScript(t, store, active, code, targets, requester)
@@ -173,7 +174,7 @@ func TestProductPolicyCodeModeSharesAPPAndRebuildsAfterStoreReopen(t *testing.T)
 }
 
 // Assert the pre-migration digest layout using a real Runtime-produced approval.
-func assertCodeModeCallDigest(t *testing.T, ctx context.Context, req agent.ApprovalRequest) {
+func assertCodeModeCallDigest(t *testing.T, ctx context.Context, req approval.Request) {
 	t.Helper()
 	base, err := presets.WorkspaceWriteMode().DecideTool(ctx, policy.ToolContext{
 		Session: req.Session, Tool: req.Tool, Call: req.Call,
@@ -217,12 +218,12 @@ func TestProductPolicyCrossAPPDenialDoesNotReplayEarlierEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	var effects, approvals atomic.Int32
-	runPolicyScript(t, store, active, `await tools.call("dtw__click",{app:"com.example.A"});await tools.call("dtw__click",{app:"com.example.B"});return {};`, policyEffectTools(t, &effects), requesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	runPolicyScript(t, store, active, `await tools.call("dtw__click",{app:"com.example.A"});await tools.call("dtw__click",{app:"com.example.B"});return {};`, policyEffectTools(t, &effects), requesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		approvals.Add(1)
 		if req.Authorization.Scope.Resource == "com.example.B" {
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel", Approved: false}, nil
+			return approval.Response{Outcome: "selected", OptionID: "cancel", Approved: false}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 	}))
 	if effects.Load() != 1 || approvals.Load() != 2 {
 		t.Fatalf("effects=%d approvals=%d", effects.Load(), approvals.Load())
@@ -241,12 +242,12 @@ func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
 			var effects, asks, prepares atomic.Int32
 			targets := policyEffectTools(t, &effects)
 			code := `await tools.call("dtw__click",{app:"com.example.A"});return {};`
-			runPolicyScript(t, store, active, code, targets, requesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			runPolicyScript(t, store, active, code, targets, requesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 				asks.Add(1)
 				if req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.A" {
 					t.Error("original APP consent not scoped")
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 			}))
 			hooks := agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "target-B", Apply: func(_ context.Context, e agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
 				if e.Tool.Name != "dtw__click" {
@@ -260,19 +261,19 @@ func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
 				}
 				return p, nil
 			}}}}
-			runPolicyScript(t, store, active, code, targets, requesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			runPolicyScript(t, store, active, code, targets, requesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				asks.Add(1)
 				if req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.B" || string(req.Call.Input) != `{"app":"com.example.B"}` {
 					t.Errorf("approval did not consume final APP: %+v", req)
 				}
 				if req.OnAdmission != nil {
 					if err := req.OnAdmission(ctx); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
 				}
 				events, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 				if err != nil {
-					return agent.ApprovalResponse{}, err
+					return approval.Response{}, err
 				}
 				found := false
 				for _, e := range events {
@@ -287,9 +288,9 @@ func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
 				select {
 				case <-delayed:
 				case <-ctx.Done():
-					return agent.ApprovalResponse{}, ctx.Err()
+					return approval.Response{}, ctx.Err()
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel", Approved: false}, nil
+				return approval.Response{Outcome: "selected", OptionID: "cancel", Approved: false}, nil
 			}), hooks)
 			if effects.Load() != 1 || asks.Load() != 2 || prepares.Load() != 1 {
 				t.Fatalf("APP A consent or synthetic result bypassed APP B denial: effects=%d asks=%d prepares=%d", effects.Load(), asks.Load(), prepares.Load())

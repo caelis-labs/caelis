@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -195,62 +196,23 @@ type ChildEndpointBinder interface {
 	BindChildEndpoint(context.Context, ChildEndpointRef, SubagentSpawnContext) error
 }
 
-// EndpointApprovalToolCall is one external endpoint tool call asking for
-// approval. Controller and subagent bridges share this value contract.
-type EndpointApprovalToolCall struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	// NamePresent carries the external field presence defined by
-	// session.ProtocolToolCall, independently of compatibility name fallbacks.
-	NamePresent *bool                             `json:"name_present,omitempty"`
-	Kind        string                            `json:"kind,omitempty"`
-	Title       string                            `json:"title,omitempty"`
-	Status      string                            `json:"status,omitempty"`
-	RawInput    map[string]any                    `json:"raw_input,omitempty"`
-	RawOutput   map[string]any                    `json:"raw_output,omitempty"`
-	Content     []session.ProtocolToolCallContent `json:"content,omitempty"`
-}
-
-// SubagentApprovalRequest is one child permission request bridged into the
-// parent runtime approval surface.
-type SubagentApprovalRequest struct {
-	// Approval preserves independent endpoint context when no tool invocation
-	// exists. The legacy ToolCall/Options projection is used only when nil.
-	Approval     *session.ProtocolApproval `json:"approval,omitempty"`
-	Origin       ApprovalOrigin            `json:"origin"`
-	SessionRef   session.SessionRef        `json:"session_ref,omitempty"`
-	Session      session.Session           `json:"session,omitempty"`
-	TaskID       string                    `json:"task_id,omitempty"`
-	ParentCallID string                    `json:"parent_call_id,omitempty"`
-	Agent        string                    `json:"agent,omitempty"`
-	Mode         string                    `json:"mode,omitempty"`
-	ToolCall     EndpointApprovalToolCall  `json:"tool_call,omitempty"`
-	Options      []ApprovalOption          `json:"options,omitempty"`
-}
-
-// SubagentApprovalRequester bridges child permission requests into the parent
-// runtime's approval surface.
-type SubagentApprovalRequester interface {
-	RequestSubagentApproval(context.Context, SubagentApprovalRequest) (ApprovalResponse, error)
-}
-
 // SubagentSpawnContext is the system-controlled parent context inherited by a
 // child endpoint. None of these fields are model-controlled tool arguments.
 type SubagentSpawnContext struct {
 	// ContentParts preserves the user request's structured text and attachments.
-	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
-	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
-	Session           session.Session           `json:"session,omitempty"`
-	CWD               string                    `json:"cwd,omitempty"`
-	TaskID            string                    `json:"task_id,omitempty"`
-	ActivityID        string                    `json:"activity_id,omitempty"`
-	Handle            string                    `json:"handle,omitempty"`
-	Role              session.ParticipantRole   `json:"role,omitempty"`
-	ParentCallID      string                    `json:"parent_call_id,omitempty"`
-	Mode              string                    `json:"mode,omitempty"`
-	ApprovalMode      string                    `json:"approval_mode,omitempty"`
-	ApprovalRequester SubagentApprovalRequester `json:"-"`
-	Output            output.Observer           `json:"-"`
+	ContentParts      []model.ContentPart        `json:"content_parts,omitempty"`
+	SessionRef        session.SessionRef         `json:"session_ref,omitempty"`
+	Session           session.Session            `json:"session,omitempty"`
+	CWD               string                     `json:"cwd,omitempty"`
+	TaskID            string                     `json:"task_id,omitempty"`
+	ActivityID        string                     `json:"activity_id,omitempty"`
+	Handle            string                     `json:"handle,omitempty"`
+	Role              session.ParticipantRole    `json:"role,omitempty"`
+	ParentCallID      string                     `json:"parent_call_id,omitempty"`
+	Mode              string                     `json:"mode,omitempty"`
+	ApprovalMode      string                     `json:"approval_mode,omitempty"`
+	ApprovalRequester approval.SubagentRequester `json:"-"`
+	Output            output.Observer            `json:"-"`
 	// Completion is the Runtime-owned terminal lifecycle path for this child
 	// turn. Stream consumers and Task control calls remain observers.
 	Completion delegation.CompletionSink `json:"-"`

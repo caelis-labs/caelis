@@ -7,14 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestCloneRuntimeRequestKeepsSharedModelStepAdmission(t *testing.T) {
-	steps := agentsdk.NewConcurrentModelStepRefs("step-1", 2)
-	first := agentsdk.ApprovalRequest{ModelStep: steps[0]}
+	steps := tool.NewConcurrentModelStepRefs("step-1", 2)
+	first := Request{ModelStep: steps[0]}
 	cloned := CloneRuntimeRequest(first)
 	if cloned.ModelStep == steps[0] || cloned.ModelStep.ID != "step-1" || cloned.ModelStep.Index != 0 || cloned.ModelStep.CallCount != 2 {
 		t.Fatalf("cloned model step = %#v; want isolated position at index 0 of step-1", cloned.ModelStep)
@@ -39,7 +38,7 @@ func TestCloneRuntimeRequestKeepsSharedModelStepAdmission(t *testing.T) {
 }
 
 func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
-	req := agentsdk.ApprovalRequest{
+	req := Request{
 		Tool: tool.Definition{Name: "custom_tool"},
 		Call: tool.Call{ID: "call-from-runtime", Name: "custom_tool"},
 		Approval: &session.ProtocolApproval{
@@ -112,7 +111,7 @@ func TestPayloadFromRuntimeRequestFallsBackToCallInput(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"command": "git status --short",
 	})
-	payload := PayloadFromRuntimeRequest(agentsdk.ApprovalRequest{
+	payload := PayloadFromRuntimeRequest(Request{
 		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{ID: "call-1", Name: "RunCommand", Input: raw},
 	})
@@ -213,7 +212,7 @@ func TestRuntimeResponseFromReviewInvalidOptionFallsBackToOutcome(t *testing.T) 
 }
 
 func TestTypedApprovalDisplayPreservesEffectiveInput(t *testing.T) {
-	req := agentsdk.ApprovalRequest{Authorization: &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion}, Tool: tool.Definition{Name: "dtw__look"}, Call: tool.Call{ID: "actual-call", Name: "dtw__look", Input: json.RawMessage(`{"app":"fixture.app"}`)}, Metadata: map[string]any{"approval_reason": "APP Session access"}}
+	req := Request{Authorization: &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion}, Tool: tool.Definition{Name: "dtw__look"}, Call: tool.Call{ID: "actual-call", Name: "dtw__look", Input: json.RawMessage(`{"app":"fixture.app"}`)}, Metadata: map[string]any{"approval_reason": "APP Session access"}}
 	frozen := CloneRuntimeRequest(req)
 	frozen.Authorization.Schema++
 	if req.Authorization.Schema != session.AuthorizationSchemaVersion {

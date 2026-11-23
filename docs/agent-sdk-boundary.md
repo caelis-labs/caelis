@@ -45,7 +45,7 @@ loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
 | ModelInvoke | One actual-attempt continuation, with a detached request |
 | ModelResult | Semantic Message; actual usage and provider identity stay fixed |
 | ToolPrepare | Final arguments, synthetic result or block, with fixed occurrence and target |
-| ToolInvoke | One Policy-admitted dispatch continuation |
+| ToolInvoke | One dispatch continuation after any configured Policy |
 | ToolResult | Ordered content blocks, including the optional structured block. Identity, error and system metadata stay fixed. |
 | ModelView | Tool-result presentation content; the full business value stays fixed |
 | Completion | Accept, Replace, Continue with feedback or Reject before final commit |
@@ -96,7 +96,7 @@ Tool-local execution errors and approval denials also return to the model so
 it can correct the call or choose another action. A malformed call envelope
 gets a bounded request to regenerate before any call in its batch executes.
 Invalid hook transformations fail preparation before batch commit.
-Synthetic success still passes Policy and final dispatch checks. Full results
+Synthetic success passes any configured Policy and the final dispatch checks. Full results
 and checked model views share one ToolResult commit, including nested Code Mode
 calls. ToolResult affects JS Body; ModelView does not. A failed transformation
 commits safe presentation and typed processing_failure separately from the
@@ -342,6 +342,8 @@ legacy callers until that API requires an explicit identity. A yielded Task
 submission already has its single ToolResult; Task completion does not write
 another one.
 
+The optional `approval.Requester` receives tool and endpoint permission requests.
+`approval.Resolver` settles a pending request by its durable ID.
 Approval request/resolution facts live in `Event.Approval`. Runtime owns their
 persistence and reusable consent; Control projects their redacted request and
 live queue settlement without a second approval history writer. Restart does not

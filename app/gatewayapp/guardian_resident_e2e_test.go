@@ -13,11 +13,12 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -91,18 +92,18 @@ func TestGuardianResidentE2E(t *testing.T) {
 				req := approvalReviewerTestRequest(active, llm, "Continue the authorized development task", map[string]any{"command": s.command, "workdir": active.CWD})
 				req.ReviewID = fmt.Sprintf("development-%d-%d", round, index)
 				req.Approval.ToolName = "RunCommand"
-				origin := &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: active.SessionID}
+				origin := &approval.Origin{Role: approval.RoleMain, Endpoint: approval.EndpointBuiltin, SessionID: active.SessionID}
 				switch (round + index) % 4 {
 				case 1:
-					origin.Role = agent.ApprovalRoleSubagent
+					origin.Role = approval.RoleSubagent
 					origin.ParentSessionID = active.SessionID
 					origin.TaskID = "development-child"
 				case 2:
-					origin.Endpoint = agent.ApprovalEndpointExternalACP
+					origin.Endpoint = approval.EndpointExternalACP
 					origin.SessionID = "external-main"
 				case 3:
-					origin.Endpoint = agent.ApprovalEndpointExternalACP
-					origin.Role = agent.ApprovalRoleSubagent
+					origin.Endpoint = approval.EndpointExternalACP
+					origin.Role = approval.RoleSubagent
 					origin.ParentSessionID = active.SessionID
 					origin.SessionID = "external-child"
 					origin.TaskID = "development-child"
@@ -137,7 +138,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 	}
 	t.Run("concurrent_delegated_approvals", func(t *testing.T) {
 		before := len(all)
-		refs := agent.NewConcurrentModelStepRefs("development-step", 8)
+		refs := tool.NewConcurrentModelStepRefs("development-step", 8)
 		var pending sync.WaitGroup
 		for i, ref := range refs {
 			pending.Add(1)
@@ -148,7 +149,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 				req.Approval.ToolName = "RunCommand"
 				req.ReviewID, req.RunID, req.TurnID = fmt.Sprintf("concurrent-%d", i), "development-run", "development-turn"
 				req.RuntimeRequest.ModelStep = ref
-				req.RuntimeRequest.Origin = &agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: agent.ApprovalEndpointExternalACP, ParentSessionID: active.SessionID, SessionID: fmt.Sprintf("worker-%d", i)}
+				req.RuntimeRequest.Origin = &approval.Origin{Role: approval.RoleSubagent, Endpoint: approval.EndpointExternalACP, ParentSessionID: active.SessionID, SessionID: fmt.Sprintf("worker-%d", i)}
 				result, err := reviewer.Decide(t.Context(), req)
 				if err != nil || !result.Approved {
 					t.Errorf("concurrent review %d: %+v %v", i, result, err)
@@ -183,7 +184,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 			req := approvalReviewerTestRequest(active, llm, "External agent requests this action", map[string]any{"command": s.command, "workdir": active.CWD})
 			req.Approval.ToolName = "RunCommand"
 			req.ReviewID = s.name
-			req.RuntimeRequest.Origin = &agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: agent.ApprovalEndpointExternalACP, ParentSessionID: active.SessionID, SessionID: "external-child"}
+			req.RuntimeRequest.Origin = &approval.Origin{Role: approval.RoleSubagent, Endpoint: approval.EndpointExternalACP, ParentSessionID: active.SessionID, SessionID: "external-child"}
 			result, err := reviewer.Decide(t.Context(), req)
 			if err != nil || result.Approved || result.Rationale == "" {
 				t.Errorf("risk decision: %+v %v", result, err)

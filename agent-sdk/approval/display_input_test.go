@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -21,7 +20,7 @@ func TestApprovalDisplayRedactsOnlySchemaMarkedInput(t *testing.T) {
 	input := map[string]any{"nested": []any{map[string]any{"credential": "MARKED-CREDENTIAL", "target": "/docs"}}, "unknown": map[string]any{"token": "UNMARKED-IS-NOT-SANITIZED"}, "justification": "MARKED-JUSTIFICATION"}
 	options := []session.ProtocolApprovalOption{{ID: "native-session", Name: "Native session choice", Kind: "allow_once"}, {ID: "native-reject", Name: "Reject", Kind: "reject_once"}}
 	callInput, _ := json.Marshal(input)
-	req := agentsdk.ApprovalRequest{Tool: tool.Definition{Name: "custom", InputSchema: schema}, Call: tool.Call{ID: "call", Input: callInput},
+	req := Request{Tool: tool.Definition{Name: "custom", InputSchema: schema}, Call: tool.Call{ID: "call", Input: callInput},
 		Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "custom", Title: "MARKED-CREDENTIAL", RawInput: input, RawOutput: map[string]any{"echo": "MARKED-CREDENTIAL"}}, Options: options}, Metadata: map[string]any{"justification": "MARKED-JUSTIFICATION"}}
 	canonical := PayloadFromRuntimeRequest(req)
 	if canonical.RawInput["justification"] != "MARKED-JUSTIFICATION" || canonical.Justification != "MARKED-JUSTIFICATION" || canonical.ToolTitle != "MARKED-CREDENTIAL" {
@@ -95,7 +94,7 @@ func TestApprovalDisplayBoundsWidePatternEvaluation(t *testing.T) {
 }
 
 func TestApprovalDisplayHonorsOwnerSensitiveFactWithoutSchema(t *testing.T) {
-	req := agentsdk.ApprovalRequest{Tool: tool.Definition{Name: "custom"}, Call: tool.Call{Input: json.RawMessage(`{"opaque":"OWNER-MARKED-SECRET"}`)},
+	req := Request{Tool: tool.Definition{Name: "custom"}, Call: tool.Call{Input: json.RawMessage(`{"opaque":"OWNER-MARKED-SECRET"}`)},
 		Approval: &session.ProtocolApproval{Subject: &session.ApprovalSubject{Kind: "opaque", Targets: []session.ApprovalField{{State: session.ApprovalFieldKnown, Text: "OWNER-MARKED-SECRET", Sensitive: true}}}, ToolCall: session.ProtocolToolCall{Name: "custom", Title: "OWNER-MARKED-SECRET"}}}
 	canonical := PayloadFromRuntimeRequest(req)
 	display := DisplayPayloadFromRuntimeRequest(req)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -89,7 +90,7 @@ func TestDefaultApprovalRecordIdentitySurvivesRuntimeRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
 	seenTokens := map[string]bool{}
 	for index := 0; index < 2; index++ {
 		service = sessionfile.NewStore(sessionfile.Config{RootDir: root})
@@ -102,7 +103,7 @@ func TestDefaultApprovalRecordIdentitySurvivesRuntimeRestart(t *testing.T) {
 
 		result := make(chan error, 1)
 		go func() {
-			_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+			_, requestErr := runtime.requestDurableApproval(context.Background(), approval.Request{
 				SessionRef: active.SessionRef,
 				Session:    active,
 				RunID:      runID,
@@ -118,7 +119,7 @@ func TestDefaultApprovalRecordIdentitySurvivesRuntimeRestart(t *testing.T) {
 			t.Fatalf("runtime %d reused pause token %q", index, tokenID)
 		}
 		seenTokens[tokenID] = true
-		if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
+		if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
 			t.Fatalf("ResolveApproval(runtime %d) error = %v", index, err)
 		}
 		select {

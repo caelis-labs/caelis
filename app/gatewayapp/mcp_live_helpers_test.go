@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -107,9 +107,9 @@ func writeLiveJSON(t *testing.T, path string, v any) {
 	}
 }
 
-type liveApprovalFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type liveApprovalFunc func(context.Context, approval.Request) (approval.Response, error)
 
-func (f liveApprovalFunc) RequestApproval(ctx context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f liveApprovalFunc) RequestApproval(ctx context.Context, r approval.Request) (approval.Response, error) {
 	return f(ctx, r)
 }
 

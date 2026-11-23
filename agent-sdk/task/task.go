@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -125,13 +126,13 @@ type SubagentStartRequest struct {
 	IncludeContext bool `json:"include_context,omitempty"`
 	// ContextUnsupported records that IncludeContext was requested but the
 	// host could not attach a transfer. It is an outcome, not digest input.
-	ContextUnsupported bool                            `json:"context_unsupported,omitempty"`
-	ParentCall         string                          `json:"parent_call,omitempty"`
-	Role               session.ParticipantRole         `json:"role,omitempty"`
-	Source             string                          `json:"source,omitempty"`
-	Mode               string                          `json:"mode,omitempty"`
-	ApprovalMode       string                          `json:"approval_mode,omitempty"`
-	Approval           agent.SubagentApprovalRequester `json:"-"`
+	ContextUnsupported bool                       `json:"context_unsupported,omitempty"`
+	ParentCall         string                     `json:"parent_call,omitempty"`
+	Role               session.ParticipantRole    `json:"role,omitempty"`
+	Source             string                     `json:"source,omitempty"`
+	Mode               string                     `json:"mode,omitempty"`
+	ApprovalMode       string                     `json:"approval_mode,omitempty"`
+	Approval           approval.SubagentRequester `json:"-"`
 }
 
 // ControlRequest defines one task control request. Principal is the normalized

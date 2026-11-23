@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -15,15 +15,15 @@ func TestSteeringInvalidatesAutomaticApprovalBeforeSettlement(t *testing.T) {
 	owner := newTurnHandle(turnHandleConfig{handleID: "turn", sessionRef: ref, approvals: c})
 	var approvals []*pendingApproval
 	var reviews []context.Context
-	steps := agent.NewConcurrentModelStepRefs("step", 2)
+	steps := tool.NewConcurrentModelStepRefs("step", 2)
 	for i, call := range []tool.Call{{ID: "push", Name: "RunCommand"}, {ID: "update-pr", Name: "github_update_pull_request"}} {
-		request := &agent.ApprovalRequest{SessionRef: ref, RunID: "run", TurnID: "turn", ModelStep: steps[i], Origin: &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain}, Call: call}
+		request := &approval.Request{SessionRef: ref, RunID: "run", TurnID: "turn", ModelStep: steps[i], Origin: &approval.Origin{Role: approval.RoleMain}, Call: call}
 		pending, err := c.enqueue(owner, request, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		request.Origin.Role = agent.ApprovalRoleSubagent
-		if pending.request.Origin.Role != agent.ApprovalRoleMain {
+		request.Origin.Role = approval.RoleSubagent
+		if pending.request.Origin.Role != approval.RoleMain {
 			t.Fatal("queue origin changed after admission")
 		}
 		ctx, cancel := context.WithCancel(t.Context())

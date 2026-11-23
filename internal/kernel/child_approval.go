@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 )
 
 // RequestChildApproval uses the Session approval queue without acquiring a
 // foreground Turn. The child producer owns the request lifetime; its caller
 // supplies the same Session feed observer used by ordinary Turn approvals.
-func (g *Gateway) RequestChildApproval(ctx context.Context, req agent.ApprovalRequest, observer TurnEventObserver) (agent.ApprovalResponse, error) {
+func (g *Gateway) RequestChildApproval(ctx context.Context, req approval.Request, observer TurnEventObserver) (approval.Response, error) {
 	if !detachedApprovalRequest(&req) {
-		return agent.ApprovalResponse{}, errors.New("gateway: child approval requires a child origin")
+		return approval.Response{}, errors.New("gateway: child approval requires a child origin")
 	}
 	if req.TurnID == "" {
 		req.TurnID = newParticipantTurnID()

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -420,18 +421,18 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 	if err != nil {
 		return err
 	}
-	approver := liveApprovalFunc(func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	approver := liveApprovalFunc(func(_ context.Context, request approval.Request) (approval.Response, error) {
 		for _, name := range task.Selected {
 			if request.Tool.Name == name {
 				for _, option := range request.Approval.Options {
 					if option.ID == "allow_session" {
-						return agent.ApprovalResponse{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
+						return approval.Response{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
 					}
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 			}
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	observer := agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
 		if event.Canonical == nil {

@@ -9,9 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -165,7 +166,7 @@ func runGuardianTaskWorkflow(t *testing.T, llm model.LLM, evaluator judgment.Eva
 	} {
 		t.Run(round.name, func(t *testing.T) {
 			appendGuardianFixtureDialogue(t, t.Context(), service, active, round.dialogue)
-			refs := agent.NewConcurrentModelStepRefs(round.name, len(round.actions))
+			refs := tool.NewConcurrentModelStepRefs(round.name, len(round.actions))
 			var screening atomic.Int32
 			allScreening := make(chan struct{})
 			var batch sync.WaitGroup
@@ -181,7 +182,7 @@ func runGuardianTaskWorkflow(t *testing.T, llm model.LLM, evaluator judgment.Eva
 					}
 					req.RuntimeRequest.Call.Name, req.RuntimeRequest.Tool.Name = action.tool, action.tool
 					req.RuntimeRequest.Call.ID = req.ReviewID
-					req.RuntimeRequest.Origin = &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: active.SessionID}
+					req.RuntimeRequest.Origin = &approval.Origin{Role: approval.RoleMain, Endpoint: approval.EndpointBuiltin, SessionID: active.SessionID}
 					if action.mcp {
 						req.RuntimeRequest.Tool.Metadata = map[string]any{mcp.MetadataKind: mcp.KindTool, mcp.MetadataServer: "github-fixture", mcp.MetadataTool: action.tool}
 					}

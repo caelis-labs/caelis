@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -51,7 +51,7 @@ func TestGuardianShortUserApprovalE2E(t *testing.T) {
 			}
 			req := approvalReviewerTestRequest(active, llm, reason, map[string]any{"command": test.command, "workdir": active.CWD})
 			req.Approval.ToolName = "RunCommand"
-			req.RuntimeRequest.Origin = &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: active.SessionID, WorkingDirectory: active.CWD}
+			req.RuntimeRequest.Origin = &approval.Origin{Role: approval.RoleMain, Endpoint: approval.EndpointBuiltin, SessionID: active.SessionID, WorkingDirectory: active.CWD}
 			decision, err := reviewer.Decide(t.Context(), req)
 			if err != nil || decision.Approved != test.allow || (test.allow && decision.OptionID != "allow_once") {
 				t.Fatalf("decision=%+v, error=%v, want allow=%v", decision, err, test.allow)

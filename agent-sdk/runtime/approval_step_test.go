@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -34,21 +35,21 @@ func TestRuntimeApprovalStepWaitsForPolicyAdmissionNotEffectCompletion(t *testin
 	defer cancel()
 	barrierClosed := make(chan struct{})
 	allowedEffect := make(chan struct{})
-	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 		step := req.ModelStep
 		if step == nil || step.ID == "" || step.Index != 1 || step.CallCount != 2 || step.AdmissionDone() == nil {
 			t.Errorf("approval step = %#v; want concurrent second call of two", step)
-			return agent.ApprovalResponse{}, fmt.Errorf("missing mixed-batch admission reference")
+			return approval.Response{}, fmt.Errorf("missing mixed-batch admission reference")
 		}
 		// The approval queue marks this index once the request is registered.
 		step.MarkAdmissionComplete()
 		select {
 		case <-step.AdmissionDone():
 			close(barrierClosed)
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "reject_once"}, nil
+			return approval.Response{Outcome: "selected", OptionID: "reject_once"}, nil
 		case <-ctx.Done():
 			t.Errorf("mixed model step admission remained open: %v", ctx.Err())
-			return agent.ApprovalResponse{}, ctx.Err()
+			return approval.Response{}, ctx.Err()
 		}
 	})
 	probe := tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {

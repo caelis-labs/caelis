@@ -3,7 +3,7 @@ package kernel
 import (
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -11,7 +11,7 @@ import (
 func TestCanonicalApprovalPayloadPreservesPromptFields(t *testing.T) {
 	t.Parallel()
 
-	payload := canonicalApprovalPayload(&agent.ApprovalRequest{
+	payload := canonicalApprovalPayload(&approval.Request{
 		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{
 			ID: "call-1",

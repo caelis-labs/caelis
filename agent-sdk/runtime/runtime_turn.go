@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
@@ -36,7 +37,7 @@ func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.R
 }
 
 // wrapTurnTools is shared by native and externally controlled execution.
-func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
+func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester approval.Requester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
 	concrete := spec.Tools
 	spec.Tools = r.wrapToolsForDispatch(ref, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{

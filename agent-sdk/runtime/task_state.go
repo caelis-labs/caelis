@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
@@ -334,12 +335,12 @@ func taskOperationKey(ref session.SessionRef, taskID string) string {
 type runtimeToolContext struct {
 	mode              string
 	approvalMode      string
-	approvalRequester agent.ApprovalRequester
+	approvalRequester approval.Requester
 	inputSender       agent.AgentInputSender
 }
 
 type StartSubagentOptions struct {
-	ApprovalRequester agent.ApprovalRequester
+	ApprovalRequester approval.Requester
 	ApprovalMode      string
 	// ReturnOnStart skips the short completion wait after durable admission.
 	// Background callers observe subsequent progress through the Task stream.

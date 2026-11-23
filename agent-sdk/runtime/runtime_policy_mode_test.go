@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -55,9 +56,9 @@ func TestHostOwnsToolPolicy(t *testing.T) {
 			run, err := rt.Run(t.Context(), agent.RunRequest{
 				SessionRef: active.SessionRef,
 				AgentSpec:  agent.AgentSpec{Model: driver, Tools: []tool.Tool{command}, Metadata: map[string]any{policy.MetadataPolicyProfile: tc.profile}},
-				ApprovalRequester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				ApprovalRequester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 					approvals++
-					return agent.ApprovalResponse{Outcome: "selected", OptionID: "reject_once"}, nil
+					return approval.Response{Outcome: "selected", OptionID: "reject_once"}, nil
 				}),
 			})
 			if err != nil {
@@ -109,7 +110,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 					wrapped := policyWrappedTool{
 						tool: observed, policy: presets.WorkspaceWriteMode(), mode: presets.ModeWorkspaceWrite,
 						options: policy.ModeOptions{WorkspaceRoot: "/workspace", WritableRoots: []string{"/workspace"}},
-						approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+						approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, request approval.Request) (approval.Response, error) {
 							requests++
 							if !reflect.DeepEqual(request.Call, call) || request.Metadata["sandbox_permissions"] != route {
 								t.Fatalf("approval changed caller intent: %+v", request)
@@ -118,7 +119,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 							if approved {
 								id = "allow_once"
 							}
-							return agent.ApprovalResponse{Approved: approved, Outcome: "selected", OptionID: id}, nil
+							return approval.Response{Approved: approved, Outcome: "selected", OptionID: id}, nil
 						})},
 					}
 					result, err := wrapped.Call(t.Context(), call)
@@ -180,7 +181,7 @@ func TestPolicyModelFeedbackDistinguishesResolvedDenialFromPendingApproval(t *te
 	t.Parallel()
 
 	decision := policy.Decision{Action: policy.ActionAskApproval, Reason: "host execution requested"}
-	denied, deniedHint := policyModelFeedback(decision, agent.ApprovalResponse{
+	denied, deniedHint := policyModelFeedback(decision, approval.Response{
 		Outcome:  "selected",
 		OptionID: "reject_once",
 	})
@@ -188,7 +189,7 @@ func TestPolicyModelFeedbackDistinguishesResolvedDenialFromPendingApproval(t *te
 		t.Fatalf("resolved denial feedback = (%q, %q), want denial without pending hint", denied, deniedHint)
 	}
 
-	pending, pendingHint := policyModelFeedback(decision, agent.ApprovalResponse{})
+	pending, pendingHint := policyModelFeedback(decision, approval.Response{})
 	if pending != "host execution requested" || pendingHint == "" {
 		t.Fatalf("pending approval feedback = (%q, %q), want request reason and retry hint", pending, pendingHint)
 	}

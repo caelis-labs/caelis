@@ -331,7 +331,7 @@ type runtimeSpawnTool struct {
 	runner       subagent.Runner
 	mode         string
 	approvalMode string
-	approval     agent.ApprovalRequester
+	approval     approval.Requester
 }
 
 // StartThread returns conversation identity; producer completion owns its output.
@@ -499,7 +499,7 @@ func (runtimeTaskTool) RuntimeTaskResultSource(toolbinding.Token) bool { return 
 type subagentApprovalRequester struct {
 	runtime    *Runtime
 	mode       string
-	requester  agent.ApprovalRequester
+	requester  approval.Requester
 	session    session.Session
 	sessionRef session.SessionRef
 }
@@ -507,7 +507,7 @@ type subagentApprovalRequester struct {
 func newSubagentApprovalRequester(
 	runtime *Runtime,
 	mode string,
-	requester agent.ApprovalRequester,
+	requester approval.Requester,
 	activeSession session.Session,
 	sessionRef session.SessionRef,
 ) subagent.ApprovalRequester {
@@ -551,13 +551,13 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		}
 	}
 	origin := req.Origin
-	origin.Role = agent.ApprovalRoleSubagent
+	origin.Role = approval.RoleSubagent
 	origin.ParentSessionID = r.sessionRef.SessionID
 	origin.TaskID = req.TaskID
 	origin.ParentCallID = req.ParentCallID
 	origin.ToolCallID = req.ToolCall.ID
 	origin.Agent = req.Agent
-	runtimeRequest := agent.ApprovalRequest{
+	runtimeRequest := approval.Request{
 		Origin:     &origin,
 		SessionRef: r.sessionRef,
 		Session:    session.CloneSession(r.session),
@@ -608,7 +608,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		return subagent.ApprovalResponse{}, nil
 	}
 	permission := cloneApproval(runtimeRequest.Approval)
-	var resp agent.ApprovalResponse
+	var resp approval.Response
 	var err error
 	if r.runtime != nil {
 		resp, err = r.runtime.requestDurableApproval(ctx, runtimeRequest, r.requester)

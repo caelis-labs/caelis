@@ -23,6 +23,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -637,17 +638,17 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 	if err != nil {
 		return err
 	}
-	approver := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	approver := liveApprovalFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		if remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs" {
 			for _, option := range r.Approval.Options {
 				if option.ID == "allow_session" {
-					return agent.ApprovalResponse{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
+					return approval.Response{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
 				}
 			}
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	observer := agent.SourceEventObserverFunc(func(_ context.Context, e agent.SourceEvent) error {
 		if e.Canonical == nil {

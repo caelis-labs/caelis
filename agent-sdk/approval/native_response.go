@@ -3,7 +3,6 @@ package approval
 import (
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -11,10 +10,10 @@ import (
 // before settlement or publication. An offered option's canonical kind owns
 // its executable meaning; Approved is only a legacy outcome hint. Presentation
 // facts and option labels never grant authority.
-func ResolveNativeResponse(permission *session.ProtocolApproval, response agent.ApprovalResponse) (agent.ApprovalResponse, error) {
+func ResolveNativeResponse(permission *session.ProtocolApproval, response Response) (Response, error) {
 	if response.Outcome == "cancelled" {
 		if response.OptionID != "" {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval: cancelled decision cannot select an option")
+			return Response{}, fmt.Errorf("approval: cancelled decision cannot select an option")
 		}
 		response.Approved = false
 		return response, nil
@@ -29,12 +28,12 @@ func ResolveNativeResponse(permission *session.ProtocolApproval, response agent.
 		options = append(options, Option{ID: option.ID, Name: option.Name, Kind: option.Kind})
 	}
 	if err := ValidateStrictOptions(options); err != nil {
-		return agent.ApprovalResponse{}, err
+		return Response{}, err
 	}
 	switch response.Outcome {
 	case "", "approved", "rejected", "selected":
 	default:
-		return agent.ApprovalResponse{}, fmt.Errorf("approval: unsupported decision outcome %q", response.Outcome)
+		return Response{}, fmt.Errorf("approval: unsupported decision outcome %q", response.Outcome)
 	}
 	if response.Outcome == "selected" || response.OptionID != "" {
 		for _, option := range options {
@@ -44,7 +43,7 @@ func ResolveNativeResponse(permission *session.ProtocolApproval, response agent.
 			decision, _ := strictOptionDecision(option.Kind)
 			allow := decision == OptionDecisionAllow
 			if response.Outcome == "approved" && !allow || response.Outcome == "rejected" && allow {
-				return agent.ApprovalResponse{}, fmt.Errorf("approval: outcome conflicts with the selected option kind")
+				return Response{}, fmt.Errorf("approval: outcome conflicts with the selected option kind")
 			}
 			response.Approved = allow
 			if response.Outcome == "" {
@@ -52,7 +51,7 @@ func ResolveNativeResponse(permission *session.ProtocolApproval, response agent.
 			}
 			return response, nil
 		}
-		return agent.ApprovalResponse{}, fmt.Errorf("approval: selected option was not offered")
+		return Response{}, fmt.Errorf("approval: selected option was not offered")
 	}
 	// Keep legacy outcome-only decisions usable for existing SDK callers. An
 	// approval still needs an originally offered allow choice; denial does not
@@ -65,7 +64,7 @@ func ResolveNativeResponse(permission *session.ProtocolApproval, response agent.
 	}
 	if response.Approved {
 		if _, exists, err := StrictOptionIDForDecision(options, OptionDecisionAllow); err != nil || !exists {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval: no allow option was offered")
+			return Response{}, fmt.Errorf("approval: no allow option was offered")
 		}
 	}
 	return response, nil

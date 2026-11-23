@@ -16,6 +16,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -157,11 +158,11 @@ func TestCodeModeSimpleLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requester := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := liveApprovalFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		if allowed(r.Tool, r.Call.Input) {
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	prompts := []struct {
 		ID   string

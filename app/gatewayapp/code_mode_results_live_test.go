@@ -20,6 +20,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -207,8 +208,8 @@ func TestCodeModeResultsLive(t *testing.T) {
 			return errors.Join(e, f.Close())
 		})
 		stream := true
-		request := agent.RunRequest{SessionRef: active.SessionRef, Input: task.Text, Request: agent.ModelRequestOptions{Stream: &stream}, SourceObserver: observer, ApprovalRequester: liveApprovalFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+		request := agent.RunRequest{SessionRef: active.SessionRef, Input: task.Text, Request: agent.ModelRequestOptions{Stream: &stream}, SourceObserver: observer, ApprovalRequester: liveApprovalFunc(func(context.Context, approval.Request) (approval.Response, error) {
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}), AgentSpec: agent.AgentSpec{Model: fairPreserveInvocationTracking(trace, built.Model), Metadata: map[string]any{"reasoning_effort": built.ReasoningEffort, codemode.MetadataSelectedTools: []string{"reports__lookup", "reports__picture"}}, Tools: tools, DeferredTools: manager}}
 		result, runErr := rt.Run(context.WithValue(ctx, fairContextKey{}, fairRequestContext{Turn: 1}), request)
 		if runErr == nil {

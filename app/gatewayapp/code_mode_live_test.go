@@ -18,6 +18,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -252,7 +253,7 @@ func TestCodeModeLive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	requester := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := liveApprovalFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		approved := false
 		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		switch remote {
@@ -275,9 +276,9 @@ func TestCodeModeLive(t *testing.T) {
 					break
 				}
 			}
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: option, Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: option, Approved: true}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	route := "Use native filesystem tools directly. Use js_exec for extension calls."
 	if mode == "js_exec" {

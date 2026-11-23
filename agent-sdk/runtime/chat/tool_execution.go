@@ -38,7 +38,7 @@ type toolExecutionResult struct {
 func (a *Agent) executeToolCallWithProgressAdmitted(
 	ctx context.Context,
 	call model.ToolCall,
-	step *agent.ModelStepRef,
+	step *tool.ModelStepRef,
 	yieldProgress func(*session.Event) bool,
 	visibility *toolVisibility,
 ) (model.Message, *session.Event, error) {
@@ -99,7 +99,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 func (a *Agent) executeToolCallAdmitted(
 	ctx context.Context,
 	call model.ToolCall,
-	step *agent.ModelStepRef,
+	step *tool.ModelStepRef,
 	report func(toolbinding.Progress),
 	visibility *toolVisibility,
 ) (model.Message, *session.Event, error) {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -46,10 +47,10 @@ func TestCodeModeCancelsPendingApprovalWithoutEffect(t *testing.T) {
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	requester := approvalRequesterFunc(func(ctx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
 		close(approvalStarted)
 		<-ctx.Done()
-		return agent.ApprovalResponse{}, ctx.Err()
+		return approval.Response{}, ctx.Err()
 	})
 	var queuedErr error
 	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {

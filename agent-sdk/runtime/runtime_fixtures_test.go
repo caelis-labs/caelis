@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -1750,9 +1751,9 @@ func taskHandleFromSessionEvent(event *session.Event) string {
 	return ""
 }
 
-type approvalRequesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type approvalRequesterFunc func(context.Context, approval.Request) (approval.Response, error)
 
-func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req approval.Request) (approval.Response, error) {
 	return f(ctx, req)
 }
 

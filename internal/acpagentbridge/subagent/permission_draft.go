@@ -5,7 +5,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -38,16 +38,16 @@ func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn subagent.Spawn
 			return v2.RequestPermissionResponse{}, errACPPermissionSessionMismatchChild
 		}
 		if observationOnly {
-			return acppermission.ResponseToDraft(req, agent.ApprovalResponse{})
+			return acppermission.ResponseToDraft(req, approval.Response{})
 		}
 		if r.permissionBridge != nil {
 			if bridge, ok := r.permissionBridge.(DraftPermissionBridge); ok {
 				return bridge.RequestDraftPermission(ctx, DraftPermissionRequest{Spawn: spawn, Agent: delegation.Agent{Name: cfg.Name, Description: cfg.Description}, AgentID: agentID, Request: req})
 			}
-			return acppermission.ResponseToDraft(req, agent.ApprovalResponse{})
+			return acppermission.ResponseToDraft(req, approval.Response{})
 		}
 		if r.permissionHandler != nil || spawn.ApprovalRequester == nil {
-			return acppermission.ResponseToDraft(req, agent.ApprovalResponse{})
+			return acppermission.ResponseToDraft(req, approval.Response{})
 		}
 		inbound, _ := acpsdk.InboundInfoFromContext(ctx)
 		normalize := acppermission.RequestFromDraft
@@ -58,12 +58,12 @@ func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn subagent.Spawn
 		if err != nil {
 			return v2.RequestPermissionResponse{}, err
 		}
-		endpoint := agent.ApprovalEndpointExternalACP
+		endpoint := approval.EndpointExternalACP
 		if cfg.BuiltinRuntime {
-			endpoint = agent.ApprovalEndpointBuiltin
+			endpoint = approval.EndpointBuiltin
 		}
 		response, err := spawn.ApprovalRequester.RequestSubagentApproval(ctx, subagent.ApprovalRequest{
-			Origin:     agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: endpoint, SessionID: bound, ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: permission.ToolCall.ID, Agent: agentID},
+			Origin:     approval.Origin{Role: approval.RoleSubagent, Endpoint: endpoint, SessionID: bound, ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: permission.ToolCall.ID, Agent: agentID},
 			SessionRef: session.NormalizeSessionRef(spawn.SessionRef), Session: session.CloneSession(spawn.Session), TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, Agent: cfg.Name, Mode: spawn.Mode, Approval: permission,
 		})
 		if err != nil {

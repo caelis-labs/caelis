@@ -24,7 +24,7 @@ type sandboxRuntimeProvider interface {
 
 type approvalContext struct {
 	ctx       context.Context
-	requester agent.ApprovalRequester
+	requester approval.Requester
 	runtime   *Runtime
 	runID     string
 	turnID    string
@@ -225,10 +225,10 @@ func (t policyWrappedTool) requestApproval(
 	return policyDecisionResultWithOutcome(t.tool.Definition(), decision, response)
 }
 
-func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, decision policy.Decision, dispatch toolbinding.Dispatch) agent.ApprovalRequest {
-	request := agent.ApprovalRequest{
+func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, decision policy.Decision, dispatch toolbinding.Dispatch) approval.Request {
+	request := approval.Request{
 		Authorization:  session.CloneApprovalAuthorization(decision.Authorization),
-		Origin:         &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
+		Origin:         &approval.Origin{WorkingDirectory: t.session.CWD, Role: approval.RoleMain, Endpoint: approval.EndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
 		SessionRef:     t.sessionRef,
 		Session:        session.CloneSession(t.session),
 		RunID:          strings.TrimSpace(t.approval.runID),
@@ -238,7 +238,7 @@ func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, 
 		Execution:      tool.InvocationFromContext(ctx),
 		Parent:         tool.ParentFromContext(ctx),
 		ProducingModel: dispatch.Model,
-		ModelStep:      agent.CloneModelStepRef(dispatch.Step),
+		ModelStep:      tool.CloneModelStepRef(dispatch.Step),
 		Approval:       cloneApproval(decision.Approval),
 		Metadata:       session.CloneState(decision.Metadata),
 	}
@@ -248,8 +248,8 @@ func (t policyWrappedTool) approvalRequest(ctx context.Context, call tool.Call, 
 	return request
 }
 
-func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-	var resp agent.ApprovalResponse
+func (t policyWrappedTool) resolveApproval(ctx context.Context, request approval.Request) (approval.Response, error) {
+	var resp approval.Response
 	var err error
 	approvalCall := func(callCtx context.Context) error {
 		if t.approval.runtime != nil {
@@ -296,13 +296,13 @@ func mergeCallMetadata(meta map[string]any, decision policy.Decision) map[string
 }
 
 func policyDecisionResult(def tool.Definition, decision policy.Decision) (tool.Result, error) {
-	return policyDecisionResultWithOutcome(def, decision, agent.ApprovalResponse{})
+	return policyDecisionResultWithOutcome(def, decision, approval.Response{})
 }
 
 func policyDecisionResultWithOutcome(
 	def tool.Definition,
 	decision policy.Decision,
-	outcome agent.ApprovalResponse,
+	outcome approval.Response,
 ) (tool.Result, error) {
 	errorText, systemHint := policyModelFeedback(decision, outcome)
 	payload := map[string]any{
@@ -319,7 +319,7 @@ func policyDecisionResultWithOutcome(
 }
 
 // policyModelFeedback separates factual error text from one actionable model hint.
-func policyModelFeedback(decision policy.Decision, outcome agent.ApprovalResponse) (errorText string, systemHint string) {
+func policyModelFeedback(decision policy.Decision, outcome approval.Response) (errorText string, systemHint string) {
 	reason := strings.TrimSpace(decision.Reason)
 	outcomeReason := strings.TrimSpace(firstNonEmpty(outcome.Reason, outcome.ReviewText))
 	approvalResolved := strings.TrimSpace(outcome.Outcome) != "" || strings.TrimSpace(outcome.OptionID) != "" || outcomeReason != ""

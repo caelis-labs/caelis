@@ -31,8 +31,8 @@ type turnHandleConfig struct {
 	allowPendingSubmissions   bool
 	waitForRunnerSubmission   bool
 	prepareSubmission         func(context.Context, SubmitRequest) (SubmitRequest, error)
-	projectApproval           func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
-	projectApprovalSettlement func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
+	projectApproval           func(*approval.Request, eventstream.ApprovalRequestID) (*session.Event, error)
+	projectApprovalSettlement func(*approval.Request, eventstream.ApprovalRequestID, string) (*session.Event, error)
 	approvals                 *approvalCoordinator
 	observer                  TurnEventObserver
 }
@@ -65,8 +65,8 @@ type turnHandle struct {
 	runnerReady               chan struct{}
 	runnerReadyOnce           sync.Once
 	prepareSubmission         func(context.Context, SubmitRequest) (SubmitRequest, error)
-	projectApproval           func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
-	projectApprovalSettlement func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
+	projectApproval           func(*approval.Request, eventstream.ApprovalRequestID) (*session.Event, error)
+	projectApprovalSettlement func(*approval.Request, eventstream.ApprovalRequestID, string) (*session.Event, error)
 	approvals                 *approvalCoordinator
 	finishHooks               []func()
 	done                      chan struct{}
@@ -361,15 +361,15 @@ func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, 
 	}
 }
 
-func (h *turnHandle) publishApprovalReviewPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
+func (h *turnHandle) publishApprovalReviewPayload(req *approval.Request, payload *ApprovalPayload) {
 	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, nil), "")
 }
 
-func (h *turnHandle) publishApprovalReviewPayloadWithInvocation(req *agent.ApprovalRequest, payload *ApprovalPayload, invocation *session.EventInvocation) {
+func (h *turnHandle) publishApprovalReviewPayloadWithInvocation(req *approval.Request, payload *ApprovalPayload, invocation *session.EventInvocation) {
 	h.publishEnvelopes(h.approvalReviewEnvelopes(req, payload, invocation), "")
 }
 
-func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, invocation *session.EventInvocation) []eventstream.Envelope {
+func (h *turnHandle) approvalReviewEnvelopes(req *approval.Request, payload *ApprovalPayload, invocation *session.EventInvocation) []eventstream.Envelope {
 	payload = cloneApprovalPayload(payload)
 	if req != nil && payload != nil {
 		if display := approval.DisplayPayloadFromRuntimeRequest(*req); display != nil {
@@ -421,7 +421,7 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 	return nil
 }
 
-func approvalEventMeta(req *agent.ApprovalRequest, invocation *session.EventInvocation) map[string]any {
+func approvalEventMeta(req *approval.Request, invocation *session.EventInvocation) map[string]any {
 	meta := canonicalApprovalEventMeta(req)
 	if invocation == nil || (strings.TrimSpace(invocation.Provider) == "" && strings.TrimSpace(invocation.Model) == "") {
 		return meta
@@ -450,7 +450,7 @@ func approvalReviewFromPayload(payload *ApprovalPayload) *eventstream.ApprovalRe
 	}
 }
 
-func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
+func canonicalApprovalEventMeta(req *approval.Request) map[string]any {
 	if req == nil || len(req.Metadata) == 0 {
 		return nil
 	}
@@ -463,7 +463,7 @@ func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
 	return approvalRelationMeta(parentCallID, parentTool, parentTaskID)
 }
 
-func approvalParentToolRelation(req *agent.ApprovalRequest) *eventstream.ParentToolRelation {
+func approvalParentToolRelation(req *approval.Request) *eventstream.ParentToolRelation {
 	if req == nil {
 		return nil
 	}

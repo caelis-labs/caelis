@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
@@ -19,22 +18,22 @@ type approvalRequester struct {
 
 func (r approvalRequester) RequestApproval(
 	ctx context.Context,
-	req agent.ApprovalRequest,
-) (agent.ApprovalResponse, error) {
+	req approval.Request,
+) (approval.Response, error) {
 	if r.reviewer != nil && r.mode != approval.ModeManual {
 		return r.reviewApproval(ctx, req)
 	}
 	return r.requestClientPermission(ctx, req)
 }
 
-func (r approvalRequester) reviewApproval(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (r approvalRequester) reviewApproval(ctx context.Context, req approval.Request) (approval.Response, error) {
 	payload := approval.PayloadFromRuntimeRequest(req)
 	var reviewModel model.LLM
 	if r.modelResolver != nil {
 		var err error
 		reviewModel, err = r.modelResolver.ResolveApprovalModel(ctx, req.SessionRef)
 		if err != nil {
-			return agent.ApprovalResponse{}, fmt.Errorf("resolve automatic approval model: %w", err)
+			return approval.Response{}, fmt.Errorf("resolve automatic approval model: %w", err)
 		}
 	}
 	result, err := approval.ReviewerAdapter{Reviewer: r.reviewer}.Decide(ctx, approval.ReviewRequest{
@@ -48,26 +47,26 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 		RuntimeRequest: req,
 	})
 	if err != nil {
-		return agent.ApprovalResponse{}, fmt.Errorf("automatic approval review failed: %w", err)
+		return approval.Response{}, fmt.Errorf("automatic approval review failed: %w", err)
 	}
 	return approval.RuntimeResponseFromFinalReview(result), nil
 }
 
 func (r approvalRequester) requestClientPermission(
 	ctx context.Context,
-	req agent.ApprovalRequest,
-) (agent.ApprovalResponse, error) {
+	req approval.Request,
+) (approval.Response, error) {
 	if r.callbacks == nil || req.Approval == nil {
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	}
 	display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req))
 	request, err := sdkPermissionRequestFromApproval(req.SessionRef, display, nil)
 	if err != nil {
-		return agent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
 	response, err := r.callbacks.RequestPermission(ctx, request)
 	if err != nil {
-		return agent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
 	return approvalResponseFromSDK(response, req.Approval), nil
 }

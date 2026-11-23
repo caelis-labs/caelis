@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -2652,7 +2653,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 	outsidePath := policyOutsidePathForRuntimeTest()
 	testModel := &denyWriteRuntimeModel{}
 	var sawApproval bool
-	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		sawApproval = true
 		if req.ModelStep == nil || strings.TrimSpace(req.ModelStep.ID) == "" || req.ModelStep.Index != 0 || req.ModelStep.CallCount != 1 {
 			t.Fatalf("approval model step = %#v, want one call in a non-empty model step", req.ModelStep)
@@ -2663,7 +2664,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		if got := strings.TrimSpace(fmt.Sprint(req.Metadata["risk_class"])); got != "path_escape" {
 			t.Fatalf("approval metadata risk_class = %q, want path_escape", got)
 		}
-		return agent.ApprovalResponse{
+		return approval.Response{
 			Outcome:  "selected",
 			OptionID: "reject_once",
 			Approved: false,
@@ -2746,9 +2747,9 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "yolo-outside.txt")
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		t.Fatal("danger full-access policy routed an allowed tool call to approval")
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
@@ -2806,9 +2807,9 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(tempRoot) })
 	tempPath := filepath.Join(tempRoot, "scratch.txt")
 	testModel := &writePathRuntimeModel{path: tempPath, content: "temporary\n"}
-	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		t.Errorf("system temporary file unexpectedly requested approval: %+v", req.Approval)
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
@@ -3136,32 +3137,32 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 			return nil
 		},
 	}
-	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
-			return agent.ApprovalResponse{}, fmt.Errorf("RunState during approval: %w", err)
+			return approval.Response{}, fmt.Errorf("RunState during approval: %w", err)
 		}
 		if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || req.OperationTaskID == "" {
-			return agent.ApprovalResponse{}, fmt.Errorf("run state during command approval = %+v, want running with a Task-owned approval", state)
+			return approval.Response{}, fmt.Errorf("run state during command approval = %+v, want running with a Task-owned approval", state)
 		}
 		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval request = %+v, want RunCommand tool call", req.Approval)
+			return approval.Response{}, fmt.Errorf("approval request = %+v, want RunCommand tool call", req.Approval)
 		}
 		got, ok := req.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
 		if !ok || !reflect.DeepEqual(got, sandboxPolicy) {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
+			return approval.Response{}, fmt.Errorf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
 		}
 		budget, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		if err := req.OnAdmission(budget); err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 		select {
 		case <-approve:
 		case <-budget.Done():
-			return agent.ApprovalResponse{}, budget.Err()
+			return approval.Response{}, budget.Err()
 		}
-		return agent.ApprovalResponse{
+		return approval.Response{
 			Outcome:  "selected",
 			OptionID: "allow_once",
 			Approved: true,
@@ -3292,8 +3293,8 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if err != nil || resumed.Handle != run.Handle {
 		t.Fatalf("AttachLiveRun() = %+v, %v; want same live runner", resumed, err)
 	}
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
+	if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() error = %v", err)
 	}
 	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
@@ -3305,7 +3306,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("tool calls = %d, want 1", calls)
 	}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("idempotent ResolveApproval() error = %v", err)
 	}
 	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
@@ -3334,7 +3335,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if err != nil || state.ActiveRunID != "" {
 		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
 	}
-	if err := reopened.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+	if err := reopened.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() after reopening with original request ID: %v", err)
 	}
 	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
@@ -3347,11 +3348,11 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 	t.Parallel()
 
-	var captured agent.ApprovalRequest
+	var captured approval.Request
 	requester := controllerApprovalRequester{
-		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			captured = req
-			return agent.ApprovalResponse{
+			return approval.Response{
 				Outcome:  "selected",
 				OptionID: "allow_once",
 				Approved: true,
@@ -3410,11 +3411,11 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 	t.Parallel()
 
-	var captured agent.ApprovalRequest
+	var captured approval.Request
 	requester := controllerApprovalRequester{
-		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			captured = req
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}),
 		sessionRef:           session.SessionRef{SessionID: "sess-approval"},
 		session:              session.Session{SessionRef: session.SessionRef{SessionID: "sess-approval"}},

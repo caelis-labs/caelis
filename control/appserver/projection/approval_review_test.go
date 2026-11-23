@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -17,7 +16,7 @@ import (
 
 func TestApprovalReviewReplayUsesSafePresentationAndPreservesVerdict(t *testing.T) {
 	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "custom", RawInput: map[string]any{"credential": "REPLAY-MARKED-SECRET"}}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Kind: "allow_once"}}}
-	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Tool: tool.Definition{Name: "custom", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}}, Approval: original}))
+	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(approval.Request{Tool: tool.Definition{Name: "custom", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}}, Approval: original}))
 	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{
 		RequestID: "native-request", TurnID: "turn", ToolCallID: "call", ToolName: "custom", Status: session.ApprovalRecordResolved, Approved: true, OptionID: "native-allow",
 		Input: json.RawMessage(`{"credential":"REPLAY-MARKED-SECRET"}`), Approval: original, Presentation: presentation, ReviewText: "REPLAY-MARKED-SECRET rationale",
@@ -44,7 +43,7 @@ func TestApprovalReviewReplayUsesSafePresentationAndPreservesVerdict(t *testing.
 
 func TestIndependentPermissionReviewReplayNeedsNoToolCall(t *testing.T) {
 	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original", RawSubject: json.RawMessage(`{"type":"_private","secret":"PRIVATE-DRAFT-EVIDENCE"}`)}, Subject: &session.ApprovalSubject{Kind: "opaque", OpaqueInput: true}, Options: []session.ProtocolApprovalOption{{ID: "native-reject", Name: "Reject", Kind: "reject_once"}}}
-	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: original}))
+	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(approval.Request{Approval: original}))
 	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{RequestID: "native-request", TurnID: "turn", Status: session.ApprovalRecordResolved, OptionID: "native-reject", Approval: original, Presentation: presentation, ReviewText: "PRIVATE-DRAFT-EVIDENCE reviewed"}}
 	projected := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "owner"}, event)
 	if len(projected) != 1 || projected[0].ApprovalRequestID != "native-request" || projected[0].ApprovalReview.ToolCallID != "" || projected[0].ApprovalReview.Status != "denied" || projected[0].ApprovalReview.Text != "Opaque action details withheld." {

@@ -65,7 +65,7 @@ type Config struct {
 	Subagents     agent.SubagentRunner
 	// ChildApprovalRequester routes approvals independently of a parent Turn,
 	// including user-started children and child endpoints reattached after restart.
-	ChildApprovalRequester agent.ApprovalRequester
+	ChildApprovalRequester approval.Requester
 	TraceSink              agent.TraceSink
 }
 
@@ -75,7 +75,7 @@ type Runtime struct {
 	hookPurpose              agent.HookPurpose
 	codeModeMu               sync.Mutex
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
-	childApprovalRequester   agent.ApprovalRequester
+	childApprovalRequester   approval.Requester
 	sessions                 session.Service
 	agentFactory             agent.AgentFactory
 	runIDGenerator           func() string

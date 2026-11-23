@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -33,7 +33,7 @@ func TestApprovalSubjectLiveStateFileReplayAndStaleIdentity(t *testing.T) {
 			if err != nil || decision.Approval == nil {
 				t.Fatalf("native approval = %+v, %v", decision, err)
 			}
-			request := &agent.ApprovalRequest{SessionRef: active.SessionRef, Session: active, RunID: "run-1", TurnID: "turn-1", ApprovalRequestID: "native-pause", Tool: def, Call: call, Approval: decision.Approval, Metadata: decision.Metadata}
+			request := &approval.Request{SessionRef: active.SessionRef, Session: active, RunID: "run-1", TurnID: "turn-1", ApprovalRequestID: "native-pause", Tool: def, Call: call, Approval: decision.Approval, Metadata: decision.Metadata}
 			if child {
 				request.Metadata["subagent"] = true
 				request.Metadata["task_id"] = "child-task"
@@ -114,7 +114,7 @@ func TestGuardianReceivesExactMarkedActionWhileLiveReviewIsSafe(t *testing.T) {
 	const secret = "GUARDIAN-MARKED-SECRET"
 	input := json.RawMessage(`{"command":"GUARDIAN-MARKED-SECRET","justification":"GUARDIAN-MARKED-SECRET"}`)
 	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "RunCommand", Title: secret, RawInput: map[string]any{"command": secret, "justification": secret}}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: "Allow", Kind: "allow_once"}, {ID: "native-reject", Name: "Reject", Kind: "reject_once"}}}
-	req := &agent.ApprovalRequest{SessionRef: session.SessionRef{SessionID: "session"}, ApprovalRequestID: "native-request", Tool: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"properties": map[string]any{"command": map[string]any{"writeOnly": true}, "justification": map[string]any{"writeOnly": true}}}},
+	req := &approval.Request{SessionRef: session.SessionRef{SessionID: "session"}, ApprovalRequestID: "native-request", Tool: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"properties": map[string]any{"command": map[string]any{"writeOnly": true}, "justification": map[string]any{"writeOnly": true}}}},
 		Call: tool.Call{ID: "call", Name: "RunCommand", Input: input}, Approval: original, Metadata: map[string]any{"approval_reason": secret, "justification": secret}}
 	reviewer := &recordingApprovalReviewer{result: ApprovalReviewResult{Approved: true, OptionID: "native-allow", DisplayText: secret, Rationale: secret, Risk: secret, Authorization: secret}}
 	gateway := &Gateway{approvalReviewer: reviewer}

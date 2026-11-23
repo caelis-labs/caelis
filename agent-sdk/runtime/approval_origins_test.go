@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -15,17 +15,17 @@ import (
 )
 
 func TestApprovalOriginBuiltinNoOptionsNormalizationAndReason(t *testing.T) {
-	var captured agent.ApprovalRequest
+	var captured approval.Request
 	invoked := false
-	wrapped := policyWrappedTool{sessionRef: session.SessionRef{SessionID: "s"}, tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { invoked = true; return tool.Result{}, nil }}, approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	wrapped := policyWrappedTool{sessionRef: session.SessionRef{SessionID: "s"}, tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { invoked = true; return tool.Result{}, nil }}, approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		captured = req
-		return agent.ApprovalResponse{OptionID: "reject_once", Outcome: "selected", Reason: "Destructive target is not authorized."}, nil
+		return approval.Response{OptionID: "reject_once", Outcome: "selected", Reason: "Destructive target is not authorized."}, nil
 	})}}
 	result, err := wrapped.requestApproval(t.Context(), tool.Call{ID: "call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "Probe"}}}, toolbinding.Dispatch{})
 	if !tool.HasFailedReply(err) {
 		t.Fatalf("denial error = %v", err)
 	}
-	if invoked || captured.Origin == nil || captured.Origin.Role != agent.ApprovalRoleMain || captured.Origin.Endpoint != agent.ApprovalEndpointBuiltin || len(captured.Approval.Options) != 2 {
+	if invoked || captured.Origin == nil || captured.Origin.Role != approval.RoleMain || captured.Origin.Endpoint != approval.EndpointBuiltin || len(captured.Approval.Options) != 2 {
 		t.Fatalf("bad admission: %+v invoked=%v", captured, invoked)
 	}
 	encoded, _ := json.Marshal(result)
@@ -35,31 +35,31 @@ func TestApprovalOriginBuiltinNoOptionsNormalizationAndReason(t *testing.T) {
 }
 
 func TestApprovalOriginEndpointRoleOrthogonality(t *testing.T) {
-	for _, endpoint := range []agent.ApprovalEndpoint{agent.ApprovalEndpointBuiltin, agent.ApprovalEndpointExternalACP} {
-		var captured agent.ApprovalRequest
-		bridge := subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	for _, endpoint := range []approval.Endpoint{approval.EndpointBuiltin, approval.EndpointExternalACP} {
+		var captured approval.Request
+		bridge := subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			captured = req
-			return agent.ApprovalResponse{Reason: "Exact denial"}, nil
+			return approval.Response{Reason: "Exact denial"}, nil
 		})}
-		response, err := bridge.RequestSubagentApproval(t.Context(), agent.SubagentApprovalRequest{Origin: agent.ApprovalOrigin{Endpoint: endpoint, SessionID: "child"}, TaskID: "task", ParentCallID: "spawn", ToolCall: agent.EndpointApprovalToolCall{ID: "call"}})
+		response, err := bridge.RequestSubagentApproval(t.Context(), approval.SubagentRequest{Origin: approval.Origin{Endpoint: endpoint, SessionID: "child"}, TaskID: "task", ParentCallID: "spawn", ToolCall: session.ProtocolToolCall{ID: "call"}})
 		if err != nil || response.Reason != "Exact denial" {
 			t.Fatalf("response=%+v err=%v", response, err)
 		}
 		o := captured.Origin
-		if o.Role != agent.ApprovalRoleSubagent || o.Endpoint != endpoint || o.SessionID != "child" || o.ParentSessionID != "parent" || o.TaskID != "task" || o.ParentCallID != "spawn" || o.ToolCallID != "call" {
+		if o.Role != approval.RoleSubagent || o.Endpoint != endpoint || o.SessionID != "child" || o.ParentSessionID != "parent" || o.TaskID != "task" || o.ParentCallID != "spawn" || o.ToolCallID != "call" {
 			t.Fatalf("origin=%+v", o)
 		}
 	}
-	var captured agent.ApprovalRequest
-	bridge := controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	var captured approval.Request
+	bridge := controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		captured = req
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})}
-	_, err := bridge.RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", ToolCall: agent.EndpointApprovalToolCall{ID: "call"}})
+	_, err := bridge.RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", ToolCall: session.ProtocolToolCall{ID: "call"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if captured.Origin.Role != agent.ApprovalRoleMain || captured.Origin.Endpoint != agent.ApprovalEndpointExternalACP || captured.Origin.SessionID != "remote" {
+	if captured.Origin.Role != approval.RoleMain || captured.Origin.Endpoint != approval.EndpointExternalACP || captured.Origin.SessionID != "remote" {
 		t.Fatalf("origin=%+v", captured.Origin)
 	}
 }

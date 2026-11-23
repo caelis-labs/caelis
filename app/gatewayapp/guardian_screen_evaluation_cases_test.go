@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -133,9 +132,9 @@ func constructGuardianScreenFixture(t *testing.T, ctx context.Context, c guardia
 	if c.Options != nil {
 		req.Approval.Options = c.Options
 	}
-	req.RuntimeRequest.Origin = &agentsdk.ApprovalOrigin{
-		Role:             agentsdk.ApprovalRoleMain,
-		Endpoint:         agentsdk.ApprovalEndpointBuiltin,
+	req.RuntimeRequest.Origin = &approval.Origin{
+		Role:             approval.RoleMain,
+		Endpoint:         approval.EndpointBuiltin,
 		WorkingDirectory: "/workspace",
 	}
 	return service, active, req

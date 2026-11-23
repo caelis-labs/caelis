@@ -132,7 +132,7 @@ func (r *approvalRuntime) RunState(context.Context, session.SessionRef) (agent.R
 
 type childApprovalRuntime struct {
 	session   session.Session
-	responses chan agent.ApprovalResponse
+	responses chan approval.Response
 }
 
 func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -542,7 +542,7 @@ func (r *controlPlaneRuntime) DetachParticipant(ctx context.Context, req agent.D
 }
 
 type staticSessionService struct {
-	approvalRequest *agent.ApprovalRequest
+	approvalRequest *approval.Request
 	session         session.Session
 	state           map[string]any
 }
@@ -904,8 +904,8 @@ func firstUsageSnapshot(events []eventstream.Envelope) *session.UsageSnapshot {
 	return nil
 }
 
-func (r *approvalRuntime) approvalRequest() agent.ApprovalRequest {
-	return agent.ApprovalRequest{
+func (r *approvalRuntime) approvalRequest() approval.Request {
+	return approval.Request{
 		SessionRef:     r.session.SessionRef,
 		Session:        r.session,
 		RunID:          "run-1",
@@ -929,8 +929,8 @@ func (r *approvalRuntime) approvalRequest() agent.ApprovalRequest {
 	}
 }
 
-func (r *childApprovalRuntime) approvalRequest() agent.ApprovalRequest {
-	return agent.ApprovalRequest{
+func (r *childApprovalRuntime) approvalRequest() approval.Request {
+	return approval.Request{
 		SessionRef: r.session.SessionRef,
 		Session:    r.session,
 		RunID:      "run-1",

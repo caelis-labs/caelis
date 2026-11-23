@@ -9,9 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+
 	"context"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -55,20 +56,20 @@ func TestProductPolicyNativeFixtureAutomatedApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	var approved, denied atomic.Int32
-	requester := requesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := requesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		if req.Authorization == nil {
 			t.Error("missing typed authorization")
-			return agent.ApprovalResponse{}, nil
+			return approval.Response{}, nil
 		}
 		if req.Authorization.Scope.Resource == b {
 			denied.Add(1)
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+			return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 		}
 		if req.Authorization.Scope.Resource != a {
 			t.Errorf("unexpected resource %q", req.Authorization.Scope.Resource)
 		}
 		approved.Add(1)
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 	})
 	names := map[string]string{}
 	for _, item := range manager.Tools() {

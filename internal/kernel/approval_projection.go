@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -14,19 +13,19 @@ import (
 
 const approvalProjectionTimeout = 5 * time.Second
 
-func (g *Gateway) approvalProjector(ref session.SessionRef, turnID string) func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error) {
-	return func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
+func (g *Gateway) approvalProjector(ref session.SessionRef, turnID string) func(*approval.Request, eventstream.ApprovalRequestID) (*session.Event, error) {
+	return func(req *approval.Request, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
 		return g.projectApprovalRequest(req, ref, turnID, requestID)
 	}
 }
 
-func (g *Gateway) approvalSettlementProjector(ref session.SessionRef, turnID string) func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error) {
-	return func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
+func (g *Gateway) approvalSettlementProjector(ref session.SessionRef, turnID string) func(*approval.Request, eventstream.ApprovalRequestID, string) (*session.Event, error) {
+	return func(req *approval.Request, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
 		return g.projectApprovalSettlement(req, ref, turnID, requestID, state)
 	}
 }
 
-func (g *Gateway) projectApprovalRequest(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
+func (g *Gateway) projectApprovalRequest(req *approval.Request, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
 	if g == nil || g.sessions == nil || req == nil {
 		return nil, fmt.Errorf("gateway: approval persistence is unavailable")
 	}
@@ -89,7 +88,7 @@ func (g *Gateway) projectApprovalRequest(req *agent.ApprovalRequest, fallbackRef
 
 }
 
-func approvalChildOrigin(req *agent.ApprovalRequest, origin *EventOrigin, requestID eventstream.ApprovalRequestID) *session.EventChildOrigin {
+func approvalChildOrigin(req *approval.Request, origin *EventOrigin, requestID eventstream.ApprovalRequestID) *session.EventChildOrigin {
 	if req == nil || origin == nil {
 		return nil
 	}
@@ -126,7 +125,7 @@ func approvalChildOrigin(req *agent.ApprovalRequest, origin *EventOrigin, reques
 	}
 }
 
-func (g *Gateway) projectApprovalSettlement(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
+func (g *Gateway) projectApprovalSettlement(req *approval.Request, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
 	if g == nil || g.sessions == nil {
 		return nil, fmt.Errorf("gateway: approval settlement projection is unavailable")
 	}

@@ -577,7 +577,7 @@ func TestChatAgentDispatchesModelStepPosition(t *testing.T) {
 		{name: "concurrent", parallel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			observed := make(chan *agent.ModelStepRef, 2)
+			observed := make(chan *tool.ModelStepRef, 2)
 			makeTool := func(name string) tool.Tool {
 				return stepDispatchTool{
 					Tool: tool.NamedTool{
@@ -632,7 +632,7 @@ func TestChatAgentDispatchesModelStepPosition(t *testing.T) {
 
 type stepDispatchTool struct {
 	tool.Tool
-	observe chan<- *agent.ModelStepRef
+	observe chan<- *tool.ModelStepRef
 }
 
 func (t stepDispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {

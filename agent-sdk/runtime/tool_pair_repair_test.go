@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -683,8 +684,8 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-				return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
+			requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
+				return approval.Response{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
 			})
 			for range 2 {
 				driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {

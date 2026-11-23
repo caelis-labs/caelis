@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 )
 
@@ -18,7 +17,7 @@ func (r failedApprovalReviewer) ReviewApproval(context.Context, approval.ReviewR
 func TestAutomaticApprovalFailureDoesNotBecomePolicyDenial(t *testing.T) {
 	failure := errors.New("required evidence unavailable")
 	requester := approvalRequester{reviewer: failedApprovalReviewer{failure}, mode: approval.ModeAutoReview}
-	response, err := requester.RequestApproval(t.Context(), agent.ApprovalRequest{})
+	response, err := requester.RequestApproval(t.Context(), approval.Request{})
 	if !errors.Is(err, failure) {
 		t.Fatalf("error=%v, want original review failure", err)
 	}

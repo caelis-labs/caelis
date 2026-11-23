@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -29,7 +28,7 @@ func TestApprovalProjectionReadsRuntimeFactDuringFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	gateway := &Gateway{sessions: sessions}
-	request := &agent.ApprovalRequest{
+	request := &approval.Request{
 		SessionRef: active.SessionRef, RunID: "run-1", TurnID: "turn-1",
 		Tool: tool.Definition{Name: "Write"},
 		Call: tool.Call{ID: "write-1", Name: "Write", Input: json.RawMessage(`{"path":"child.txt"}`)},
@@ -57,7 +56,7 @@ func TestApprovalProjectionReadsRuntimeFactDuringFence(t *testing.T) {
 }
 
 // The fixture authors the Runtime-domain request once; Control only reads it.
-func appendRuntimeApprovalFixture(t *testing.T, service session.Service, req *agent.ApprovalRequest, id string) {
+func appendRuntimeApprovalFixture(t *testing.T, service session.Service, req *approval.Request, id string) {
 	t.Helper()
 	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(*req))
 	record := session.ApprovalRecord{Schema: session.ApprovalSchemaVersion, RequestID: id, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID, ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Execution.ItemID, Revision: 1, Status: session.ApprovalRecordPending, Input: req.Call.Input, Approval: req.Approval, Presentation: presentation}

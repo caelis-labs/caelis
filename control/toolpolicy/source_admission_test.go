@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -74,10 +75,10 @@ func TestProductPolicyPendingCodeModeBindingChange(t *testing.T) {
 				}
 				return nil
 			}}
-			req := requesterFunc(func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			req := requesterFunc(func(_ context.Context, request approval.Request) (approval.Response, error) {
 				asks.Add(1)
 				if request.Authorization == nil {
-					return agent.ApprovalResponse{}, fmt.Errorf("missing product authorization")
+					return approval.Response{}, fmt.Errorf("missing product authorization")
 				}
 				switch change {
 				case "same-tool-schema":
@@ -86,12 +87,12 @@ func TestProductPolicyPendingCodeModeBindingChange(t *testing.T) {
 					publish("click", "changed")
 				case "source-revoke":
 					if err := mgr.RevokeServer("desktop-world", "dtw"); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
 				}
 				if change != "source-revoke" {
 					if err := mgr.RefreshTools(ctx, "desktop-world", "dtw"); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
 					for name, old := range before {
 						current, found, err := mgr.Lookup(ctx, name)
@@ -105,7 +106,7 @@ func TestProductPolicyPendingCodeModeBindingChange(t *testing.T) {
 						}
 					}
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 			})
 			rt, err := runtime.New(runtime.Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: policies})
 			if err != nil {

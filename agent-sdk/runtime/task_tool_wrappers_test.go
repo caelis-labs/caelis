@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -336,11 +337,11 @@ func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T
 func TestSubagentApprovalRequesterPreservesCanonicalToolPayload(t *testing.T) {
 	t.Parallel()
 
-	var captured agent.ApprovalRequest
+	var captured approval.Request
 	requester := subagentApprovalRequester{
-		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			captured = req
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow-once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow-once", Approved: true}, nil
 		}),
 		sessionRef: session.SessionRef{SessionID: "parent-1"},
 	}

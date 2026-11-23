@@ -14,8 +14,8 @@ and handoff remain in the product Control layer.
 
 | Package | Role |
 | --- | --- |
-| `agent-sdk` | Cross-domain Agent, Run, capability, approval, usage, and error contracts |
-| `approval` | Approval review contracts |
+| `agent-sdk` | Cross-domain Agent, Run, capability, usage, and error contracts |
+| `approval` | Permission requests, decisions, resolution, and review contracts |
 | `display` | Tool and Runtime display helpers |
 | `judgment` | Typed choice, probability and relevance evaluation contracts; `judgment/typesafe` implements System One |
 | `model` | Model contracts and provider implementations |

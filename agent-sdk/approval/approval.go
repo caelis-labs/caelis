@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -55,6 +54,7 @@ const (
 	ReviewStatusFailed     ReviewStatus = "failed"
 )
 
+// Option is one user-selectable approval choice.
 type Option struct {
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
@@ -102,7 +102,7 @@ type ReviewRequest struct {
 	// present it takes precedence over Model, within the same review context.
 	ResolveModel   func(context.Context) (model.LLM, error)
 	Approval       *Payload
-	RuntimeRequest agentsdk.ApprovalRequest
+	RuntimeRequest Request
 }
 
 type ReviewResult struct {
@@ -141,7 +141,7 @@ type ModelResolver interface {
 	ResolveApprovalModel(context.Context, session.SessionRef) (model.LLM, error)
 }
 
-func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
+func PayloadFromRuntimeRequest(req Request) *Payload {
 	payload := &Payload{PolicyAuthorization: session.CloneApprovalAuthorization(req.Authorization),
 		ToolCallID: strings.TrimSpace(req.Call.ID),
 		ToolName:   strings.TrimSpace(req.Tool.Name),
@@ -199,7 +199,7 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 
 // DisplayPayloadFromRuntimeRequest creates a separate presentation snapshot.
 // Reviewers and execution/resolve must use PayloadFromRuntimeRequest instead.
-func DisplayPayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
+func DisplayPayloadFromRuntimeRequest(req Request) *Payload {
 	payload := PayloadFromRuntimeRequest(req)
 	if payload == nil {
 		return nil
@@ -278,7 +278,7 @@ func DisplayReviewText(text string, subject *session.ApprovalSubject) string {
 // buffers after handing an approval to Control; the action, protocol payload,
 // options, and provenance metadata must remain the exact values that entered
 // the approval queue.
-func CloneRuntimeRequest(in agentsdk.ApprovalRequest) agentsdk.ApprovalRequest {
+func CloneRuntimeRequest(in Request) Request {
 	out := in
 	out.Authorization = session.CloneApprovalAuthorization(in.Authorization)
 	if in.Origin != nil {
@@ -297,7 +297,7 @@ func CloneRuntimeRequest(in agentsdk.ApprovalRequest) agentsdk.ApprovalRequest {
 		parent := *in.Parent
 		out.Parent = &parent
 	}
-	out.ModelStep = agentsdk.CloneModelStepRef(in.ModelStep)
+	out.ModelStep = tool.CloneModelStepRef(in.ModelStep)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	if in.Approval != nil {
 		approval := session.CloneProtocolApproval(*in.Approval)
@@ -410,8 +410,8 @@ func NormalizeOptions(options []Option) []Option {
 
 // RuntimeResponseFromFinalReview converts an already-finalized review result
 // into the runtime approval response shape.
-func RuntimeResponseFromFinalReview(result ReviewResult) agentsdk.ApprovalResponse {
-	return agentsdk.ApprovalResponse{
+func RuntimeResponseFromFinalReview(result ReviewResult) Response {
+	return Response{
 		Outcome:    strings.TrimSpace(result.Outcome),
 		OptionID:   strings.TrimSpace(result.OptionID),
 		Approved:   result.Approved,

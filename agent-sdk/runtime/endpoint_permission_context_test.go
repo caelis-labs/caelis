@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -14,14 +14,14 @@ import (
 func TestEndpointIndependentPermissionPreservesMachineContextWithoutFakeTool(t *testing.T) {
 	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original title", Description: new("Original description"), RawSubject: json.RawMessage(`{"type":"command","command":"exact command","cwd":"/workspace"}`), NativeRequestID: json.RawMessage(`"original-jsonrpc-id"`)}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: " Allow original ", Kind: "allow_once"}}}
 	for _, child := range []bool{false, true} {
-		var observed agent.ApprovalRequest
-		requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		var observed approval.Request
+		requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			observed = req
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
 		})
 		var err error
 		if child {
-			_, err = (subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: requester}).RequestSubagentApproval(t.Context(), agent.SubagentApprovalRequest{Origin: agent.ApprovalOrigin{SessionID: "child", Endpoint: agent.ApprovalEndpointExternalACP}, TaskID: "task", ParentCallID: "spawn", Approval: original})
+			_, err = (subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: requester}).RequestSubagentApproval(t.Context(), approval.SubagentRequest{Origin: approval.Origin{SessionID: "child", Endpoint: approval.EndpointExternalACP}, TaskID: "task", ParentCallID: "spawn", Approval: original})
 		} else {
 			_, err = (controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "owner"}, requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", Approval: original})
 		}

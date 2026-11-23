@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // ErrRunInputClosed reports that an exact live Run no longer accepts input.
@@ -33,66 +33,6 @@ func (e *RunConflictError) Error() string {
 
 func (e *RunConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
-// ApprovalOption is one user-selectable approval choice.
-type ApprovalOption struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	Kind string `json:"kind,omitempty"`
-}
-
-// ApprovalRequest is one runtime-owned approval request emitted before one
-// sensitive tool execution continues.
-type ApprovalRequest struct {
-	// Authorization binds offered choices to exact Policy-owned scopes.
-	Authorization *session.ApprovalAuthorization `json:"authorization,omitempty"`
-	Origin        *ApprovalOrigin                `json:"origin,omitempty"`
-	SessionRef    session.SessionRef             `json:"session_ref"`
-	Session       session.Session                `json:"session"`
-	RunID         string                         `json:"run_id,omitempty"`
-	TurnID        string                         `json:"turn_id,omitempty"`
-	// ApprovalRequestID identifies the SDK-owned durable request when this approval
-	// was created by Runtime durable approval handling. Product Control may use
-	// it as the request correlation value without adding it to ACP wire payloads.
-	ApprovalRequestID string `json:"approval_request_id,omitempty"`
-	// OperationTaskID associates the approval with a Job in SessionRef. It is
-	// separate from Origin.TaskID, which identifies the requesting Agent.
-	OperationTaskID string `json:"operation_task_id,omitempty"`
-	// OnAdmission acknowledges registration in the approval scheduler. Task
-	// producers may yield only after it succeeds. The supplied context carries
-	// the original approval deadline; observing a Task never renews it.
-	// Requesters which omit the acknowledgment retain synchronous observation.
-	OnAdmission func(context.Context) error `json:"-"`
-	Tool        tool.Definition             `json:"tool"`
-	// Execution and Parent are detached Runtime occurrence evidence.
-	Execution tool.InvocationContext `json:"-"`
-	Parent    *tool.ParentCall       `json:"-"`
-	Call      tool.Call              `json:"call"`
-	// ProducingModel is the process-local fallback reviewer from the request
-	// that emitted Call. It is absent for approvals without a producing model.
-	ProducingModel model.LLM `json:"-"`
-	// ModelStep identifies the model-emitted tool-call batch. Concurrent batches
-	// also carry a process-local admission barrier; neither is part of the ACP
-	// permission payload.
-	ModelStep *ModelStepRef             `json:"model_step,omitempty"`
-	Approval  *session.ProtocolApproval `json:"approval,omitempty"`
-	Metadata  map[string]any            `json:"metadata,omitempty"`
-}
-
-// ApprovalResponse is one resolved approval outcome.
-type ApprovalResponse struct {
-	Outcome    string `json:"outcome,omitempty"`
-	OptionID   string `json:"option_id,omitempty"`
-	Approved   bool   `json:"approved,omitempty"`
-	Reason     string `json:"reason,omitempty"`
-	ReviewText string `json:"review_text,omitempty"`
-}
-
-// ApprovalRequester bridges runtime approval decisions to an interactive client
-// such as ACP request_permission.
-type ApprovalRequester interface {
-	RequestApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
-}
-
 // RunRequest is the minimal runtime execution request.
 type RunRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
@@ -115,7 +55,7 @@ type RunRequest struct {
 	// input. It does not alter the provider-visible message.
 	InputCompaction   *session.EventCompactionContext `json:"-"`
 	Request           ModelRequestOptions             `json:"request,omitempty"`
-	ApprovalRequester ApprovalRequester               `json:"-"`
+	ApprovalRequester approval.Requester              `json:"-"`
 	SourceObserver    SourceEventObserver             `json:"-"`
 	Agent             Agent                           `json:"-"`
 	AgentSpec         AgentSpec                       `json:"-"`
@@ -132,13 +72,6 @@ type RunResult struct {
 type AttachLiveRunRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
 	RunID      string             `json:"run_id"`
-}
-
-// ResolveApprovalRequest resolves one durable approval request.
-type ResolveApprovalRequest struct {
-	SessionRef session.SessionRef `json:"session_ref"`
-	RequestID  string             `json:"request_id"`
-	Decision   ApprovalResponse   `json:"decision"`
 }
 
 // RunNotAttachableError reports a run that has no live execution in this
@@ -179,12 +112,6 @@ type RunnerCompletionRuntime interface {
 // continues a durable run after restart.
 type LiveRunAttacher interface {
 	AttachLiveRun(context.Context, AttachLiveRunRequest) (RunResult, error)
-}
-
-// ApprovalResolver resolves one durable approval pause. Resolution can wake a
-// matching live waiter, but does not make a non-live run resumable.
-type ApprovalResolver interface {
-	ResolveApproval(context.Context, ResolveApprovalRequest) error
 }
 
 // AttachParticipantRequest attaches one external participant without replacing
@@ -232,7 +159,7 @@ type PromptParticipantRequest struct {
 	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
 	Source            string              `json:"source,omitempty"`
 	Stream            bool                `json:"stream,omitempty"`
-	ApprovalRequester ApprovalRequester   `json:"-"`
+	ApprovalRequester approval.Requester  `json:"-"`
 	SourceObserver    SourceEventObserver `json:"-"`
 }
 

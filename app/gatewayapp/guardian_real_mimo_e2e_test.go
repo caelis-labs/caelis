@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -237,7 +237,7 @@ func guardianRealMimoApprovalRequest(
 			Status:             kernel.ApprovalStatusPending,
 			Options:            options,
 		},
-		RuntimeRequest: agent.ApprovalRequest{
+		RuntimeRequest: approval.Request{
 			SessionRef: activeSession.SessionRef,
 			Session:    activeSession,
 			RunID:      "guardian-real-mimo-run",

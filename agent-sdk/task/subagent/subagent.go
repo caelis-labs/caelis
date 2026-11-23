@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
@@ -54,22 +55,22 @@ type Registry interface {
 }
 
 // ApprovalOption is one remote permission option exposed by a child ACP agent.
-type ApprovalOption = agent.ApprovalOption
+type ApprovalOption = approval.Option
 
 // ApprovalToolCall is the child tool call asking for approval.
-type ApprovalToolCall = agent.EndpointApprovalToolCall
+type ApprovalToolCall = session.ProtocolToolCall
 
 // ApprovalRequest is one runtime-owned approval bridge payload for a spawned
 // child ACP agent. It is system-controlled and never exposed on the LLM-facing
 // SPAWN or TASK results.
-type ApprovalRequest = agent.SubagentApprovalRequest
+type ApprovalRequest = approval.SubagentRequest
 
 // ApprovalResponse is one bridged child approval outcome.
-type ApprovalResponse = agent.ApprovalResponse
+type ApprovalResponse = approval.Response
 
 // ApprovalRequester bridges child ACP permission requests into the parent
 // runtime's approval surface.
-type ApprovalRequester = agent.SubagentApprovalRequester
+type ApprovalRequester = approval.SubagentRequester
 
 // SpawnContext is the system-controlled parent session context inherited by one
 // child ACP agent. None of these fields are exposed on the LLM-facing SPAWN

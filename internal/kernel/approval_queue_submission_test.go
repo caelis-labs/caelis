@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 )
 
 func TestCallerCannotResolveAutoReviewButGuardianCan(t *testing.T) {
@@ -15,7 +15,7 @@ func TestCallerCannotResolveAutoReviewButGuardianCan(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			handle := newTestTurnHandle()
-			request := &agent.ApprovalRequest{SessionRef: handle.sessionRef, ApprovalRequestID: "auto-main"}
+			request := &approval.Request{SessionRef: handle.sessionRef, ApprovalRequestID: "auto-main"}
 			gateway := &Gateway{
 				active:    map[string]*turnHandle{handle.sessionRef.SessionID: handle},
 				approvals: map[string]*approvalCoordinator{handle.sessionRef.SessionID: handle.approvals},

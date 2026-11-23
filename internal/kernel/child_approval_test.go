@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -37,10 +37,10 @@ func TestBackgroundChildApprovalWithoutParentToolOrTurn(t *testing.T) {
 			events := make(chan eventstream.Envelope, 16)
 			done := make(chan error, 1)
 			go func() {
-				request := agent.ApprovalRequest{
+				request := approval.Request{
 					RunID: "child-run", TurnID: "child-turn", SessionRef: active.SessionRef, ApprovalRequestID: "child-permission",
 					Metadata: map[string]any{"subagent": true, "task_id": "child-task", "participant_id": "child-agent", "participant_kind": "subagent", "participant_session_id": "child-session"},
-					Origin:   &agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: agent.ApprovalEndpointExternalACP, TaskID: "child-task", ParticipantID: "child-agent", SessionID: "child-session", ParentSessionID: active.SessionID},
+					Origin:   &approval.Origin{Role: approval.RoleSubagent, Endpoint: approval.EndpointExternalACP, TaskID: "child-task", ParticipantID: "child-agent", SessionID: "child-session", ParentSessionID: active.SessionID},
 					Tool:     tool.Definition{Name: "Write"}, Call: tool.Call{ID: "write-1", Name: "Write"},
 					Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "write-1", Name: "Write"}, Options: []session.ProtocolApprovalOption{{ID: "allow", Name: "Allow once", Kind: "allow_once"}}},
 				}

@@ -9,8 +9,9 @@ import (
 	"time"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
-	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
+	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -71,7 +72,7 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 			spawn.ParentCallID = "original-spawn-call"
 			spawn.ApprovalRequester = subagentApprovalRequesterFunc(func(_ context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
 				approvals <- req
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
 			})
 			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
 			if err != nil {

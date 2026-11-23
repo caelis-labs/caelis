@@ -8,7 +8,6 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -26,7 +25,7 @@ func TestDTWAPPApprovalRenderedScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Session: input.Session, SessionRef: input.Session.SessionRef, Tool: input.Tool, Call: input.Call, Approval: decision.Approval, Authorization: decision.Authorization, Metadata: decision.Metadata}))
+	display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(approval.Request{Session: input.Session, SessionRef: input.Session.SessionRef, Tool: input.Tool, Call: input.Call, Approval: decision.Approval, Authorization: decision.Authorization, Metadata: decision.Metadata}))
 	permission := &eventstream.RequestPermissionRequest{ToolCall: eventstream.ToolCallUpdate{ToolCallID: display.ToolCall.ID, Name: new(display.ToolCall.Name), RawInput: display.ToolCall.RawInput}}
 	for _, option := range display.Options {
 		permission.Options = append(permission.Options, acpsdk.PermissionOption{OptionId: acpsdk.PermissionOptionId(option.ID), Name: option.Name, Kind: acpsdk.PermissionOptionKind(option.Kind)})

@@ -4,15 +4,15 @@ import (
 	"errors"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestApprovalSnapshotExposesOnlyCallerResolvableHead(t *testing.T) {
 	handle := newTestTurnHandle()
-	request := func(id string) *agent.ApprovalRequest {
-		return &agent.ApprovalRequest{
+	request := func(id string) *approval.Request {
+		return &approval.Request{
 			SessionRef: handle.sessionRef, ApprovalRequestID: id,
 			Tool: tool.Definition{Name: "RunCommand"}, Call: tool.Call{ID: id, Name: "RunCommand"},
 			Approval: &session.ProtocolApproval{

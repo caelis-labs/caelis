@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -17,8 +17,8 @@ type taskInvocationStart struct {
 
 type taskApproval struct {
 	owner      context.Context
-	request    agent.ApprovalRequest
-	resolve    func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+	request    approval.Request
+	resolve    func(context.Context, approval.Request) (approval.Response, error)
 	started    time.Time
 	generation uint64
 	admission  *codeModeAdmissionBinding

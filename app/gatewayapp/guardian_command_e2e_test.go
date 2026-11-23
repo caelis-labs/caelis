@@ -224,19 +224,19 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	var review approval.ReviewResult
 	var reviewErr error
 	var reviews int
-	requester := guardianCommandRequester(func(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := guardianCommandRequester(func(ctx context.Context, request approval.Request) (approval.Response, error) {
 		ctx, cancel := kernel.WithAutoReviewBudget(ctx)
 		defer cancel()
 		if request.OnAdmission != nil {
 			if err := request.OnAdmission(ctx); err != nil {
-				return agent.ApprovalResponse{}, err
+				return approval.Response{}, err
 			}
 		}
 		reviews++
 		payload := approval.PayloadFromRuntimeRequest(request)
 		review, reviewErr = reviewer.Decide(ctx, approval.ReviewRequest{SessionRef: request.SessionRef, RunID: request.RunID, TurnID: request.TurnID, ReviewID: request.Call.ID, Mode: approval.ModeAutoReview, Model: guardian, Approval: payload, RuntimeRequest: request})
 		if reviewErr != nil {
-			return agent.ApprovalResponse{}, reviewErr
+			return approval.Response{}, reviewErr
 		}
 		return approval.RuntimeResponseFromFinalReview(review), nil
 	})
@@ -351,9 +351,9 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	}
 }
 
-type guardianCommandRequester func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type guardianCommandRequester func(context.Context, approval.Request) (approval.Response, error)
 
-func (f guardianCommandRequester) RequestApproval(ctx context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f guardianCommandRequester) RequestApproval(ctx context.Context, r approval.Request) (approval.Response, error) {
 	return f(ctx, r)
 }
 

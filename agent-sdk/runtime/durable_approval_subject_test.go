@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -27,10 +27,10 @@ func TestDurableApprovalSeparatesPrivateEvidenceFromPresentation(t *testing.T) {
 	}
 	input := json.RawMessage(`{"command":"git fetch","credential":"DURABLE-MARKED-SECRET"}`)
 	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "RunCommand", Title: "DURABLE-MARKED-SECRET", RawInput: map[string]any{"command": "git fetch", "credential": "DURABLE-MARKED-SECRET"}}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: "Allow", Kind: "allow_once"}, {ID: "native-reject", Name: "Reject", Kind: "reject_once"}}}
-	req := agent.ApprovalRequest{SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn", OperationTaskID: "worker-task",
+	req := approval.Request{SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn", OperationTaskID: "worker-task",
 		Tool: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}}, Call: tool.Call{ID: "call", Name: "RunCommand", Input: input}, Approval: original}
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "native-allow", Approved: true, ReviewText: "DURABLE-MARKED-SECRET reviewed"}
-	got, err := runtime.requestDurableApproval(t.Context(), req, approvalRequesterFunc(func(_ context.Context, observed agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	decision := approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true, ReviewText: "DURABLE-MARKED-SECRET reviewed"}
+	got, err := runtime.requestDurableApproval(t.Context(), req, approvalRequesterFunc(func(_ context.Context, observed approval.Request) (approval.Response, error) {
 		if !reflect.DeepEqual(observed.Approval, original) || string(observed.Call.Input) != string(input) {
 			t.Fatal("reviewer did not receive exact action evidence")
 		}
@@ -74,9 +74,9 @@ func TestDurableIndependentPermissionRestoresExactEvidenceWithoutTool(t *testing
 		t.Fatal(err)
 	}
 	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original prompt", RawSubject: json.RawMessage(`{"type":"_private","secret":"OPAQUE-PRIVATE-EVIDENCE"}`), NativeRequestID: json.RawMessage(`9007199254740991`)}, Subject: &session.ApprovalSubject{Kind: "opaque", OpaqueInput: true}, Options: []session.ProtocolApprovalOption{{ID: "native-reject", Name: " Reject original ", Kind: "reject_once"}}}
-	req := agent.ApprovalRequest{SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn", OperationTaskID: "worker", Approval: original}
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "native-reject", ReviewText: "OPAQUE-PRIVATE-EVIDENCE reviewed"}
-	_, err = runtime.requestDurableApproval(t.Context(), req, approvalRequesterFunc(func(_ context.Context, observed agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	req := approval.Request{SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn", OperationTaskID: "worker", Approval: original}
+	decision := approval.Response{Outcome: "selected", OptionID: "native-reject", ReviewText: "OPAQUE-PRIVATE-EVIDENCE reviewed"}
+	_, err = runtime.requestDurableApproval(t.Context(), req, approvalRequesterFunc(func(_ context.Context, observed approval.Request) (approval.Response, error) {
 		if !reflect.DeepEqual(observed.Approval, original) || observed.Call.ID != "" || observed.Tool.Name != "" {
 			t.Fatal("independent permission lost exact evidence or acquired a fake tool")
 		}

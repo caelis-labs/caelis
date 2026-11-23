@@ -1,11 +1,11 @@
-package agentsdk
+package tool
 
 import (
 	"strings"
 	"sync"
 )
 
-// ModelStepRef identifies an approval request's position in a model-emitted
+// ModelStepRef identifies one call's position in a model-emitted
 // tool-call batch. Index is zero-based and CallCount includes every call in the
 // batch, including calls that do not require approval. The shared admission
 // barrier, when present, is process-local and never serialized.

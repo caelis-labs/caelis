@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
@@ -161,7 +162,7 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	}
 	oldModel, newModel := newRequestSnapshotModel("old-model"), newRequestSnapshotModel("new-model")
 	oldCalls, newCalls := make(chan tool.InvocationContext, 1), make(chan tool.InvocationContext, 1)
-	approvals := make(chan agent.ApprovalRequest, 2)
+	approvals := make(chan approval.Request, 2)
 	var oldReleases, newReleases atomic.Int64
 	oldConfig := snapshotTestConfig("old", oldModel, snapshotTestTool("old", oldCalls))
 	oldConfig.Request.ServiceTier = model.ServiceTierPriority
@@ -185,9 +186,9 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	stream := true
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "inspect", TurnID: "canonical-turn", AgentSpec: agent.AgentSpec{
 		ResolveModelRequest: source.resolve, Request: agent.ModelRequestOptions{Stream: &stream, ServiceTier: model.ServiceTierPriority},
-	}, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	}, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		approvals <- req
-		return agent.ApprovalResponse{Approved: true, OptionID: "allow_once"}, nil
+		return approval.Response{Approved: true, OptionID: "allow_once"}, nil
 	})})
 	if err != nil {
 		t.Fatal(err)
