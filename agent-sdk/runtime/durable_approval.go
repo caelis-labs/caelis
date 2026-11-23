@@ -14,10 +14,20 @@ import (
 
 const approvalResolutionRecoveryTimeout = 5 * time.Second
 
+type approvalKey struct {
+	sessionID string
+	requestID string
+}
+
+func keyForApproval(record session.ApprovalRecord) approvalKey {
+	return approvalKey{record.SessionID, record.RequestID}
+}
+
 // approvalWaiter retains the existing producer's context so a cancelled owner
 // cannot settle permission merely because its callback has not returned yet.
 type approvalWaiter struct {
 	responses     chan approval.Response
+	stopRequester context.CancelFunc
 	owner         context.Context
 	blockingRunID string
 }
@@ -109,17 +119,24 @@ func (r *Runtime) requestDurableApproval(
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 		Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req)),
 	})
-	waiter := approvalWaiter{responses: make(chan approval.Response, 1), owner: ctx}
+	requestCtx, stopRequester := context.WithCancel(ctx)
+	defer stopRequester()
+	waiter := approvalWaiter{responses: make(chan approval.Response, 1), owner: ctx, stopRequester: stopRequester}
 	if err := session.ValidateApprovalRecordTransition(session.ApprovalRecord{}, token); err != nil {
 		return approval.Response{}, err
 	}
 	r.mu.Lock()
 	// Register delivery before the append so a reader of the committed record can resolve it immediately.
-	r.approvalWaiters[token.RequestID] = waiter
+	key := keyForApproval(token)
+	if _, exists := r.approvalWaiters[key]; exists {
+		r.mu.Unlock()
+		return approval.Response{}, fmt.Errorf("approval request %q already has a live waiter", token.RequestID)
+	}
+	r.approvalWaiters[key] = waiter
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
-		delete(r.approvalWaiters, token.RequestID)
+		delete(r.approvalWaiters, key)
 		r.mu.Unlock()
 	}()
 	if err := r.appendApprovalRecord(ctx, req.SessionRef, token); err != nil {
@@ -129,7 +146,7 @@ func (r *Runtime) requestDurableApproval(
 	if req.OperationTaskID == "" {
 		waiter.blockingRunID = req.RunID
 		r.mu.Lock()
-		r.approvalWaiters[token.RequestID] = waiter
+		r.approvalWaiters[key] = waiter
 		r.mu.Unlock()
 	}
 	abandon := func(err error) error {
@@ -140,18 +157,21 @@ func (r *Runtime) requestDurableApproval(
 		// Keep it on the normalized request rather than hiding it in metadata or
 		// adding a field to the ACP request_permission wire payload.
 		req.ApprovalRequestID = token.RequestID
-		decision, err := requester.RequestApproval(ctx, req)
-		if err != nil {
-			// The producer owns cancellation; settle only this approval request.
-			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
-				_ = r.cancelPendingApprovalRecord(context.WithoutCancel(ctx), req.SessionRef, token, err.Error())
-				return approval.Response{}, err
-			}
-			// Guardian failures settle this request while the live producer continues.
-			return approval.Response{}, abandon(err)
+		decision, err := requester.RequestApproval(requestCtx, req)
+		if err == nil {
+			err = r.ResolveApproval(ctx, approval.ResolveRequest{SessionRef: req.SessionRef, RequestID: token.RequestID, Decision: decision})
 		}
-		if err := r.ResolveApproval(ctx, approval.ResolveRequest{SessionRef: req.SessionRef, RequestID: token.RequestID, Decision: decision}); err != nil {
-			return approval.Response{}, abandon(err)
+		if err != nil {
+			cleanupErr := abandon(err)
+			// A competing resolver may have committed before delivering its
+			// response, including while the requester was being cancelled.
+			recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
+			defer cancel()
+			winner, loadErr := r.approvalRecord(recoveryCtx, req.SessionRef, token.RequestID)
+			if loadErr == nil && winner.Status == session.ApprovalRecordResolved {
+				return responseFromApprovalRecord(winner), nil
+			}
+			return approval.Response{}, errors.Join(cleanupErr, loadErr)
 		}
 	} else if req.OnAdmission != nil {
 		if err := req.OnAdmission(ctx); err != nil {
@@ -238,7 +258,7 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req approval.ResolveReque
 		}
 	}
 	r.mu.RLock()
-	waiter := r.approvalWaiters[token.RequestID]
+	waiter := r.approvalWaiters[keyForApproval(token)]
 	live := waiter.responses != nil && waiter.owner != nil && waiter.owner.Err() == nil
 	r.mu.RUnlock()
 	if !live {
@@ -280,8 +300,8 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req approval.ResolveReque
 		}
 		return err
 	}
-	if err := r.appendApprovalRecordWithGuard(ctx, ref, next, session.ControlMutationGuard(session.ControlMutationPurposeApproval)); err != nil {
-		if !session.IsCommitted(err) {
+	if err := r.appendApprovalRecordWithGuard(ctx, ref, next, session.RuntimeMutationGuard(waiter.owner)); err != nil {
+		if !session.IsCommitted(err) && !errors.Is(err, session.ErrEventConflict) {
 			return settlementError(err)
 		}
 		recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
@@ -300,24 +320,30 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req approval.ResolveReque
 	return nil
 }
 
-func (r *Runtime) deliverApprovalDecision(token session.ApprovalRecord) {
-	if r == nil || token.Status != session.ApprovalRecordResolved {
-		return
-	}
-	decision := approval.Response{
+func responseFromApprovalRecord(token session.ApprovalRecord) approval.Response {
+	return approval.Response{
 		Outcome:    token.Outcome,
 		OptionID:   token.OptionID,
 		Approved:   token.Approved,
 		Reason:     token.Reason,
 		ReviewText: token.ReviewText,
 	}
+}
+
+func (r *Runtime) deliverApprovalDecision(token session.ApprovalRecord) {
+	if r == nil || token.Status != session.ApprovalRecordResolved {
+		return
+	}
 	r.mu.RLock()
-	waiter := r.approvalWaiters[token.RequestID].responses
+	waiter := r.approvalWaiters[keyForApproval(token)]
 	r.mu.RUnlock()
-	if waiter != nil {
+	if waiter.responses != nil {
 		select {
-		case waiter <- decision:
+		case waiter.responses <- responseFromApprovalRecord(token):
 		default:
+		}
+		if waiter.stopRequester != nil {
+			waiter.stopRequester()
 		}
 	}
 }

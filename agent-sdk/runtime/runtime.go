@@ -106,7 +106,7 @@ type Runtime struct {
 	participantInputs    map[*participantInputReservation]struct{}
 	mu                   sync.RWMutex
 	activeRunners        map[string]activeRun
-	approvalWaiters      map[string]approvalWaiter
+	approvalWaiters      map[approvalKey]approvalWaiter
 	tasks                *taskRuntime
 	taskOutput           output.Binder
 	lifecycle            agent.TraceOptions
@@ -159,7 +159,7 @@ func New(cfg Config) (*Runtime, error) {
 		childApprovalRequester:   cfg.ChildApprovalRequester,
 		taskOutput:               cfg.TaskOutput,
 		activeRunners:            map[string]activeRun{},
-		approvalWaiters:          map[string]approvalWaiter{},
+		approvalWaiters:          map[approvalKey]approvalWaiter{},
 		lifecycle: agent.TraceOptions{
 			TraceSink: cfg.TraceSink,
 			Clock:     cfg.Clock,

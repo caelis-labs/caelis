@@ -215,6 +215,11 @@ when the process starts. Control's automatic approval deadline includes queue
 time and is not renewed by Task observation. External ACP permission requests
 retain their synchronous contract.
 
+Each pending approval belongs to one Session and request ID. The first valid
+decision committed through its live owner settles the request. Repeating that
+decision is idempotent. An outstanding reviewer receives cancellation, and a
+later conflicting answer cannot change the tool outcome.
+
 Task-owned approval does not pause the whole Run. Runtime retains at most 32
 pending submission/start continuations per Run; excess submissions fail before
 approval or execution. Cancellation and accepted user steering revoke unclaimed

@@ -359,11 +359,11 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 
 	waiter := make(chan approval.Response, 1)
 	runtime.mu.Lock()
-	runtime.approvalWaiters[resolved.RequestID] = approvalWaiter{responses: waiter, owner: t.Context()}
+	runtime.approvalWaiters[keyForApproval(resolved)] = approvalWaiter{responses: waiter, owner: t.Context()}
 	runtime.mu.Unlock()
 	defer func() {
 		runtime.mu.Lock()
-		delete(runtime.approvalWaiters, resolved.RequestID)
+		delete(runtime.approvalWaiters, keyForApproval(resolved))
 		runtime.mu.Unlock()
 	}()
 
@@ -473,5 +473,62 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 				t.Fatal("conflicting retry succeeded, want fail closed")
 			}
 		})
+	}
+}
+
+func TestRequestDurableApprovalHonorsFirstCommittedDecision(t *testing.T) {
+	sessions, active := newTestSessionService(t, "approval-first-wins")
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, release, err := sessions.BeginTurn(t.Context(), active.SessionRef, "foreground")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	}()
+	winner := approval.Response{Outcome: "selected", OptionID: "reject_once", Reason: "declined"}
+	late := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	req := approval.Request{
+		SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn",
+		Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call", Name: "Write"},
+	}
+	got, err := rt.requestDurableApproval(ctx, req, approvalRequesterFunc(func(reviewerCtx context.Context, pending approval.Request) (approval.Response, error) {
+		resolution := approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: pending.ApprovalRequestID, Decision: winner}
+		// The external resolver has no Turn credentials.
+		if err := rt.ResolveApproval(t.Context(), resolution); err != nil {
+			t.Fatal(err)
+		}
+		if reviewerCtx.Err() == nil {
+			t.Fatal("outstanding reviewer did not receive cancellation")
+		}
+		if err := rt.ResolveApproval(t.Context(), resolution); err != nil {
+			t.Fatalf("identical retry: %v", err)
+		}
+		resolution.Decision = late
+		if err := rt.ResolveApproval(t.Context(), resolution); err == nil {
+			t.Fatal("different retry replaced the committed decision")
+		}
+		return late, nil
+	}))
+	if err != nil || got != winner {
+		t.Fatalf("tool received %+v, %v; want %+v", got, err, winner)
+	}
+	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statuses []session.ApprovalRecordStatus
+	for _, event := range events {
+		if token := approvalRecordFromEvent(event); token != nil {
+			statuses = append(statuses, token.Status)
+		}
+	}
+	if len(statuses) != 2 || statuses[0] != session.ApprovalRecordPending || statuses[1] != session.ApprovalRecordResolved {
+		t.Fatalf("approval history: %v", statuses)
 	}
 }
