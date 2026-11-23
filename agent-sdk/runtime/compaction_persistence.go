@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -61,7 +60,7 @@ func (r *Runtime) persistContextArtifactUsing(ctx context.Context, active *sessi
 			return persisted, nil
 		}
 		if !errors.Is(err, session.ErrRevisionConflict) {
-			persisted, readErr := r.reconcileCompactionAppend(ctx, active.SessionRef, event)
+			persisted, readErr := r.reconcileEventAppend(ctx, active.SessionRef, event)
 			if readErr == nil && persisted != nil {
 				r.clearCompactionRequest(active.SessionRef)
 				return persisted, nil
@@ -82,31 +81,4 @@ func (r *Runtime) persistContextArtifactUsing(ctx context.Context, active *sessi
 		*active = current.Session
 	}
 	return nil, err
-}
-
-// A failed write may already have committed. Read back the original ID/key and
-// compare through the Store's full-payload idempotency contract. Absence is not
-// permission to replay with a new identity. This function never writes.
-func (r *Runtime) reconcileCompactionAppend(ctx context.Context, ref session.SessionRef, want *session.Event) (*session.Event, error) {
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	loaded, err := r.sessions.LoadSession(cleanup, session.LoadSessionRequest{SessionRef: ref, IncludeTransient: true})
-	if err != nil {
-		return nil, err
-	}
-	for _, event := range loaded.Events {
-		if event.ID != want.ID && (want.IdempotencyKey == "" || event.IdempotencyKey != want.IdempotencyKey) {
-			continue
-		}
-		prepared, err := session.PrepareEventsForAppend(session.PrepareEventsForAppendRequest{
-			SessionID: ref.SessionID, Events: []*session.Event{want}, ExistingEvents: []*session.Event{event}, Now: r.now(),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if len(prepared.Persisted) == 0 && len(prepared.Events) == 1 {
-			return prepared.Events[0], nil
-		}
-	}
-	return nil, nil
 }

@@ -5,11 +5,10 @@ import (
 	"strings"
 	"sync"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type stepToolCallResult struct {
@@ -46,7 +45,7 @@ func (a *Agent) executeStepToolCalls(
 func (a *Agent) executeStepToolCallsConcurrent(
 	ctx context.Context,
 	calls []model.ToolCall,
-	stepRefs []*agent.ModelStepRef,
+	stepRefs []*tool.ModelStepRef,
 	yieldProgress func(*session.Event) bool,
 	visibility *toolVisibility,
 ) ([]model.Message, []*session.Event, bool, error) {
@@ -176,7 +175,6 @@ func (a *Agent) executeStepToolCallsOrdered(
 					a.yieldedResults = map[*session.Event]bool{}
 				}
 				a.yieldedResults[event] = true
-				mcpdiscovery.Apply(a.discoveries, event)
 			}
 		}
 		if err != nil {
@@ -186,18 +184,18 @@ func (a *Agent) executeStepToolCallsOrdered(
 	return messages, events, true, nil
 }
 
-func modelStepRef(stepID string, index int, callCount int) *agent.ModelStepRef {
+func modelStepRef(stepID string, index int, callCount int) *tool.ModelStepRef {
 	stepID = strings.TrimSpace(stepID)
 	if stepID == "" || index < 0 || callCount <= 0 || index >= callCount {
 		return nil
 	}
-	return &agent.ModelStepRef{ID: stepID, Index: index, CallCount: callCount}
+	return &tool.ModelStepRef{ID: stepID, Index: index, CallCount: callCount}
 }
 
-func concurrentStepRefs(stepID string, callCount, start, end int) []*agent.ModelStepRef {
-	refs := agent.NewConcurrentModelStepRefs(stepID, callCount)
+func concurrentStepRefs(stepID string, callCount, start, end int) []*tool.ModelStepRef {
+	refs := tool.NewConcurrentModelStepRefs(stepID, callCount)
 	if refs == nil {
-		return make([]*agent.ModelStepRef, end-start)
+		return make([]*tool.ModelStepRef, end-start)
 	}
 	// Preserve the original model positions, but only this group participates
 	// in the approval barrier. Other calls may never be dispatched.

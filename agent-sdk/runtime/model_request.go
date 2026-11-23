@@ -6,18 +6,54 @@ import (
 	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
-// wrapModelRequestResolver admits changing model-facing values through the same
-// Runtime owners as the static AgentSpec, retaining the Turn's execution identity
-// and authority. No embedding configuration or revision semantics belong here.
-func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, req agent.RunRequest, runID, turnID string, sequence *atomic.Uint64) agent.ModelRequestResolver {
+func (r *Runtime) resolveAgent(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	state map[string]any,
+	runID string,
+	turnID string,
+	req agent.RunRequest,
+	toolStepSequence *atomic.Uint64,
+) (agent.Agent, error) {
+	if req.Agent != nil {
+		return req.Agent, nil
+	}
+	spec := cloneAgentSpec(req.AgentSpec)
+	spec.Request = req.Request.WithDefaults(spec.Request)
+	prepare := func(bound *agent.AgentSpec, snapshot *agent.ModelRequestSnapshot) error {
+		if err := r.prepareRequestModels(ref, bound, snapshot, req.AgentSpec.ResolveModelRequest); err != nil {
+			return err
+		}
+		// The deferred source can outlive this preparation. Capture this request's
+		// policy and the Turn's occurrence sequence for both direct and deferred tools.
+		wrappingSpec := *bound
+		wrap := func(tools []tool.Tool) []tool.Tool {
+			toolSpec := wrappingSpec
+			toolSpec.Tools = tools
+			return r.wrapTurnTools(ctx, activeSession, ref, state, toolSpec, req.ApprovalRequester, runID, turnID, toolStepSequence)
+		}
+		bound.Tools = r.wrapToolsForRuntime(activeSession, ref, *bound, runtimeToolContext{
+			mode: r.policyMode(*bound), approvalMode: string(r.currentApprovalMode(state)),
+			approvalRequester: req.ApprovalRequester, inputSender: agent.AgentInputSenderFromContext(ctx),
+		})
+		return r.bindRequestTools(ctx, activeSession, ref, bound, snapshot, wrap)
+	}
+	if spec.ResolveModelRequest != nil {
+		spec.ResolveModelRequest = bindModelRequests(spec, turnID, prepare)
+	} else if err := prepare(&spec, nil); err != nil {
+		return nil, err
+	}
+
+	return r.agentFactory.NewAgent(ctx, spec)
+}
+
+// bindModelRequests prepares each unsent request with the same bindings as a static spec.
+func bindModelRequests(spec agent.AgentSpec, turnID string, prepare func(*agent.AgentSpec, *agent.ModelRequestSnapshot) error) agent.ModelRequestResolver {
 	source := spec.ResolveModelRequest
 	return func(callCtx context.Context) (agent.ModelRequestSnapshot, error) {
 		snapshot, err := source(callCtx)
@@ -27,7 +63,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		snapshot = agent.CloneModelRequestSnapshot(snapshot)
 		// RunRequest overrides only presentation/output choices. The dynamic
 		// snapshot owns service tier, including an explicit empty/default tier.
-		overrides := req.Request.WithDefaults(spec.Request)
+		overrides := spec.Request
 		overrides.ServiceTier = ""
 		snapshot.Request = overrides.WithDefaults(snapshot.Request)
 		bound := cloneAgentSpec(spec)
@@ -35,26 +71,13 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		bound.Model, bound.Tools, bound.Request = snapshot.Model, snapshot.Tools, snapshot.Request
 		bound.DeferredTools = snapshot.DeferredTools
 		bound.ResolveModelRequest = nil
-		prepareCtx := ctx
-		validateCodeMode := snapshot.Validate
-		if validateCodeMode == nil {
-			validateCodeMode = func(context.Context) (func(), error) {
-				return nil, tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode host calls require a dynamic snapshot generation validator")
+		if admit := snapshot.Admit; admit != nil {
+			snapshot.Admit = func(ctx context.Context, admission agent.ModelRequestAdmission) error {
+				admission.TurnID = turnID
+				return admit(ctx, admission)
 			}
 		}
-		prepareCtx = context.WithValue(prepareCtx, codeModeValidationKey{}, validateCodeMode)
-		if r.compaction.Enabled {
-			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, deferredTools: snapshot.DeferredTools, resolveIdle: source}
-			if admit := snapshot.Admit; admit != nil {
-				authority.admit = func(ctx context.Context, admission agent.ModelRequestAdmission) error {
-					admission.TurnID = turnID
-					return admit(ctx, admission)
-				}
-			}
-			snapshot.Release = authority.drop
-			prepareCtx = context.WithValue(prepareCtx, modelRequestAuthorityKey{}, authority)
-		}
-		if err := r.prepareAgentSpec(prepareCtx, active, ref, state, &bound, req, runID, turnID, sequence); err != nil {
+		if err := prepare(&bound, &snapshot); err != nil {
 			if snapshot.Release != nil {
 				snapshot.Release()
 			}
@@ -62,43 +85,23 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		}
 		snapshot.Models = bound.Models
 		snapshot.Model, snapshot.Tools, snapshot.DeferredTools = bound.Model, bound.Tools, bound.DeferredTools
-		if catalog, _ := bound.Metadata[codemode.MetadataCatalog].(string); catalog != "" {
-			snapshot.Instructions = append(snapshot.Instructions, model.NewTextPart(catalog))
-		}
-		if admit := snapshot.Admit; admit != nil {
-			snapshot.Admit = func(ctx context.Context, admission agent.ModelRequestAdmission) error {
-				admission.TurnID = turnID
-				return admit(ctx, admission)
-			}
-		}
 		return snapshot, nil
 	}
 }
 
-func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, ref session.SessionRef, state map[string]any, spec *agent.AgentSpec, req agent.RunRequest, runID, turnID string, sequence *atomic.Uint64) error {
+func (r *Runtime) prepareRequestModels(ref session.SessionRef, spec *agent.AgentSpec, snapshot *agent.ModelRequestSnapshot, resolveIdle agent.ModelRequestResolver) error {
 	if err := validateAgentSpecCapabilities(spec.Model, spec.Tools, spec.Request.OutputSpec(), spec.Request.StreamEnabled(false), spec.RequiredModelCapabilities); err != nil {
 		return err
 	}
-	hasCodeMode := false
-	for _, one := range spec.Tools {
-		if declaration, ok := one.(*codemode.Tool); ok && declaration.Name == codemode.ToolName {
-			hasCodeMode = true
+	var authority *modelRequestAuthority
+	if r.compaction.Enabled {
+		if snapshot == nil {
+			authority = &modelRequestAuthority{epoch: "static", refs: 1, deferredTools: spec.DeferredTools, validate: func(context.Context) (func(), error) { return func() {}, nil }}
+		} else {
+			authority = &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, deferredTools: spec.DeferredTools,
+				admit: snapshot.Admit, validate: snapshot.Validate, release: snapshot.Release, resolveIdle: resolveIdle}
+			snapshot.Release = authority.drop
 		}
-	}
-	if hasCodeMode {
-		catalog, err := r.codeModeCatalog(ctx, ref, spec.DeferredTools, spec.Metadata)
-		if err != nil {
-			return err
-		}
-		if spec.Metadata == nil {
-			spec.Metadata = map[string]any{}
-		}
-		spec.Metadata[codemode.MetadataCatalog] = catalog
-	}
-	modeName := r.policyMode(*spec)
-	authority, _ := ctx.Value(modelRequestAuthorityKey{}).(*modelRequestAuthority)
-	if authority == nil && r.compaction.Enabled {
-		authority = &modelRequestAuthority{epoch: "static", deferredTools: spec.DeferredTools, validate: func(context.Context) (func(), error) { return func() {}, nil }, refs: 1}
 	}
 	for key, candidate := range spec.Models {
 		if candidate == nil {
@@ -110,68 +113,5 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		spec.Models[key] = r.wrapModelForAutoCompaction(ref, candidate, authority)
 	}
 	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model, authority)
-	spec.Tools = r.wrapToolsForRuntime(active, ref, *spec, runtimeToolContext{
-		mode: modeName, approvalMode: string(r.currentApprovalMode(state)),
-		approvalRequester: req.ApprovalRequester,
-		inputSender:       agent.AgentInputSenderFromContext(ctx),
-	})
-	wrappingSpec := *spec
-	wrap := func(tools []tool.Tool) []tool.Tool {
-		bound := wrappingSpec
-		bound.Tools = tools
-		return r.wrapTurnTools(ctx, active, ref, state, bound, req.ApprovalRequester, runID, turnID, sequence)
-	}
-	// The model keeps its request's declarations. Code Mode resolves live MCP
-	// entries through the same wrapped source, not through those frozen schemas.
-	var localTools []tool.Tool
-	lookup := func(ctx context.Context, name string) (tool.Tool, bool, error) {
-		for _, one := range localTools {
-			if one != nil && one.Definition().Name == name {
-				return one, true, nil
-			}
-		}
-		if source, ok := spec.DeferredTools.(toolset.NamedSource); ok {
-			return source.Lookup(ctx, name)
-		}
-
-		return nil, false, nil
-	}
-	var checkBinding func(context.Context, tool.Binding) error
-	if source, ok := spec.DeferredTools.(interface {
-		CheckToolBinding(context.Context, tool.Binding) error
-	}); ok {
-		checkBinding = source.CheckToolBinding
-	}
-	validate, _ := ctx.Value(codeModeValidationKey{}).(func(context.Context) (func(), error))
-	var discovery tool.Tool
-	for i, one := range spec.Tools {
-		if declaration, ok := one.(*codemode.Tool); ok {
-			discovery = codeModeDiscoveryTool{lookup: lookup, checkBinding: checkBinding}
-			available := func() []tool.Tool { return codeModeAvailableTools(localTools, spec.DeferredTools) }
-			spec.Tools[i] = runtimeCodeModeTool{runtime: r, tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, availableTools: available, lookup: lookup, validate: validate, checkBinding: checkBinding}
-		}
-	}
-	if discovery != nil {
-		visible := make([]tool.Tool, 0, len(spec.Tools))
-		for _, candidate := range spec.Tools {
-			if candidate != nil && !mcp.IsSearchDefinition(candidate.Definition()) && !mcp.IsCallDefinition(candidate.Definition()) {
-				visible = append(visible, candidate)
-			}
-		}
-		spec.Tools = visible
-	}
-	spec.Tools = wrap(spec.Tools)
-	if spec.DeferredTools != nil {
-		spec.DeferredTools = &deferredToolSource{source: spec.DeferredTools, wrap: wrap}
-	}
-	if discovery != nil {
-		localTools = make([]tool.Tool, 0, len(spec.Tools)+1)
-		for _, one := range spec.Tools {
-			if spec.DeferredTools == nil || !mcp.IsModelFunction(one.Definition()) {
-				localTools = append(localTools, one)
-			}
-		}
-		localTools = append(localTools, wrap([]tool.Tool{discovery})...)
-	}
 	return nil
 }

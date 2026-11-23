@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -25,31 +25,28 @@ func (r *Runtime) prepareHookInputs(ctx context.Context, inputs []*session.Event
 			continue
 		}
 		e.InputEvidence = &session.InputEvidence{Message: model.CloneMessage(*e.Message), Source: session.CloneActorRef(e.Actor)}
-		evidence := run.Evidence
-		evidence.InputSource = session.CloneActorRef(e.Actor)
 		var extra []*session.Event
 		for _, h := range run.Hooks.Input {
-			decision, err := hookrun.Call(ctx, "input", h, evidence, agent.InputView{Message: *e.Message}, func(v agent.InputView) agent.InputView { v.Message = model.CloneMessage(v.Message); return v }, hookrun.CloneInput)
+			decision, err := hookrun.Call(ctx, "input", h, hook.InputContext{TurnContext: run.Evidence, InputSource: session.CloneActorRef(e.Actor)}, hook.InputView{Message: *e.Message}, func(v hook.InputView) hook.InputView { v.Message = model.CloneMessage(v.Message); return v }, hookrun.CloneInput)
 			if err != nil {
 				return nil, err
 			}
 			if decision.Message.Role != e.Message.Role || len(decision.Message.ToolCalls()) > 0 || len(decision.Message.ToolResults()) > 0 {
-				return nil, &agent.HookError{Phase: "input", Name: h.Name, Cause: fmt.Errorf("input role and protocol identity cannot change")}
+				return nil, &hook.Error{Phase: "input", Name: h.Name, Cause: fmt.Errorf("input role and protocol identity cannot change")}
 			}
 			if err := validateEarlyResponse(decision.Response); err != nil {
-				return nil, &agent.HookError{Phase: "input", Name: h.Name, Cause: err}
+				return nil, &hook.Error{Phase: "input", Name: h.Name, Cause: err}
 			}
 			e.Message = &decision.Message
 			e.InputEvidence.Hooks = append(e.InputEvidence.Hooks, h.Name)
 			if len(decision.Context) > 0 {
 				event, err := hookContextEvent(decision.Context, "input/"+h.Name)
 				if err != nil {
-					return nil, &agent.HookError{Phase: "input", Name: h.Name, Cause: err}
+					return nil, &hook.Error{Phase: "input", Name: h.Name, Cause: err}
 				}
 				extra = append(extra, event)
 			}
-			evidence.OutputSource = agent.HookOutputInputEarly
-			run.SetEarly(decision.Response, evidence)
+			run.SetEarly(decision.Response, hook.OutputInputEarly)
 		}
 		out = append(out, e)
 		out = append(out, extra...)
@@ -61,23 +58,21 @@ func (r *Runtime) runTurnStartHooks(ctx context.Context) ([]*session.Event, erro
 	run := hookrun.FromContext(ctx)
 	var out []*session.Event
 	for _, h := range run.Hooks.TurnStart {
-		decision, err := hookrun.Call(ctx, "turn_start", h, run.Evidence, struct{}{}, func(v struct{}) struct{} { return v }, hookrun.CloneTurn)
+		decision, err := hookrun.Transform(ctx, "turn_start", h.Name, h.Timeout, func(ctx context.Context) (hook.TurnStartDecision, error) { return h.Apply(ctx, run.Evidence) }, hookrun.CloneTurn)
 		if err != nil {
 			return nil, err
 		}
 		if err := validateEarlyResponse(decision.Response); err != nil {
-			return nil, &agent.HookError{Phase: "turn_start", Name: h.Name, Cause: err}
+			return nil, &hook.Error{Phase: "turn_start", Name: h.Name, Cause: err}
 		}
 		if len(decision.Context) > 0 {
 			event, err := hookContextEvent(decision.Context, "turn_start/"+h.Name)
 			if err != nil {
-				return nil, &agent.HookError{Phase: "turn_start", Name: h.Name, Cause: err}
+				return nil, &hook.Error{Phase: "turn_start", Name: h.Name, Cause: err}
 			}
 			out = append(out, event)
 		}
-		evidence := run.Evidence
-		evidence.OutputSource = agent.HookOutputTurnEarly
-		run.SetEarly(decision.Response, evidence)
+		run.SetEarly(decision.Response, hook.OutputTurnEarly)
 	}
 	return out, nil
 }

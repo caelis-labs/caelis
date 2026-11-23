@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -55,6 +56,22 @@ func (s *StateService) State(ctx context.Context, req StateRequest) (SessionStat
 	}
 	if result.Subscription != nil {
 		_ = result.Subscription.Close()
+	}
+	if req.RequireIdle {
+		if result.State.Run.Active {
+			return SessionState{}, session.ErrFenceConflict
+		}
+		fences, ok := s.config.Sessions.(session.SessionFenceReader)
+		if !ok {
+			return SessionState{}, errorcode.New(errorcode.Unsupported, "controlclient: Session service cannot verify idle execution")
+		}
+		fence, err := fences.SessionFence(ctx, session.SessionRef{SessionID: sessionID})
+		if err != nil {
+			return SessionState{}, err
+		}
+		if session.SessionFenceIsHeld(fence) {
+			return SessionState{}, session.ErrFenceConflict
+		}
 	}
 	return result.State, nil
 }

@@ -205,7 +205,7 @@ return await %s(%s);`, target, "globalThis."+target+"(args)", string(mustDTWJSON
 				}
 			}
 			if top == nil || child == nil || scriptResult == nil || child.Parent.CallID != scriptResult.ID ||
-				top.Binding == nil || child.Binding == nil || *top.Binding != *child.Binding || top.ModelCall != nil {
+				top.Binding == nil || child.Binding == nil || *top.Binding != *child.Binding {
 				t.Fatalf("canonical MCP occurrences lost source or relation: top=%+v child=%+v script=%+v", top, child, scriptResult)
 			}
 			for _, fact := range []*session.EventTool{top, child, scriptResult} {

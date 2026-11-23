@@ -8,9 +8,10 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -36,35 +37,10 @@ func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.R
 	return state, nil
 }
 
-func (r *Runtime) resolveAgent(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	state map[string]any,
-	runID string,
-	turnID string,
-	req agent.RunRequest,
-	toolStepSequence *atomic.Uint64,
-) (agent.Agent, error) {
-	if req.Agent != nil {
-		return req.Agent, nil
-	}
-	spec := cloneAgentSpec(req.AgentSpec)
-	spec.Request = req.Request.WithDefaults(spec.Request)
-	if spec.ResolveModelRequest != nil {
-		spec.ResolveModelRequest = r.wrapModelRequestResolver(ctx, activeSession, ref, state, spec, req, runID, turnID, toolStepSequence)
-	} else if err := r.prepareAgentSpec(ctx, activeSession, ref, state, &spec, req, runID, turnID, toolStepSequence); err != nil {
-		return nil, err
-	}
-
-	return r.agentFactory.NewAgent(ctx, spec)
-}
-
 // wrapTurnTools is shared by native and externally controlled execution.
-func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
+func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester approval.Requester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
 	concrete := spec.Tools
-	spec.Tools = r.wrapToolsForDispatch(ref, spec.Tools)
-	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
+	spec.Tools = r.bindToolDispatch(activeSession, ref, state, spec, approvalContext{
 		ctx: ctx, requester: requester, runtime: r, runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)
@@ -160,7 +136,6 @@ func (r *Runtime) runAttempt(
 		return false, err
 	}
 
-	ctx = mcpdiscovery.WithEvents(ctx, invocation.SourceEvents)
 	ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
 	var source *requestsource.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled || len(r.hooks.ModelPrepare) > 0 {
@@ -215,8 +190,8 @@ func (r *Runtime) runAttempt(
 	var pendingCalls []*session.Event
 	pendingCount := 0
 	runCtx := &localInputContext{Context: baseCtx, runner: sink,
-		contextSource: func() (agent.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
-		contextEdit: func(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+		contextSource: func() (hook.ContextSource, error) { return r.contextEditSource(ctx, ref, source.Events()) },
+		contextEdit: func(logical, name string, edit hook.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
 			events, err := r.commitContextEdit(ctx, ref, turnID, runID, logical, name, edit, source.Events(), validate)
 			if err != nil {
 				return nil, err
@@ -357,7 +332,7 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 		return persisted, nil
 	}
 	if event.Type == session.EventTypeToolCall || event.Type == session.EventTypeToolResult || event.Type == session.EventTypeContext && strings.HasPrefix(event.ID, "hook-feedback:") {
-		confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, event)
+		confirmed, readErr := r.reconcileEventAppend(ctx, ref, event)
 		if confirmed != nil {
 			return confirmed, nil
 		}

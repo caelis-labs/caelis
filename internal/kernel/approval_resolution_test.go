@@ -3,7 +3,7 @@ package kernel
 import (
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -16,7 +16,7 @@ func TestNativeApprovalInvalidSelectionKeepsMainAndChildPending(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			handle := newTestTurnHandle()
-			request := &agent.ApprovalRequest{SessionRef: handle.sessionRef, RunID: handle.runID, TurnID: handle.turnID, ApprovalRequestID: "native-pending"}
+			request := &approval.Request{SessionRef: handle.sessionRef, RunID: handle.runID, TurnID: handle.turnID, ApprovalRequestID: "native-pending"}
 			if child {
 				handle.finish()
 				request = testChildApprovalRequest("native-task", "native.txt")
@@ -28,7 +28,7 @@ func TestNativeApprovalInvalidSelectionKeepsMainAndChildPending(t *testing.T) {
 				t.Fatal(err)
 			}
 			var settlements int
-			handle.projectApprovalSettlement = func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error) {
+			handle.projectApprovalSettlement = func(*approval.Request, eventstream.ApprovalRequestID, string) (*session.Event, error) {
 				settlements++
 				return &session.Event{ID: "original-settlement", SessionID: handle.sessionRef.SessionID, Seq: 2}, nil
 			}

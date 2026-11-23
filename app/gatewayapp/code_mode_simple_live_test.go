@@ -16,7 +16,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -157,11 +159,11 @@ func TestCodeModeSimpleLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requester := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := liveApprovalFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		if allowed(r.Tool, r.Call.Input) {
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	prompts := []struct {
 		ID   string
@@ -230,7 +232,7 @@ func TestCodeModeSimpleLive(t *testing.T) {
 			t.Fatal(e)
 		}
 		writeLiveJSON(t, filepath.Join(dir, "session-ref.json"), active.SessionRef)
-		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: fairSystem}, PolicyRegistry: policies, DefaultPolicyMode: "simple-readonly"})
+		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: fairSystem}, Hooks: hook.Set{ToolPolicy: policies}, DefaultPolicyMode: "simple-readonly"})
 		if e != nil {
 			t.Fatal(e)
 		}

@@ -20,10 +20,10 @@ func TestPriorHostFenceReplacementRequiresStoreAuthorization(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
-		new  func(*testing.T) session.Service
+		new  func(*testing.T) session.ManagedService
 	}{
-		{name: "memory", new: func(*testing.T) session.Service { return inmemory.NewStore(inmemory.Config{}) }},
-		{name: "file", new: func(t *testing.T) session.Service {
+		{name: "memory", new: func(*testing.T) session.ManagedService { return inmemory.NewStore(inmemory.Config{}) }},
+		{name: "file", new: func(t *testing.T) session.ManagedService {
 			return sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 		}},
 	} {
@@ -56,7 +56,7 @@ func TestPriorHostFenceCapabilityRechecksAuthorization(t *testing.T) {
 		t.Run(store, func(t *testing.T) {
 			t.Parallel()
 			deny := func(context.Context) (func(), bool) { return nil, false }
-			var service session.Service
+			var service session.ManagedService
 			var priorHostFences session.PriorHostFenceService
 			switch store {
 			case "memory":
@@ -96,7 +96,7 @@ func TestSessionFenceObservationCannotForgeReleaseOrMutation(t *testing.T) {
 		store := store
 		t.Run(store, func(t *testing.T) {
 			t.Parallel()
-			var service session.Service
+			var service session.ManagedService
 			switch store {
 			case "memory":
 				service = inmemory.NewStore(inmemory.Config{})
@@ -162,21 +162,21 @@ func TestSessionFenceServiceConformance(t *testing.T) {
 		t.Run(store, func(t *testing.T) {
 			t.Parallel()
 			clock := &fenceTestClock{now: time.Unix(100, 0)}
-			var service session.Service
+			var service session.ManagedService
 			var priorHostFences session.PriorHostFenceService
-			var reopen func() (session.Service, session.PriorHostFenceService)
+			var reopen func() (session.ManagedService, session.PriorHostFenceService)
 			switch store {
 			case "memory":
 				base, prior := inmemory.NewStoreWithPriorHostFences(inmemory.Config{Clock: clock.Now}, allowPriorHostFence)
 				service = base
 				priorHostFences = prior
-				reopen = func() (session.Service, session.PriorHostFenceService) { return base, prior }
+				reopen = func() (session.ManagedService, session.PriorHostFenceService) { return base, prior }
 			case "file":
 				root := t.TempDir()
 				base, prior := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: root, Clock: clock.Now}, allowPriorHostFence)
 				service = base
 				priorHostFences = prior
-				reopen = func() (session.Service, session.PriorHostFenceService) {
+				reopen = func() (session.ManagedService, session.PriorHostFenceService) {
 					reopened, reopenedPrior := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: root, Clock: clock.Now}, allowPriorHostFence)
 					return reopened, reopenedPrior
 				}
@@ -244,7 +244,7 @@ func TestSessionFenceReleaseAndFenceConformance(t *testing.T) {
 		t.Run(store, func(t *testing.T) {
 			t.Parallel()
 			clock := &fenceTestClock{now: time.Unix(1_000, 0)}
-			var service session.Service
+			var service session.ManagedService
 			var priorHostFences session.PriorHostFenceService
 			switch store {
 			case "memory":
@@ -300,7 +300,7 @@ func TestSessionFenceReleaseAndFenceConformance(t *testing.T) {
 
 func assertFenceGuardedMutations(
 	t *testing.T,
-	service session.Service,
+	service session.ManagedService,
 	ref session.SessionRef,
 	stale session.MutationGuard,
 	current session.SessionFence,
@@ -312,8 +312,7 @@ func assertFenceGuardedMutations(
 	}); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("stale AppendEvent error = %v, want ErrFenceConflict", err)
 	}
-	batch := service.(session.EventBatchService)
-	if _, err := batch.AppendEvents(context.Background(), session.AppendEventsRequest{
+	if _, err := service.AppendEvents(context.Background(), session.AppendEventsRequest{
 		SessionRef: ref, MutationGuard: stale, Events: []*session.Event{{Type: session.EventTypeUser, Message: &user}},
 	}); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("stale AppendEvents error = %v, want ErrFenceConflict", err)
@@ -499,4 +498,50 @@ func (c *fenceTestClock) Advance(delta time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(delta)
 	c.mu.Unlock()
+}
+
+func TestDelegatedClaimAdmitsOneTurnAcrossContexts(t *testing.T) {
+	ctx := t.Context()
+	s := inmemory.NewStore(inmemory.Config{})
+	active, err := s.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin := func() (func() error, error) {
+		_, end, err := s.AcquireWriter(session.ContextWithRuntimeFence(ctx, f), active.SessionRef, "producer")
+		return end, err
+	}
+	end, err := begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = begin(); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("same claim admitted two producers: %v", err)
+	}
+	if err = end(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = end(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = begin(); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("repeated release affected the next producer: %v", err)
+	}
+	if err = next(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(f)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = begin(); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("stale delegated claim admitted a producer: %v", err)
+	}
 }

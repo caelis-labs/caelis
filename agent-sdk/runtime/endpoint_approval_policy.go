@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func preserveEndpointApproval(request agent.ApprovalRequest, permission *session.ProtocolApproval) agent.ApprovalRequest {
+func preserveEndpointApproval(request approval.Request, permission *session.ProtocolApproval) approval.Request {
 	if permission == nil {
 		return request
 	}
@@ -38,24 +37,24 @@ func preserveEndpointApproval(request agent.ApprovalRequest, permission *session
 func (r *Runtime) resolveEndpointApprovalByPolicy(
 	ctx context.Context,
 	modeName string,
-	request agent.ApprovalRequest,
-) (agent.ApprovalResponse, bool, error) {
+	request approval.Request,
+) (approval.Response, bool, error) {
 	modeName = presets.NormalizeModeName(modeName)
 	if modeName != presets.ModeDangerFullAccess {
-		return agent.ApprovalResponse{}, false, nil
+		return approval.Response{}, false, nil
 	}
 	// The profile name can originate from Agent metadata, but only the
 	// process-owned registry may authorize the exceptional YOLO behavior.
 	// Lookup failure owns the request and fails closed instead of falling back
 	// to the Host approval path.
 	if _, _, err := r.lookupPolicyMode(ctx, modeName); err != nil {
-		return agent.ApprovalResponse{}, true, err
+		return approval.Response{}, true, err
 	}
 	response, err := approveEndpointPermission(request.Approval)
 	return response, true, err
 }
 
-func approveEndpointPermission(payload *session.ProtocolApproval) (agent.ApprovalResponse, error) {
+func approveEndpointPermission(payload *session.ProtocolApproval) (approval.Response, error) {
 	options := make([]approval.Option, 0)
 	if payload != nil {
 		options = make([]approval.Option, 0, len(payload.Options))
@@ -64,15 +63,15 @@ func approveEndpointPermission(payload *session.ProtocolApproval) (agent.Approva
 		}
 	}
 	if err := approval.ValidateACPOptions(options); err != nil {
-		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: invalid endpoint permission options: %w", err)
+		return approval.Response{}, fmt.Errorf("agent-sdk/runtime: invalid endpoint permission options: %w", err)
 	}
 	decision := approval.OptionDecisionAllow
 	optionID, ok, err := approval.StrictOptionIDForDecision(options, decision)
 	if err != nil {
-		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: resolve endpoint permission option: %w", err)
+		return approval.Response{}, fmt.Errorf("agent-sdk/runtime: resolve endpoint permission option: %w", err)
 	}
 	if !ok {
-		return agent.ApprovalResponse{}, fmt.Errorf("agent-sdk/runtime: endpoint permission has no %s option", decision)
+		return approval.Response{}, fmt.Errorf("agent-sdk/runtime: endpoint permission has no %s option", decision)
 	}
 	resolved := approval.ReviewResult{
 		Outcome:  string(approval.StatusSelected),

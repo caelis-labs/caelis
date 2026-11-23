@@ -2,7 +2,6 @@ package gatewayapp_test
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -57,14 +58,13 @@ func TestBackgroundParticipantRejectsInvalidTaskLabelBeforeRuntime(t *testing.T)
 			if err != nil || after.Revision != before.Revision || len(after.Participants) != 0 || provider.requests.Load() != 0 {
 				t.Fatalf("invalid label changed Session or invoked provider: revision=%d/%d participants=%d provider_calls=%d error=%v", before.Revision, after.Revision, len(after.Participants), provider.requests.Load(), err)
 			}
-			db, err := sql.Open("sqlite", "file:"+filepath.Join(root, "store", "sessions", ".sessions.index.sqlite")+"?mode=ro")
+			tasks, err := httpclient.NewTaskClient(host.host)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer db.Close()
-			var tasks int
-			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM tasks WHERE session_id = ?", created.SessionID).Scan(&tasks); err != nil || tasks != 0 {
-				t.Fatalf("invalid label created Tasks: count=%d error=%v", tasks, err)
+			list, err := tasks.List(ctx, taskstream.ListRequest{SessionID: created.SessionID})
+			if err != nil || len(list.Tasks) != 0 {
+				t.Fatalf("invalid label created Tasks: tasks=%v error=%v", list.Tasks, err)
 			}
 		})
 	}

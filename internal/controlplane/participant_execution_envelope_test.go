@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -38,7 +39,7 @@ func TestParticipantPromptUsesSessionFenceWithoutOrchestrationWatchdog(t *testin
 	if attached.Handle != mainRun.Handle {
 		t.Fatalf("attached handle = %T, want the existing outer decorated runner", attached.Handle)
 	}
-	if err := ownerA.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef}); err != nil {
+	if err := ownerA.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: active.SessionRef}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ownerA.AttachParticipant(context.Background(), agent.AttachParticipantRequest{SessionRef: active.SessionRef}); err != nil {
@@ -125,7 +126,7 @@ func (r *participantEnvelopeRuntime) AttachLiveRun(context.Context, agent.Attach
 	return agent.RunResult{Handle: r.mainRunner}, nil
 }
 
-func (r *participantEnvelopeRuntime) ResolveApproval(context.Context, agent.ResolveApprovalRequest) error {
+func (r *participantEnvelopeRuntime) ResolveApproval(context.Context, approval.ResolveRequest) error {
 	r.mu.Lock()
 	r.approvals++
 	r.mu.Unlock()

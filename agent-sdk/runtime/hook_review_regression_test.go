@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -42,9 +43,9 @@ func TestHooksContextEditSurvivesToolRound(t *testing.T) {
 					return textResponse("done", model.Usage{})
 				}}
 				var prepares atomic.Int64
-				hooks := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "once", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+				hooks := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "once", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 					if prepares.Add(1) == 1 {
-						edit := &agent.ContextEdit{Source: e.ContextSource}
+						edit := &hook.ContextEdit{Source: e.ContextSource}
 						switch mode {
 						case "append":
 							edit.Append = []model.Part{model.NewTextPart("EDIT-MARKER")}
@@ -58,11 +59,11 @@ func TestHooksContextEditSurvivesToolRound(t *testing.T) {
 					return p, nil
 				}}}}
 				if feedback {
-					hooks.Completion = []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "feedback", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
+					hooks.Completion = []hook.Completion{{Name: "feedback", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
 						if len(requests) == 1 {
-							return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: []model.Part{model.NewTextPart("FEEDBACK")}}, nil
+							return hook.CompletionDecision{Kind: hook.CompletionContinue, Feedback: []model.Part{model.NewTextPart("FEEDBACK")}}, nil
 						}
-						return agent.CompletionDecision{Kind: agent.CompletionAccept}, nil
+						return hook.CompletionDecision{Kind: hook.CompletionAccept}, nil
 					}}}
 				}
 				target := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
@@ -151,25 +152,25 @@ func TestHooksSyntheticResponseStreamTransform(t *testing.T) {
 				providers.Add(1)
 				return textResponse("secret", model.Usage{})
 			}}
-			h := agent.Hooks{Stream: []agent.Hook[struct{}, agent.StreamTransformer]{{Name: "redact", Apply: func(context.Context, agent.HookContext, struct{}) (agent.StreamTransformer, error) {
+			h := hook.Set{Stream: []hook.Stream{{Name: "redact", Apply: func(context.Context, hook.OutputContext) (hook.StreamTransformer, error) {
 				factories.Add(1)
 				return &tokenRedactor{}, nil
 			}}}}
 			switch branch {
 			case "cache":
-				h.ModelPrepare = []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "cache", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+				h.ModelPrepare = []hook.ModelPrepare{{Name: "cache", Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 					p.Response = textResponse("secret", model.Usage{})
 					return p, nil
 				}}}
 			case "input-early":
-				h.Input = []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "early", Apply: func(_ context.Context, _ agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
+				h.Input = []hook.Input{{Name: "early", Apply: func(_ context.Context, _ hook.InputContext, v hook.InputView) (hook.InputDecision, error) {
 					m := model.NewTextMessage(model.RoleAssistant, "secret")
-					return agent.InputDecision{Message: v.Message, Response: &m}, nil
+					return hook.InputDecision{Message: v.Message, Response: &m}, nil
 				}}}
 			case "turn-early":
-				h.TurnStart = []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "early", Apply: func(context.Context, agent.HookContext, struct{}) (agent.TurnStartDecision, error) {
+				h.TurnStart = []hook.TurnStart{{Name: "early", Apply: func(context.Context, hook.TurnContext) (hook.TurnStartDecision, error) {
 					m := model.NewTextMessage(model.RoleAssistant, "secret")
-					return agent.TurnStartDecision{Response: &m}, nil
+					return hook.TurnStartDecision{Response: &m}, nil
 				}}}
 			}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: h})
@@ -218,7 +219,7 @@ func TestHooksInvokePostFailureDoesNotPersistRaw(t *testing.T) {
 				effects.Add(1)
 				return tool.Result{Content: []tool.ContentBlock{tool.Text("SECRET-RAW-RESULT")}}, nil
 			}}
-			h := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "redaction", Invoke: func(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+			h := hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "redaction", Apply: func(ctx context.Context, e hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 				r, err := next(ctx)
 				if err != nil {
 					return r, err
@@ -290,7 +291,7 @@ func TestHooksTypedSchemaCloneCannotDefeatBindingCheck(t *testing.T) {
 	store, active := newTestSessionService(t, "schema-alias")
 	var providers atomic.Int64
 	probe := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"real": map[string]any{"type": "string"}}, "required": []string{"real"}}}}
-	h := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "unbound-schema", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+	h := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "unbound-schema", Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 		// Mutate the detached hook input using the SDK's supported JSON value type.
 		p.Request.Tools[0].Function.Parameters["required"].([]string)[0] = "invented"
 		return p, nil
@@ -343,9 +344,9 @@ func TestHooksCompletionBudgetSurvivesRuntimeRebuild(t *testing.T) {
 				yield(model.StreamEventFromResponse(textResponse("candidate", model.Usage{})), nil)
 			}}
 			compactor := &hookBudgetCompactor{}
-			h := agent.Hooks{CompletionLimit: 2, Completion: []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "continue", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
+			h := hook.Set{CompletionLimit: 2, Completion: []hook.Completion{{Name: "continue", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
 				completions.Add(1)
-				return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: []model.Part{model.NewTextPart("try again")}}, nil
+				return hook.CompletionDecision{Kind: hook.CompletionContinue, Feedback: []model.Part{model.NewTextPart("try again")}}, nil
 			}}}}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: h, Compactor: compactor, Compaction: CompactionConfig{Enabled: true}})
 			if err != nil {
@@ -402,12 +403,12 @@ func TestHooksConcurrentNextAndResultReadback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var effects, accepted atomic.Int64
-	var retained agent.ToolNext
+	var retained hook.ToolNext
 	target := tool.NamedTool{Def: tool.Definition{Name: "WriteOnce"}, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		effects.Add(1)
 		return tool.Result{Content: []tool.ContentBlock{tool.Text("known result")}}, nil
 	}}
-	h := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "concurrent", Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	h := hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "concurrent", Apply: func(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 		retained = next
 		results := make(chan tool.Result, 8)
 		var wg sync.WaitGroup
@@ -476,10 +477,10 @@ func TestHooksContextEditRecoveryUsesCurrentProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 			count := 0
-			h := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "edit", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+			h := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "edit", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 				count++
 				if count == 1 {
-					edit := &agent.ContextEdit{Source: e.ContextSource}
+					edit := &hook.ContextEdit{Source: e.ContextSource}
 					switch mode {
 					case "append":
 						edit.Append = []model.Part{model.NewTextPart("EDIT")}

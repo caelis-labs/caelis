@@ -131,7 +131,7 @@ func ValidateProfile(p Profile) error {
 		if def.Name == codemode.ToolName || def.Name == "Task" {
 			return fmt.Errorf("%w: callback collides with fixed Code Mode/Task entry", ErrInvalid)
 		}
-		if def.Name == "Skill" || def.Name == mcp.SearchToolName || def.Name == mcp.CallToolName {
+		if def.Name == "Skill" || def.Name == mcp.SearchToolName {
 			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
 		}
 		for _, server := range p.MCPServers {

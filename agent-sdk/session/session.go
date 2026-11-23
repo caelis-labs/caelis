@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -200,43 +201,6 @@ func validateJSONMap(scope string, value map[string]any) error {
 	return nil
 }
 
-// EventType identifies one canonical session event kind.
-type EventType string
-
-const (
-	EventTypeUser EventType = "user"
-	// EventTypeInteraction is durable conversation input dispatched by Control
-	// as a command. Mirror visibility excludes it from model context.
-	EventTypeInteraction EventType = "interaction"
-	EventTypeAssistant   EventType = "assistant"
-	EventTypePlan        EventType = "plan"
-	EventTypeToolCall    EventType = "tool_call"
-	EventTypeToolResult  EventType = "tool_result"
-	EventTypeParticipant EventType = "participant"
-	EventTypeHandoff     EventType = "handoff"
-	EventTypeCompact     EventType = "compact"
-	EventTypeNotice      EventType = "notice"
-	EventTypeLifecycle   EventType = "lifecycle"
-	EventTypeSystem      EventType = "system"
-	EventTypeContext     EventType = "context"
-	EventTypeCustom      EventType = "custom"
-)
-
-// Visibility defines how one event participates in history and invocation
-// context reconstruction.
-type Visibility string
-
-const (
-	VisibilityCanonical Visibility = "canonical"
-	VisibilityUIOnly    Visibility = "ui_only"
-	VisibilityOverlay   Visibility = "overlay"
-	VisibilityMirror    Visibility = "mirror"
-	// VisibilityJournal marks durable execution-control facts that are excluded
-	// from canonical model history. Only completed reviewed approval decisions
-	// have a client projection; other journal facts remain internal.
-	VisibilityJournal Visibility = "journal"
-)
-
 // ControllerKind identifies the main controller family of one session epoch.
 type ControllerKind string
 
@@ -362,6 +326,7 @@ type SessionFence struct {
 	OwnerID      string     `json:"owner_id,omitempty"`
 	FencingToken uint64     `json:"fencing_token,omitempty"`
 	AcquiredAt   time.Time  `json:"acquired_at,omitempty"`
+	turnInUse    *atomic.Bool
 	claimToken   string
 	claimDigest  string
 }
@@ -689,11 +654,6 @@ type EventAppender interface {
 	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
 }
 
-// ControllerBindingStore mutates the durable active-controller binding.
-type ControllerBindingStore interface {
-	BindController(context.Context, BindControllerRequest) (Session, error)
-}
-
 // ParticipantBindingStore mutates durable participant bindings.
 // Implementations must return RevisionConflictError for a failed revision CAS
 // and ParticipantBindingConflictError for a failed delegation CAS. If a
@@ -722,17 +682,6 @@ type StateStore interface {
 	StateWriter
 }
 
-// Service is the full reference session service. Consumers should accept the
-// narrow interfaces above unless they genuinely need the aggregate.
-type Service interface {
-	Lifecycle
-	Reader
-	EventAppender
-	ControllerBindingStore
-	ParticipantBindingStore
-	StateStore
-}
-
 // ParticipantLifecycleService is implemented by stores that can atomically
 // change participant bindings and append their replayable lifecycle events.
 // Implementations must enforce ExpectedRevision, MutationGuard, and the
@@ -748,12 +697,6 @@ type ParticipantLifecycleService interface {
 // controller binding and its matching durable handoff event.
 type ControllerHandoffService interface {
 	BindControllerWithEvent(context.Context, BindControllerWithEventRequest) (Session, *Event, error)
-}
-
-// EventBatchService is implemented by stores that can validate and append a
-// batch of events without exposing partially appended durable history.
-type EventBatchService interface {
-	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
 }
 
 // EventBatchStateService is implemented by stores that can append an event

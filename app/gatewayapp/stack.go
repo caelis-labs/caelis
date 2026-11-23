@@ -139,7 +139,7 @@ type Stack struct {
 }
 
 // Sessions returns the Host's process-level Session authority.
-func (s *Stack) Sessions() session.Service {
+func (s *Stack) Sessions() session.ManagedService {
 	if runtime := s.runtimeProjection(); runtime != nil {
 		return runtime.sessions
 	}
@@ -189,11 +189,10 @@ func (s *runtimeComposition) KernelControlPlaneState() KernelControlPlaneReader 
 	return nil
 }
 
-// KernelTerminals returns the current gateway terminal provider without
-// exposing gateway control or Session operations.
-func (s *runtimeComposition) KernelTerminals() kernelimpl.TerminalProvider {
+// KernelTerminals returns command control for the currently bound gateway.
+func (s *runtimeComposition) KernelTerminals() terminal.Controller {
 	if gw := s.currentGateway(); gw != nil {
-		return gw
+		return gw.Terminals()
 	}
 	return nil
 }

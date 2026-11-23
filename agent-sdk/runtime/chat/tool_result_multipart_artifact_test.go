@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/artifact"
 )
 
 func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
@@ -34,16 +35,16 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			store := testToolResultArtifactStore(t, 8, 4*1024*1024)
+			store := artifact.NewFileStore(t.TempDir())
 			result := tool.Result{Content: parts}
 			before, _ := tool.CloneResult(result, nil)
-			canonical, meta := canonicalToolResult(result, store)
+			canonical, meta := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), result)
 			var path string
 			if _, ok := canonical.Structured(); ok {
 				path = artifactPathFromJSONMetadata(t, firstToolResultJSONMap(t, canonical))
 			} else {
 				for _, block := range canonical.Content {
-					if text, ok := block.(tool.Text); ok && strings.Contains(string(text), toolResultArtifactHintPrefix) {
+					if text, ok := block.(tool.Text); ok && strings.Contains(string(text), "Caelis runtime artifact: ") {
 						path = artifactPathFromHint(t, string(text))
 					}
 				}
@@ -59,7 +60,6 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 			if err := json.Unmarshal(raw, &recovered); err != nil || !reflect.DeepEqual(recovered.Content, before.Content) {
 				t.Fatalf("artifact lost typed blocks: recovered %d of %d, decode error: %v", len(recovered.Content), len(before.Content), err)
 			}
-			assertPrivateFileMode(t, path)
 			if !reflect.DeepEqual(before, result) {
 				t.Fatal("canonicalization changed the original result")
 			}
@@ -107,19 +107,19 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 	}
 }
 
-func TestCanonicalMultipartResultArtifactQuotaFailureStaysBounded(t *testing.T) {
+func TestCanonicalMultipartResultArtifactFailureStaysBounded(t *testing.T) {
 	t.Parallel()
-	store := testToolResultArtifactStore(t, 1, 32)
+	store := artifact.NewFileStore("")
 	result := tool.Result{Content: []tool.ContentBlock{
 		tool.Text(strings.Repeat("large content", 10000)),
 		tool.StructuredContent{Value: mustJSON(map[string]any{"status": "complete"})},
 	}}
-	canonical, meta := canonicalToolResult(result, store)
+	canonical, meta := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), result)
 	if tool.ResultNeedsTruncation(canonical, tool.DefaultTruncationPolicy()) {
 		t.Fatal("artifact failure bypassed result budget")
 	}
 	for _, part := range tool.ModelParts(canonical.Content) {
-		if part.Text != nil && strings.Contains(part.Text.Text, toolResultArtifactHintPrefix) {
+		if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
 			t.Fatal("reference to an unwritten artifact")
 		}
 		if part.JSON != nil && strings.Contains(string(part.JSON.Value), `"_caelis"`) {

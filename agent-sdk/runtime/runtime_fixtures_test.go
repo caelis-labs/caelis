@@ -14,8 +14,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -575,7 +576,7 @@ func (testRecoveryCoordinator) ReattachController(_ context.Context, req control
 }
 
 type testContextRouter struct {
-	sessions session.Service
+	sessions session.Reader
 }
 
 func (r testContextRouter) ControllerContext(ctx context.Context, req controller.ControllerContextRequest) (controller.ContextRoute, error) {
@@ -691,7 +692,7 @@ func (r testContextRouter) contextTransfer(ctx context.Context, ref session.Sess
 }
 
 type testControllerForwarder struct {
-	sessions session.Service
+	sessions session.EventAppender
 }
 
 func (f testControllerForwarder) BeginControllerEvents(_ context.Context, req agent.ControllerEventForwardRequest) (agent.ControllerEventSession, error) {
@@ -830,7 +831,7 @@ func testShouldPersistExternalControllerEvent(event *session.Event) bool {
 	}
 }
 
-func newTestSessionService(t *testing.T, sessionID string) (session.Service, session.Session) {
+func newTestSessionService(t *testing.T, sessionID string) (session.ManagedService, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return sessionID },
@@ -898,7 +899,7 @@ func userTextEvent(text string) *session.Event {
 	}
 }
 
-func appendTestEvent(t *testing.T, sessions session.Service, ref session.SessionRef, event *session.Event) {
+func appendTestEvent(t *testing.T, sessions session.EventAppender, ref session.SessionRef, event *session.Event) {
 	t.Helper()
 	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: ref,
@@ -1751,9 +1752,9 @@ func taskHandleFromSessionEvent(event *session.Event) string {
 	return ""
 }
 
-type approvalRequesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type approvalRequesterFunc func(context.Context, approval.Request) (approval.Response, error)
 
-func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req approval.Request) (approval.Response, error) {
 	return f(ctx, req)
 }
 
@@ -2225,7 +2226,7 @@ func newRuntimeRunCommandToolTestHarness(t *testing.T) (session.Service, session
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

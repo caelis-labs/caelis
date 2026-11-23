@@ -61,11 +61,8 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 		EnvelopeVersion: EnvelopeVersion,
 		APIVersion:      HTTPAPIVersion,
 		ServerID:        ServerIdentity,
-		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration, CapabilityApprovalSubjects, CapabilityDisplayReplacements, CapabilitySessionInterrupt),
+		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration, CapabilityApprovalSubjects, CapabilityDisplayReplacements, CapabilitySessionInterrupt, CapabilityIdleCommandAdmission),
 		Transports:      []string{"embedded"},
-	}
-	if SupportsConversationInteractions(c.service) {
-		info.Capabilities = append(info.Capabilities, CapabilityConversationInteractions)
 	}
 	for _, capability := range c.capabilities {
 		if !slices.Contains(info.Capabilities, capability) {

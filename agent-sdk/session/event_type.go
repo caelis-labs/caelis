@@ -6,6 +6,29 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
+// EventType identifies one canonical session event kind.
+type EventType string
+
+const (
+	EventTypeUser EventType = "user"
+	// EventTypeInteraction identifies command echoes in older Session histories.
+	// Control no longer writes these records. Keep the type while that event
+	// schema is supported by replay.
+	EventTypeInteraction EventType = "interaction"
+	EventTypeAssistant   EventType = "assistant"
+	EventTypePlan        EventType = "plan"
+	EventTypeToolCall    EventType = "tool_call"
+	EventTypeToolResult  EventType = "tool_result"
+	EventTypeParticipant EventType = "participant"
+	EventTypeHandoff     EventType = "handoff"
+	EventTypeCompact     EventType = "compact"
+	EventTypeNotice      EventType = "notice"
+	EventTypeLifecycle   EventType = "lifecycle"
+	EventTypeSystem      EventType = "system"
+	EventTypeContext     EventType = "context"
+	EventTypeCustom      EventType = "custom"
+)
+
 // EventTypeOf backfills an event type for deserialized or adapter-produced
 // envelopes that predate explicit Event.Type. Runtime writers should set Type
 // when producing new canonical events.

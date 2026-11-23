@@ -111,5 +111,5 @@ func (taskStreamRouterTestController) Kill(context.Context, terminal.Ref) error 
 func (taskStreamRouterTestController) Release(context.Context, terminal.Ref) error { return nil }
 
 var _ agent.Runtime = taskStreamRouterTestRuntime{}
-var _ agent.TerminalProvider = taskStreamRouterTestRuntime{}
+var _ terminal.Provider = taskStreamRouterTestRuntime{}
 var _ terminal.Controller = taskStreamRouterTestController{}

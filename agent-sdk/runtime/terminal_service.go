@@ -11,14 +11,19 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
-// terminalService is deliberately not a TaskStream service. It exposes only a
-// bounded current/final command fallback plus process control for compatibility
-// terminal APIs. Transient delivery and replay are Control spool concerns.
+// Terminals provides command inspection and process control over this Runtime's tasks.
+func (r *Runtime) Terminals() terminal.Controller {
+	if r == nil || r.tasks == nil {
+		return nil
+	}
+	return terminalService{tasks: r.tasks}
+}
+
 type terminalService struct {
 	tasks *taskRuntime
 }
 
-func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+func (s terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
 	ref = terminal.NormalizeRef(ref)
 	task, err := s.resolveTerminalCommand(ctx, ref)
 	if err != nil {
@@ -64,7 +69,7 @@ func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.
 	return snapshot, nil
 }
 
-func (s *terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+func (s terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
 	ref = terminal.NormalizeRef(ref)
 	for {
 		task, err := s.resolveTerminalCommand(ctx, ref)
@@ -103,7 +108,7 @@ func (s *terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.
 	}
 }
 
-func (s *terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
+func (s terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
 	task, err := s.resolveTerminalCommand(ctx, terminal.NormalizeRef(ref))
 	if err != nil {
 		return err
@@ -115,7 +120,7 @@ func (s *terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
 	return commandSession.Terminate(ctx)
 }
 
-func (s *terminalService) Release(ctx context.Context, ref terminal.Ref) error {
+func (s terminalService) Release(ctx context.Context, ref terminal.Ref) error {
 	task, err := s.resolveTerminalCommand(ctx, terminal.NormalizeRef(ref))
 	if err != nil {
 		return err
@@ -134,8 +139,8 @@ func (s *terminalService) Release(ctx context.Context, ref terminal.Ref) error {
 	return nil
 }
 
-func (s *terminalService) resolveTerminalCommand(ctx context.Context, ref terminal.Ref) (*commandTask, error) {
-	if s == nil || s.tasks == nil {
+func (s terminalService) resolveTerminalCommand(ctx context.Context, ref terminal.Ref) (*commandTask, error) {
+	if s.tasks == nil {
 		return nil, fmt.Errorf("terminal service is unavailable")
 	}
 	if err := terminal.ValidateRef(ref); err != nil {
@@ -188,4 +193,4 @@ func terminalCommandSnapshotLocked(task *commandTask, status sandbox.SessionStat
 	return terminal.CloneSnapshot(snapshot)
 }
 
-var _ terminal.Controller = (*terminalService)(nil)
+var _ terminal.Provider = (*Runtime)(nil)

@@ -282,7 +282,7 @@ func TestCancelSessionSubagentsRecoversRehydratedOrphans(t *testing.T) {
 func TestCancelSessionSubagentsReturnsBindingWithoutTask(t *testing.T) {
 	r, active := newSubagentTaskTestRuntime(t, nil)
 	binding := session.ParticipantBinding{ID: "child-agent", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated, SessionID: "child-session", DelegationID: "missing-task"}
-	if _, err := r.sessions.PutParticipant(t.Context(), session.PutParticipantRequest{SessionRef: active.SessionRef, Binding: binding}); err != nil {
+	if _, err := r.participantBindings.PutParticipant(t.Context(), session.PutParticipantRequest{SessionRef: active.SessionRef, Binding: binding}); err != nil {
 		t.Fatal(err)
 	}
 	endpoints, err := r.CancelSessionSubagents(t.Context(), active.SessionRef)

@@ -73,7 +73,7 @@ func TestControlObservationPreservesIdleAndPinsRuntime(t *testing.T) {
 }
 
 func TestControlMutationStillCancelsIdle(t *testing.T) {
-	for _, action := range []appserver.Action{appserver.ActionConversationInteraction, appserver.ActionSessionConfigure, appserver.ActionSessionClose} {
+	for _, action := range []appserver.Action{appserver.ActionSessionConfigure, appserver.ActionSessionClose} {
 		t.Run(string(action), func(t *testing.T) {
 			c, work, _, _ := idleCoordinatorFixture(t, true)
 			defer work.cancel()

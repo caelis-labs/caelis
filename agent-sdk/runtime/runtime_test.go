@@ -14,7 +14,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -93,12 +95,12 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 	sessions, active := newTestSessionService(t, "agent-owned-watchdog")
 	runtime, err := New(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{},
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{
 			ID: "allow",
 			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			},
-		}},
+		}}},
 		DefaultPolicyMode: "allow",
 	})
 	if err != nil {
@@ -468,7 +470,25 @@ func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) 
 
 }
 
-func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
+func TestRuntimeRequiresSessionIDBeforeAcquiringWriter(t *testing.T) {
+	rt, err := New(Config{
+		Sessions:     inmemory.NewStore(inmemory.Config{}),
+		AgentFactory: chat.Factory{},
+		RunIDGenerator: func() string {
+			t.Fatal("unbound prompt entered run admission")
+			return ""
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = rt.Run(t.Context(), agent.RunRequest{SessionRef: session.SessionRef{SessionID: " "}, Input: "hello"})
+	if !errors.Is(err, session.ErrInvalidSession) {
+		t.Fatalf("Run() error = %v, want ErrInvalidSession", err)
+	}
+}
+
+func TestRuntimeAdmitsOnePromptPerSession(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-concurrent-run")
@@ -477,7 +497,7 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	blocking := &blockingTestAgent{started: make(chan struct{})}
-	first, err := runtime.Run(context.Background(), agent.RunRequest{
+	first, err := runtime.Run(t.Context(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "first",
 		Agent:      blocking,
@@ -485,6 +505,7 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(first) error = %v", err)
 	}
+	defer first.Handle.Close()
 	select {
 	case <-blocking.started:
 	case <-time.After(2 * time.Second):
@@ -501,6 +522,45 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 	}
 	if conflict.ActiveRunID != first.Handle.RunID() {
 		t.Fatalf("conflict.ActiveRunID = %q, want %q", conflict.ActiveRunID, first.Handle.RunID())
+	}
+	for _, wrong := range []session.SessionRef{
+		{SessionID: activeSession.SessionID, UserID: "another-user"},
+		{SessionID: activeSession.SessionID, WorkspaceKey: "another-workspace"},
+		{SessionID: activeSession.SessionID, AppName: "another-app"},
+	} {
+		_, err := runtime.Run(t.Context(), agent.RunRequest{SessionRef: wrong, Input: "second", Agent: blocking})
+		if !errors.Is(err, session.ErrSessionNotFound) || errors.As(err, &conflict) {
+			t.Fatalf("out-of-scope request returned %v", err)
+		}
+	}
+	other, err := sessions.StartSession(t.Context(), session.StartSessionRequest{
+		AppName: activeSession.AppName, UserID: activeSession.UserID, PreferredSessionID: "other",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parallel, err := runtime.Run(t.Context(), agent.RunRequest{SessionRef: other.SessionRef, Input: "independent", Agent: seqAgent{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parallel.Handle.Close()
+	if err := parallel.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for ref, want := range map[session.SessionRef]string{activeSession.SessionRef: "first", other.SessionRef: "independent"} {
+		events, err := sessions.Events(t.Context(), session.EventsRequest{SessionRef: ref})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prompts []string
+		for _, event := range events {
+			if session.EventTypeOf(event) == session.EventTypeUser {
+				prompts = append(prompts, session.EventText(event))
+			}
+		}
+		if !reflect.DeepEqual(prompts, []string{want}) {
+			t.Fatalf("Session %s recorded prompts %q, want only %q", ref.SessionID, prompts, want)
+		}
 	}
 	first.Handle.Cancel()
 	if err := first.Handle.WaitCompletion(t.Context()); err == nil {
@@ -762,7 +822,7 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	}
 	runtime, err := New(Config{
 		Sessions: sessions,
-		Hooks:    agent.Hooks{StreamMode: agent.StreamIncremental},
+		Hooks:    hook.Set{StreamMode: hook.StreamIncremental},
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Be terse.",
 		},
@@ -2389,12 +2449,12 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{
 			ID: "allow",
 			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			},
-		}},
+		}}},
 		DefaultPolicyMode: "allow",
 		RunIDGenerator:    func() string { return "run-tools" },
 	})
@@ -2639,7 +2699,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2652,7 +2712,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 	outsidePath := policyOutsidePathForRuntimeTest()
 	testModel := &denyWriteRuntimeModel{}
 	var sawApproval bool
-	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		sawApproval = true
 		if req.ModelStep == nil || strings.TrimSpace(req.ModelStep.ID) == "" || req.ModelStep.Index != 0 || req.ModelStep.CallCount != 1 {
 			t.Fatalf("approval model step = %#v, want one call in a non-empty model step", req.ModelStep)
@@ -2663,7 +2723,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		if got := strings.TrimSpace(fmt.Sprint(req.Metadata["risk_class"])); got != "path_escape" {
 			t.Fatalf("approval metadata risk_class = %q, want path_escape", got)
 		}
-		return agent.ApprovalResponse{
+		return approval.Response{
 			Outcome:  "selected",
 			OptionID: "reject_once",
 			Approved: false,
@@ -2734,7 +2794,7 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry:    registry,
+		Hooks:             hook.Set{ToolPolicy: registry},
 		DefaultPolicyMode: presets.ModeDangerFullAccess,
 	})
 	if err != nil {
@@ -2746,9 +2806,9 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "yolo-outside.txt")
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		t.Fatal("danger full-access policy routed an allowed tool call to approval")
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
@@ -2787,7 +2847,7 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2806,9 +2866,9 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(tempRoot) })
 	tempPath := filepath.Join(tempRoot, "scratch.txt")
 	testModel := &writePathRuntimeModel{path: tempPath, content: "temporary\n"}
-	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		t.Errorf("system temporary file unexpectedly requested approval: %+v", req.Approval)
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
@@ -2852,7 +2912,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 		t.Fatalf("policy.NewMemory() error = %v", err)
 	}
 	runtime := &Runtime{
-		policies:          registry,
+		hooks:             hook.Set{ToolPolicy: registry},
 		defaultPolicyMode: "locked-down",
 	}
 	targetTool := tool.NamedTool{
@@ -2862,7 +2922,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 			return tool.Result{}, nil
 		},
 	}
-	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Tools: []tool.Tool{targetTool},
 	}, approvalContext{ctx: context.Background()})
 	if got := len(wrapped); got != 1 {
@@ -2899,7 +2959,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 	runtime := &Runtime{
-		policies:          registry,
+		hooks:             hook.Set{ToolPolicy: registry},
 		defaultPolicyMode: presets.ModeWorkspaceWrite,
 	}
 	targetTool := tool.NamedTool{
@@ -2909,7 +2969,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 			return tool.Result{}, nil
 		},
 	}
-	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Metadata: map[string]any{policy.MetadataPolicyProfile: "unknown-policy"},
 		Tools:    []tool.Tool{targetTool},
 	}, approvalContext{ctx: context.Background()})
@@ -2960,8 +3020,8 @@ func TestRuntimePolicyRegistryErrorAndEmptyDecisionFailClosed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			runtime := &Runtime{policies: tt.registry, defaultPolicyMode: "empty"}
-			wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+			runtime := &Runtime{hooks: hook.Set{ToolPolicy: tt.registry}, defaultPolicyMode: "empty"}
+			wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 				Tools: []tool.Tool{targetTool},
 			}, approvalContext{ctx: context.Background()})
 			_, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
@@ -2997,7 +3057,7 @@ func TestRuntimePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testin
 	t.Parallel()
 
 	tests := map[string]string{
-		"":                "workspace-write",
+		"":                "",
 		"auto":            "workspace-write",
 		"auto_review":     "workspace-write",
 		"manual":          "workspace-write",
@@ -3027,7 +3087,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3093,8 +3153,8 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
-		SandboxPolicy:     sandboxPolicy,
+		Hooks:         hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
+		SandboxPolicy: sandboxPolicy,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3136,32 +3196,32 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 			return nil
 		},
 	}
-	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
-			return agent.ApprovalResponse{}, fmt.Errorf("RunState during approval: %w", err)
+			return approval.Response{}, fmt.Errorf("RunState during approval: %w", err)
 		}
 		if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || req.OperationTaskID == "" {
-			return agent.ApprovalResponse{}, fmt.Errorf("run state during command approval = %+v, want running with a Task-owned approval", state)
+			return approval.Response{}, fmt.Errorf("run state during command approval = %+v, want running with a Task-owned approval", state)
 		}
 		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval request = %+v, want RunCommand tool call", req.Approval)
+			return approval.Response{}, fmt.Errorf("approval request = %+v, want RunCommand tool call", req.Approval)
 		}
 		got, ok := req.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
 		if !ok || !reflect.DeepEqual(got, sandboxPolicy) {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
+			return approval.Response{}, fmt.Errorf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
 		}
 		budget, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		if err := req.OnAdmission(budget); err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 		select {
 		case <-approve:
 		case <-budget.Done():
-			return agent.ApprovalResponse{}, budget.Err()
+			return approval.Response{}, budget.Err()
 		}
-		return agent.ApprovalResponse{
+		return approval.Response{
 			Outcome:  "selected",
 			OptionID: "allow_once",
 			Approved: true,
@@ -3237,7 +3297,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}}
 	traceSink := &concurrentTraceSink{}
 	runtime, err := New(Config{
-		Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: ask, DefaultPolicyMode: "ask",
+		Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: ask}, DefaultPolicyMode: "ask",
 		RunIDGenerator: func() string { return "run-durable-approval" },
 		TraceSink:      traceSink,
 	})
@@ -3292,8 +3352,8 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if err != nil || resumed.Handle != run.Handle {
 		t.Fatalf("AttachLiveRun() = %+v, %v; want same live runner", resumed, err)
 	}
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
+	if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() error = %v", err)
 	}
 	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
@@ -3305,7 +3365,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("tool calls = %d, want 1", calls)
 	}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("idempotent ResolveApproval() error = %v", err)
 	}
 	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
@@ -3334,7 +3394,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if err != nil || state.ActiveRunID != "" {
 		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
 	}
-	if err := reopened.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
+	if err := reopened.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: activeSession.SessionRef, RequestID: requestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() after reopening with original request ID: %v", err)
 	}
 	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
@@ -3347,11 +3407,11 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 	t.Parallel()
 
-	var captured agent.ApprovalRequest
+	var captured approval.Request
 	requester := controllerApprovalRequester{
-		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			captured = req
-			return agent.ApprovalResponse{
+			return approval.Response{
 				Outcome:  "selected",
 				OptionID: "allow_once",
 				Approved: true,
@@ -3410,11 +3470,11 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 	t.Parallel()
 
-	var captured agent.ApprovalRequest
+	var captured approval.Request
 	requester := controllerApprovalRequester{
-		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			captured = req
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}),
 		sessionRef:           session.SessionRef{SessionID: "sess-approval"},
 		session:              session.Session{SessionRef: session.SessionRef{SessionID: "sess-approval"}},
@@ -3467,7 +3527,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

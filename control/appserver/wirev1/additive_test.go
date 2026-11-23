@@ -143,7 +143,6 @@ func TestAdditiveControlCommandFamilies(t *testing.T) {
 		appserver.PrepareACPAuthenticationRequest{},
 		appserver.PrepareACPRequest{},
 		appserver.PromptParticipantRequest{},
-		appserver.RecordInteractionRequest{},
 		appserver.RemoveMarketplaceRequest{},
 		appserver.RemovePluginRequest{},
 		appserver.ResetAgentBindingRequest{},

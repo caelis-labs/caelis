@@ -30,7 +30,7 @@ func (mockRuntime) RunState(context.Context, session.SessionRef) (agent.RunState
 }
 
 type revisionConflictOnceSessionService struct {
-	session.Service
+	session.ManagedService
 	conflicted  atomic.Bool
 	updateCalls atomic.Int64
 }
@@ -48,7 +48,7 @@ func (s *revisionConflictOnceSessionService) UpdateState(ctx context.Context, re
 			Actual:    expected + 1,
 		}
 	}
-	return s.Service.UpdateState(ctx, req)
+	return s.ManagedService.UpdateState(ctx, req)
 }
 
 type recordingRuntime struct {
@@ -132,7 +132,7 @@ func (r *approvalRuntime) RunState(context.Context, session.SessionRef) (agent.R
 
 type childApprovalRuntime struct {
 	session   session.Session
-	responses chan agent.ApprovalResponse
+	responses chan approval.Response
 }
 
 func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -542,7 +542,7 @@ func (r *controlPlaneRuntime) DetachParticipant(ctx context.Context, req agent.D
 }
 
 type staticSessionService struct {
-	approvalRequest *agent.ApprovalRequest
+	approvalRequest *approval.Request
 	session         session.Session
 	state           map[string]any
 }
@@ -576,15 +576,6 @@ func (s staticSessionService) Events(context.Context, session.EventsRequest) ([]
 }
 func (s staticSessionService) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, nil
-}
-func (s staticSessionService) BindController(context.Context, session.BindControllerRequest) (session.Session, error) {
-	return s.session, nil
-}
-func (s staticSessionService) PutParticipant(context.Context, session.PutParticipantRequest) (session.Session, error) {
-	return s.session, nil
-}
-func (s staticSessionService) RemoveParticipant(context.Context, session.RemoveParticipantRequest) (session.Session, error) {
-	return s.session, nil
 }
 func (s staticSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return cloneMap(s.state), nil
@@ -684,18 +675,6 @@ func (s *recordingSessionService) ListSessions(_ context.Context, req session.Li
 		return s.listSessionsFn(req), nil
 	}
 	return s.listSessionsResult, nil
-}
-
-func (s *recordingSessionService) BindController(context.Context, session.BindControllerRequest) (session.Session, error) {
-	return s.sessionResult, nil
-}
-
-func (s *recordingSessionService) PutParticipant(context.Context, session.PutParticipantRequest) (session.Session, error) {
-	return s.sessionResult, nil
-}
-
-func (s *recordingSessionService) RemoveParticipant(context.Context, session.RemoveParticipantRequest) (session.Session, error) {
-	return s.sessionResult, nil
 }
 
 func (s *recordingSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
@@ -904,8 +883,8 @@ func firstUsageSnapshot(events []eventstream.Envelope) *session.UsageSnapshot {
 	return nil
 }
 
-func (r *approvalRuntime) approvalRequest() agent.ApprovalRequest {
-	return agent.ApprovalRequest{
+func (r *approvalRuntime) approvalRequest() approval.Request {
+	return approval.Request{
 		SessionRef:     r.session.SessionRef,
 		Session:        r.session,
 		RunID:          "run-1",
@@ -929,8 +908,8 @@ func (r *approvalRuntime) approvalRequest() agent.ApprovalRequest {
 	}
 }
 
-func (r *childApprovalRuntime) approvalRequest() agent.ApprovalRequest {
-	return agent.ApprovalRequest{
+func (r *childApprovalRuntime) approvalRequest() approval.Request {
+	return approval.Request{
 		SessionRef: r.session.SessionRef,
 		Session:    r.session,
 		RunID:      "run-1",

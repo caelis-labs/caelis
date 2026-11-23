@@ -10,6 +10,8 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -29,13 +31,13 @@ func TestCodeModeIntentDoesNotHoldConfigurationGuardDuringApprovalOrIO(t *testin
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
 	var approved, executed atomic.Bool
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		if !revision.TryLock() {
-			return agent.ApprovalResponse{}, errors.New("configuration guard held during approval")
+			return approval.Response{}, errors.New("configuration guard held during approval")
 		}
 		revision.Unlock()
 		approved.Store(true)
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
 	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		if !revision.TryLock() {
@@ -71,7 +73,7 @@ func TestCodeModeRunnerJoinsUnresponsiveExecutor(t *testing.T) {
 		<-release
 		return nil, ctx.Err()
 	})}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

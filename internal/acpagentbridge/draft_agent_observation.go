@@ -423,20 +423,12 @@ func draftLifecycleStopReason(env eventstream.Envelope) string {
 }
 
 func draftCanonicalUser(env eventstream.Envelope) bool {
-	return env.Update != nil && env.Update.SessionUpdateType() == eventstream.UpdateUserMessage && env.EventID != "" && env.Final && env.Delivery != nil && (env.Delivery.Mode == eventstream.DeliveryCanonical || env.Delivery.Mode == eventstream.DeliveryMirror) && (env.Scope == "" || env.Scope == eventstream.ScopeMain) && env.AgentCommunicationSource == nil
+	return env.Update != nil && env.Update.SessionUpdateType() == eventstream.UpdateUserMessage && env.EventID != "" && env.Final && env.Delivery != nil && env.Delivery.Mode == eventstream.DeliveryCanonical && (env.Scope == "" || env.Scope == eventstream.ScopeMain) && env.AgentCommunicationSource == nil
 }
 
 func (s *draftSession) settleReceiptLocked(env eventstream.Envelope) {
 	w := s.waiter
-	if w != nil && w.interactionID != "" && env.EventID == w.interactionID {
-		select {
-		case w.message <- env.EventID:
-		default:
-		}
-		clear(s.users)
-		return
-	}
-	if w == nil || w.target.TurnID == "" || env.TurnID != w.target.TurnID || env.SessionID != s.id {
+	if w == nil || w.commandID != "" || w.target.TurnID == "" || env.TurnID != w.target.TurnID || env.SessionID != s.id {
 		return
 	}
 	if env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryCanonical {
@@ -457,7 +449,7 @@ func (s *draftSession) settleReceiptLocked(env eventstream.Envelope) {
 
 func (s *draftSession) failUninsertedReceiptLocked(turnID string) {
 	w := s.waiter
-	if w == nil || w.interactionID != "" || w.target.TurnID == "" || w.target.TurnID != turnID {
+	if w == nil || w.commandID != "" || w.target.TurnID == "" || w.target.TurnID != turnID {
 		return
 	}
 	select {
@@ -483,10 +475,35 @@ func (s *draftSession) emitForegroundStateLocked(state draftForegroundState) err
 	return nil
 }
 
+// echoCommand publishes directly to the submitting connection. Its message ID
+// correlates the live echo and receipt within this connection.
+func (s *draftSession) echoCommand(ctx context.Context, id, text string) error {
+	s.projectionMu.Lock()
+	defer s.projectionMu.Unlock()
+	update := v2.SessionUpdate{UserMessage: &v2.SessionUpdateUserMessage{
+		SessionUpdate: "user_message", MessageId: v2.MessageId(id),
+		Content: []v2.ContentBlock{{Text: &v2.ContentBlockText{Type: "text", Text: text}}},
+	}}
+	return s.agent.callbacks.SessionUpdate(ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: update})
+}
+
 func (s *draftSession) emitCommandState(messageID string, active bool, stopReason string) error {
 	s.projectionMu.Lock()
 	defer s.projectionMu.Unlock()
-	return s.emitForegroundStateLocked(draftForegroundState{activityID: messageID, active: active, stopReason: stopReason})
+	previous := s.lastForeground
+	otherActive := previous != nil && previous.active && previous.activityID != messageID
+	if active && otherActive {
+		return nil
+	}
+	if err := s.emitForegroundStateLocked(draftForegroundState{activityID: messageID, active: active, stopReason: stopReason}); err != nil {
+		return err
+	}
+	if otherActive {
+		// Settle this receipt and restore the observed foreground Turn in the
+		// same ordered notification sequence, including its approval state.
+		return s.emitForegroundStateLocked(*previous)
+	}
+	return nil
 }
 
 func (s *draftSession) cancelApproval() {

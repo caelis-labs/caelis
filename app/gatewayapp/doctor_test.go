@@ -38,7 +38,7 @@ func TestConfigMigrationWarningsUseProcessSnapshot(t *testing.T) {
 }
 
 type doctorSessionMigrationReporter struct {
-	session.Service
+	session.ManagedService
 	report sessionfile.MigrationReport
 }
 
@@ -57,7 +57,7 @@ func TestDoctorReportsObservedLegacySessionParticipantDrop(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	stack.composition.sessions = doctorSessionMigrationReporter{
-		Service: stack.composition.sessions,
+		ManagedService: stack.composition.sessions,
 		report: sessionfile.MigrationReport{
 			FromVersion: 1,
 			Dropped: []sessionfile.MigrationDrop{{

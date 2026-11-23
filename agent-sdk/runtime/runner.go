@@ -271,7 +271,9 @@ func (r *runner) publish(event agent.SourceEvent) {
 	r.observerMu.Unlock()
 }
 
-func (r *runner) finish() {
+// finish waits for accepted steering to settle under the same writer as the
+// Turn before releasing ownership and signalling completion.
+func (r *runner) finish(endTurn func() error) {
 	if r == nil {
 		return
 	}
@@ -286,6 +288,12 @@ func (r *runner) finish() {
 	r.mu.Unlock()
 	if dispatcher != nil {
 		dispatcher.close(agent.ErrRunInputClosed)
+		<-dispatcher.done
+	}
+	if endTurn != nil {
+		if err := endTurn(); err != nil {
+			r.publishError(err)
+		}
 	}
 	close(r.done)
 }

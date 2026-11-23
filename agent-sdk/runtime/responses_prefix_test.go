@@ -13,6 +13,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -117,11 +118,11 @@ func testResponsesPrefixThroughRepair(t *testing.T, route responsesPrefixRoute) 
 		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "fixture read failed")
 	}}
 	var updated atomic.Bool
-	hooks := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{
-		Name: "append-context", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+	hooks := hook.Set{ModelPrepare: []hook.ModelPrepare{{
+		Name: "append-context", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 			last := p.Request.Messages[len(p.Request.Messages)-1]
 			if last.TextContent() == "resume turn" && updated.CompareAndSwap(false, true) {
-				p.ContextEdit = &agent.ContextEdit{Source: e.ContextSource, Append: []model.Part{model.NewTextPart("durable context update")}}
+				p.ContextEdit = &hook.ContextEdit{Source: e.ContextSource, Append: []model.Part{model.NewTextPart("durable context update")}}
 			}
 			return p, nil
 		},

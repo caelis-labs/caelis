@@ -12,32 +12,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
-
-// Static registration owns its canonical name, as in model-request lookup.
-// Deferred tools have already received the same Runtime wrappers.
-func codeModeAvailableTools(static []tool.Tool, source toolset.Source) []tool.Tool {
-	items := append([]tool.Tool(nil), static...)
-	names := map[string]bool{}
-	for _, item := range static {
-		if item != nil {
-			names[item.Definition().Name] = true
-		}
-	}
-	if source != nil {
-		for _, item := range source.Tools() {
-			if item != nil && !names[item.Definition().Name] {
-				items = append(items, item)
-			}
-		}
-	}
-	return items
-}
 
 // Search results and accepted ToolCalls share the canonical binding order.
 // An accepted Code Mode intent retains its binding even if its outcome is unknown;
-// reading that binding never replays the child or grants legacy mcp_call access.
+// reading that binding never replays the child.
 func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 	bindings := map[string]tool.Binding{}
 	for _, event := range events {
@@ -59,7 +38,7 @@ func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 }
 
 func (h *codeModeHost) eligibleTarget(one tool.Tool, def tool.Definition) bool {
-	return def.Name != h.parent.Name && !mcp.IsCallDefinition(def) && !mcp.IsSearchDefinition(def) &&
+	return def.Name != h.parent.Name && !mcp.IsSearchDefinition(def) &&
 		!codemode.IsDefinition(def) && !toolbinding.HideViewImage(one, h.owner.producingModel) &&
 		(!mcp.IsDefinition(def) || mcp.BindingForDefinition(def).Identity != "")
 }

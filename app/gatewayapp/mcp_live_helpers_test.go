@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -40,7 +40,7 @@ func (w *liveMCPWire) RoundTrip(r *http.Request) (*http.Response, error) {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(body, &fields) == nil {
 			raw := fields["tools"]
-			if bytes.Contains(raw, []byte(`"mcp_call"`)) {
+			if bytes.Contains(raw, []byte(`"js_exec"`)) {
 				sum := sha256.Sum256(raw)
 				w.mu.Lock()
 				w.hashes = append(w.hashes, hex.EncodeToString(sum[:]))
@@ -107,9 +107,9 @@ func writeLiveJSON(t *testing.T, path string, v any) {
 	}
 }
 
-type liveApprovalFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type liveApprovalFunc func(context.Context, approval.Request) (approval.Response, error)
 
-func (f liveApprovalFunc) RequestApproval(ctx context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f liveApprovalFunc) RequestApproval(ctx context.Context, r approval.Request) (approval.Response, error) {
 	return f(ctx, r)
 }
 

@@ -1,4 +1,5 @@
-package agentsdk
+// Package hook defines the extension points of an Agent run.
+package hook
 
 import (
 	"context"
@@ -7,58 +8,89 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// HookContext is detached execution evidence. It conveys no mutation or approval
-// capability. A request assembly is distinct from an actual provider attempt.
-type HookContext struct {
-	SessionRef            session.SessionRef
-	RunID, TurnID         string
-	Purpose               HookPurpose
-	OutputSource          HookOutputSource
+// TurnContext identifies the Turn on which a hook runs.
+type TurnContext struct {
+	SessionRef    session.SessionRef
+	RunID, TurnID string
+	Purpose       Purpose
+}
+
+// InputContext identifies the source of an admitted input.
+type InputContext struct {
+	TurnContext
+	InputSource session.ActorRef
+}
+
+// RequestContext identifies one logical model request across assemblies.
+type RequestContext struct {
+	TurnContext
 	LogicalRequestID      string
 	AssemblyRevision      uint64
 	ConfigurationRevision string
-	InvocationID          string
-	AttemptOrdinal        uint64
-	InputSource           session.ActorRef
-	// ToolExecution and ToolParent describe the occurrence without carrying its admission.
-	ToolExecution  tool.InvocationContext
-	ToolParent     *tool.ParentCall
-	Tool           *tool.Call
-	ToolDefinition *tool.Definition
-	ContextSource  ContextSource
 }
 
-// HookOutputSource identifies a candidate's origin without claiming provider
+// PrepareContext pins the history available for a durable context edit.
+type PrepareContext struct {
+	RequestContext
+	ContextSource ContextSource
+}
+
+// AttemptContext identifies one provider invocation.
+type AttemptContext struct {
+	RequestContext
+	InvocationID   string
+	AttemptOrdinal uint64
+}
+
+// OutputContext describes a candidate. Synthetic output has no provider attempt.
+type OutputContext struct {
+	RequestContext
+	InvocationID   string
+	AttemptOrdinal uint64
+	OutputSource   OutputSource
+}
+
+// ToolContext describes the bound occurrence. Call and definition are private
+// copies. A nested Code Mode call also carries its parent occurrence.
+type ToolContext struct {
+	TurnContext
+	ToolExecution  tool.InvocationContext
+	ToolParent     *tool.ParentCall
+	Tool           tool.Call
+	ToolDefinition tool.Definition
+}
+
+// OutputSource identifies a candidate's origin without claiming provider
 // work for synthetic output. Synthetic candidates have no invocation identity.
-type HookOutputSource string
+type OutputSource string
 
 const (
-	HookOutputProvider   HookOutputSource = "provider"
-	HookOutputCache      HookOutputSource = "cache"
-	HookOutputInputEarly HookOutputSource = "input_early"
-	HookOutputTurnEarly  HookOutputSource = "turn_start_early"
+	OutputProvider   OutputSource = "provider"
+	OutputCache      OutputSource = "cache"
+	OutputInputEarly OutputSource = "input_early"
+	OutputTurnEarly  OutputSource = "turn_start_early"
 )
 
-// HookPurpose separates the main loop from private auxiliary model calls.
-type HookPurpose string
+// Purpose separates the main loop from private auxiliary model calls.
+type Purpose string
 
 const (
-	HookPurposeChat        HookPurpose = "chat"
-	HookPurposeCompaction  HookPurpose = "compaction"
-	HookPurposeSystemAgent HookPurpose = "system_agent"
+	PurposeChat        Purpose = "chat"
+	PurposeCompaction  Purpose = "compaction"
+	PurposeSystemAgent Purpose = "system_agent"
 )
 
-// Hook registers one synchronous transformation. Functions can run concurrently
-// for parallel tools and must synchronize shared state. Zero Timeout uses five
-// seconds. Pure transformations receive private copies; late output is discarded.
-type Hook[I, O any] struct {
+// BaseHook registers one named callback with the signature of its stage.
+// Zero Timeout uses five seconds. Parallel tools may invoke a callback concurrently.
+type BaseHook[F any] struct {
 	Name    string
 	Timeout time.Duration
-	Apply   func(context.Context, HookContext, I) (O, error)
+	Apply   F
 }
 
 // InputView contains the effective input. Source and original authorization
@@ -126,13 +158,6 @@ type ToolOutcome struct {
 // execution authority, even if the middleware ignores cancellation.
 type ToolNext func(context.Context) (tool.Result, error)
 
-// ToolInvokeHook wraps one admitted tool effect; the first entry is outermost.
-type ToolInvokeHook struct {
-	Name    string
-	Timeout time.Duration
-	Invoke  func(context.Context, HookContext, ToolNext) (tool.Result, error)
-}
-
 // ModelNext consumes one actual provider attempt at most once. It cannot alter
 // the admitted request or accounting. ModelResult owns response transformation.
 type ModelNext func(context.Context) error
@@ -144,13 +169,6 @@ type RetryRequest struct{ Cause error }
 
 func (r *RetryRequest) Error() string { return fmt.Sprintf("model retry requested: %v", r.Cause) }
 func (r *RetryRequest) Unwrap() error { return r.Cause }
-
-// ModelInvokeHook wraps an actual provider attempt, inside retry and accounting.
-type ModelInvokeHook struct {
-	Name    string
-	Timeout time.Duration
-	Invoke  func(context.Context, HookContext, *model.Request, ModelNext) error
-}
 
 // CompletionKind controls a candidate before final-input closure and commit.
 type CompletionKind string
@@ -186,35 +204,73 @@ type StreamTransformer interface {
 	Finish(context.Context) (string, error)
 }
 
-// Hooks fixes the ordered phase configuration for a Run. Before/after phases
+// Input transforms one admitted message before persistence.
+type Input = BaseHook[func(context.Context, InputContext, InputView) (InputDecision, error)]
+
+// TurnStart runs once for the initial input of a Turn.
+type TurnStart = BaseHook[func(context.Context, TurnContext) (TurnStartDecision, error)]
+
+// ModelPrepare edits a logical model request before provider admission.
+type ModelPrepare = BaseHook[func(context.Context, PrepareContext, ModelPreparation) (ModelPreparation, error)]
+
+// ModelInvoke wraps one actual provider attempt.
+type ModelInvoke = BaseHook[func(context.Context, AttemptContext, *model.Request, ModelNext) error]
+
+// ModelResult transforms a model response.
+type ModelResult = BaseHook[func(context.Context, OutputContext, model.Response) (model.Response, error)]
+
+// ToolPrepare prepares the effective arguments before admission.
+type ToolPrepare = BaseHook[func(context.Context, ToolContext, ToolPreparation) (ToolPreparation, error)]
+
+// ToolInvoke wraps one admitted tool dispatch.
+type ToolInvoke = BaseHook[func(context.Context, ToolContext, ToolNext) (tool.Result, error)]
+
+// ToolResult transforms the full business result.
+type ToolResult = BaseHook[func(context.Context, ToolContext, ToolOutcome) (tool.Result, error)]
+
+// ModelView transforms the reply projected to the model.
+type ModelView = BaseHook[func(context.Context, ToolContext, model.Message) (model.Message, error)]
+
+// Completion reviews a final candidate before commit.
+type Completion = BaseHook[func(context.Context, OutputContext, model.Message) (CompletionDecision, error)]
+
+// Stream creates a text transformer for one output candidate.
+type Stream = BaseHook[func(context.Context, OutputContext) (StreamTransformer, error)]
+
+// Set fixes the ordered phase configuration for a Run. Before/after phases
 // run in registration order; around phases unwind in reverse order. Observers
 // remain separate and have no authority over these values.
-type Hooks struct {
-	Input        []Hook[InputView, InputDecision]
-	TurnStart    []Hook[struct{}, TurnStartDecision]
-	ModelPrepare []Hook[ModelPreparation, ModelPreparation]
-	ModelInvoke  []ModelInvokeHook
-	ModelResult  []Hook[model.Response, model.Response]
-	ToolPrepare  []Hook[ToolPreparation, ToolPreparation]
-	ToolInvoke   []ToolInvokeHook
-	ToolResult   []Hook[ToolOutcome, tool.Result]
-	ModelView    []Hook[model.Message, model.Message]
-	Completion   []Hook[model.Message, CompletionDecision]
-	Stream       []Hook[struct{}, StreamTransformer]
-	StreamMode   StreamMode
+type Set struct {
+	Input        []Input
+	TurnStart    []TurnStart
+	ModelPrepare []ModelPrepare
+	ModelInvoke  []ModelInvoke
+	ModelResult  []ModelResult
+	ToolPrepare  []ToolPrepare
+	// ToolPolicy selects the host admission hook for each bound tool. A named
+	// profile must resolve before either a synthetic or actual success can dispatch.
+	ToolPolicy policy.Registry
+	ToolInvoke []ToolInvoke
+	ToolResult []ToolResult
+	// ToolProjection bounds SDK-owned tool views after ToolResult and before ModelView.
+	ToolProjection tool.ResultProjection
+	ModelView      []ModelView
+	Completion     []Completion
+	Stream         []Stream
+	StreamMode     StreamMode
 	// CompletionLimit is shared by all hooks. Zero uses two feedback rounds.
 	CompletionLimit int
 }
 
-// HookError identifies a failed extension while preserving its original cause.
-type HookError struct {
+// Error identifies a failed extension while preserving its original cause.
+type Error struct {
 	Phase, Name string
 	Cause       error
 }
 
-func (e *HookError) Error() string { return fmt.Sprintf("hook %s/%s: %v", e.Phase, e.Name, e.Cause) }
-func (e *HookError) Unwrap() error { return e.Cause }
-func (*HookError) Retryable() bool { return false }
+func (e *Error) Error() string { return fmt.Sprintf("hook %s/%s: %v", e.Phase, e.Name, e.Cause) }
+func (e *Error) Unwrap() error { return e.Cause }
+func (*Error) Retryable() bool { return false }
 
 // ContextSource pins the source prefix selected for a durable replacement.
 type ContextSource struct {

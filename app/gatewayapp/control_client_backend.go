@@ -197,7 +197,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 		}
 	}()
 	switch {
-	case action == appserver.ActionConversationInteraction, controlActionConfiguresSession(action):
+	case controlActionConfiguresSession(action):
 		runtime, _, closeRuntime, err := runtimes.acquireControlRuntime(ctx, sessionID, runtimeUseCommand)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
@@ -343,9 +343,6 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 				appserver.OutcomeRejected,
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
-	}
-	if action == appserver.ActionConversationInteraction {
-		return s.recordControlInteraction(ctx, principal, request.(appserver.RecordInteractionRequest))
 	}
 	gw := s.currentGateway()
 	if gw == nil {
@@ -691,8 +688,6 @@ func controlParticipantTaskID(participants []session.ParticipantBinding, partici
 
 func controlCommandSessionID(request any) string {
 	switch typed := request.(type) {
-	case appserver.RecordInteractionRequest:
-		return strings.TrimSpace(typed.SessionID)
 	case appserver.CloseSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case appserver.SessionInterruptRequest:

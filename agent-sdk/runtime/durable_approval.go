@@ -14,10 +14,21 @@ import (
 
 const approvalResolutionRecoveryTimeout = 5 * time.Second
 
+type approvalKey struct {
+	sessionID string
+	requestID string
+}
+
+func keyForApproval(record session.ApprovalRecord) approvalKey {
+	return approvalKey{record.SessionID, record.RequestID}
+}
+
 // approvalWaiter retains the existing producer's context so a cancelled owner
 // cannot settle permission merely because its callback has not returned yet.
 type approvalWaiter struct {
-	responses     chan agent.ApprovalResponse
+	recordGuard   session.MutationGuard
+	responses     chan approval.Response
+	stopRequester context.CancelFunc
 	owner         context.Context
 	blockingRunID string
 }
@@ -28,7 +39,7 @@ type activeRun struct {
 	handle            *runner
 	turnID            string
 	spec              agent.AgentSpec
-	approvalRequester agent.ApprovalRequester
+	approvalRequester approval.Requester
 }
 
 func (r *Runtime) registerActiveRun(ref session.SessionRef, activeSession session.Session, turnID string, handle *runner, requests ...agent.RunRequest) {
@@ -90,11 +101,17 @@ func (r *Runtime) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequ
 
 func (r *Runtime) requestDurableApproval(
 	ctx context.Context,
-	req agent.ApprovalRequest,
-	requester agent.ApprovalRequester,
-) (agent.ApprovalResponse, error) {
+	req approval.Request,
+	requester approval.Requester,
+) (approval.Response, error) {
+	return r.requestApprovalWithGuard(ctx, req, requester, session.RuntimeMutationGuard(ctx))
+}
+
+// The producer selects the authority for this record's entire lifecycle.
+// The reviewer's context never acquires the detached producer's write authority.
+func (r *Runtime) requestApprovalWithGuard(ctx context.Context, req approval.Request, requester approval.Requester, guard session.MutationGuard) (approval.Response, error) {
 	if r == nil || r.sessions == nil {
-		return agent.ApprovalResponse{}, errors.New("agent-sdk/runtime: durable approval service is unavailable")
+		return approval.Response{}, errors.New("agent-sdk/runtime: durable approval service is unavailable")
 	}
 	now := r.now()
 	tokenID := strings.TrimSpace(req.ApprovalRequestID)
@@ -109,53 +126,63 @@ func (r *Runtime) requestDurableApproval(
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 		Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req)),
 	})
-	waiter := approvalWaiter{responses: make(chan agent.ApprovalResponse, 1), owner: ctx}
+	requestCtx, stopRequester := context.WithCancel(ctx)
+	defer stopRequester()
+	waiter := approvalWaiter{responses: make(chan approval.Response, 1), owner: ctx, stopRequester: stopRequester, recordGuard: guard}
 	if err := session.ValidateApprovalRecordTransition(session.ApprovalRecord{}, token); err != nil {
-		return agent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
 	r.mu.Lock()
 	// Register delivery before the append so a reader of the committed record can resolve it immediately.
-	r.approvalWaiters[token.RequestID] = waiter
+	key := keyForApproval(token)
+	if _, exists := r.approvalWaiters[key]; exists {
+		r.mu.Unlock()
+		return approval.Response{}, fmt.Errorf("approval request %q already has a live waiter", token.RequestID)
+	}
+	r.approvalWaiters[key] = waiter
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
-		delete(r.approvalWaiters, token.RequestID)
+		delete(r.approvalWaiters, key)
 		r.mu.Unlock()
 	}()
-	if err := r.appendApprovalRecord(ctx, req.SessionRef, token); err != nil {
-		return agent.ApprovalResponse{}, err
+	if err := r.appendApprovalRecord(ctx, req.SessionRef, token, guard); err != nil {
+		return approval.Response{}, err
 	}
 	// Only a durable foreground approval may appear as actionable in RunState.
 	if req.OperationTaskID == "" {
 		waiter.blockingRunID = req.RunID
 		r.mu.Lock()
-		r.approvalWaiters[token.RequestID] = waiter
+		r.approvalWaiters[key] = waiter
 		r.mu.Unlock()
 	}
 	abandon := func(err error) error {
-		return r.joinApprovalCleanup(err, r.cancelPendingApprovalRecord(context.WithoutCancel(ctx), req.SessionRef, token, err.Error()))
+		return r.joinApprovalCleanup(err, r.cancelPendingApprovalRecord(context.WithoutCancel(ctx), req.SessionRef, token, err.Error(), guard))
 	}
 	if requester != nil {
 		// The durable approval record is the reusable Runtime correlation identity.
 		// Keep it on the normalized request rather than hiding it in metadata or
 		// adding a field to the ACP request_permission wire payload.
 		req.ApprovalRequestID = token.RequestID
-		decision, err := requester.RequestApproval(ctx, req)
-		if err != nil {
-			// The producer owns cancellation; settle only this approval request.
-			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
-				_ = r.cancelPendingApprovalRecord(context.WithoutCancel(ctx), req.SessionRef, token, err.Error())
-				return agent.ApprovalResponse{}, err
-			}
-			// Guardian failures settle this request while the live producer continues.
-			return agent.ApprovalResponse{}, abandon(err)
+		decision, err := requester.RequestApproval(requestCtx, req)
+		if err == nil {
+			err = r.ResolveApproval(ctx, approval.ResolveRequest{SessionRef: req.SessionRef, RequestID: token.RequestID, Decision: decision})
 		}
-		if err := r.ResolveApproval(ctx, agent.ResolveApprovalRequest{SessionRef: req.SessionRef, RequestID: token.RequestID, Decision: decision}); err != nil {
-			return agent.ApprovalResponse{}, abandon(err)
+		if err != nil {
+			cleanupErr := abandon(err)
+			// A competing resolver may have committed before delivering its
+			// response, including while the requester was being cancelled.
+			recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
+			defer cancel()
+			winner, loadErr := r.approvalRecord(recoveryCtx, req.SessionRef, token.RequestID)
+			if loadErr == nil && winner.Status == session.ApprovalRecordResolved {
+				return responseFromApprovalRecord(winner), nil
+			}
+			return approval.Response{}, errors.Join(cleanupErr, loadErr)
 		}
 	} else if req.OnAdmission != nil {
 		if err := req.OnAdmission(ctx); err != nil {
-			return agent.ApprovalResponse{}, abandon(err)
+			return approval.Response{}, abandon(err)
 		}
 	}
 	select {
@@ -164,12 +191,11 @@ func (r *Runtime) requestDurableApproval(
 	case <-ctx.Done():
 		// Cancellation is not a continue-after-tool-error path. Only cancel the
 		// approval record; the live producer owns cancellation and drain.
-		_ = r.cancelPendingApprovalRecord(context.WithoutCancel(ctx), req.SessionRef, token, ctx.Err().Error())
-		return agent.ApprovalResponse{}, ctx.Err()
+		return approval.Response{}, abandon(ctx.Err())
 	}
 }
 
-func (r *Runtime) cancelPendingApprovalRecord(ctx context.Context, ref session.SessionRef, token session.ApprovalRecord, reason string) error {
+func (r *Runtime) cancelPendingApprovalRecord(ctx context.Context, ref session.SessionRef, token session.ApprovalRecord, reason string, guard session.MutationGuard) error {
 	if r == nil {
 		return errors.New("agent-sdk/runtime: runtime is unavailable")
 	}
@@ -182,7 +208,15 @@ func (r *Runtime) cancelPendingApprovalRecord(ctx context.Context, ref session.S
 		// Already resolved/cancelled by ResolveApproval or a concurrent path.
 		return nil
 	}
-	return r.cancelApprovalRecord(ctx, ref, current, reason)
+	next := session.CloneApprovalRecord(current)
+	next.Revision++
+	next.Status = session.ApprovalRecordCancelled
+	next.Reason = strings.TrimSpace(reason)
+	next.UpdatedAt = r.now()
+	if err := session.ValidateApprovalRecordTransition(current, next); err != nil {
+		return err
+	}
+	return r.appendApprovalRecord(ctx, ref, next, guard)
 }
 
 func (r *Runtime) joinApprovalCleanup(primary error, cleanup error) error {
@@ -196,7 +230,7 @@ func (r *Runtime) joinApprovalCleanup(primary error, cleanup error) error {
 }
 
 // ResolveApproval durably records one decision before waking the live run.
-func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error {
+func (r *Runtime) ResolveApproval(ctx context.Context, req approval.ResolveRequest) error {
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	token, err := r.approvalRecord(ctx, ref, req.RequestID)
 	if err != nil {
@@ -238,7 +272,7 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 		}
 	}
 	r.mu.RLock()
-	waiter := r.approvalWaiters[token.RequestID]
+	waiter := r.approvalWaiters[keyForApproval(token)]
 	live := waiter.responses != nil && waiter.owner != nil && waiter.owner.Err() == nil
 	r.mu.RUnlock()
 	if !live {
@@ -280,8 +314,8 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 		}
 		return err
 	}
-	if err := r.appendApprovalRecordWithGuard(ctx, ref, next, session.ControlMutationGuard(session.ControlMutationPurposeApproval)); err != nil {
-		if !session.IsCommitted(err) {
+	if err := r.appendApprovalRecord(ctx, ref, next, waiter.recordGuard); err != nil {
+		if !session.IsCommitted(err) && !errors.Is(err, session.ErrEventConflict) {
 			return settlementError(err)
 		}
 		recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
@@ -300,45 +334,35 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	return nil
 }
 
-func (r *Runtime) deliverApprovalDecision(token session.ApprovalRecord) {
-	if r == nil || token.Status != session.ApprovalRecordResolved {
-		return
-	}
-	decision := agent.ApprovalResponse{
+func responseFromApprovalRecord(token session.ApprovalRecord) approval.Response {
+	return approval.Response{
 		Outcome:    token.Outcome,
 		OptionID:   token.OptionID,
 		Approved:   token.Approved,
 		Reason:     token.Reason,
 		ReviewText: token.ReviewText,
 	}
+}
+
+func (r *Runtime) deliverApprovalDecision(token session.ApprovalRecord) {
+	if r == nil || token.Status != session.ApprovalRecordResolved {
+		return
+	}
 	r.mu.RLock()
-	waiter := r.approvalWaiters[token.RequestID].responses
+	waiter := r.approvalWaiters[keyForApproval(token)]
 	r.mu.RUnlock()
-	if waiter != nil {
+	if waiter.responses != nil {
 		select {
-		case waiter <- decision:
+		case waiter.responses <- responseFromApprovalRecord(token):
 		default:
+		}
+		if waiter.stopRequester != nil {
+			waiter.stopRequester()
 		}
 	}
 }
 
-func (r *Runtime) cancelApprovalRecord(ctx context.Context, ref session.SessionRef, token session.ApprovalRecord, reason string) error {
-	next := session.CloneApprovalRecord(token)
-	next.Revision++
-	next.Status = session.ApprovalRecordCancelled
-	next.Reason = strings.TrimSpace(reason)
-	next.UpdatedAt = r.now()
-	if err := session.ValidateApprovalRecordTransition(token, next); err != nil {
-		return err
-	}
-	return r.appendApprovalRecord(ctx, ref, next)
-}
-
-func (r *Runtime) appendApprovalRecord(ctx context.Context, ref session.SessionRef, token session.ApprovalRecord) error {
-	return r.appendApprovalRecordWithGuard(ctx, ref, token, session.RuntimeMutationGuard(ctx))
-}
-
-func (r *Runtime) appendApprovalRecordWithGuard(ctx context.Context, ref session.SessionRef, token session.ApprovalRecord, guard session.MutationGuard) error {
+func (r *Runtime) appendApprovalRecord(ctx context.Context, ref session.SessionRef, token session.ApprovalRecord, guard session.MutationGuard) error {
 	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: guard, Event: approvalRecordEvent(token)})
 	return err
 }
@@ -382,6 +406,6 @@ func (r *Runtime) approvalRecord(ctx context.Context, ref session.SessionRef, to
 	return latest, nil
 }
 
-func approvalDecisionEqual(token session.ApprovalRecord, decision agent.ApprovalResponse) bool {
+func approvalDecisionEqual(token session.ApprovalRecord, decision approval.Response) bool {
 	return token.Outcome == strings.TrimSpace(decision.Outcome) && token.OptionID == strings.TrimSpace(decision.OptionID) && token.Approved == decision.Approved && token.Reason == strings.TrimSpace(decision.Reason) && token.ReviewText == strings.TrimSpace(decision.ReviewText)
 }

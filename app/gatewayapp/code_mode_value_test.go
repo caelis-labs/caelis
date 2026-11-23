@@ -20,7 +20,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -69,7 +71,7 @@ var valueInputFiles = []string{"records-turn-1.json", "records-turn-2.json", "or
 
 func valueManifestFor(head string, parameters, context7 map[string]any, sources, inputs map[string]string) valueManifest {
 	guidance := map[string]string{
-		"native": "Use native function calls for filesystem work and existing tool_search/mcp_call for extensions. Known extension name missing schema: tool_search with a name string; valid Session schema may be reused directly. Search only unknown names.",
+		"native": "Use native tools directly for filesystem work. Use js_exec for extension calls. Use tools.search({name}) when you need the schema.",
 		"js":     "Use js_exec inline code for extension calls: tools.search({name}) returns the complete schema; tools.call(name,args) calls a native or valid Session schema directly. Browse using tools.search(): {tools:[{name,description}],next}. Reuse valid Session schemas across fresh VMs. Native filesystem function calls remain available and may be called directly; JS filesystem orchestration is optional.",
 	}
 	base := newFairManifest(nil, nil, "")
@@ -91,7 +93,7 @@ Write actionable.json with exactly total_count and owners. Each owner entry has 
 			}
 		}
 	}
-	return valueManifest{Version: "h1-value-guidance-v2", ProductHead: head, Sources: sources, Inputs: inputs, Model: parameters, Context7: context7, System: fairSystem, Guidance: guidance, Tasks: tasks, Schedule: []valueSession{{"small-native", "small", "native"}, {"small-js", "small", "js"}, {"filter-js", "filter", "js"}, {"filter-native", "filter", "native"}}, Controls: map[string]any{
+	return valueManifest{Version: "h1-value-guidance-v3", ProductHead: head, Sources: sources, Inputs: inputs, Model: parameters, Context7: context7, System: fairSystem, Guidance: guidance, Tasks: tasks, Schedule: []valueSession{{"small-native", "small", "native"}, {"small-js", "small", "js"}, {"filter-js", "filter", "js"}, {"filter-native", "filter", "native"}}, Controls: map[string]any{
 		"tasks": 2, "sessions": 4, "turns_per_session": 2, "scope": "one native/JS pair PER task; order differs between tasks, NOT per-task counterbalance; do not pool tasks", "stream": true, "per_generation_seconds": 600, "max_generations_per_turn_including_selectors": 24, "http_timeout_seconds": 0, "response_header_timeout_seconds": 0, "automatic_retries": 0, "model_switches": 0, "gui": false, "native_fs_direct": true, "report_write_tool": "Write (Patch denied equally)", "saved_script_obligation": false,
 		"known_tool_script_errors": "Both routes may repair a known tool/script error inside the original Run within the same 24-generation budget; count and retain every failed step. Never rerun or replace a Session/sample.", "stop": "Unknown outcome, provider/model or Runtime fatal error, incomplete generation, capture error or permanent quota error stops entire study. Business/cost assertion failures are retained and fixed scheduled Turns continue without replacement.", "context7": "External evidence separate from local fixture; unavailable is not full API capability success.", "cache": "Use provider actual usage; no assumption of cold cache or independent Session cache isolation; bytes are not tokens; prefix token components unavailable unless provider supplies them.",
 	}, Benefit: map[string]any{
@@ -379,19 +381,14 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 		return err
 	}
 	defer sandbox.Close()
-	built, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandbox})
+	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandbox})
 	if err != nil {
 		return err
 	}
-	var tools []tool.Tool
-	for _, one := range built {
+	for _, one := range tools {
 		if declaration, ok := one.(*codemode.Tool); ok {
-			if plan.Route == "native" {
-				continue
-			}
 			declaration.Executor = &gojaexec.Executor{}
 		}
-		tools = append(tools, one)
 	}
 
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
@@ -421,22 +418,22 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 		return err
 	}
 	trace := &valueTraceModel{fairTrace: &fairTrace{LLM: resolved.Model, root: root, turnCalls: map[int]int{}}}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "value-local"})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "value-local"})
 	if err != nil {
 		return err
 	}
-	approver := liveApprovalFunc(func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	approver := liveApprovalFunc(func(_ context.Context, request approval.Request) (approval.Response, error) {
 		for _, name := range task.Selected {
 			if request.Tool.Name == name {
 				for _, option := range request.Approval.Options {
 					if option.ID == "allow_session" {
-						return agent.ApprovalResponse{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
+						return approval.Response{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
 					}
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 			}
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	observer := agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
 		if event.Canonical == nil {
@@ -548,7 +545,7 @@ func TestCodeModeValueLive(t *testing.T) {
 		t.Fatal("explicit manifest hash mismatch")
 	}
 	var manifest valueManifest
-	if json.Unmarshal(raw, &manifest) != nil {
+	if json.Unmarshal(raw, &manifest) != nil || manifest.Version != "h1-value-guidance-v3" {
 		t.Fatal("invalid frozen manifest")
 	}
 	head, err := valueHead()

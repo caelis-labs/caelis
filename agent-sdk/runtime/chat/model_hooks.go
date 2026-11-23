@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
@@ -23,7 +24,7 @@ func cloneResponse(r model.Response) model.Response {
 	r.Message = model.CloneMessage(r.Message)
 	return r
 }
-func cloneModelPreparation(p agent.ModelPreparation) agent.ModelPreparation {
+func cloneModelPreparation(p hook.ModelPreparation) hook.ModelPreparation {
 	p.Request = model.CloneRequest(p.Request)
 	if p.Response != nil {
 		r := cloneResponse(*p.Response)
@@ -41,8 +42,8 @@ func cloneModelPreparation(p agent.ModelPreparation) agent.ModelPreparation {
 	return p
 }
 
-func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.Request) (*model.Request, *model.Response, error) {
-	p := agent.ModelPreparation{Request: req}
+func (a *Agent) prepareModel(ctx agent.Context, e hook.PrepareContext, req *model.Request) (*model.Request, *model.Response, error) {
+	p := hook.ModelPreparation{Request: req}
 	editor, canEdit := ctx.(runtimeinput.ContextEditor)
 	if canEdit && len(hookrun.FromContext(ctx).Hooks.ModelPrepare) > 0 {
 		var err error
@@ -108,7 +109,7 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 			next.ContextEdit = nil
 		}
 		if err != nil {
-			return nil, nil, &agent.HookError{Phase: "model_prepare", Name: h.Name, Cause: err}
+			return nil, nil, &hook.Error{Phase: "model_prepare", Name: h.Name, Cause: err}
 		}
 		p = next
 	}
@@ -172,14 +173,14 @@ func validToolPresentation(configured, selected []model.ToolSpec) bool {
 	return true
 }
 
-func resultModel(ctx agent.Context, e agent.HookContext, r *model.Response) (*model.Response, error) {
+func resultModel(ctx agent.Context, e hook.OutputContext, r *model.Response) (*model.Response, error) {
 	for _, h := range hookrun.FromContext(ctx).Hooks.ModelResult {
 		next, err := hookrun.Call(ctx, "model_result", h, e, *r, cloneResponse, cloneResponse)
 		if err != nil {
 			return nil, err
 		}
 		if next.Message.Role != model.RoleAssistant || len(next.Message.ToolResults()) > 0 {
-			return nil, &agent.HookError{Phase: "model_result", Name: h.Name, Cause: fmt.Errorf("model result requires assistant content or tool proposals")}
+			return nil, &hook.Error{Phase: "model_result", Name: h.Name, Cause: fmt.Errorf("model result requires assistant content or tool proposals")}
 		}
 		// Only the semantic Message is editable. Original actual accounting and
 		// provider disposition survive arbitrary response replacement.
@@ -193,16 +194,15 @@ func resultModel(ctx agent.Context, e agent.HookContext, r *model.Response) (*mo
 	return r, nil
 }
 
-func modelHookContext(ctx context.Context, e agent.HookContext) context.Context {
-	ctx = hookrun.WithRequest(ctx, e)
+func modelHookContext(ctx context.Context, request hook.RequestContext) context.Context {
+	ctx = hookrun.WithRequest(ctx, request)
 	entries := hookrun.FromContext(ctx).Hooks.ModelInvoke
 	if len(entries) == 0 && hookrun.FromContext(ctx).Trace.TraceSink == nil {
 		return ctx
 	}
 	var ordinal atomic.Uint64
 	return context.WithValue(ctx, modelinvocation.MiddlewareKey{}, func(ctx context.Context, in model.Invocation, req *model.Request, next func(context.Context) error) error {
-		e.InvocationID = in.ID
-		e.AttemptOrdinal = ordinal.Add(1)
+		e := hook.AttemptContext{RequestContext: request, InvocationID: in.ID, AttemptOrdinal: ordinal.Add(1)}
 		chain := next
 		for i := len(entries) - 1; i >= 0; i-- {
 			h := entries[i]
@@ -211,14 +211,14 @@ func modelHookContext(ctx context.Context, e agent.HookContext) context.Context 
 				_, err := hookrun.Around(ctx, "model_invoke", h.Name, h.Timeout, func(ctx context.Context, next func(context.Context) (struct{}, error)) (struct{}, error) {
 					var mu sync.Mutex
 					var providerErr error
-					err := h.Invoke(ctx, e, model.CloneRequest(req), func(ctx context.Context) error {
+					err := h.Apply(ctx, e, model.CloneRequest(req), func(ctx context.Context) error {
 						_, err := next(ctx)
 						mu.Lock()
 						providerErr = err
 						mu.Unlock()
 						return err
 					})
-					var request *agent.RetryRequest
+					var request *hook.RetryRequest
 					if errors.As(err, &request) {
 						mu.Lock()
 						cause := providerErr

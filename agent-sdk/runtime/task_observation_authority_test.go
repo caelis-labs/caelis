@@ -7,8 +7,8 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -25,7 +25,7 @@ type commandObservationOrder struct {
 	waitReturned chan struct{}
 }
 
-func (o commandObservationOrder) Invoke(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+func (o commandObservationOrder) Invoke(ctx context.Context, e hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 	if e.Tool.ID == "terminal-wait" {
 		r, err := next(ctx)
 		close(o.waitReturned)
@@ -77,8 +77,7 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 			command.result.ExitCode = 0
 			rt, err := New(Config{
 				Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{},
-				DefaultPolicyMode: presets.ModeWorkspaceWrite,
-				Hooks:             agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "observation-order", Invoke: commandObservationOrder{command: command, afterWait: afterWait, waitReturned: make(chan struct{})}.Invoke}}},
+				Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t), ToolInvoke: []hook.ToolInvoke{{Name: "observation-order", Apply: commandObservationOrder{command: command, afterWait: afterWait, waitReturned: make(chan struct{})}.Invoke}}},
 			})
 			if err != nil {
 				t.Fatal(err)

@@ -20,7 +20,7 @@ func TestPlanCompoundDigestIncludesPersistedExplanation(t *testing.T) {
 		storeKind := storeKind
 		t.Run(storeKind, func(t *testing.T) {
 			t.Parallel()
-			var service session.Service
+			var service session.ManagedService
 			if storeKind == "file" {
 				service = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 			} else {

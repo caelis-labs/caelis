@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -53,10 +53,10 @@ func (s *runtimeComposition) startBackgroundParticipant(ctx context.Context, act
 
 type backgroundChildApprovalRequester struct{ composition *runtimeComposition }
 
-func (r backgroundChildApprovalRequester) RequestApproval(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (r backgroundChildApprovalRequester) RequestApproval(ctx context.Context, req approval.Request) (approval.Response, error) {
 	s := r.composition
 	if s == nil || s.currentGateway() == nil || strings.TrimSpace(req.SessionRef.SessionID) == "" {
-		return agent.ApprovalResponse{}, errors.New("child approval service is unavailable")
+		return approval.Response{}, errors.New("child approval service is unavailable")
 	}
 	observer, release := s.controlTurnObserver(req.SessionRef, "")
 	defer release()

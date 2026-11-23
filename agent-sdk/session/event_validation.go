@@ -9,8 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // EventValidationError reports a canonical session event that cannot be used to
@@ -110,9 +108,6 @@ func ValidateDurableCoreEvent(event *Event) error {
 		if event.Tool == nil {
 			return coreEventValidationError("tool call is missing durable Event.Tool")
 		}
-		if err := validateRoutedModelCall(event.Tool); err != nil {
-			return err
-		}
 		if event.Message != nil && len(event.Message.ToolCalls()) == 0 {
 			return coreEventValidationError("tool call Event.Message is missing model tool-call payload")
 		}
@@ -129,11 +124,6 @@ func ValidateDurableCoreEvent(event *Event) error {
 
 func validateDurableCoreToolResult(event *Event) error {
 	if event.Tool != nil {
-		if len(event.Tool.Output) > 0 {
-			if err := validateDurableCoreRawOutput(event.Tool.Output); err != nil {
-				return err
-			}
-		}
 		if err := validateDurableCoreToolMessageOutput(event); err != nil {
 			return err
 		}
@@ -143,17 +133,6 @@ func validateDurableCoreToolResult(event *Event) error {
 		return validateDurableCoreMeta(event.Meta)
 	}
 	return coreEventValidationError("tool result is missing durable Event.Tool or model tool-result payload")
-}
-
-func validateDurableCoreRawOutput(rawOutput map[string]any) error {
-	if _, err := json.Marshal(rawOutput); err != nil {
-		return coreEventValidationError(fmt.Sprintf("tool raw_output is not JSON-serializable: %v", err))
-	}
-	_, info := tool.TruncateMap(rawOutput, tool.DefaultTruncationPolicy())
-	if info.Truncated {
-		return coreEventValidationError(fmt.Sprintf("tool raw_output is not canonical-truncated (estimated %d tokens > %d tokens)", info.EstimatedTokens, info.MaxTokens))
-	}
-	return nil
 }
 
 func validateDurableCoreToolMessageOutput(event *Event) error {
@@ -190,11 +169,8 @@ func validateDurableCoreToolMessageOutput(event *Event) error {
 		return coreEventValidationError("tool message result does not match durable Event.Tool id")
 	}
 	expectedName := event.Tool.Name
-	if event.Tool.ModelCall != nil {
-		if err := validateRoutedModelCall(event.Tool); err != nil {
-			return err
-		}
-		expectedName = event.Tool.ModelCall.Name
+	if call := event.Tool.LegacyModelCall; call != nil {
+		expectedName = call.Name
 	}
 	if expectedName != "" && strings.TrimSpace(matched.Name) != "" && strings.TrimSpace(matched.Name) != strings.TrimSpace(expectedName) {
 		return coreEventValidationError("tool message result does not match durable Event.Tool name")
@@ -274,30 +250,4 @@ func validateDurableCoreMeta(meta map[string]any) error {
 
 func coreEventValidationError(detail string) error {
 	return &EventValidationError{Detail: strings.TrimSpace(detail)}
-}
-
-func mustInputObject(raw string) map[string]any {
-	var out map[string]any
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	_ = decoder.Decode(&out)
-	return out
-}
-
-// Routing changes presentation identity; the stored model envelope must still
-// describe exactly that real target and input under the same operation ID.
-func validateRoutedModelCall(payload *EventTool) error {
-	if payload == nil || payload.ModelCall == nil {
-		return nil
-	}
-	original := payload.ModelCall
-	actual, err := tool.ParseMCPCall(*original)
-	if original.Name != mcp.CallToolName || err != nil || actual.ID != payload.ID || actual.Name != payload.Name {
-		return coreEventValidationError("invalid routed model tool call")
-	}
-	input := mustInputObject(actual.Args)
-	if (len(input) != 0 || len(payload.Input) != 0) && !sameCanonicalJSON(input, payload.Input) {
-		return coreEventValidationError("routed model tool arguments do not match real input")
-	}
-	return nil
 }

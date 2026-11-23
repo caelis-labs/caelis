@@ -15,6 +15,8 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -46,10 +48,10 @@ func TestCodeModeCancelsPendingApprovalWithoutEffect(t *testing.T) {
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	requester := approvalRequesterFunc(func(ctx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
 		close(approvalStarted)
 		<-ctx.Done()
-		return agent.ApprovalResponse{}, ctx.Err()
+		return approval.Response{}, ctx.Err()
 	})
 	var queuedErr error
 	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
@@ -229,12 +231,12 @@ func TestCodeModeYieldedCallOverlapsSameTargetFromNativeSnapshot(t *testing.T) {
 }
 
 type taskWaitFactStore struct {
-	session.Service
+	session.ManagedService
 	started func(*session.EventTool)
 }
 
 func (s taskWaitFactStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	event, err := s.Service.AppendEvent(ctx, req)
+	event, err := s.ManagedService.AppendEvent(ctx, req)
 	if err == nil && req.Event != nil && req.Event.Type == session.EventTypeToolCall && req.Event.Tool != nil {
 		s.started(req.Event.Tool)
 	}
@@ -245,7 +247,7 @@ func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	files, active, _ := codeModeStore(t)
 	waitStarted := make(chan struct{})
 	markWait := sync.OnceFunc(func() { close(waitStarted) })
-	store := taskWaitFactStore{Service: files, started: func(record *session.EventTool) {
+	store := taskWaitFactStore{ManagedService: files, started: func(record *session.EventTool) {
 		if record.Name == tasktool.ToolName && record.Parent == nil && record.Status == "pending" {
 			markWait()
 		}
@@ -272,7 +274,7 @@ func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +338,7 @@ func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
 			}
 			secondDone := make(chan struct{})
 			var overtook atomic.Bool
-			hook := agent.ToolInvokeHook{Name: "delay-first-mutation", Invoke: func(ctx context.Context, info agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+			delay := hook.ToolInvoke{Name: "delay-first-mutation", Apply: func(ctx context.Context, info hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 				if info.Tool.ID == "first" {
 					// Simulate the first call reaching the file lock late. In a
 					// serial batch the second cannot arrive until we proceed.
@@ -358,7 +360,7 @@ func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
 				}
 				return nil
 			}}
-			events := runNativeOrdering(t, store, active, driver, []tool.Tool{target}, Config{Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{hook}}})
+			events := runNativeOrdering(t, store, active, driver, []tool.Tool{target}, Config{Hooks: hook.Set{ToolInvoke: []hook.ToolInvoke{delay}}})
 			contents, err := os.ReadFile(file)
 			if err != nil || string(contents) != "second" || overtook.Load() {
 				t.Fatalf("model order lost: file=%q, second overtook first=%v, err=%v", contents, overtook.Load(), err)
@@ -447,8 +449,8 @@ func runNativeOrdering(t *testing.T, store *sessionfile.Store, active session.Se
 	t.Helper()
 	cfg.Sessions, cfg.TaskStore = store, sessionfile.NewTaskStore(store)
 	cfg.AgentFactory, cfg.DefaultPolicyMode = chat.Factory{}, "mcp-test"
-	if cfg.PolicyRegistry == nil {
-		cfg.PolicyRegistry = mcpFixturePolicy()
+	if cfg.Hooks.ToolPolicy == nil {
+		cfg.Hooks.ToolPolicy = mcpFixturePolicy()
 	}
 	rt, err := New(cfg)
 	if err != nil {

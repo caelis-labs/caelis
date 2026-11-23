@@ -23,7 +23,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -74,7 +76,7 @@ type fairManifest struct {
 
 func newFairManifest(parameters, context7 map[string]any, harness string) fairManifest {
 	routes := map[string]string{
-		"native": "Use native filesystem tools and the existing tool_search/mcp_call entries for Context7.",
+		"native": "Use native filesystem tools directly. Use js_exec for Context7 calls.",
 		"js":     "Use js_exec inline code with tools.search and tools.call for Context7 and filesystem orchestration; native filesystem tools remain available.",
 	}
 	common := `Shell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.
@@ -91,7 +93,7 @@ Write answer.json with exactly four fields: total (integer), api_status (found o
 			prompts[route] = append(prompts[route], entry+"\n\n"+turn.Common)
 		}
 	}
-	return fairManifest{Version: "fair-a-no-gui-v1", ProductionBase: fairProductionBase, HarnessSHA256: harness, Model: parameters, Context7: context7, System: fairSystem, Question: fairQuestion, Routes: routes, Turns: turns, Prompts: prompts,
+	return fairManifest{Version: "fair-a-no-gui-v2", ProductionBase: fairProductionBase, HarnessSHA256: harness, Model: parameters, Context7: context7, System: fairSystem, Question: fairQuestion, Routes: routes, Turns: turns, Prompts: prompts,
 		Schedule:   []fairSession{{"pair1-native", 1, "native"}, {"pair1-js", 1, "js"}, {"pair2-js", 2, "js"}, {"pair2-native", 2, "native"}},
 		Controls:   map[string]any{"sessions": 4, "turns_per_session": 2, "pairs": 2, "gui": false, "stream": true, "per_generation_seconds": 600, "max_generations_per_turn_including_selectors": 24, "http_client_timeout_seconds": 0, "response_header_timeout_seconds": 0, "automatic_retries": 0, "script_file_obligation": "none for either route; file capability B uses historical evidence only", "answer_file": "retained between Turns; revalidated after each", "stop_policy": "Stop entire study on any model/runtime error, incomplete generation, unknown tool outcome, or instrumentation failure; no replacement sampling. Record assertion failures and continue fixed scheduled Turns without retry.", "cache_accounting": "Within each independent Session only; first/continuation and each pair separate. Provider reported prompt/cached/fresh/completion; no inference of KV caching from common HTTP body bytes."},
 		Assertions: []string{"both input files actually read per Turn; exact expected total", "answer.json four-field schema; short API answer and real returned source", "successful Context7 docs query with frozen question each Turn; relevant API support reviewed against original result", "no shell/process dispatch; no GUI; no saved script generation or execution", "same Session for its two Turns; four independent workspaces/Sessions", "serialized main-request instructions/tools byte-equal within each Session", "preserve original request/stream/Response/usage/invocation and Tool receipts, including failures and missing usage"}}
@@ -470,7 +472,7 @@ func TestCodeModeFairLive(t *testing.T) {
 		t.Fatal("explicit frozen manifest hash mismatch")
 	}
 	var manifest fairManifest
-	if json.Unmarshal(raw, &manifest) != nil || manifest.ProductionBase != fairProductionBase {
+	if json.Unmarshal(raw, &manifest) != nil || manifest.Version != "fair-a-no-gui-v2" || manifest.ProductionBase != fairProductionBase {
 		t.Fatal("invalid frozen study")
 	}
 	source, err := os.ReadFile("code_mode_fair_test.go")
@@ -553,12 +555,8 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 	if err != nil {
 		return err
 	}
-	kept := tools[:0]
 	for _, one := range tools {
 		if script, ok := one.(*codemode.Tool); ok {
-			if plan.Route == "native" {
-				continue
-			}
 			script.Executor = &gojaexec.Executor{Observe: func(metrics gojaexec.Metrics) {
 				f, e := os.OpenFile(filepath.Join(root, "worker-metrics.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 				if e == nil {
@@ -567,9 +565,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 				}
 			}}
 		}
-		kept = append(kept, one)
 	}
-	tools = kept
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "code-mode-fair", Workspace: session.WorkspaceRef{Key: plan.ID, CWD: workspace}})
 	if err != nil {
@@ -639,21 +635,21 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 		return err
 	}
 	trace := &fairTrace{LLM: resolved.Model, root: root, turnCalls: map[int]int{}}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "fair-local"})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "fair-local"})
 	if err != nil {
 		return err
 	}
-	approver := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	approver := liveApprovalFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		if remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs" {
 			for _, option := range r.Approval.Options {
 				if option.ID == "allow_session" {
-					return agent.ApprovalResponse{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
+					return approval.Response{Outcome: "selected", OptionID: option.ID, Approved: true}, nil
 				}
 			}
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
 	observer := agent.SourceEventObserverFunc(func(_ context.Context, e agent.SourceEvent) error {
 		if e.Canonical == nil {

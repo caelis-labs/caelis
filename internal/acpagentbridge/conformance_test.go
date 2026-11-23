@@ -14,6 +14,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	sdkchat "github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -662,15 +663,15 @@ func agentMessageTexts(notifications []eventstream.SessionNotification) []string
 	return out
 }
 
-func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgent, session.Service) {
+func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgent, session.ManagedService) {
 	return newTestRuntimeAgentWithTools(t, model, nil)
 }
 
-func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.Tool) (*runtimeacp.RuntimeAgent, session.Service) {
+func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.Tool) (*runtimeacp.RuntimeAgent, session.ManagedService) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime, err := sdkruntime.New(sdkruntime.Config{
-		Hooks:    agent.Hooks{StreamMode: agent.StreamIncremental},
+		Hooks:    hook.Set{StreamMode: hook.StreamIncremental},
 		Sessions: sessions,
 		AgentFactory: sdkchat.Factory{
 			SystemPrompt: "Answer tersely.",

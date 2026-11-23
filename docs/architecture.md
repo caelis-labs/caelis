@@ -284,7 +284,7 @@ config.json                 canonical product configuration
 control/control.sqlite      Control operations, ACP preparation, pending Agent mail
 control/cursor.key          private cursor-signing secret
 control/spool/v1/           disposable append-only Session and Task delivery traces
-sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
+sessions/                   Session documents, event JSONL, Session index and durable Tasks
 providers/                  private provider credential material
 bots/<Bot ID>/files/         retained legacy Bot data; not imported or executed
 bots/<Bot ID>/work/<Work ID>/files/  retained legacy managed work data
@@ -311,11 +311,22 @@ from durable participant history.
 composition owns ACP preparation state. Indexed SQLite columns are checked
 against the complete stored record before cleanup.
 
-Session JSONL remains canonical ordered history; `sessions/.sessions.index.sqlite`
-is an SDK-owned secondary index and is not a Control store. Credential bytes,
-cursor keys, runtime locks and tokens, diagnostic logs, and immutable plugin
-content also remain outside the Control database because their lifecycle or
-security boundary is different.
+The local Gateway assembles a file Session store and a Task store over the
+same SQLite file. An SDK host can supply its own Session backend.
+[Session storage for embedders](agent-sdk-boundary.md#session-storage-for-embedders)
+defines the Run contract.
+
+| Local storage | Contents and recovery owner | Database-backed host |
+| --- | --- | --- |
+| `rollout-*.json` | Session identity and namespace, revision, timestamps, execution configuration, title, metadata, controller and participant bindings, and mutable state. Enabled features also persist transaction identities and digests, fence ownership, and idle-compaction windows and receipts. Pending approvals are indexed from events. | Store header and state at a consistent revision. Add coordination records for each capability the host enables. |
+| `*.events.jsonl` | Session owns ordered messages, tool calls, full tool results and their model views, context edits, checkpoints and journal facts. | Store ordered events with stable identity and lossless payloads. Rebuild model context from these facts. |
+| `.sessions.index.sqlite` · `sessions` | The file adapter uses a derived summary and document path for lookup and listing. | Query and index the Session rows directly. |
+| `.sessions.index.sqlite` · `tasks` | The Task store owns durable Task identity, specification, state, lease, cursors and terminal result. Task access initializes this table. | Configure `runtime.Config.TaskStore` for durable Jobs. Ordinary native tool turns need only the Session backend. |
+| `*.txn.json`, `.sessions.transactions.pending`, `.sessions.lock` | The file adapter recovers compound writes and serializes competing operations. | Use database transactions and locking. Turn ownership has its own Session fence contract. |
+| `*.events.jsonl.metadata` | File reads can persist a sparse provenance index. The adapter can rebuild it from the log. | Use storage-native indexing when needed. |
+| Temporary tool-result files | The local chat factory can save a large result and return a temporary reference alongside the bounded model view. Session already retains the complete returned result. | Install a result artifact store only if callers need to dereference the full result separately. |
+| `control/spool/v1/` and `control/control.sqlite` | Control owns delivery traces and its operation, mail and preparation records. | Assemble equivalent services when hosting those product capabilities. |
+| `config.json` | The Gateway reads and updates user-wide policy rules through its configuration owner. Session events retain the approval decision for that call. | Supply `runtime.Config.PersistPolicyConsent` when users can save consent across Sessions. |
 
 Executable updates replace the installed program. Durable format migrations
 belong to each persistence owner and run under exclusive Store ownership.

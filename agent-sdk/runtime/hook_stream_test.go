@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -104,7 +105,7 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 			}
 			var factories atomic.Int64
 			var identities []string
-			hooks := agent.Hooks{Stream: []agent.Hook[struct{}, agent.StreamTransformer]{{Name: "redact", Apply: func(_ context.Context, e agent.HookContext, _ struct{}) (agent.StreamTransformer, error) {
+			hooks := hook.Set{Stream: []hook.Stream{{Name: "redact", Apply: func(_ context.Context, e hook.OutputContext) (hook.StreamTransformer, error) {
 				factories.Add(1)
 				identities = append(identities, e.InvocationID)
 				if e.InvocationID == "" || e.AttemptOrdinal != uint64(factories.Load()) {
@@ -114,18 +115,18 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 			}}}}
 			expected := "accepted final"
 			if incremental {
-				hooks.StreamMode = agent.StreamIncremental
+				hooks.StreamMode = hook.StreamIncremental
 				expected = "[redacted] 你好"
 				if repeated {
 					expected += expected
 				}
 			} else {
-				hooks.Completion = []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "replace", Apply: func(_ context.Context, _ agent.HookContext, candidate model.Message) (agent.CompletionDecision, error) {
+				hooks.Completion = []hook.Completion{{Name: "replace", Apply: func(_ context.Context, _ hook.OutputContext, candidate model.Message) (hook.CompletionDecision, error) {
 					if candidate.TextContent() != "secret 你好" {
 						t.Error("buffered semantic candidate transformed before replacement")
 					}
 					m := model.NewTextMessage(model.RoleAssistant, expected)
-					return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &m}, nil
+					return hook.CompletionDecision{Kind: hook.CompletionReplace, Message: &m}, nil
 				}}}
 			}
 			llm := model.WithRetry(driver, model.RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
@@ -212,7 +213,7 @@ func TestHooksIncrementalIrreversibleOutputPreventsRetry(t *testing.T) {
 			yield(nil, hookRetryError{})
 		}
 	}}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{StreamMode: agent.StreamIncremental}})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{StreamMode: hook.StreamIncremental}})
 	if err != nil {
 		t.Fatal(err)
 	}

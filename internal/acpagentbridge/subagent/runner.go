@@ -13,6 +13,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -945,24 +946,24 @@ func translateApprovalRequest(
 	if err != nil {
 		return subagent.ApprovalRequest{}, err
 	}
-	approval, err := acppermission.DecodePermissionRequest(wire)
+	permission, err := acppermission.DecodePermissionRequest(wire)
 	if err != nil {
 		return subagent.ApprovalRequest{}, err
 	}
-	options := make([]subagent.ApprovalOption, 0, len(approval.Options))
-	for _, item := range approval.Options {
+	options := make([]subagent.ApprovalOption, 0, len(permission.Options))
+	for _, item := range permission.Options {
 		options = append(options, subagent.ApprovalOption{
 			ID:   strings.TrimSpace(item.ID),
 			Name: strings.TrimSpace(item.Name),
 			Kind: strings.TrimSpace(item.Kind),
 		})
 	}
-	endpoint := agent.ApprovalEndpointExternalACP
+	endpoint := approval.EndpointExternalACP
 	if cfg.BuiltinRuntime {
-		endpoint = agent.ApprovalEndpointBuiltin
+		endpoint = approval.EndpointBuiltin
 	}
 	return subagent.ApprovalRequest{
-		Origin:       agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: endpoint, SessionID: string(req.SessionId), ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: approval.ToolCall.ID, Agent: agentID},
+		Origin:       approval.Origin{Role: approval.RoleSubagent, Endpoint: endpoint, SessionID: string(req.SessionId), ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: permission.ToolCall.ID, Agent: agentID},
 		SessionRef:   session.NormalizeSessionRef(spawn.SessionRef),
 		Session:      session.CloneSession(spawn.Session),
 		TaskID:       strings.TrimSpace(spawn.TaskID),
@@ -970,15 +971,15 @@ func translateApprovalRequest(
 		Agent:        firstNonEmpty(strings.TrimSpace(cfg.Name), strings.TrimSpace(agentID)),
 		Mode:         strings.TrimSpace(spawn.Mode),
 		ToolCall: subagent.ApprovalToolCall{
-			ID:          strings.TrimSpace(approval.ToolCall.ID),
-			Name:        approval.ToolCall.Name,
-			NamePresent: approval.ToolCall.NamePresent,
-			Kind:        strings.TrimSpace(approval.ToolCall.Kind),
-			Title:       strings.TrimSpace(approval.ToolCall.Title),
-			Status:      strings.TrimSpace(approval.ToolCall.Status),
-			RawInput:    session.CloneState(approval.ToolCall.RawInput),
-			RawOutput:   session.CloneState(approval.ToolCall.RawOutput),
-			Content:     session.CloneProtocolToolCallContent(approval.ToolCall.Content),
+			ID:          strings.TrimSpace(permission.ToolCall.ID),
+			Name:        permission.ToolCall.Name,
+			NamePresent: permission.ToolCall.NamePresent,
+			Kind:        strings.TrimSpace(permission.ToolCall.Kind),
+			Title:       strings.TrimSpace(permission.ToolCall.Title),
+			Status:      strings.TrimSpace(permission.ToolCall.Status),
+			RawInput:    session.CloneState(permission.ToolCall.RawInput),
+			RawOutput:   session.CloneState(permission.ToolCall.RawOutput),
+			Content:     session.CloneProtocolToolCallContent(permission.ToolCall.Content),
 		},
 		Options: options,
 	}, nil

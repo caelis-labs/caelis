@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -24,9 +25,9 @@ func TestSystemManagedAgentUsesCoreRuntimeHooksAndFacts(t *testing.T) {
 	startHook := &systemManagedStartRecorder{}
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
 		AgentFactory:    chat.Factory{},
-		StagingSessions: func() session.Service { return staging },
+		StagingSessions: func() session.ManagedService { return staging },
 		TraceSink:       interceptor,
-		Hooks:           agent.Hooks{TurnStart: []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "start", Apply: startHook.Apply}}},
+		Hooks:           hook.Set{TurnStart: []hook.TurnStart{{Name: "start", Apply: startHook.Apply}}},
 	})
 	parent := session.Session{SessionRef: session.SessionRef{
 		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
@@ -77,7 +78,7 @@ func TestSystemManagedAgentDoesNotInheritParentRuntimeFence(t *testing.T) {
 	staging := inmemory.NewStore(inmemory.Config{})
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
 		AgentFactory:    chat.Factory{},
-		StagingSessions: func() session.Service { return staging },
+		StagingSessions: func() session.ManagedService { return staging },
 	})
 	parent := session.Session{SessionRef: session.SessionRef{
 		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
@@ -110,11 +111,11 @@ type systemManagedStartRecorder struct {
 	count int
 }
 
-func (r *systemManagedStartRecorder) Apply(_ context.Context, _ agent.HookContext, _ struct{}) (agent.TurnStartDecision, error) {
+func (r *systemManagedStartRecorder) Apply(_ context.Context, _ hook.TurnContext) (hook.TurnStartDecision, error) {
 	r.mu.Lock()
 	r.count++
 	r.mu.Unlock()
-	return agent.TurnStartDecision{}, nil
+	return hook.TurnStartDecision{}, nil
 }
 
 func (r *systemManagedStartRecorder) calls() int {

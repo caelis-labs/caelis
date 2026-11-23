@@ -14,6 +14,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -118,7 +119,7 @@ func newCodeModeCommandAgent(t *testing.T, cwd string, llm model.LLM, stream boo
 	tasks := sessionfile.NewTaskStore(sessions)
 	runtimeConfig := sdkruntime.Config{
 		Sessions: sessions, TaskStore: tasks,
-		Hooks: agent.Hooks{StreamMode: agent.StreamIncremental}, AgentFactory: chat.Factory{},
+		Hooks: hook.Set{StreamMode: hook.StreamIncremental}, AgentFactory: chat.Factory{},
 	}
 	acpConfig := runtimeacp.Config{Sessions: sessions, AppName: "caelis", UserID: "user-1"}
 	if stream {

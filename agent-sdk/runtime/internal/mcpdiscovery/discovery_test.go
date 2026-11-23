@@ -13,7 +13,7 @@ func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
 	b := tool.Binding{Name: "docs__read", Identity: "source", Version: "schema-v1"}
 	entry := map[string]any{"name": b.Name, "binding": b, "input_schema": map[string]any{"type": "object"}}
 	event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Status: "completed", Output: map[string]any{"tools": []any{entry}}}, Meta: map[string]any{MetadataKey: true}}
-	if got := FromEvents([]*session.Event{event}); got[b.Name] != b {
+	if got := searchBindings(event); got[b.Name] != b {
 		t.Fatalf("canonical binding=%v", got)
 	}
 	for _, change := range []func(*session.Event){
@@ -27,7 +27,7 @@ func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
 	} {
 		candidate := session.CloneEvent(event)
 		change(candidate)
-		if got := FromEvents([]*session.Event{candidate}); len(got) != 0 {
+		if got := searchBindings(candidate); len(got) != 0 {
 			t.Fatalf("legacy, failed or incomplete receipt granted %v", got)
 		}
 	}
@@ -44,14 +44,20 @@ func TestFullDiscoveryResultsRequireTheirOwningSource(t *testing.T) {
 			event.Tool.Parent = &session.EventParentTool{Kind: "code_mode"}
 			event.Scope = &session.EventScope{Source: "runtime_tool"}
 		}
-		if FromEvents([]*session.Event{event})[binding.Name] != binding {
+		if searchBindings(event)[binding.Name] != binding {
 			t.Fatal("owning discovery result lost")
 		}
 	}
 	remote := session.CloneEvent(original)
 	remote.Visibility = session.VisibilityMirror
 	remote.Scope = &session.EventScope{Source: "acp"}
-	if len(FromEvents([]*session.Event{remote})) != 0 {
+	if len(searchBindings(remote)) != 0 {
 		t.Fatal("remote mirror granted discovery")
 	}
+}
+
+func searchBindings(event *session.Event) map[string]tool.Binding {
+	bindings := map[string]tool.Binding{}
+	Apply(bindings, event)
+	return bindings
 }

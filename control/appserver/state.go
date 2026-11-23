@@ -34,6 +34,9 @@ const (
 	CapabilityDisplayReplacements = "display-replacements-v1"
 	// CapabilitySessionInterrupt permits CAS-fenced cancellation of all Session work.
 	CapabilitySessionInterrupt = "session-interrupt-v1"
+	// CapabilityIdleCommandAdmission checks both the Run and its execution lease
+	// on the Host before an idle-only command is accepted.
+	CapabilityIdleCommandAdmission = "idle-command-admission-v1"
 )
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
@@ -175,6 +178,8 @@ type SessionState struct {
 // StateRequest addresses exactly one Session ID.
 type StateRequest struct {
 	SessionID string `json:"session_id"`
+	// RequireIdle rejects the read if a foreground Run or its execution claim is active.
+	RequireIdle bool `json:"require_idle,omitempty"`
 }
 
 // StateReader returns consistent reconnect bootstrap state.

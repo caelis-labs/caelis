@@ -21,14 +21,13 @@ func TestToolVisibilityKeepsOnlyDirectTools(t *testing.T) {
 		nil,
 		tool.NamedTool{},
 		search,
-		mcpToolForTest("calendar_create_event"),
-		mcp.NewCallTool(),
+		tool.NamedTool{Def: tool.Definition{Name: "calendar_create_event", Metadata: map[string]any{mcp.MetadataKind: mcp.KindTool}}},
 	})
 	var names []string
 	for _, spec := range visible.modelSpecs() {
 		names = append(names, spec.Function.Name)
 	}
-	if want := []string{"Read", mcp.CallToolName}; !slices.Equal(names, want) {
+	if want := []string{"Read"}; !slices.Equal(names, want) {
 		t.Fatalf("model tool names = %v, want %v", names, want)
 	}
 	for _, name := range names {

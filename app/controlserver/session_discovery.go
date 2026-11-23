@@ -10,6 +10,9 @@ import (
 
 func sessionServerInfo(info appserver.ServerInfo, services appserver.AppServerServices) appserver.ServerInfo {
 	info = normalizeServerInfo(info)
+	if !slices.Contains(info.Capabilities, appserver.CapabilityIdleCommandAdmission) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityIdleCommandAdmission)
+	}
 	if !slices.Contains(info.Capabilities, appserver.CapabilitySessionInterrupt) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilitySessionInterrupt)
 	}
@@ -30,9 +33,6 @@ func sessionServerInfo(info appserver.ServerInfo, services appserver.AppServerSe
 	}
 	if !slices.Contains(info.Capabilities, appserver.CapabilityDisplayReplacements) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityDisplayReplacements)
-	}
-	if appserver.SupportsConversationInteractions(services.Sessions) && !slices.Contains(info.Capabilities, appserver.CapabilityConversationInteractions) {
-		info.Capabilities = append(info.Capabilities, appserver.CapabilityConversationInteractions)
 	}
 	if services.SessionProfiles != nil {
 		for _, capability := range services.SessionProfiles.Capabilities() {

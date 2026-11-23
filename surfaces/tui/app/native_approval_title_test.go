@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -30,7 +29,7 @@ func TestNativeCommandApprovalTitleAndRenderedSubject(t *testing.T) {
 	if err != nil || decision.Action != policy.ActionAskApproval || decision.Approval == nil {
 		t.Fatalf("expected native approval decision, got %#v, %v", decision, err)
 	}
-	display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{
+	display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(approval.Request{
 		SessionRef: ref, Tool: input.Tool, Call: input.Call, Approval: decision.Approval, Metadata: decision.Metadata,
 	}))
 	envelopes := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: ref.SessionID}, &session.Event{

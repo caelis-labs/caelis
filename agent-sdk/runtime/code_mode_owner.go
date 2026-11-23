@@ -92,12 +92,9 @@ func (t codeModeProducerTool) RuntimeCall(_ toolbinding.Token, ctx context.Conte
 }
 
 // The policy owner receives source-read semantics from the concrete Runtime
-// binding through its dispatch wrapper, never from a display name or
+// binding before dispatch, never from a display name or
 // model/remote metadata.
 func codeModeReadPathArgument(one tool.Tool) string {
-	if dispatch, ok := one.(dispatchTool); ok {
-		one = dispatch.base
-	}
 	if _, ok := one.(runtimeCodeModeTool); ok {
 		return "file"
 	}

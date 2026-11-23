@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -51,14 +50,14 @@ func TestDraftChildNativeToolDisplayDoesNotTrustExternalMetadata(t *testing.T) {
 				if request.Origin.SessionID != "child" || request.Origin.ParentSessionID != "parent" || request.Origin.TaskID != "original-task" || request.Origin.ParentCallID != "original-spawn" || request.Approval == nil {
 					t.Fatal("native forwarding changed its bound identity")
 				}
-				if (request.Origin.Endpoint == agent.ApprovalEndpointBuiltin) != tc.builtin {
+				if (request.Origin.Endpoint == approval.EndpointBuiltin) != tc.builtin {
 					t.Fatal("peer metadata changed endpoint provenance")
 				}
-				canonical := approval.PayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: request.Approval})
+				canonical := approval.PayloadFromRuntimeRequest(approval.Request{Approval: request.Approval})
 				if canonical.Subject.Reported || canonical.Subject.Scope.State != session.ApprovalFieldOpaque {
 					t.Fatal("display hint became canonical action or grant authority")
 				}
-				display := approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: request.Approval})
+				display := approval.DisplayPayloadFromRuntimeRequest(approval.Request{Approval: request.Approval})
 				if (display.RawInput["app"] == "fixture.app" && display.RawInput["source"] == "return 'fixture';") != tc.expose {
 					t.Fatal("native/external or sensitive display boundary changed")
 				}
@@ -68,7 +67,7 @@ func TestDraftChildNativeToolDisplayDoesNotTrustExternalMetadata(t *testing.T) {
 				if tc.independent && (canonical.ToolCallID != "" || canonical.ToolName != "" || len(display.RawInput) != 0) {
 					t.Fatal("independent subject acquired an invented tool")
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 			})}
 			run := &childRun{anchor: delegation.Anchor{SessionID: "child"}}
 			response, err := (&Runner{}).boundDraftPermissionHandler(run, spawn, AgentConfig{Name: "native-child", BuiltinRuntime: tc.builtin}, "native-child")(t.Context(), req)
@@ -92,7 +91,7 @@ func TestDraftChildPermissionIndependentContextAndObservationBoundary(t *testing
 			spawn := tasksubagent.SpawnContext{SessionRef: session.SessionRef{SessionID: "parent"}, TaskID: "task", ParentCallID: "spawn", ApprovalRequester: subagentApprovalRequesterFunc(func(_ context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
 				calls++
 				observed = req
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
 			})}
 			runner := &Runner{}
 			if tc.legacy {

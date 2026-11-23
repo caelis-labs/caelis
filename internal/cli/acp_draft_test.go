@@ -7,14 +7,12 @@ import (
 	"io"
 	"net"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
@@ -23,7 +21,7 @@ import (
 	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
 )
 
-func TestRunACPDraftUsesProductHostAndCanonicalCommandConversation(t *testing.T) {
+func TestRunACPDraftCommandEchoIsLiveOnly(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	storeDir := cliTestStoreDir(t)
 	seedCLIModel(t, storeDir, gatewayapp.ModelConfig{Provider: "ollama", Model: "llama3"})
@@ -117,28 +115,20 @@ func TestRunACPDraftUsesProductHostAndCanonicalCommandConversation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var interaction *session.Event
-	for _, event := range after {
-		if event.ID == string(receipt.MessageId) {
-			interaction = event
-		}
-	}
-	if interaction == nil || interaction.Type != session.EventTypeInteraction || !session.IsMirror(interaction) || !session.IsClientReplayEvent(interaction) {
-		t.Fatalf("command receipt is not the original durable mirror interaction: %#v", interaction)
-	}
-	if !reflect.DeepEqual(compact.PromptEventsFromLatestCompact(before), compact.PromptEventsFromLatestCompact(after)) {
-		t.Fatal("display-only command changed actual persisted model context")
+	if len(after) != len(before) {
+		t.Fatalf("display-only /status changed durable event count from %d to %d", len(before), len(after))
 	}
 	peer.mu.Lock()
 	found := false
 	for _, update := range peer.updates {
 		if update.Update.UserMessage != nil && update.Update.UserMessage.MessageId == receipt.MessageId {
-			found = true
+			content := update.Update.UserMessage.Content
+			found = len(content) == 1 && content[0].Text != nil && content[0].Text.Text == "/status"
 		}
 	}
 	peer.mu.Unlock()
 	if !found {
-		t.Fatal("canonical command receipt lacks same-ID live user echo")
+		t.Fatal("command receipt lacks same-ID live user echo")
 	}
 	_, err = client.ResumeSession(ctx, v2.ResumeSessionRequest{SessionId: created.SessionId, Cwd: cwd, ReplayFrom: &v2.ReplayFrom{Start: &v2.ReplayFromStartInline{Type: "start"}}})
 	if err != nil {
@@ -152,15 +142,12 @@ func TestRunACPDraftUsesProductHostAndCanonicalCommandConversation(t *testing.T)
 		}
 	}
 	peer.mu.Unlock()
-	if replayed != 2 {
+	if replayed != 1 {
 		t.Fatalf("live plus replay identity count = %d", replayed)
 	}
 	_, err = client.ResumeSession(ctx, v2.ResumeSessionRequest{SessionId: created.SessionId, Cwd: v2.AbsolutePath(t.TempDir()), ReplayFrom: &v2.ReplayFrom{Start: &v2.ReplayFromStartInline{Type: "start"}}})
 	if err == nil {
 		t.Fatal("resume accepted a different workspace")
-	}
-	if receipt.MessageId == "" {
-		t.Fatal("missing durable message identity")
 	}
 	if _, err := client.CloseSession(ctx, v2.CloseSessionRequest{SessionId: created.SessionId}); err != nil {
 		t.Fatalf("draft native Session close = %v", err)

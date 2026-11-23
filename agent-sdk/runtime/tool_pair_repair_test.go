@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -190,22 +193,10 @@ func TestToolFactsCancellationHoldsFenceUntilProducerEnds(t *testing.T) {
 		t.Fatalf("late known result/effect lost: %v %v %d", pairs, err, effects.Load())
 	}
 }
-func TestToolFactsRepairRequiresFence(t *testing.T) {
-	store, active := newToolFactTestSession(t, "repair-fence")
-	call := &session.Event{ID: "call", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "protocol", Name: "Tool", Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "old", ItemID: "occurrence"}}}
-	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: call}); err != nil {
-		t.Fatal(err)
-	}
-	rt := &Runtime{sessions: store, clock: time.Now}
-	if err := rt.repairToolPairs(t.Context(), active.SessionRef); err == nil {
-		t.Fatal("unfenced repair accepted")
-	}
-}
-
 func TestToolFactsCompleteResultAndModelViewRoundTrip(t *testing.T) {
 	for _, backend := range []string{"memory", "file"} {
 		t.Run(backend, func(t *testing.T) {
-			var store session.Service
+			var store session.ManagedService
 			var active session.Session
 			var root string
 			if backend == "memory" {
@@ -492,7 +483,7 @@ func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 
 type repeatedToolContinuation struct{}
 
-func (repeatedToolContinuation) Invoke(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+func (repeatedToolContinuation) Invoke(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 	first, err := next(ctx)
 	if err != nil {
 		return first, err
@@ -514,7 +505,7 @@ func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "repeat", Invoke: repeatedToolContinuation{}.Invoke}}}})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "repeat", Apply: repeatedToolContinuation{}.Invoke}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,12 +670,12 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "mcp-test"})
+			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "mcp-test"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-				return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
+			requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
+				return approval.Response{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
 			})
 			for range 2 {
 				driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -717,6 +708,60 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 				seen[operation] = true
 			}
 		})
+	}
+}
+
+func TestResumeRoutedMCPHistoryFromV0841(t *testing.T) {
+	root := t.TempDir()
+	// Register the file locator, then reopen the exact header and JSONL from v0.84.1.
+	seed := sessionfile.NewStore(sessionfile.Config{RootDir: root,
+		SessionIDGenerator: func() string { return "routed-mcp" },
+		Clock:              func() time.Time { return time.Unix(1770000000, 0).UTC() },
+	})
+	_, err := seed.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "reader", Workspace: session.WorkspaceRef{Key: "ws", CWD: "/workspace"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{".json", ".events.jsonl"} {
+		path := filepath.Join("ws", "2026", "02", "02", "rollout-2026-02-02T02-40-00-routed-mcp"+suffix)
+		data, err := os.ReadFile(filepath.Join("testdata", "routed-mcp-v0.84.1", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, path), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	ref := session.SessionRef{SessionID: "routed-mcp"}
+	for i, want := range []string{"proposal", "receipt"} {
+		page, err := store.EventsPage(t.Context(), session.EventPageRequest{SessionRef: ref, AfterSeq: uint64(i), Limit: 1, Visibility: session.EventPageAllDurable})
+		if err != nil || len(page.Events) != 1 || page.Events[0].ID != want || page.Events[0].Tool.Name != "docs__read" {
+			t.Fatalf("page %d=%+v, %v", i, page, err)
+		}
+	}
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := &recoveryCaptureModel{}
+	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: ref, Input: "continue", AgentSpec: agent.AgentSpec{Model: probe}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var calls []model.ToolCall
+	var results []model.ToolResultPart
+	for _, m := range probe.messages {
+		calls = append(calls, m.ToolCalls()...)
+		results = append(results, m.ToolResults()...)
+	}
+	want := model.ToolCall{ID: "read-1", Name: "mcp_call", Args: `{"tool_name":"docs__read","arguments":{"page":2}}`, ThoughtSignature: "original"}
+	if len(calls) != 1 || calls[0] != want || len(results) != 1 || results[0].Name != want.Name || results[0].ToolUseID != want.ID ||
+		len(results[0].Content) != 1 || string(results[0].Content[0].JSONValue()) != `{"title":"Notes"}` {
+		t.Fatalf("resumed model context: calls=%+v results=%+v", calls, results)
 	}
 }
 

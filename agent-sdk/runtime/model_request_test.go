@@ -13,7 +13,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -161,7 +163,7 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	}
 	oldModel, newModel := newRequestSnapshotModel("old-model"), newRequestSnapshotModel("new-model")
 	oldCalls, newCalls := make(chan tool.InvocationContext, 1), make(chan tool.InvocationContext, 1)
-	approvals := make(chan agent.ApprovalRequest, 2)
+	approvals := make(chan approval.Request, 2)
 	var oldReleases, newReleases atomic.Int64
 	oldConfig := snapshotTestConfig("old", oldModel, snapshotTestTool("old", oldCalls))
 	oldConfig.Request.ServiceTier = model.ServiceTierPriority
@@ -178,16 +180,16 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 		}}, nil
 	}}}
 	interceptor := &concurrentTraceSink{}
-	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", TraceSink: interceptor})
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "test", TraceSink: interceptor})
 	if err != nil {
 		t.Fatal(err)
 	}
 	stream := true
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "inspect", TurnID: "canonical-turn", AgentSpec: agent.AgentSpec{
 		ResolveModelRequest: source.resolve, Request: agent.ModelRequestOptions{Stream: &stream, ServiceTier: model.ServiceTierPriority},
-	}, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	}, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		approvals <- req
-		return agent.ApprovalResponse{Approved: true, OptionID: "allow_once"}, nil
+		return approval.Response{Approved: true, OptionID: "allow_once"}, nil
 	})})
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +303,7 @@ type snapshotLifecycleBarrier struct {
 	once    sync.Once
 }
 
-func (b *snapshotLifecycleBarrier) Prepare(ctx context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+func (b *snapshotLifecycleBarrier) Prepare(ctx context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 	b.once.Do(func() {
 		close(b.entered)
 		select {
@@ -321,7 +323,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 	oldSnapshot.Release = func() { oldReleases.Add(1) }
 	source.set(oldSnapshot)
 	barrier := &snapshotLifecycleBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "snapshot-barrier", Apply: barrier.Prepare}}}})
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "snapshot-barrier", Apply: barrier.Prepare}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

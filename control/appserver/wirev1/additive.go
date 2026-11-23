@@ -75,7 +75,6 @@ func knownWireFields(raw []byte, target any) ([]byte, error) {
 		*appserver.PrepareACPAuthenticationRequest,
 		*appserver.PrepareACPRequest,
 		*appserver.PromptParticipantRequest,
-		*appserver.RecordInteractionRequest,
 		*appserver.RemoveMarketplaceRequest,
 		*appserver.RemovePluginRequest,
 		*appserver.ResetAgentBindingRequest,

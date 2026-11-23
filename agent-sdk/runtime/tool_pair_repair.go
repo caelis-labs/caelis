@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// repairToolPairs executes no producer. A newly acquired or inherited exclusive
-// fence proves that the previous producer was drained or lost ownership at the
-// Host boundary. An empty local active map alone is never sufficient authority.
+// repairToolPairs records interrupted calls under the exclusive Turn admitted
+// by the Session service. Repair never dispatches a tool.
 func (r *Runtime) repairToolPairs(ctx context.Context, ref session.SessionRef) error {
 	for {
 		err := r.repairToolPairsAtCut(ctx, ref)
@@ -45,9 +43,6 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 		if pair.Result != nil || pair.Call.Seq > 0 && pair.Call.Seq <= through {
 			continue
 		}
-		if session.RuntimeMutationGuard(ctx).FenceID == "" {
-			return fmt.Errorf("missing tool results require an exclusive Session fence and ended prior producer")
-		}
 		call := pair.Call
 		event := session.CloneEvent(call)
 		event.Message = nil
@@ -67,8 +62,8 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 		event.Tool.Output = payload
 		if session.IsMainInvocationVisibleEvent(call) {
 			name := call.Tool.Name
-			if call.Tool.ModelCall != nil {
-				name = call.Tool.ModelCall.Name
+			if legacy := call.Tool.LegacyModelCall; legacy != nil {
+				name = legacy.Name
 			}
 			message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: call.Tool.ID, Name: name, Content: tool.ModelParts(result.Content), IsError: true}}}}
 			event.Message = &message
@@ -78,14 +73,10 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 	if len(fixes) == 0 {
 		return nil
 	}
-	batch, ok := r.sessions.(session.EventBatchService)
-	if !ok {
-		return fmt.Errorf("tool pairing repair requires atomic Session batch append")
-	}
-	_, err = batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), ExpectedRevision: &loaded.Session.Revision, Events: fixes})
+	_, err = r.sessions.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), ExpectedRevision: &loaded.Session.Revision, Events: fixes})
 	if err != nil {
 		for _, fact := range fixes {
-			confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, fact)
+			confirmed, readErr := r.reconcileEventAppend(ctx, ref, fact)
 			if confirmed == nil {
 				return errors.Join(err, readErr)
 			}
@@ -97,17 +88,13 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 func mustRepairJSON(value any) json.RawMessage { raw, _ := json.Marshal(value); return raw }
 
 func (r *Runtime) appendToolCallBatch(ctx context.Context, ref session.SessionRef, events []*session.Event) ([]*session.Event, error) {
-	service, ok := r.sessions.(session.EventBatchService)
-	if !ok {
-		return nil, fmt.Errorf("frozen tool batch requires atomic Session append")
-	}
-	persisted, err := service.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Events: events})
+	persisted, err := r.sessions.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Events: events})
 	if err == nil {
 		return persisted, nil
 	}
 	confirmed := make([]*session.Event, 0, len(events))
 	for _, event := range events {
-		found, readErr := r.reconcileCompactionAppend(ctx, ref, event)
+		found, readErr := r.reconcileEventAppend(ctx, ref, event)
 		if found == nil {
 			return nil, errors.Join(err, readErr)
 		}

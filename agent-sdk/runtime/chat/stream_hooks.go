@@ -6,17 +6,17 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 type textTransform struct {
-	registration agent.Hook[struct{}, agent.StreamTransformer]
-	value        agent.StreamTransformer
+	registration hook.Stream
+	value        hook.StreamTransformer
 }
 type textStream struct {
-	evidence                                   agent.HookContext
+	evidence                                   hook.OutputContext
 	transforms                                 []textTransform
 	raw, accepted, pendingInput, pendingOutput map[int]string
 	last                                       int
@@ -24,15 +24,15 @@ type textStream struct {
 	finished                                   bool
 }
 
-func newTextStream(ctx context.Context, e agent.HookContext) (*textStream, error) {
+func newTextStream(ctx context.Context, e hook.OutputContext) (*textStream, error) {
 	s := &textStream{evidence: e, raw: map[int]string{}, accepted: map[int]string{}, pendingInput: map[int]string{}, pendingOutput: map[int]string{}}
 	for _, h := range hookrun.FromContext(ctx).Hooks.Stream {
-		value, err := hookrun.Call(ctx, "stream_factory", h, e, struct{}{}, func(v struct{}) struct{} { return v }, func(v agent.StreamTransformer) agent.StreamTransformer { return v })
+		value, err := hookrun.Transform(ctx, "stream_factory", h.Name, h.Timeout, func(ctx context.Context) (hook.StreamTransformer, error) { return h.Apply(ctx, e) }, func(v hook.StreamTransformer) hook.StreamTransformer { return v })
 		if err != nil {
 			return nil, err
 		}
 		if value == nil {
-			return nil, &agent.HookError{Phase: "stream_factory", Name: h.Name, Cause: fmt.Errorf("nil transformer")}
+			return nil, &hook.Error{Phase: "stream_factory", Name: h.Name, Cause: fmt.Errorf("nil transformer")}
 		}
 		s.transforms = append(s.transforms, textTransform{registration: h, value: value})
 	}
@@ -55,11 +55,9 @@ func utf8Prefix(text string) (string, string, error) {
 
 func (s *textStream) transform(ctx context.Context, start int, text string) (string, error) {
 	for _, t := range s.transforms[start:] {
-		h := agent.Hook[string, string]{Name: t.registration.Name, Timeout: t.registration.Timeout, Apply: func(ctx context.Context, _ agent.HookContext, v string) (string, error) {
-			return t.value.Transform(ctx, v)
-		}}
+		input := text
 		var err error
-		text, err = hookrun.Call(ctx, "stream", h, s.evidence, text, func(v string) string { return v }, func(v string) string { return v })
+		text, err = hookrun.Transform(ctx, "stream", t.registration.Name, t.registration.Timeout, func(ctx context.Context) (string, error) { return t.value.Transform(ctx, input) }, func(s string) string { return s })
 		if err != nil {
 			return "", err
 		}
@@ -166,8 +164,7 @@ func (s *textStream) finish(ctx context.Context, message model.Message, incremen
 		message.Parts = append(message.Parts, model.NewTextPart(""))
 	}
 	for i, t := range s.transforms {
-		h := agent.Hook[struct{}, string]{Name: t.registration.Name, Timeout: t.registration.Timeout, Apply: func(ctx context.Context, _ agent.HookContext, _ struct{}) (string, error) { return t.value.Finish(ctx) }}
-		out, err := hookrun.Call(ctx, "stream_finish", h, s.evidence, struct{}{}, func(v struct{}) struct{} { return v }, func(v string) string { return v })
+		out, err := hookrun.Transform(ctx, "stream_finish", t.registration.Name, t.registration.Timeout, t.value.Finish, func(s string) string { return s })
 		if err != nil {
 			return model.Message{}, err
 		}

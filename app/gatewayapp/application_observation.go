@@ -15,7 +15,7 @@ import (
 // assembleObservationSnapshot gives idle Application projections the declared
 // profile without assembling a sandbox, provider, MCP service or execution
 // Runtime. Ordinary Session projection keeps its existing assembly owner.
-func (a *workspaceConfigAssembler) assembleObservationSnapshot(ctx context.Context, active session.Session, sessions session.Service) (*sessionRuntimeInstance, error) {
+func (a *workspaceConfigAssembler) assembleObservationSnapshot(ctx context.Context, active session.Session, sessions session.ManagedService) (*sessionRuntimeInstance, error) {
 	if !sessionvisibility.IsApplicationSession(active) {
 		return a.assembleSnapshot(ctx, active, sessionRuntimeActivity{}, sessions)
 	}

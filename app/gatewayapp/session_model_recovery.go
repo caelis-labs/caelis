@@ -76,7 +76,7 @@ func (s *controlCommandBackend) prepareControlClientReconnect(ctx context.Contex
 // revision conflict always yields to the concurrent user mutation.
 func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 	ctx context.Context,
-	sessions session.Service,
+	sessions session.ManagedService,
 	active session.Session,
 ) (session.Session, error) {
 	if r == nil || sessions == nil || r.store == nil {
@@ -90,7 +90,7 @@ func (r *sessionModelRecovery) repairMissingSessionModelSelection(
 // loads the current catalog on demand and can also repair unsupported settings.
 func (r *sessionModelRecovery) repairSessionModelSelection(
 	ctx context.Context,
-	sessions session.Service,
+	sessions session.ManagedService,
 	active session.Session,
 	observed *modelLookup,
 	removedProviderID func(string) string,

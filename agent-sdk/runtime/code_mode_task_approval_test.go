@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
@@ -58,7 +59,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				approvals.Add(1)
 				if req.Tool.Name != "Write" || req.Parent == nil || req.Parent.ID != "script" {
 					t.Error("approval lost original child identity")
@@ -75,7 +76,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 				}
 				// Deliberately race a late approval against invalidation; the original
 				// admission chain, not a second approval owner, must still prevent dispatch.
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 			})
 			var handle string
 			driver := &mcpScriptModel{steps: func(i int, r *model.Request) []model.ToolCall {

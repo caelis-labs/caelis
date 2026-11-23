@@ -6,16 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-type approvalRequesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type approvalRequesterFunc func(context.Context, approval.Request) (approval.Response, error)
 
-func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req approval.Request) (approval.Response, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -32,11 +31,11 @@ func (g *Gateway) resolveApprovalRequest(
 	turnCtx context.Context,
 	approvalCtx context.Context,
 	handle *turnHandle,
-	req *agent.ApprovalRequest,
+	req *approval.Request,
 	reviewModel model.LLM,
-) (agent.ApprovalResponse, error) {
+) (approval.Response, error) {
 	if g == nil || handle == nil || req == nil {
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	}
 	lifecycleCtx := turnCtx
 	if detachedApprovalRequest(req) {
@@ -44,7 +43,7 @@ func (g *Gateway) resolveApprovalRequest(
 	}
 	mode, modeErr := g.currentApprovalMode(lifecycleCtx, req.SessionRef)
 	if modeErr != nil {
-		return agent.ApprovalResponse{}, modeErr
+		return approval.Response{}, modeErr
 	}
 
 	if mode == ApprovalModeAutoReview {
@@ -58,13 +57,13 @@ func (g *Gateway) resolveApprovalRequest(
 	// auto reviews from one model step may share that head as a concurrent cohort.
 	pending, err := handle.enqueueApproval(req, mode == ApprovalModeManual)
 	if err != nil {
-		return agent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
 	defer handle.releasePendingApproval(pending, "abandoned")
 	req = pending.request
 	if req.OnAdmission != nil {
 		if err := req.OnAdmission(approvalCtx); err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 	}
 	if mode != ApprovalModeManual {
@@ -84,17 +83,17 @@ func (g *Gateway) resolveApprovalRequest(
 		case <-pending.activated:
 		case <-pending.done:
 			if pending.activationErr != nil {
-				return agent.ApprovalResponse{}, pending.activationErr
+				return approval.Response{}, pending.activationErr
 			}
-			return agent.ApprovalResponse{}, context.Canceled
+			return approval.Response{}, context.Canceled
 		case <-approvalCtx.Done():
-			return agent.ApprovalResponse{}, approvalCtx.Err()
+			return approval.Response{}, approvalCtx.Err()
 		case <-lifecycleCtx.Done():
-			return agent.ApprovalResponse{}, lifecycleCtx.Err()
+			return approval.Response{}, lifecycleCtx.Err()
 		}
 		response, err := g.resolveActiveAutoApproval(lifecycleCtx, approvalCtx, handle, req, reviewModel, mode)
 		if err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 		if err := handle.resolvePendingApproval(pending, ApprovalDecision{
 			Outcome:    response.Outcome,
@@ -103,20 +102,20 @@ func (g *Gateway) resolveApprovalRequest(
 			Reason:     response.Reason,
 			ReviewText: response.ReviewText,
 		}); err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 	}
 
 	return waitForApprovalDecision(lifecycleCtx, approvalCtx, pending)
 }
 
-func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Context, pending *pendingApproval) (agent.ApprovalResponse, error) {
+func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Context, pending *pendingApproval) (approval.Response, error) {
 	if pending == nil {
-		return agent.ApprovalResponse{}, context.Canceled
+		return approval.Response{}, context.Canceled
 	}
 	select {
 	case decision := <-pending.decisions:
-		return agent.ApprovalResponse{
+		return approval.Response{
 			Outcome:    decision.Outcome,
 			OptionID:   decision.OptionID,
 			Approved:   decision.Approved,
@@ -125,13 +124,13 @@ func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Contex
 		}, nil
 	case <-pending.done:
 		if pending.activationErr != nil {
-			return agent.ApprovalResponse{}, pending.activationErr
+			return approval.Response{}, pending.activationErr
 		}
-		return agent.ApprovalResponse{}, context.Canceled
+		return approval.Response{}, context.Canceled
 	case <-approvalCtx.Done():
-		return agent.ApprovalResponse{}, approvalCtx.Err()
+		return approval.Response{}, approvalCtx.Err()
 	case <-turnCtx.Done():
-		return agent.ApprovalResponse{}, turnCtx.Err()
+		return approval.Response{}, turnCtx.Err()
 	}
 }
 
@@ -142,10 +141,10 @@ func (g *Gateway) resolveActiveAutoApproval(
 	turnCtx context.Context,
 	approvalCtx context.Context,
 	handle *turnHandle,
-	req *agent.ApprovalRequest,
+	req *approval.Request,
 	reviewModel model.LLM,
 	mode ApprovalMode,
-) (agent.ApprovalResponse, error) {
+) (approval.Response, error) {
 
 	payload := canonicalApprovalPayload(req)
 	if payload == nil {
@@ -252,16 +251,16 @@ func (g *Gateway) resolveActiveAutoApproval(
 		terminal.DecisionSource = ""
 		handle.publishApprovalReviewPayload(req, terminal)
 		if turnCtx.Err() != nil {
-			return agent.ApprovalResponse{}, turnCtx.Err()
+			return approval.Response{}, turnCtx.Err()
 		}
 		if approvalCtx.Err() != nil {
-			return agent.ApprovalResponse{}, approvalCtx.Err()
+			return approval.Response{}, approvalCtx.Err()
 		}
 		// A Guardian execution failure is not a Guardian denial. Auto-review has no
 		// human fallback and the tool cannot run without a valid model decision, so
 		// surface a typed availability error immediately instead of synthesizing an
 		// approval response that the model never produced.
-		return agent.ApprovalResponse{}, guardianUnavailableError(err)
+		return approval.Response{}, guardianUnavailableError(err)
 	}
 	response := approval.RuntimeResponseFromFinalReview(result)
 	if strings.TrimSpace(result.DecisionSource) == "" {
@@ -304,7 +303,7 @@ func (g *Gateway) approvalReviewSessionAccounting(ctx context.Context, req Appro
 	return nil, nil
 }
 
-func (g *Gateway) projectApprovalReviewSessionAccounting(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
+func (g *Gateway) projectApprovalReviewSessionAccounting(ctx context.Context, req *approval.Request, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
 	if g == nil || g.sessions == nil || req == nil || usage == nil || usageSnapshotEmpty(*usage) {
 		return nil
 	}

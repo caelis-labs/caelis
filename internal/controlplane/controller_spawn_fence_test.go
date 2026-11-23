@@ -108,7 +108,7 @@ func TestControllerSpawnRetainsTurnFenceThroughCleanupAndReceipt(t *testing.T) {
 						t.Fatal(result.Err)
 					}
 				} else {
-					close(backend.done)
+					backend.finish()
 				}
 				<-child.cleaning
 				turnDone := make(chan error, 1)
@@ -203,6 +203,7 @@ func (r *spawnDrainChild) Spawn(ctx context.Context, _ subagent.SpawnContext, _ 
 }
 
 type spawnDrainController struct {
+	finishOnce sync.Once
 	recordingControllerBackend
 	started chan struct{}
 	done    chan struct{}
@@ -224,7 +225,10 @@ func (b *spawnDrainController) WaitCompletion(ctx context.Context) error {
 	}
 }
 
-func (*spawnDrainController) Cancel() controller.CancelResult {
+func (b *spawnDrainController) finish() { b.finishOnce.Do(func() { close(b.done) }) }
+
+func (b *spawnDrainController) Cancel() controller.CancelResult {
+	b.finish()
 	return controller.CancelResult{Status: controller.CancelStatusCancelled}
 }
 

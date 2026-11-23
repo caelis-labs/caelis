@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -122,7 +121,7 @@ func RequestFromBuiltinDraft(req v2.RequestPermissionRequest, nativeReqID json.R
 
 // ResponseToDraft preserves selection of an actually offered original option;
 // no interpretation of display facts can manufacture a grant.
-func ResponseToDraft(req v2.RequestPermissionRequest, response agent.ApprovalResponse) (v2.RequestPermissionResponse, error) {
+func ResponseToDraft(req v2.RequestPermissionRequest, response approval.Response) (v2.RequestPermissionResponse, error) {
 	if response.Outcome == "selected" {
 		for _, option := range req.Options {
 			if string(option.OptionId) == response.OptionID {

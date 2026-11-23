@@ -11,40 +11,27 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-// ownRunFence gives standalone SDK callers the same exclusive producer lifetime
-// as Control. An inherited bearer is retained by its existing owner. Acquiring a
-// new fence never takes over an old Host or an unresponsive producer.
-func (r *Runtime) ownRunFence(ctx context.Context, ref session.SessionRef) (context.Context, func() error, error) {
-	if session.RuntimeMutationGuard(ctx).FenceID != "" {
-		return ctx, func() error { return nil }, nil
-	}
-	service, ok := r.sessions.(session.SessionFenceService)
-	if !ok {
-		return ctx, func() error { return nil }, nil
-	}
-	fence, err := service.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: ref, OwnerID: r.nextID("sdk-runtime", nil)})
-	if err != nil {
-		return ctx, func() error { return nil }, err
-	}
-	return session.ContextWithRuntimeFence(ctx, fence), func() error {
-		return service.ReleaseSessionFence(context.WithoutCancel(ctx), session.SessionFenceReleaseRequest(fence))
-	}, nil
-}
-
 // finalizeTurn clears only this Turn's Plan after its producers have drained,
 // before releasing the original fence.
 func (r *Runtime) finalizeTurn(ctx context.Context, ref session.SessionRef, turnID string) error {
 	return r.clearTurnPlan(context.WithoutCancel(ctx), ref, turnID, false)
 }
 
-// reconcileTurnPlan runs under newly acquired or inherited exclusive ownership,
-// before new input or compaction. Fence acquisition/Host transfer, never an empty
-// local handle map, establishes that the prior producer can no longer write.
+// reconcileTurnPlan runs after AcquireWriter has granted exclusive ownership,
+// before the new input or compaction.
 func (r *Runtime) reconcileTurnPlan(ctx context.Context, ref session.SessionRef, turnID string) error {
 	return r.clearTurnPlan(ctx, ref, turnID, true)
 }
 
 func (r *Runtime) clearTurnPlan(ctx context.Context, ref session.SessionRef, turnID string, orphan bool) error {
+	// Most turns have no plan. Only load its source history when state names one.
+	state, err := r.sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if _, ok := state["plan"].(map[string]any); !ok {
+		return nil
+	}
 	var original map[string]any
 	var identity string
 	for {
@@ -68,9 +55,6 @@ func (r *Runtime) clearTurnPlan(ctx context.Context, ref session.SessionRef, tur
 		}
 		if !orphan && owner != turnID {
 			return nil
-		}
-		if session.RuntimeMutationGuard(ctx).FenceID == "" {
-			return fmt.Errorf("plan cleanup requires exclusive Session ownership and ended prior producer")
 		}
 		// Legacy state lacking an owning Turn/fact is identified by its full
 		// original value under the same exclusive-fence compatibility rule.

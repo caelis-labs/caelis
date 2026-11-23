@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -59,8 +58,6 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		if event.Tool.Outcome == session.ToolOutcomeSucceeded {
 			event.Tool.Status = "completed"
 		}
-		message := chat.CanonicalToolResult(model.ToolCall{ID: call.ID, Name: call.Name}, full, callErr)
-		original := model.CloneMessage(message)
 		def := tool.Definition{Name: call.Name}
 		var source tool.Tool
 		if len(targets) > 0 {
@@ -68,9 +65,11 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			source = targets[0].source
 		}
 		observation.Apply(event.Tool, def, effectErr == nil)
-		message, processingErr = hookrun.ModelView(ctx, def, call, message)
-		if processingErr != nil {
-			message = hookrun.FailedView(original)
+		projection := hookrun.FromContext(ctx).Hooks.ToolProjection
+		message, _, viewErr := chat.ProjectToolResult(ctx, def, call, full, callErr, projection.Preview)
+		processingErr = viewErr
+		if viewErr != nil {
+			observation.BuiltinDisplay = nil
 		}
 		event.Message = &message
 		if ownsNestedCommandPresentation(ctx, call, source) {
@@ -106,7 +105,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 	persisted, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 	if err != nil {
 		var readErr error
-		persisted, readErr = r.reconcileCompactionAppend(cleanup, ref, event)
+		persisted, readErr = r.reconcileEventAppend(cleanup, ref, event)
 		if persisted == nil {
 			return errors.Join(err, readErr)
 		}

@@ -8,26 +8,26 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type postCommitApprovalService struct {
-	session.Service
+	session.ManagedService
 	failResolved atomic.Bool
 }
 
 type rejectResolvedApprovalService struct {
-	session.Service
+	session.ManagedService
 	rejectResolved atomic.Bool
 }
 
 type cancelAfterCommitApprovalService struct {
-	session.Service
+	session.ManagedService
 	armed  atomic.Bool
 	cancel context.CancelFunc
 }
@@ -38,11 +38,11 @@ func (s *rejectResolvedApprovalService) AppendEvent(ctx context.Context, req ses
 			return nil, errors.New("simulated durable resolve failure")
 		}
 	}
-	return s.Service.AppendEvent(ctx, req)
+	return s.ManagedService.AppendEvent(ctx, req)
 }
 
 func (s *cancelAfterCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	persisted, err := s.Service.AppendEvent(ctx, req)
+	persisted, err := s.ManagedService.AppendEvent(ctx, req)
 	if err != nil || !s.armed.CompareAndSwap(true, false) {
 		return persisted, err
 	}
@@ -58,11 +58,11 @@ func (s *cancelAfterCommitApprovalService) Events(ctx context.Context, req sessi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return s.Service.Events(ctx, req)
+	return s.ManagedService.Events(ctx, req)
 }
 
 func (s *postCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	persisted, err := s.Service.AppendEvent(ctx, req)
+	persisted, err := s.ManagedService.AppendEvent(ctx, req)
 	if err != nil || !s.failResolved.CompareAndSwap(true, false) {
 		return persisted, err
 	}
@@ -87,7 +87,7 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-approval-committed" },
 	})
-	sessions := &postCommitApprovalService{Service: base}
+	sessions := &postCommitApprovalService{ManagedService: base}
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -102,13 +102,13 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 	const runID = "run-approval-committed"
 	const turnID = "turn-approval-committed"
 
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
 	result := make(chan struct {
-		decision agent.ApprovalResponse
+		decision approval.Response
 		err      error
 	}, 1)
 	go func() {
-		got, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+		got, requestErr := runtime.requestDurableApproval(context.Background(), approval.Request{
 			SessionRef: activeSession.SessionRef,
 			Session:    activeSession,
 			RunID:      runID,
@@ -117,7 +117,7 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 			Call:       tool.Call{ID: "call-approval-committed", Name: "Write"},
 		}, nil)
 		result <- struct {
-			decision agent.ApprovalResponse
+			decision approval.Response
 			err      error
 		}{decision: got, err: requestErr}
 	}()
@@ -125,7 +125,7 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 	requestID := waitForPendingApprovalRecord(t, sessions, activeSession.SessionRef, runID)
 
 	sessions.failResolved.Store(true)
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{
+	if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{
 		SessionRef: activeSession.SessionRef,
 		RequestID:  requestID,
 		Decision:   decision,
@@ -154,16 +154,16 @@ func TestRequestDurableApprovalExposesApprovalRequestIDToRequester(t *testing.T)
 	const runID = "run-approval-request-id"
 	const turnID = "turn-approval-request-id"
 
-	var observed agent.ApprovalRequest
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, ReviewText: "review approved"}
-	got, err := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+	var observed approval.Request
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true, ReviewText: "review approved"}
+	got, err := runtime.requestDurableApproval(context.Background(), approval.Request{
 		SessionRef: activeSession.SessionRef,
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
 		Tool:       tool.Definition{Name: "Write"},
 		Call:       tool.Call{ID: "call-approval-request-id", Name: "Write"}, Execution: tool.InvocationContext{ItemID: "item-approval-request-id"},
-	}, approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	}, approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		observed = req
 		return decision, nil
 	}))
@@ -220,15 +220,15 @@ func TestRequestDurableApprovalRequesterFailureLeavesStartedJournal(t *testing.T
 	const turnID = "turn-approval-request-fail"
 
 	wantErr := errors.New("guardian execution failed")
-	_, err = runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+	_, err = runtime.requestDurableApproval(context.Background(), approval.Request{
 		SessionRef: activeSession.SessionRef,
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
 		Tool:       tool.Definition{Name: "Write"},
 		Call:       tool.Call{ID: "call-approval-request-fail", Name: "Write"},
-	}, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		return agent.ApprovalResponse{}, wantErr
+	}, approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
+		return approval.Response{}, wantErr
 	}))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("requestDurableApproval() error = %v, want %v", err, wantErr)
@@ -272,7 +272,7 @@ func TestRequestDurableApprovalResolveFailureLeavesStartedJournal(t *testing.T) 
 	t.Parallel()
 
 	base, activeSession := newTestSessionService(t, "approval-resolve-fail")
-	sessions := &rejectResolvedApprovalService{Service: base}
+	sessions := &rejectResolvedApprovalService{ManagedService: base}
 	sessions.rejectResolved.Store(true)
 	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
 	if err != nil {
@@ -281,15 +281,15 @@ func TestRequestDurableApprovalResolveFailureLeavesStartedJournal(t *testing.T) 
 	const runID = "run-approval-resolve-fail"
 	const turnID = "turn-approval-resolve-fail"
 
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
-	_, err = runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	_, err = runtime.requestDurableApproval(context.Background(), approval.Request{
 		SessionRef: activeSession.SessionRef,
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
 		Tool:       tool.Definition{Name: "Write"},
 		Call:       tool.Call{ID: "call-approval-resolve-fail", Name: "Write"},
-	}, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	}, approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		return decision, nil
 	}))
 	if err == nil || !strings.Contains(err.Error(), "simulated durable resolve failure") {
@@ -342,10 +342,10 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 		RunID: "run-redelivery", TurnID: "turn-redelivery", ToolCallID: "call-redelivery", ToolName: "Write",
 		Revision: 1, Status: session.ApprovalRecordPending, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, pending); err != nil {
+	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, pending, session.MutationGuard{}); err != nil {
 		t.Fatalf("appendApprovalRecord(pending) error = %v", err)
 	}
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
 	resolved := pending
 	resolved.Revision++
 	resolved.Status = session.ApprovalRecordResolved
@@ -353,21 +353,21 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 	resolved.OptionID = decision.OptionID
 	resolved.Approved = decision.Approved
 	resolved.UpdatedAt = now.Add(time.Second)
-	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, resolved); err != nil {
+	if err := runtime.appendApprovalRecord(context.Background(), activeSession.SessionRef, resolved, session.MutationGuard{}); err != nil {
 		t.Fatalf("appendApprovalRecord(resolved) error = %v", err)
 	}
 
-	waiter := make(chan agent.ApprovalResponse, 1)
+	waiter := make(chan approval.Response, 1)
 	runtime.mu.Lock()
-	runtime.approvalWaiters[resolved.RequestID] = approvalWaiter{responses: waiter, owner: t.Context()}
+	runtime.approvalWaiters[keyForApproval(resolved)] = approvalWaiter{responses: waiter, owner: t.Context()}
 	runtime.mu.Unlock()
 	defer func() {
 		runtime.mu.Lock()
-		delete(runtime.approvalWaiters, resolved.RequestID)
+		delete(runtime.approvalWaiters, keyForApproval(resolved))
 		runtime.mu.Unlock()
 	}()
 
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{
+	if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{
 		SessionRef: activeSession.SessionRef,
 		RequestID:  resolved.RequestID,
 		Decision:   decision,
@@ -391,7 +391,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 		kind := kind
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
-			var base session.Service
+			var base session.ManagedService
 			switch kind {
 			case "memory":
 				base = inmemory.NewStore(inmemory.Config{})
@@ -399,7 +399,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 				base = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 			}
 			resolverCtx, cancel := context.WithCancel(context.Background())
-			sessions := &cancelAfterCommitApprovalService{Service: base, cancel: cancel}
+			sessions := &cancelAfterCommitApprovalService{ManagedService: base, cancel: cancel}
 			active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "resolver-cancel", PreferredSessionID: "approval-" + kind})
 			if err != nil {
 				t.Fatal(err)
@@ -412,7 +412,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 
 			result := make(chan error, 1)
 			go func() {
-				_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+				_, requestErr := runtime.requestDurableApproval(context.Background(), approval.Request{
 					SessionRef: active.SessionRef, Session: active, RunID: runID, TurnID: turnID,
 					Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call-" + kind, Name: "Write"}, Execution: tool.InvocationContext{ItemID: "item-" + kind},
 				}, nil)
@@ -421,9 +421,9 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 
 			tokenID := waitForPendingApprovalRecord(t, sessions, active.SessionRef, runID)
 
-			decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, ReviewText: "review approved"}
+			decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true, ReviewText: "review approved"}
 			sessions.armed.Store(true)
-			if err := runtime.ResolveApproval(resolverCtx, agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
+			if err := runtime.ResolveApproval(resolverCtx, approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
 				t.Fatalf("ResolveApproval() error = %v", err)
 			}
 			if resolverCtx.Err() != context.Canceled {
@@ -437,7 +437,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			case <-time.After(2 * time.Second):
 				t.Fatal("live approval waiter remained asleep after committed resolution")
 			}
-			if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
+			if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
 				t.Fatalf("matching idempotent retry error = %v", err)
 			}
 			all, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
@@ -469,9 +469,66 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			conflict := decision
 			conflict.OptionID = "reject_once"
 			conflict.Approved = false
-			if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: conflict}); err == nil {
+			if err := runtime.ResolveApproval(context.Background(), approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: conflict}); err == nil {
 				t.Fatal("conflicting retry succeeded, want fail closed")
 			}
 		})
+	}
+}
+
+func TestRequestDurableApprovalHonorsFirstCommittedDecision(t *testing.T) {
+	sessions, active := newTestSessionService(t, "approval-first-wins")
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, release, err := sessions.AcquireWriter(t.Context(), active.SessionRef, "foreground")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	}()
+	winner := approval.Response{Outcome: "selected", OptionID: "reject_once", Reason: "declined"}
+	late := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	req := approval.Request{
+		SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn",
+		Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call", Name: "Write"},
+	}
+	got, err := rt.requestDurableApproval(ctx, req, approvalRequesterFunc(func(reviewerCtx context.Context, pending approval.Request) (approval.Response, error) {
+		resolution := approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: pending.ApprovalRequestID, Decision: winner}
+		// The external resolver has no Turn credentials.
+		if err := rt.ResolveApproval(t.Context(), resolution); err != nil {
+			t.Fatal(err)
+		}
+		if reviewerCtx.Err() == nil {
+			t.Fatal("outstanding reviewer did not receive cancellation")
+		}
+		if err := rt.ResolveApproval(t.Context(), resolution); err != nil {
+			t.Fatalf("identical retry: %v", err)
+		}
+		resolution.Decision = late
+		if err := rt.ResolveApproval(t.Context(), resolution); err == nil {
+			t.Fatal("different retry replaced the committed decision")
+		}
+		return late, nil
+	}))
+	if err != nil || got != winner {
+		t.Fatalf("tool received %+v, %v; want %+v", got, err, winner)
+	}
+	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var statuses []session.ApprovalRecordStatus
+	for _, event := range events {
+		if token := approvalRecordFromEvent(event); token != nil {
+			statuses = append(statuses, token.Status)
+		}
+	}
+	if len(statuses) != 2 || statuses[0] != session.ApprovalRecordPending || statuses[1] != session.ApprovalRecordResolved {
+		t.Fatalf("approval history: %v", statuses)
 	}
 }

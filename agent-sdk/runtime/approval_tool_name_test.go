@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -24,12 +24,12 @@ func TestEndpointApprovalRequestersPreserveNamePresence(t *testing.T) {
 			{"fallback", "Read file", new(false)},
 		} {
 			t.Run(source+"/"+tc.label, func(t *testing.T) {
-				var captured agent.ApprovalRequest
-				requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				var captured approval.Request
+				requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 					captured = req
-					return agent.ApprovalResponse{}, nil
+					return approval.Response{}, nil
 				})
-				call := agent.EndpointApprovalToolCall{ID: "call-1", Name: tc.name, NamePresent: tc.present, Title: "Read file", Kind: "read"}
+				call := session.ProtocolToolCall{ID: "call-1", Name: tc.name, NamePresent: tc.present, Title: "Read file", Kind: "read"}
 				var err error
 				if source == "controller" {
 					_, err = (controllerApprovalRequester{requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{ToolCall: call})

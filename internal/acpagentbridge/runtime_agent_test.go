@@ -849,13 +849,13 @@ func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
 	}
 }
 
-func newRuntimeAgentWithConfig(t *testing.T, override runtimeacp.Config) (*runtimeacp.RuntimeAgent, session.Service) {
+func newRuntimeAgentWithConfig(t *testing.T, override runtimeacp.Config) (*runtimeacp.RuntimeAgent, session.ManagedService) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	return newRuntimeAgentWithSessionsAndConfig(t, sessions, override)
 }
 
-func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service, override runtimeacp.Config) (*runtimeacp.RuntimeAgent, session.Service) {
+func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.ManagedService, override runtimeacp.Config) (*runtimeacp.RuntimeAgent, session.ManagedService) {
 	t.Helper()
 	runtime, err := sdkruntime.New(sdkruntime.Config{
 		Sessions: sessions,
@@ -1109,7 +1109,7 @@ func firstAgentMessageChunk(notifications []eventstream.SessionNotification) str
 }
 
 type promptRouterRuntime struct {
-	sessions      session.Service
+	sessions      session.ManagedService
 	expectedAgent string
 	runCalled     bool
 	attach        agent.AttachParticipantRequest
@@ -1231,7 +1231,7 @@ func (c *permissionCountingCallbacks) RequestPermission(_ context.Context, req a
 }
 
 type approvalReviewRuntime struct {
-	response agent.ApprovalResponse
+	response approval.Response
 	mode     string
 }
 
@@ -1240,7 +1240,7 @@ func (r *approvalReviewRuntime) Run(ctx context.Context, req agent.RunRequest) (
 		SessionRef: req.SessionRef,
 	}
 	if req.ApprovalRequester != nil {
-		resp, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
+		resp, err := req.ApprovalRequester.RequestApproval(ctx, approval.Request{
 			SessionRef: req.SessionRef,
 			Session:    activeSession,
 			RunID:      "run-1",

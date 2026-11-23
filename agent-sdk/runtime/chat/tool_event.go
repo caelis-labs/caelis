@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -47,8 +48,11 @@ func applyToolResultPresentation(event *session.Event, call model.ToolCall, resu
 	var parts []model.Part
 	if message != nil && len(message.ToolResults()) > 0 {
 		parts = message.ToolResults()[0].Content
+	} else if statusOverride == "in_progress" {
+		// Progress carries the preview that was already bounded for live publication.
+		parts = tool.ModelParts(result.Content)
 	} else {
-		view, _ := canonicalToolResult(result, nil)
+		view, _ := (tool.ResultProjection{}).Preview(context.Background(), result)
 		parts = tool.ModelParts(view.Content)
 	}
 	rawOutput := toolResultRawOutput(parts, err != nil)
@@ -247,41 +251,6 @@ func toolMeta(name string) map[string]any {
 			"runtime": map[string]any{
 				"tool": map[string]any{
 					"name": name,
-				},
-			},
-		},
-	}
-}
-
-func toolTruncationEventMeta(info tool.TruncationInfo) map[string]any {
-	truncation := tool.TruncationMetadata(info)
-	if len(truncation) == 0 {
-		return nil
-	}
-	return map[string]any{
-		"caelis": map[string]any{
-			"version": 1,
-			"runtime": map[string]any{
-				"tool": map[string]any{
-					"truncation": truncation,
-				},
-			},
-		},
-	}
-}
-
-func toolReservedNamespaceCollisionEventMeta(collision bool) map[string]any {
-	if !collision {
-		return nil
-	}
-	return map[string]any{
-		"caelis": map[string]any{
-			"version": 1,
-			"runtime": map[string]any{
-				"tool": map[string]any{
-					"provenance": map[string]any{
-						"reserved_namespace_collision": true,
-					},
 				},
 			},
 		},

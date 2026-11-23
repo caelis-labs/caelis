@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -20,7 +19,7 @@ type pendingApproval struct {
 	decisions         chan ApprovalDecision
 	done              chan struct{}
 	activated         chan struct{}
-	request           *agent.ApprovalRequest
+	request           *approval.Request
 	owner             *turnHandle
 	detached          bool
 	publishOnActivate bool
@@ -60,7 +59,7 @@ func newApprovalCoordinator(ref session.SessionRef) *approvalCoordinator {
 	}
 }
 
-func (c *approvalCoordinator) enqueue(owner *turnHandle, req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
+func (c *approvalCoordinator) enqueue(owner *turnHandle, req *approval.Request, publishOnActivate bool) (*pendingApproval, error) {
 	if c == nil {
 		return nil, approvalUnavailableError()
 	}
@@ -117,7 +116,7 @@ func (c *approvalCoordinator) enqueue(owner *turnHandle, req *agent.ApprovalRequ
 	return pending, nil
 }
 
-func detachedApprovalRequest(req *agent.ApprovalRequest) bool {
+func detachedApprovalRequest(req *approval.Request) bool {
 	if req == nil {
 		return false
 	}
@@ -132,7 +131,7 @@ func approvalUnavailableError() error {
 	}
 }
 
-func approvalRequestIDForRuntimeRequest(req *agent.ApprovalRequest) eventstream.ApprovalRequestID {
+func approvalRequestIDForRuntimeRequest(req *approval.Request) eventstream.ApprovalRequestID {
 	if req == nil {
 		return ""
 	}
@@ -191,7 +190,7 @@ func (c *approvalCoordinator) resolveLocked(pending *pendingApproval, decision A
 	if pending.request != nil {
 		permission = pending.request.Approval
 	}
-	response, err := approval.ResolveNativeResponse(permission, agent.ApprovalResponse{Outcome: decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved, Reason: decision.Reason, ReviewText: decision.ReviewText})
+	response, err := approval.ResolveNativeResponse(permission, approval.Response{Outcome: decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved, Reason: decision.Reason, ReviewText: decision.ReviewText})
 	if err != nil {
 		return &Error{Kind: KindValidation, Code: CodeInvalidRequest, UserVisible: true, Message: "gateway: invalid approval decision", Cause: err}
 	}
@@ -411,7 +410,7 @@ func (c *approvalCoordinator) isActiveLocked(pending *pendingApproval) bool {
 	return false
 }
 
-func autoApprovalParallelGroup(req *agent.ApprovalRequest) (string, <-chan struct{}) {
+func autoApprovalParallelGroup(req *approval.Request) (string, <-chan struct{}) {
 	if req == nil || req.ModelStep == nil {
 		return "", nil
 	}
@@ -526,7 +525,7 @@ func (c *approvalCoordinator) target(requestID eventstream.ApprovalRequestID) (A
 	}, true
 }
 
-func (h *turnHandle) enqueueApproval(req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
+func (h *turnHandle) enqueueApproval(req *approval.Request, publishOnActivate bool) (*pendingApproval, error) {
 	if h == nil || h.approvals == nil {
 		return nil, approvalUnavailableError()
 	}

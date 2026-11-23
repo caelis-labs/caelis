@@ -263,15 +263,14 @@ guard are invalid. An unmet condition returns the profile's structured
 `promptRequired` no-effect error. Callers do not silently retry it as a different
 operation. Ordinary unguarded external v2 prompts keep standard insertion
 behavior. The selected draft has no equivalent running-only or idle-only admission/CAS
-field, so this minimal negotiated metadata remains. Pure
-commands may use their durable interaction identity as an opaque Activity ID;
-that ID never authorizes steering into a native Turn.
+field, so this minimal negotiated metadata remains. A command such as
+`/status` gets a connection-local message ID. Its echo and command Activity
+are visible on the submitting connection. New commands add no Session event.
+Older Sessions can still contain command echoes recorded by earlier versions.
 
-Each successful controlled-draft `PromptResponse` also carries
-`_meta["caelis/activity_id"]`: the actual admitted native Turn, or the durable
-interaction identity for a command that creates no Turn. Its standard
-`messageId` identifies the canonical inserted input and the mandatory same-ID
-live user echo. Callers bind completion to this receipt's Activity and its true
+Each successful controlled-draft `PromptResponse` carries the Activity ID
+of the admitted native Turn, or the command's own ID for a display-only
+command. Its `messageId` matches the live user echo. Callers bind completion to this receipt's Activity and its true
 terminal state, including when state notifications arrive before the response.
 Another caller's running/idle pair cannot complete the request. Missing receipt
 identity is an unknown outcome; callers do not infer it from ambient Session

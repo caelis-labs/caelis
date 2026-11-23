@@ -4,6 +4,7 @@ import (
 	"context"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -23,6 +24,6 @@ type SubmissionCommitter interface {
 // ContextEditor exposes only guarded context commits at a model safe point.
 // It never hands an extension a Store or execution fence.
 type ContextEditor interface {
-	ContextEditSource() (agent.ContextSource, error)
-	CommitContextEdit(string, string, agent.ContextEdit, func(context.Context) (func(), error)) ([]*session.Event, error)
+	ContextEditSource() (hook.ContextSource, error)
+	CommitContextEdit(string, string, hook.ContextEdit, func(context.Context) (func(), error)) ([]*session.Event, error)
 }

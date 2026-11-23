@@ -13,6 +13,8 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -53,7 +55,7 @@ func TestCodeModeCommandApprovalUsesOriginalOwner(t *testing.T) {
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				if req.Tool.Name != "RunCommand" || req.Parent == nil || req.Parent.ID != "script" {
 					t.Error("approval lost real command target/direct parent")
 				}
@@ -66,7 +68,7 @@ func TestCodeModeCommandApprovalUsesOriginalOwner(t *testing.T) {
 				if mode == "deny" {
 					option = "cancel"
 				}
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: option, Approved: mode != "deny"}, nil
+				return approval.Response{Outcome: "selected", OptionID: option, Approved: mode != "deny"}, nil
 			})
 			var commandHandle string
 			driver := &mcpScriptModel{steps: func(i int, r *model.Request) []model.ToolCall {
@@ -175,17 +177,17 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
 			approve := make(chan struct{})
-			asked := make(chan agent.ApprovalRequest, 1)
-			requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			asked := make(chan approval.Request, 1)
+			requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				asked <- req
 				if err := req.OnAdmission(ctx); err != nil {
-					return agent.ApprovalResponse{}, err
+					return approval.Response{}, err
 				}
 				select {
 				case <-approve:
-					return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+					return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 				case <-ctx.Done():
-					return agent.ApprovalResponse{}, ctx.Err()
+					return approval.Response{}, ctx.Err()
 				}
 			})
 			var stale atomic.Bool
@@ -270,7 +272,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 			if tc.name == "settlement-failure" {
 				taskStore = &codeModeCommandFailingStore{TaskStore: tasks, err: persistErr}
 			}
-			rt, err := New(Config{Sessions: store, TaskStore: taskStore, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "mcp-test"})
+			rt, err := New(Config{Sessions: store, TaskStore: taskStore, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "mcp-test"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -293,7 +295,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 			if starts := backend.starts.Load(); starts != tc.wantStarts {
 				t.Errorf("command starts = %d, want %d", starts, tc.wantStarts)
 			}
-			var request agent.ApprovalRequest
+			var request approval.Request
 			select {
 			case request = <-asked:
 			default:

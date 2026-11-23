@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -30,8 +31,8 @@ func TestHooksModelInvokeRetryHasDistinctActualReceipts(t *testing.T) {
 			var ids []string
 			var order []string
 			var logical string
-			hook := func(name string) agent.ModelInvokeHook {
-				return agent.ModelInvokeHook{Name: name, Invoke: func(ctx context.Context, e agent.HookContext, req *model.Request, next agent.ModelNext) error {
+			middleware := func(name string) hook.ModelInvoke {
+				return hook.ModelInvoke{Name: name, Apply: func(ctx context.Context, e hook.AttemptContext, req *model.Request, next hook.ModelNext) error {
 					if e.AssemblyRevision != 1 || e.InvocationID == "" {
 						t.Error("attempt lost assembly/actual identity")
 					}
@@ -48,12 +49,12 @@ func TestHooksModelInvokeRetryHasDistinctActualReceipts(t *testing.T) {
 					err := next(ctx)
 					order = append(order, name+" after")
 					if explicit && name == "inner" && err != nil {
-						return &agent.RetryRequest{Cause: err}
+						return &hook.RetryRequest{Cause: err}
 					}
 					return err
 				}}
 			}
-			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ModelInvoke: []agent.ModelInvokeHook{hook("outer"), hook("inner")}}})
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ModelInvoke: []hook.ModelInvoke{middleware("outer"), middleware("inner")}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,7 +105,7 @@ func TestHooksTimedOutProducerRetainsFenceUntilActualDrain(t *testing.T) {
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "deadline", Timeout: 10 * time.Millisecond, Invoke: func(ctx context.Context, _ agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolInvoke: []hook.ToolInvoke{{Name: "deadline", Timeout: 10 * time.Millisecond, Apply: func(ctx context.Context, _ hook.ToolContext, next hook.ToolNext) (tool.Result, error) {
 		return next(ctx)
 	}}}}})
 	if err != nil {
@@ -149,7 +150,7 @@ func TestHooksTimedOutProducerRetainsFenceUntilActualDrain(t *testing.T) {
 }
 
 func TestHooksLateInputInvalidatesCompletionDecision(t *testing.T) {
-	for _, kind := range []agent.CompletionKind{agent.CompletionReject, agent.CompletionContinue, agent.CompletionReplace} {
+	for _, kind := range []hook.CompletionKind{hook.CompletionReject, hook.CompletionContinue, hook.CompletionReplace} {
 		t.Run(string(kind), func(t *testing.T) {
 			store, active := newTestSessionService(t, "late-hook")
 			entered, release := make(chan struct{}), make(chan struct{})
@@ -157,21 +158,21 @@ func TestHooksLateInputInvalidatesCompletionDecision(t *testing.T) {
 			driver := scriptedTestModel{generate: func(context.Context, *model.Request) *model.Response {
 				return textResponse(fmt.Sprintf("candidate %d", providers.Add(1)), model.Usage{})
 			}}
-			hooks := agent.Hooks{Input: []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "once", Apply: func(_ context.Context, _ agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
+			hooks := hook.Set{Input: []hook.Input{{Name: "once", Apply: func(_ context.Context, _ hook.InputContext, v hook.InputView) (hook.InputDecision, error) {
 				inputs.Add(1)
-				return agent.InputDecision{Message: v.Message}, nil
+				return hook.InputDecision{Message: v.Message}, nil
 			}}},
-				Completion: []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "finish", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
+				Completion: []hook.Completion{{Name: "finish", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
 					if completions.Add(1) > 1 {
-						return agent.CompletionDecision{Kind: agent.CompletionAccept}, nil
+						return hook.CompletionDecision{Kind: hook.CompletionAccept}, nil
 					}
 					close(entered)
 					<-release
-					d := agent.CompletionDecision{Kind: kind}
-					if kind == agent.CompletionContinue {
+					d := hook.CompletionDecision{Kind: kind}
+					if kind == hook.CompletionContinue {
 						d.Feedback = []model.Part{model.NewTextPart("obsolete feedback")}
 					}
-					if kind == agent.CompletionReplace {
+					if kind == hook.CompletionReplace {
 						m := model.NewTextMessage(model.RoleAssistant, "obsolete replacement")
 						d.Message = &m
 					}

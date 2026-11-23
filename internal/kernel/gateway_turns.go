@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -199,7 +200,7 @@ func (g *Gateway) runTurn(
 		runReq.Inputs = agent.CloneAgentCommunicationInputs(req.Inputs)
 	}
 	normalizeRunRequestPolicyProfile(&runReq)
-	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req approval.Request) (approval.Response, error) {
 		reviewModel := runReq.AgentSpec.Model
 		if req.ProducingModel != nil {
 			// A later model request can select a different model during this
@@ -271,7 +272,7 @@ func (g *Gateway) runParticipantTurn(
 		Source:         strings.TrimSpace(req.Source),
 		Stream:         true,
 	}
-	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req approval.Request) (approval.Response, error) {
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, nil)
 	})
 	runReq.SourceObserver = agent.SourceEventObserverFunc(func(observeCtx context.Context, event agent.SourceEvent) error {

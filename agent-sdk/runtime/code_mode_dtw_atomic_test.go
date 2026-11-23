@@ -22,6 +22,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -312,27 +313,27 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	var metrics []gojaexec.Metrics
 	executor := &gojaexec.Executor{Observe: func(m gojaexec.Metrics) { mu.Lock(); defer mu.Unlock(); metrics = append(metrics, m) }}
 	var approvals []map[string]any
-	requester := approvalRequesterFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		if r.Tool.Name != r.Call.Name || r.Tool.Metadata[mcp.MetadataServer] != "dtw" || r.Parent == nil || r.Parent.Kind != codemode.ToolKind || mcp.BindingForDefinition(r.Tool).Identity == "" || r.Execution.SessionID == "" || r.Execution.TurnID == "" || r.Execution.ItemID == "" {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval lost real MCP target: %s", r.Tool.Name)
+			return approval.Response{}, fmt.Errorf("approval lost real MCP target: %s", r.Tool.Name)
 		}
 		var args map[string]any
 		if e := json.Unmarshal(r.Call.Input, &args); e != nil {
-			return agent.ApprovalResponse{}, e
+			return approval.Response{}, e
 		}
 		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		if remote == "apps" {
 			if args["query"] != fixtureName || args["state"] != "running" {
-				return agent.ApprovalResponse{}, fmt.Errorf("unscoped discovery approval")
+				return approval.Response{}, fmt.Errorf("unscoped discovery approval")
 			}
 		} else if args["app"] != executable {
-			return agent.ApprovalResponse{}, fmt.Errorf("approval escaped fixture")
+			return approval.Response{}, fmt.Errorf("approval escaped fixture")
 		}
 
 		mu.Lock()
 		approvals = append(approvals, map[string]any{"target": r.Tool.Name, "remote": remote, "args": args, "approval": r.Approval, "response": "allow_once"})
 		mu.Unlock()
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
 	driver := &mcpScriptModel{steps: func(i int, request *model.Request) []model.ToolCall {
 		if i > 0 {

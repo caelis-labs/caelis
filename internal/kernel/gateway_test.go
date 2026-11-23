@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -2248,7 +2250,7 @@ func TestBeginTurnPublishesChildApprovalThroughControlQueue(t *testing.T) {
 	}
 	runtime := &childApprovalRuntime{
 		session:   activeSession,
-		responses: make(chan agent.ApprovalResponse, 1),
+		responses: make(chan approval.Response, 1),
 	}
 	gw, err := New(Config{
 		Sessions: staticSessionService{approvalRequest: ptrApprovalRequest(runtime.approvalRequest()),
@@ -2310,7 +2312,7 @@ func TestBeginTurnPublishesChildAutoReviewWithoutContextUsage(t *testing.T) {
 	}}
 	runtime := &childApprovalRuntime{
 		session:   activeSession,
-		responses: make(chan agent.ApprovalResponse, 1),
+		responses: make(chan approval.Response, 1),
 	}
 	gw, err := New(Config{
 		Sessions: staticSessionService{
@@ -2403,15 +2405,15 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	handle := newTestTurnHandle()
-	stepRefs := map[string][]*agent.ModelStepRef{
-		"step-1": agent.NewConcurrentModelStepRefs("step-1", 2),
-		"step-2": agent.NewConcurrentModelStepRefs("step-2", 2),
+	stepRefs := map[string][]*tool.ModelStepRef{
+		"step-1": tool.NewConcurrentModelStepRefs("step-1", 2),
+		"step-2": tool.NewConcurrentModelStepRefs("step-2", 2),
 	}
 	stepRefs["step-1"][1].MarkAdmissionComplete()
 	stepRefs["step-2"][1].MarkAdmissionComplete()
 	admitted := make(chan string, 2)
-	request := func(callID string, stepID string) *agent.ApprovalRequest {
-		return &agent.ApprovalRequest{
+	request := func(callID string, stepID string) *approval.Request {
+		return &approval.Request{
 			SessionRef: activeSession.SessionRef,
 			Session:    activeSession,
 			RunID:      "run-1",
@@ -2430,7 +2432,7 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 	}
 	type result struct {
 		callID string
-		resp   agent.ApprovalResponse
+		resp   approval.Response
 		err    error
 	}
 	results := make(chan result, 2)
@@ -2516,9 +2518,9 @@ func TestResolveApprovalRequestRunsSameModelStepAutoReviewsConcurrently(t *testi
 		t.Fatal(err)
 	}
 	handle := newTestTurnHandle()
-	stepRefs := agent.NewConcurrentModelStepRefs("shared-step", 2)
-	request := func(callID string, index int) *agent.ApprovalRequest {
-		return &agent.ApprovalRequest{
+	stepRefs := tool.NewConcurrentModelStepRefs("shared-step", 2)
+	request := func(callID string, index int) *approval.Request {
+		return &approval.Request{
 			SessionRef: activeSession.SessionRef,
 			Session:    activeSession,
 			RunID:      "run-1",
@@ -2530,7 +2532,7 @@ func TestResolveApprovalRequestRunsSameModelStepAutoReviewsConcurrently(t *testi
 	}
 	type result struct {
 		callID string
-		resp   agent.ApprovalResponse
+		resp   approval.Response
 		err    error
 	}
 	results := make(chan result, 2)
@@ -2935,7 +2937,7 @@ func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *tes
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := &revisionConflictOnceSessionService{Service: inmemory.NewStore(inmemory.Config{})}
+	sessions := &revisionConflictOnceSessionService{ManagedService: inmemory.NewStore(inmemory.Config{})}
 	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "u",
@@ -2949,7 +2951,7 @@ func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *tes
 		sessions: sessions,
 		clock:    time.Now,
 	}
-	req := &agent.ApprovalRequest{
+	req := &approval.Request{
 		SessionRef: activeSession.SessionRef,
 		TurnID:     "turn-1",
 	}
@@ -3150,7 +3152,7 @@ func TestResolveActiveAutoApprovalPropagatesApprovalDeadlineWithoutSyntheticDeci
 		context.Background(),
 		approvalCtx,
 		handle,
-		&agent.ApprovalRequest{
+		&approval.Request{
 			SessionRef: activeSession.SessionRef,
 			Session:    activeSession,
 			RunID:      "run-1",
@@ -3212,4 +3214,4 @@ func TestBindSessionExpiresBinding(t *testing.T) {
 	}
 }
 
-func ptrApprovalRequest(req agent.ApprovalRequest) *agent.ApprovalRequest { return &req }
+func ptrApprovalRequest(req approval.Request) *approval.Request { return &req }

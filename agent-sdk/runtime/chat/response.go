@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -43,13 +43,13 @@ func collectFinalResponse(
 	if err := model.ValidateRequestCapabilities(llm, req); err != nil {
 		return nil, nil, err
 	}
-	incremental := hookrun.FromContext(ctx).Hooks.StreamMode == agent.StreamIncremental
+	incremental := hookrun.FromContext(ctx).Hooks.StreamMode == hook.StreamIncremental
 	ctx = model.WithIrreversibleOutputTracking(ctx)
 	var pipeline *textStream
 	var ordinal uint64
 	ctx = model.WithInvocationStart(ctx, func(ctx context.Context, in model.Invocation, _ *model.Request) error {
-		e := hookrun.RequestEvidence(ctx)
-		e.OutputSource = agent.HookOutputProvider
+		e := hook.OutputContext{RequestContext: hookrun.RequestEvidence(ctx)}
+		e.OutputSource = hook.OutputProvider
 		e.InvocationID = in.ID
 		ordinal++
 		e.AttemptOrdinal = ordinal

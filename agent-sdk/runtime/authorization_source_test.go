@@ -10,6 +10,8 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -65,10 +67,10 @@ func TestAuthorizationRevokeReadbackCancelsOriginalFlight(t *testing.T) {
 			req := authorizationTestRequest(active, authorizationTestRequirement(active))
 			entered := make(chan context.Context, 1)
 			finished := make(chan struct{})
-			target := policyWrappedTool{session: active, approval: approvalContext{ctx: t.Context(), runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			target := policyAdmission{session: active, approval: approvalContext{ctx: t.Context(), runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
 				entered <- ctx
 				<-ctx.Done()
-				return agent.ApprovalResponse{}, ctx.Err()
+				return approval.Response{}, ctx.Err()
 			})}}
 			go func() { defer close(finished); _, _ = target.resolvePolicyApproval(t.Context(), req) }()
 			producer := <-entered
@@ -137,7 +139,7 @@ func TestAuthorizationRevokeReadbackCancelsOriginalFlight(t *testing.T) {
 // binding check and the single-use permission consumption. The Session lookup
 // is an existing yield point inside the permission owner, before consume.
 type refreshAuthorizationAtPermitStore struct {
-	session.Service
+	session.ManagedService
 	fired   atomic.Bool
 	refresh func() error
 }
@@ -148,7 +150,7 @@ func (s *refreshAuthorizationAtPermitStore) Session(ctx context.Context, ref ses
 			return session.Session{}, err
 		}
 	}
-	return s.Service.Session(ctx, ref)
+	return s.ManagedService.Session(ctx, ref)
 }
 func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
@@ -177,7 +179,7 @@ func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T)
 		t.Fatal(err)
 	}
 	files, active, _ := codeModeStore(t)
-	store := &refreshAuthorizationAtPermitStore{Service: files, refresh: func() error {
+	store := &refreshAuthorizationAtPermitStore{ManagedService: files, refresh: func() error {
 		publish("click", "v2")
 		if err := mgr.RefreshTools(ctx, "fixture", "fixture"); err != nil {
 			return err
@@ -201,7 +203,7 @@ func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T)
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: policies})
+	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: policies}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,9 +212,9 @@ func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T)
 			t.Error(err)
 		}
 	}()
-	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "fixture", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{&codemode.Tool{Name: "js_exec", Executor: &gojaexec.Executor{}}}, DeferredTools: mgr}, ApprovalRequester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "fixture", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{&codemode.Tool{Name: "js_exec", Executor: &gojaexec.Executor{}}}, DeferredTools: mgr}, ApprovalRequester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		asks.Add(1)
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 	})})
 	if err != nil {
 		t.Fatal(err)

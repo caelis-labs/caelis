@@ -132,8 +132,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/compact", s.compactSession)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/interactions", s.recordInteraction)
-	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState(false))
+	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state/idle", s.sessionState(true))
 	s.mux.HandleFunc("GET "+apiPrefix+"/status", s.sessionStatus)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/status", s.sessionStatus)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/reconnect", s.reconnectSession)
@@ -315,13 +315,16 @@ func (s *Server) compactSession(w http.ResponseWriter, r *http.Request) {
 	writeCommandResult(w, result, err)
 }
 
-func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
+func (s *Server) sessionState(requireIdle bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := s.requirePrincipal(w, r)
+		if !ok {
+			return
+		}
+		req := appserver.StateRequest{SessionID: r.PathValue("session_id"), RequireIdle: requireIdle}
+		result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, req)
+		writeJSONResult(w, result, err)
 	}
-	result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, appserver.StateRequest{SessionID: r.PathValue("session_id")})
-	writeJSONResult(w, result, err)
 }
 
 func (s *Server) sessionStatus(w http.ResponseWriter, r *http.Request) {

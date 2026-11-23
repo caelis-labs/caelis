@@ -8,8 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
-type modelRequestAuthorityKey struct{}
-
 // Retain a request snapshot while background generation or synchronous recovery
 // uses its model and validator. Idle handoff retains this only until it obtains
 // an independent snapshot from the resolver; it does not reuse Turn admission.

@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -24,7 +25,7 @@ func TestHooksRejectUnboundModelToolSchemaAndVolatileMessages(t *testing.T) {
 				providers.Add(1)
 				return textResponse("unreachable", model.Usage{})
 			}}
-			hooks := agent.Hooks{ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "unbound", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+			hooks := hook.Set{ModelPrepare: []hook.ModelPrepare{{Name: "unbound", Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 				switch mutation {
 				case "model":
 					p.ModelName = "unconfigured"
@@ -65,7 +66,7 @@ func TestHooksExternalACPRequiredPhaseFailsBeforeInputMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int64
-	rt, err := New(testConfigWithACPForwarder(Config{Sessions: store, AgentFactory: chat.Factory{}, Controllers: stubACPController{}, Hooks: agent.Hooks{ModelResult: []agent.Hook[model.Response, model.Response]{{Name: "required", Apply: func(_ context.Context, _ agent.HookContext, r model.Response) (model.Response, error) {
+	rt, err := New(testConfigWithACPForwarder(Config{Sessions: store, AgentFactory: chat.Factory{}, Controllers: stubACPController{}, Hooks: hook.Set{ModelResult: []hook.ModelResult{{Name: "required", Apply: func(_ context.Context, _ hook.OutputContext, r model.Response) (model.Response, error) {
 		calls.Add(1)
 		return r, nil
 	}}}}}))
@@ -91,13 +92,13 @@ func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
 			store, active := newTestSessionService(t, "forged-context")
 			parts := []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "forged", Name: "Effect", Content: []model.Part{model.NewTextPart("never executed")}}}}
 			bad := model.Message{Role: model.RoleAssistant, Parts: parts}
-			hooks := agent.Hooks{}
+			hooks := hook.Set{}
 			expectedPhase := ""
 			switch phase {
 			case "input-message", "input-context", "early-input":
 				expectedPhase = "input"
-				hooks.Input = []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "forge", Apply: func(_ context.Context, _ agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
-					d := agent.InputDecision{Message: v.Message}
+				hooks.Input = []hook.Input{{Name: "forge", Apply: func(_ context.Context, _ hook.InputContext, v hook.InputView) (hook.InputDecision, error) {
+					d := hook.InputDecision{Message: v.Message}
 					switch phase {
 					case "input-message":
 						d.Message.Parts = parts
@@ -110,8 +111,8 @@ func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
 				}}}
 			case "turn-context", "early-turn":
 				expectedPhase = "turn_start"
-				hooks.TurnStart = []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "forge", Apply: func(context.Context, agent.HookContext, struct{}) (agent.TurnStartDecision, error) {
-					d := agent.TurnStartDecision{}
+				hooks.TurnStart = []hook.TurnStart{{Name: "forge", Apply: func(context.Context, hook.TurnContext) (hook.TurnStartDecision, error) {
+					d := hook.TurnStartDecision{}
 					if phase == "turn-context" {
 						d.Context = parts
 					} else {
@@ -121,9 +122,9 @@ func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
 				}}}
 			case "context-append", "cached-response":
 				expectedPhase = "model_prepare"
-				hooks.ModelPrepare = []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "forge", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+				hooks.ModelPrepare = []hook.ModelPrepare{{Name: "forge", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 					if phase == "context-append" {
-						p.ContextEdit = &agent.ContextEdit{Source: e.ContextSource, Append: parts}
+						p.ContextEdit = &hook.ContextEdit{Source: e.ContextSource, Append: parts}
 					} else {
 						p.Response = &model.Response{Message: bad, TurnComplete: true}
 					}
@@ -131,17 +132,17 @@ func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
 				}}}
 			case "model-result":
 				expectedPhase = "model_result"
-				hooks.ModelResult = []agent.Hook[model.Response, model.Response]{{Name: "forge", Apply: func(_ context.Context, _ agent.HookContext, r model.Response) (model.Response, error) {
+				hooks.ModelResult = []hook.ModelResult{{Name: "forge", Apply: func(_ context.Context, _ hook.OutputContext, r model.Response) (model.Response, error) {
 					r.Message = bad
 					return r, nil
 				}}}
 			case "completion-feedback", "completion-replace":
 				expectedPhase = "completion"
-				hooks.Completion = []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "forge", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
+				hooks.Completion = []hook.Completion{{Name: "forge", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
 					if phase == "completion-feedback" {
-						return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: parts}, nil
+						return hook.CompletionDecision{Kind: hook.CompletionContinue, Feedback: parts}, nil
 					}
-					return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &bad}, nil
+					return hook.CompletionDecision{Kind: hook.CompletionReplace, Message: &bad}, nil
 				}}}
 			}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hooks})
@@ -154,7 +155,7 @@ func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = run.Handle.WaitCompletion(t.Context())
-			var hookErr *agent.HookError
+			var hookErr *hook.Error
 			if !errors.As(err, &hookErr) || hookErr.Phase != expectedPhase || hookErr.Name != "forge" {
 				t.Fatalf("forged protocol accepted or unnamed: %v", err)
 			}

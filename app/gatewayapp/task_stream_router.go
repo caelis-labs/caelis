@@ -73,11 +73,11 @@ func (s hostTaskStreamService) controller(sessionID string) (terminal.Controller
 		}
 		composition = &runtime.instance.runtimeComposition
 	}
-	provider := composition.KernelTerminals()
-	if provider == nil || provider.Terminals() == nil {
+	controller := composition.KernelTerminals()
+	if controller == nil {
 		return nil, taskStreamRuntimeUnavailable()
 	}
-	return provider.Terminals(), nil
+	return controller, nil
 }
 
 func taskStreamRuntimeUnavailable() error {

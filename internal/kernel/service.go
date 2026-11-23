@@ -6,7 +6,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 type Service interface {
@@ -37,10 +36,6 @@ type ControlPlaneService interface {
 	PromptParticipant(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
 	StartParticipant(context.Context, StartParticipantRequest) (BeginTurnResult, error)
 	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
-}
-
-type TerminalProvider interface {
-	Terminals() terminal.Controller
 }
 
 type TurnResolver interface {

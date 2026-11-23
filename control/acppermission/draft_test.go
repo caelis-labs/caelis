@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
@@ -35,11 +34,11 @@ func TestDraftPermissionIndependentSubjectsPreserveCanonicalIdentity(t *testing.
 					t.Fatalf("independent subject acquired fake tool: %+v", permission.ToolCall)
 				}
 			}
-			canonical := approval.PayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: permission})
+			canonical := approval.PayloadFromRuntimeRequest(approval.Request{Approval: permission})
 			if canonical.Context.Title != req.Title || !reflect.DeepEqual(canonical.Context.RawSubject, permission.Context.RawSubject) {
 				t.Fatal("machine context was replaced by public facts")
 			}
-			display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: permission}))
+			display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(approval.Request{Approval: permission}))
 			event := &session.Event{Type: session.EventTypeLifecycle, Protocol: &session.EventProtocol{Method: session.ProtocolMethodRequestPermission, Permission: display}}
 			envs := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "owner", ApprovalRequestID: "control-admission"}, event)
 			if len(envs) != 1 {
@@ -62,15 +61,15 @@ func TestDraftPermissionIndependentSubjectsPreserveCanonicalIdentity(t *testing.
 				}
 			}
 			for _, choice := range permission.Options {
-				response, err := acppermission.ResponseToDraft(req, agent.ApprovalResponse{Outcome: "selected", OptionID: choice.ID})
+				response, err := acppermission.ResponseToDraft(req, approval.Response{Outcome: "selected", OptionID: choice.ID})
 				if err != nil || response.Outcome.Selected == nil || string(response.Outcome.Selected.OptionId) != choice.ID {
 					t.Fatalf("native resolution = %+v %v", response, err)
 				}
 			}
-			if _, err := acppermission.ResponseToDraft(req, agent.ApprovalResponse{Outcome: "selected", OptionID: "invented"}); err == nil {
+			if _, err := acppermission.ResponseToDraft(req, approval.Response{Outcome: "selected", OptionID: "invented"}); err == nil {
 				t.Fatal("unoffered choice granted")
 			}
-			cancelled, err := acppermission.ResponseToDraft(req, agent.ApprovalResponse{})
+			cancelled, err := acppermission.ResponseToDraft(req, approval.Response{})
 			if err != nil || cancelled.Outcome.Cancelled == nil {
 				t.Fatal("no decision was interpreted as a grant")
 			}
@@ -96,7 +95,7 @@ func TestDraftPermissionActualToolIdentityRemainsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonical := approval.PayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: original})
+	canonical := approval.PayloadFromRuntimeRequest(approval.Request{Approval: original})
 	if original.ToolCall.ID != " exact-actual-id " || canonical.ToolCallID != original.ToolCall.ID || approval.ProtocolApprovalFromPayload(canonical).ToolCall.ID != original.ToolCall.ID {
 		t.Fatal("actual endpoint tool identity was normalized")
 	}
@@ -111,15 +110,15 @@ func TestDraftPermissionReportedDisplayCannotChangeCanonicalEvidenceOrOptions(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonical := approval.PayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: permission})
+	canonical := approval.PayloadFromRuntimeRequest(approval.Request{Approval: permission})
 	if canonical.Subject.Reported || canonical.Subject.Scope.State != session.ApprovalFieldOpaque || canonical.Subject.Operation.Text != "execute" || canonical.Context.Title != req.Title || string(canonical.Context.NativeRequestID) != `"actual-native-request"` || !strings.Contains(string(canonical.Context.RawSubject), "git fetch") {
 		t.Fatalf("remote display claims became authoritative: %+v", canonical)
 	}
-	display := approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: permission})
+	display := approval.DisplayPayloadFromRuntimeRequest(approval.Request{Approval: permission})
 	if !display.Subject.Reported || display.Subject.Scope.State != session.ApprovalFieldOpaque || !display.Subject.SensitiveInput || display.Subject.Targets[0].Text != "" || len(display.Subject.Grants) != 2 || display.Subject.Grants[0].OptionID != "native-reject" || display.Subject.Grants[0].Scope.State != session.ApprovalFieldUnavailable || display.Subject.Grants[1].OptionID != "native-allow" {
 		t.Fatalf("bounded presentation or original choices lost: %+v", display.Subject)
 	}
-	if _, err := acppermission.ResponseToDraft(req, agent.ApprovalResponse{Outcome: "selected", OptionID: "invented"}); err == nil {
+	if _, err := acppermission.ResponseToDraft(req, approval.Response{Outcome: "selected", OptionID: "invented"}); err == nil {
 		t.Fatal("display hint manufactured permission")
 	}
 	if display.Context.RawSubject != nil || display.Context.NativeRequestID != nil {

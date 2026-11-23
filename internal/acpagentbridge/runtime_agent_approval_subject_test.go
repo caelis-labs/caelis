@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -39,7 +38,7 @@ func (r *approvalEvidenceReviewer) ReviewApproval(_ context.Context, req approva
 func TestRuntimeAgentApprovalDisplayCopyKeepsCanonicalReviewAndResolve(t *testing.T) {
 	const secret = "DIRECT-MARKED-SECRET"
 	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "native-call", Name: "custom", Title: secret, RawInput: map[string]any{"credential": secret}}, Options: []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}}
-	req := agent.ApprovalRequest{SessionRef: session.SessionRef{SessionID: "session"}, Tool: tool.Definition{Name: "custom", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}},
+	req := approval.Request{SessionRef: session.SessionRef{SessionID: "session"}, Tool: tool.Definition{Name: "custom", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}},
 		Call: tool.Call{ID: "native-call", Name: "custom", Input: json.RawMessage(`{"credential":"DIRECT-MARKED-SECRET"}`)}, Approval: original}
 	callbacks := &approvalDisplayCallbacks{}
 	response, err := (approvalRequester{callbacks: callbacks, mode: approval.ModeManual}).RequestApproval(t.Context(), req)

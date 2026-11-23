@@ -181,7 +181,7 @@ func (r *sagaRunner) Cancel(context.Context, delegation.Anchor) error {
 }
 
 type sagaSessionService struct {
-	session.Service
+	session.ManagedService
 	failParticipant   bool
 	commitParticipant bool
 	failCanonical     bool
@@ -198,13 +198,13 @@ type completionNoticeFailSessionService struct {
 }
 
 type revisionBumpBeforeParticipantSessionService struct {
-	session.Service
+	session.ManagedService
 	once  sync.Once
 	calls atomic.Int64
 }
 
 type blockingRevisionConflictSessionService struct {
-	session.Service
+	session.ManagedService
 	once      sync.Once
 	attempted chan struct{}
 	release   chan struct{}
@@ -257,14 +257,14 @@ func (s *revisionBumpBeforeParticipantSessionService) PutParticipantWithEvent(
 	if bumpErr != nil {
 		return session.Session{}, nil, bumpErr
 	}
-	return s.Service.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
+	return s.ManagedService.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
 }
 
 func (s *revisionBumpBeforeParticipantSessionService) RemoveParticipantWithEvent(
 	ctx context.Context,
 	req session.RemoveParticipantWithEventRequest,
 ) (session.Session, *session.Event, error) {
-	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+	return s.ManagedService.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
 }
 
 func (s *blockingRevisionConflictSessionService) PutParticipantWithEvent(
@@ -291,7 +291,7 @@ func (s *blockingRevisionConflictSessionService) RemoveParticipantWithEvent(
 	ctx context.Context,
 	req session.RemoveParticipantWithEventRequest,
 ) (session.Session, *session.Event, error) {
-	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+	return s.ManagedService.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
 }
 
 func (s *completionNoticeFailSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
@@ -308,7 +308,7 @@ func (s *sagaSessionService) PutParticipantWithEvent(ctx context.Context, req se
 	if s.failParticipant {
 		return session.Session{}, nil, errors.New("forced participant lifecycle failure")
 	}
-	updated, event, err := s.Service.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
+	updated, event, err := s.ManagedService.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
 	if err == nil && s.commitParticipant {
 		s.commitParticipant = false
 		return updated, event, &session.CommittedError{Err: errors.New("forced committed participant error")}
@@ -319,7 +319,7 @@ func (s *sagaSessionService) RemoveParticipantWithEvent(ctx context.Context, req
 	if s.failDetach {
 		return session.Session{}, nil, errors.New("forced participant detach failure")
 	}
-	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+	return s.ManagedService.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
 }
 func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	canonical := req.Event != nil && session.IsCanonicalHistoryEvent(req.Event)
@@ -329,7 +329,7 @@ func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.Append
 			return nil, errors.New("forced canonical dialogue failure")
 		}
 	}
-	persisted, err := s.Service.AppendEvent(ctx, req)
+	persisted, err := s.ManagedService.AppendEvent(ctx, req)
 	if err == nil && canonical && s.commitCanonical {
 		s.commitCanonical = false
 		return persisted, &session.CommittedError{Err: errors.New("forced committed canonical error")}
@@ -469,7 +469,7 @@ func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
 
 func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *testing.T) {
 	baseSessions := memory.NewStore(memory.Config{})
-	sessions := &sagaSessionService{Service: baseSessions, failCanonicalAt: 2}
+	sessions := &sagaSessionService{ManagedService: baseSessions, failCanonicalAt: 2}
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
@@ -514,7 +514,7 @@ func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *tes
 
 func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) {
 	baseSessions := memory.NewStore(memory.Config{})
-	sessions := &completionNoticeFailSessionService{sagaSessionService: &sagaSessionService{Service: baseSessions}}
+	sessions := &completionNoticeFailSessionService{sagaSessionService: &sagaSessionService{ManagedService: baseSessions}}
 	sessions.fail.Store(true)
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
@@ -579,7 +579,7 @@ func TestSubagentSpawnRetriesParticipantAttachAfterConcurrentSessionMutation(t *
 	t.Parallel()
 
 	base := memory.NewStore(memory.Config{})
-	sessions := &revisionBumpBeforeParticipantSessionService{Service: base}
+	sessions := &revisionBumpBeforeParticipantSessionService{ManagedService: base}
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "spawn-revision-retry",
 	})
@@ -632,7 +632,7 @@ func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *
 
 	base := memory.NewStore(memory.Config{})
 	sessions := &blockingRevisionConflictSessionService{
-		Service: base, attempted: make(chan struct{}), release: make(chan struct{}),
+		ManagedService: base, attempted: make(chan struct{}), release: make(chan struct{}),
 	}
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "spawn-persistent-revision-conflict",
@@ -729,7 +729,7 @@ func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *
 func newSubagentCompletionSagaRuntime(
 	t *testing.T,
 	store taskapi.Store,
-	sessions session.Service,
+	sessions session.ManagedService,
 	runner subagent.Runner,
 ) (*Runtime, session.Session) {
 	t.Helper()
@@ -787,7 +787,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sessions := &sagaSessionService{Service: base, failParticipant: test.failParticipant, failCanonical: test.failCanonical, failCanonicalAt: test.failCanonicalAt}
+			sessions := &sagaSessionService{ManagedService: base, failParticipant: test.failParticipant, failCanonical: test.failCanonical, failCanonicalAt: test.failCanonicalAt}
 			store := newSagaTaskStore()
 			store.failOnPut = test.failPut
 			store.failStatus = test.failStatus
@@ -1018,7 +1018,7 @@ func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	spawnedRunner := &sagaRunner{}
-	spawnedSessions := &sagaSessionService{Service: base}
+	spawnedSessions := &sagaSessionService{ManagedService: base}
 	spawnedRuntime, err := New(testConfigWithACPForwarder(Config{
 		Sessions: spawnedSessions, AgentFactory: chat.Factory{}, Subagents: spawnedRunner, TaskStore: spawnedStore,
 	}))
@@ -1046,7 +1046,7 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := &sagaSessionService{Service: base, failDetach: true}
+	sessions := &sagaSessionService{ManagedService: base, failDetach: true}
 	store := newSagaTaskStore()
 	runner := &sagaRunner{}
 	req := taskapi.SubagentStartRequest{SpawnID: "detach-recovery", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar}
@@ -1066,7 +1066,7 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 	}
 	// Seed mid-compensation after a durable post-spawn attach, before detach.
 	// Pure intermediate marker failures no longer exist; resume from compensating.
-	lifecycle := sessions.Service.(session.ParticipantLifecycleService)
+	lifecycle := sessions.ManagedService.(session.ParticipantLifecycleService)
 	if _, _, err := lifecycle.PutParticipantWithEvent(context.Background(), session.PutParticipantWithEventRequest{
 		SessionRef: active.SessionRef,
 		Binding: session.ParticipantBinding{
@@ -1154,7 +1154,7 @@ func TestSubagentSpawnCancelSuccessCannotRollForwardAfterTerminalWriteFailure(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := &sagaSessionService{Service: base, failParticipant: true}
+	sessions := &sagaSessionService{ManagedService: base, failParticipant: true}
 	store := newSagaTaskStore()
 	store.failStatus = string(spawnPhaseCompensated)
 	runner := &sagaRunner{}
@@ -1525,7 +1525,7 @@ func TestSubagentSpawnCommittedErrorsReloadAndRollForward(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := &sagaSessionService{Service: base, commitParticipant: true, commitCanonical: true}
+	sessions := &sagaSessionService{ManagedService: base, commitParticipant: true, commitCanonical: true}
 	store := newSagaTaskStore()
 	// Put sequence: 1 intent, 2 claim, 3 post_spawn, 4 final_event_persisted, 5 committed.
 	// CommittedError recovery is implemented on spawn-phase CAS puts; exercise put 3.

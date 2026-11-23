@@ -516,16 +516,6 @@ func (s *applicationChildSessions) Prompt(ctx context.Context, req appserver.Pro
 	req.SourceKind, req.GrantID = bound.Child.Source.Kind, bound.Child.Source.GrantID
 	return s.SessionClient.Prompt(ctx, req)
 }
-func (s *applicationChildSessions) RecordInteraction(ctx context.Context, req appserver.RecordInteractionRequest) (appserver.CommandResult, error) {
-	if _, err := s.binding(ctx, req.SessionID); err != nil {
-		return appserver.CommandResult{}, err
-	}
-	client, ok := s.SessionClient.(appserver.InteractionClient)
-	if !ok {
-		return appserver.CommandResult{}, errors.New("application child: interaction owner is unavailable")
-	}
-	return client.RecordInteraction(ctx, req)
-}
 
 // The local channel fills only the factual native relation on reattachment.
 // The scoped Session client still checks the exact persisted parent binding.
@@ -546,6 +536,4 @@ func (a *applicationDraftChild) ResumeSession(ctx context.Context, req v2.Resume
 	return a.DraftAgent.ResumeSession(ctx, req)
 }
 
-// Preserve exact native decision options and identities in inherited methods.
-var _ appserver.InteractionClient = (*applicationChildSessions)(nil)
 var _ endpoint.Resolver = (*applicationChildren)(nil)

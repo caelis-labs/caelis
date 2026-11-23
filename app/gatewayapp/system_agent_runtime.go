@@ -14,7 +14,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -119,7 +121,7 @@ type systemManagedAgentRuntime struct {
 }
 
 type systemManagedAgentExecution struct {
-	staging session.Service
+	staging session.ManagedService
 	core    *sdkruntime.Runtime
 	history []*session.Event
 	key     string
@@ -148,8 +150,8 @@ func systemManagedHistoryExtends(previous, next []*session.Event) bool {
 
 type systemManagedAgentRuntimeConfig struct {
 	AgentFactory    agent.AgentFactory
-	Hooks           agent.Hooks
-	StagingSessions func() session.Service
+	Hooks           hook.Set
+	StagingSessions func() session.ManagedService
 	TraceSink       agent.TraceSink
 	Diagnostics     *slog.Logger
 }
@@ -171,13 +173,16 @@ func newSystemManagedAgentRuntime(factory agent.AgentFactory) *systemManagedAgen
 func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConfig) *systemManagedAgentRuntime {
 	if config.AgentFactory == nil {
 		config.AgentFactory = chat.Factory{}
+		if config.Hooks.ToolProjection == (tool.ResultProjection{}) {
+			config.Hooks.ToolProjection = localResultProjection
+		}
 	}
 	if config.StagingSessions == nil {
-		config.StagingSessions = func() session.Service {
+		config.StagingSessions = func() session.ManagedService {
 			return inmemory.NewStore(inmemory.Config{})
 		}
 	}
-	config.Hooks = agent.CloneHooks(config.Hooks)
+	config.Hooks = config.Hooks.Clone()
 	return &systemManagedAgentRuntime{config: config}
 }
 
@@ -214,7 +219,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if r != nil && r.resident && r.execution != nil && r.execution.key == key && systemManagedHistoryExtends(r.execution.history, plan.Events) {
 		previous = r.execution
 	}
-	var staging session.Service
+	var staging session.ManagedService
 	seed := plan.Events
 	if previous != nil {
 		staging = previous.staging
@@ -235,11 +240,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		return systemManagedAgentRunResult{}, err
 	}
 	if len(seed) > 0 {
-		batch, ok := staging.(session.EventBatchService)
-		if !ok {
-			return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
-		}
-		if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(seed)}); err != nil {
+		if _, err := staging.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(seed)}); err != nil {
 			return systemManagedAgentRunResult{}, err
 		}
 	}
@@ -264,6 +265,11 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if previous != nil {
 		core = previous.core
 	} else {
+		policies, err := presets.NewRegistry()
+		if err != nil {
+			return systemManagedAgentRunResult{}, err
+		}
+		config.Hooks.ToolPolicy = policies
 		core, err = sdkruntime.New(sdkruntime.Config{
 			Compactor:    compactor,
 			Sessions:     staging,
@@ -271,7 +277,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 			Compaction:   plan.Compaction,
 			TraceSink:    config.TraceSink,
 			Hooks:        config.Hooks,
-			HookPurpose:  agent.HookPurposeSystemAgent,
+			HookPurpose:  hook.PurposeSystemAgent,
 			Diagnostics:  config.Diagnostics,
 		})
 		if err != nil {
@@ -391,7 +397,7 @@ func systemManagedAgentConversationEvents(events []*session.Event) []*session.Ev
 	return out
 }
 
-func startSystemManagedAgentStagingSession(ctx context.Context, service session.Service, planned session.Session) (session.Session, error) {
+func startSystemManagedAgentStagingSession(ctx context.Context, service session.Lifecycle, planned session.Session) (session.Session, error) {
 	ref := session.NormalizeSessionRef(planned.SessionRef)
 	if ref.AppName == "" {
 		ref.AppName = "caelis-system"

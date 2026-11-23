@@ -19,8 +19,8 @@ import (
 var _ taskapi.Store = (*TaskStore)(nil)
 var _ taskapi.CASStore = (*TaskStore)(nil)
 
-// NewTaskStore constructs one task store facade backed by the same file store
-// index used for session metadata.
+// NewTaskStore shares the Session store's database and writer lock.
+// The first Task operation initializes its table.
 func NewTaskStore(store *Store) *TaskStore {
 	if store == nil {
 		store = NewStore(Config{})
@@ -271,7 +271,7 @@ func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.Sess
 }
 
 func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskapi.Entry, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +382,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 }
 
 func (s *Store) getTaskIndex(taskID string) (*taskapi.Entry, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +400,7 @@ func (s *Store) getTaskIndex(taskID string) (*taskapi.Entry, error) {
 }
 
 func (s *Store) listTaskIndex(ref session.SessionRef) ([]*taskapi.Entry, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +430,7 @@ func (s *Store) listTaskIndex(ref session.SessionRef) ([]*taskapi.Entry, error) 
 }
 
 func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, handle string) (*taskapi.Entry, error) {
-	db, err := s.openSessionIndex()
+	db, err := s.openTaskIndex()
 	if err != nil {
 		return nil, err
 	}

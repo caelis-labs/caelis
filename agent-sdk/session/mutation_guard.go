@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 )
 
 // MutationAuthority identifies the explicit authority for a session mutation.
@@ -30,12 +31,6 @@ const (
 	ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
 	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
 	ControlMutationPurposeTest          ControlMutationPurpose = "test"
-	// ControlMutationPurposeInteraction appends display-only conversation input
-	// without changing Runtime execution, model context or authorization.
-	ControlMutationPurposeInteraction ControlMutationPurpose = "conversation_interaction"
-	// ControlMutationPurposeIdleInteraction atomically rejects the same display
-	// append when an execution fence is held by any producer.
-	ControlMutationPurposeIdleInteraction ControlMutationPurpose = "idle_conversation_interaction"
 	// ControlMutationPurposeSubagentCompletion owns the asynchronous terminal
 	// Task and side-participant commit after the spawning Turn may have ended.
 	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
@@ -56,6 +51,7 @@ type MutationGuard struct {
 	OwnerID      string                 `json:"owner_id,omitempty"`
 	FencingToken uint64                 `json:"fencing_token,omitempty"`
 	claimToken   string
+	turnInUse    *atomic.Bool
 }
 
 type mutationGuardContextKey struct{}
@@ -67,7 +63,7 @@ func ContextWithRuntimeFence(ctx context.Context, fence SessionFence) context.Co
 	}
 	return context.WithValue(ctx, mutationGuardContextKey{}, MutationGuard{
 		Authority: MutationAuthorityRuntime, FenceID: fence.FenceID, OwnerID: fence.OwnerID, FencingToken: fence.FencingToken,
-		claimToken: fence.claimToken,
+		claimToken: fence.claimToken, turnInUse: fence.turnInUse,
 	})
 }
 
@@ -208,7 +204,6 @@ func sessionFenceMutationAuthorized(active SessionFence, guard MutationGuard) bo
 func controlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool {
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
-		ControlMutationPurposeInteraction,
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeSubagentActivity,
@@ -223,8 +218,6 @@ func controlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool 
 func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 	switch purpose {
 	case ControlMutationPurposeApproval,
-		ControlMutationPurposeInteraction,
-		ControlMutationPurposeIdleInteraction,
 		ControlMutationPurposeHandoff,
 		ControlMutationPurposeCoordinator,
 		ControlMutationPurposeParticipant,

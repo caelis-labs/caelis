@@ -2,58 +2,17 @@ package gatewayapp
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
-// CodeModeFixtureCall migrates deterministic provider fixtures to the product's
-// real JS interface. It neither executes tools nor replaces live-model evidence.
-func CodeModeFixtureCall(enabled bool, name, args string) (string, string) {
-	if !enabled {
-		return name, args
+// CodeModeFixtureArgs encodes the body of a scripted js_exec call.
+func CodeModeFixtureArgs(code string) string {
+	encoded, err := json.Marshal(map[string]string{"code": code})
+	if err != nil {
+		panic(err)
 	}
-	var source string
-	switch name {
-	case mcp.SearchToolName:
-		source = "return await tools.search(" + args + ");"
-	case mcp.CallToolName:
-		var input struct {
-			Name string          `json:"tool_name"`
-			Args json.RawMessage `json:"arguments"`
-		}
-		_ = json.Unmarshal([]byte(args), &input)
-		nameJSON, _ := json.Marshal(input.Name)
-		if len(input.Args) == 0 {
-			input.Args = []byte(`{}`)
-		}
-		source = "await tools.search({name:" + string(nameJSON) + "});return await tools.call(" + string(nameJSON) + "," + string(input.Args) + ");"
-	default:
-		return name, args
-	}
-	encoded, _ := json.Marshal(map[string]any{"code": source})
-	return codemode.ToolName, string(encoded)
-}
-
-// CodeModeFixturePhase preserves a scripted fixture's phase machine while its
-// actual response and execution use js_exec rather than hidden legacy entries.
-func CodeModeFixturePhase(name, args string) string {
-	if name != codemode.ToolName {
-		return name
-	}
-	var input struct {
-		Code string `json:"code"`
-	}
-	_ = json.Unmarshal([]byte(args), &input)
-	if strings.Contains(input.Code, "tools.call(") {
-		return mcp.CallToolName
-	}
-	if strings.Contains(input.Code, "tools.search(") {
-		return mcp.SearchToolName
-	}
-	return mcp.CallToolName
+	return string(encoded)
 }
 
 // CodeModeFixtureSelectedTools keeps the opt-in external-package model harness

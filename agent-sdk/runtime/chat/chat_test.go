@@ -16,6 +16,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -577,7 +578,7 @@ func TestChatAgentDispatchesModelStepPosition(t *testing.T) {
 		{name: "concurrent", parallel: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			observed := make(chan *agent.ModelStepRef, 2)
+			observed := make(chan *tool.ModelStepRef, 2)
 			makeTool := func(name string) tool.Tool {
 				return stepDispatchTool{
 					Tool: tool.NamedTool{
@@ -632,7 +633,7 @@ func TestChatAgentDispatchesModelStepPosition(t *testing.T) {
 
 type stepDispatchTool struct {
 	tool.Tool
-	observe chan<- *agent.ModelStepRef
+	observe chan<- *tool.ModelStepRef
 }
 
 func (t stepDispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, dispatch toolbinding.Dispatch) (tool.Result, error) {
@@ -2279,7 +2280,7 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 	result := tool.Result{
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`)}},
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
 	message := toolResultMessageFromCanonical(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
@@ -2587,7 +2588,7 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("messageFromDurableEvent() = false, want Task result")
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
 	live := toolResultMessageFromCanonical(call, canonical, nil)
 	if !reflect.DeepEqual(replayed, live) {
 		t.Fatalf("Task result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
@@ -2608,7 +2609,7 @@ func TestImageToolResultModelContextRoundTrip(t *testing.T) {
 			tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "pixel.png"},
 		},
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
 	live := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(call, result, nil, &live)
 	replayed, ok := messageFromDurableEvent(event)
@@ -2882,7 +2883,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		Name: "RunCommand",
 		Args: `{"command":"find /tmp -delete"}`,
 	}
-	canonical, truncationMeta := canonicalToolResult(result, nil)
+	canonical, truncationMeta := (tool.ResultProjection{}).Project(t.Context(), result)
 	message := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
@@ -2962,7 +2963,7 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 			"result": large,
 		})}},
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
 	message := toolResultMessageFromCanonical(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
@@ -3271,7 +3272,7 @@ func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
+		Context: hookrun.WithRun(t.Context(), hook.Set{StreamMode: hook.StreamIncremental}, hook.TurnContext{}),
 		Session: session.Session{
 			SessionRef: session.SessionRef{SessionID: "sess-stream"},
 		},
@@ -4232,7 +4233,7 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
+		Context: hookrun.WithRun(t.Context(), hook.Set{StreamMode: hook.StreamIncremental}, hook.TurnContext{}),
 		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-retry-tool"}},
 		Events: []*session.Event{{
 			Type:    session.EventTypeUser,

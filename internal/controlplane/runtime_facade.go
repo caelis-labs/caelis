@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
@@ -46,7 +47,7 @@ func (f *runtimeFacade) RunState(ctx context.Context, ref session.SessionRef) (a
 }
 
 func (f *runtimeFacade) Terminals() terminal.Controller {
-	provider, _ := f.inner.(agent.TerminalProvider)
+	provider, _ := f.inner.(terminal.Provider)
 	if provider == nil {
 		return nil
 	}
@@ -72,8 +73,8 @@ func (f *runtimeFacade) AttachLiveRun(ctx context.Context, req agent.AttachLiveR
 	return result, nil
 }
 
-func (f *runtimeFacade) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error {
-	resolver, ok := f.inner.(agent.ApprovalResolver)
+func (f *runtimeFacade) ResolveApproval(ctx context.Context, req approval.ResolveRequest) error {
+	resolver, ok := f.inner.(approval.Resolver)
 	if !ok {
 		return fmt.Errorf("controlplane: decorated runtime does not support approval resolution")
 	}

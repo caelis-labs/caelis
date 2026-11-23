@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
@@ -75,7 +74,7 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 			t.Fatal("replay limited to eight approvals")
 		}
 		if len(pending) > 0 {
-			if _, err := service.(session.EventBatchService).AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: pending}); err != nil {
+			if _, err := service.AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: pending}); err != nil {
 				t.Fatal(err)
 			}
 			pending = nil
@@ -90,10 +89,10 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 			}
 			pause.Metadata[policy.MetadataSandboxPolicy] = snapshot
 		}
-		runtimeReq := agentsdk.ApprovalRequest{
+		runtimeReq := approval.Request{
 			SessionRef: active.SessionRef, Session: active, RunID: pause.RunID, TurnID: pause.TurnID,
 			Tool: tool.Definition{Name: pause.ToolName}, Call: tool.Call{ID: pause.ToolCallID, Name: pause.ToolName, Input: pause.Input}, Approval: pause.Approval, Metadata: pause.Metadata,
-			Origin: &agentsdk.ApprovalOrigin{Role: agentsdk.ApprovalRoleMain, Endpoint: agentsdk.ApprovalEndpointBuiltin, SessionID: metadata.Session.SessionID, WorkingDirectory: metadata.Session.CWD, ToolCallID: pause.ToolCallID},
+			Origin: &approval.Origin{Role: approval.RoleMain, Endpoint: approval.EndpointBuiltin, SessionID: metadata.Session.SessionID, WorkingDirectory: metadata.Session.CWD, ToolCallID: pause.ToolCallID},
 		}
 		req := approvalReviewerTestRequest(active, nil, "", nil)
 		req.RuntimeRequest = runtimeReq

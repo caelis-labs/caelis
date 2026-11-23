@@ -14,10 +14,11 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -59,32 +60,32 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeWorkspaceWrite})
+	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(active.CWD, "approved.txt")
-	approvalEntered := make(chan agent.ApprovalRequest, 1)
+	approvalEntered := make(chan approval.Request, 1)
 	approve := make(chan struct{})
 	continued := make(chan *model.Request, 1)
 	continueModel := make(chan struct{})
 	var approvalCount atomic.Int32
-	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 		approvalCount.Add(1)
 		if req.OnAdmission == nil || req.OperationTaskID == "" {
-			return agent.ApprovalResponse{}, context.Canceled
+			return approval.Response{}, context.Canceled
 		}
 		budget, end := context.WithTimeout(ctx, 90*time.Second)
 		defer end()
 		if err := req.OnAdmission(budget); err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 		approvalEntered <- req
 		select {
 		case <-approve:
-			return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once", ReviewText: "approved"}, nil
+			return approval.Response{Approved: true, Outcome: "selected", OptionID: "allow_once", ReviewText: "approved"}, nil
 		case <-ctx.Done():
-			return agent.ApprovalResponse{}, ctx.Err()
+			return approval.Response{}, ctx.Err()
 		}
 	})
 	step := 0
@@ -116,7 +117,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		t.Fatal(err)
 	}
 	defer run.Handle.Cancel()
-	var approval agent.ApprovalRequest
+	var approval approval.Request
 	select {
 	case approval = <-approvalEntered:
 	case <-ctx.Done():
@@ -256,15 +257,17 @@ func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 				owner := context.WithValue(t.Context(), taskScopeKey{}, scope)
 				call := tool.Call{ID: "budget", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo ok", "workdir": active.CWD})}
 				start := time.Now()
-				result, err := target.submitApproval(owner, call, taskApproval{owner: owner, started: start, request: agent.ApprovalRequest{RunID: "run", TurnID: "turn"}, resolve: func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				result, err := target.submitApproval(owner, call, taskApproval{owner: owner, started: start, request: approval.Request{RunID: "run", TurnID: "turn"}, resolve: func(ctx context.Context, req approval.Request) (approval.Response, error) {
 					budget, cancel := context.WithTimeout(ctx, 90*time.Second)
 					defer cancel()
 					if err := req.OnAdmission(budget); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
 					time.Sleep(delay)
-					return agent.ApprovalResponse{Approved: true}, nil
-				}}, target.Call)
+					return approval.Response{Approved: true}, nil
+				}}, func(ctx context.Context, call tool.Call, _ string) (tool.Result, error) {
+					return target.Call(ctx, call)
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -354,12 +357,12 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 					}
 					_ = scope.join()
 				}()
-				result, err := target.submitApproval(observer, call, taskApproval{owner: owner, request: agent.ApprovalRequest{RunID: "run", TurnID: "turn"}, resolve: func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				result, err := target.submitApproval(observer, call, taskApproval{owner: owner, request: approval.Request{RunID: "run", TurnID: "turn"}, resolve: func(ctx context.Context, req approval.Request) (approval.Response, error) {
 					if err := req.OnAdmission(ctx); err != nil {
-						return agent.ApprovalResponse{}, err
+						return approval.Response{}, err
 					}
-					return agent.ApprovalResponse{Approved: true}, nil
-				}}, func(ctx context.Context, call tool.Call) (tool.Result, error) {
+					return approval.Response{Approved: true}, nil
+				}}, func(ctx context.Context, call tool.Call, _ string) (tool.Result, error) {
 					close(approved)
 					<-start
 					return target.Call(ctx, call)
@@ -375,7 +378,7 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 				if err != nil || pending.State != taskapi.StateWaitingApproval || pending.SupportsInput {
 					t.Fatalf("pending read = %#v, %v", pending, err)
 				}
-				terminalSnapshot, err := r.terminals.Read(owner, terminal.Ref{SessionID: active.SessionID, TaskID: id})
+				terminalSnapshot, err := r.Terminals().Read(owner, terminal.Ref{SessionID: active.SessionID, TaskID: id})
 				if err != nil || terminalSnapshot.State != "waiting_approval" || !terminalSnapshot.Running || !terminalSnapshot.StartedAt.IsZero() {
 					t.Fatalf("pending terminal fallback = %#v, %v", terminalSnapshot, err)
 				}
@@ -547,13 +550,13 @@ func TestCommandApprovalFinalSafePointJoinsAndAcceptsSteering(t *testing.T) {
 			}
 			return model.NewTextMessage(model.RoleAssistant, "done")
 		}}
-		requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 			if err := req.OnAdmission(ctx); err != nil {
-				return agent.ApprovalResponse{}, err
+				return approval.Response{}, err
 			}
 			entered <- ctx
 			<-release // A resolver may need cleanup after its cancellation signal.
-			return agent.ApprovalResponse{Approved: true}, nil
+			return approval.Response{Approved: true}, nil
 		})
 		run, err := r.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "run command", ApprovalRequester: requester, AgentSpec: agent.AgentSpec{Name: "chat", Model: m, Tools: []tool.Tool{mustRuntimeRunCommandTool(t, backend)}}})
 		if err != nil {
@@ -608,18 +611,18 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 	backend := newCommandStartProbe(newYieldProbeSandboxSession(), nil)
 	command := runtimeCommandTool{base: mustRuntimeRunCommandTool(t, backend), session: active, sessionRef: active.SessionRef, tasks: r.tasks}
 	var approvals int
-	target := policyWrappedTool{tool: command, mode: "ask", session: active, sessionRef: active.SessionRef,
+	target := policyAdmission{tool: command, mode: "ask", session: active,
 		policy: policy.NamedMode{ID: "ask", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			// Steering arrives after the call began but before Task registration.
 			scope.revoke(errTaskAuthorizationChanged, false)
 			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name}}}, nil
 		}},
-		approval: approvalContext{ctx: owner, runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approval: approvalContext{ctx: owner, runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 			approvals++
-			return agent.ApprovalResponse{Approved: true}, nil
+			return approval.Response{Approved: true}, nil
 		})},
 	}
-	result, err := target.Call(owner, tool.Call{ID: "late-admission", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo old request", "yield_time_ms": 0})})
+	result, err := (dispatchTool{base: target.tool, before: target.beforeTool}).Call(owner, tool.Call{ID: "late-admission", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo old request", "yield_time_ms": 0})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,6 +632,51 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 	}
 	if payload["state"] != "cancelled" || approvals != 0 || backend.startCalls() != 0 {
 		t.Fatalf("late admission = %#v, approvals=%d starts=%d", payload, approvals, backend.startCalls())
+	}
+}
+
+func TestDeferredCommandRevalidatesSelectedOptionBeforeStart(t *testing.T) {
+	t.Parallel()
+	_, active, r := newRuntimeRunCommandToolTestHarness(t)
+	r.tasks.store = newSagaTaskStore()
+	scope := newTaskContinuationScope()
+	owner := context.WithValue(t.Context(), taskScopeKey{}, scope)
+	backend := newCommandStartProbe(newYieldProbeSandboxSession(), nil)
+	command := runtimeCommandTool{base: mustRuntimeRunCommandTool(t, backend), session: active, sessionRef: active.SessionRef, tasks: r.tasks}
+
+	changed := errors.New("policy changed during approval")
+	var selected string
+	mode := policy.NamedMode{ID: "ask", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		return policy.Decision{
+			Action:   policy.ActionAskApproval,
+			Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name}},
+			Validate: func(_ context.Context, optionID string) (func(), error) {
+				selected = optionID
+				return nil, changed
+			},
+		}, nil
+	}}
+	answer := make(chan struct{})
+	requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
+		if err := req.OnAdmission(ctx); err != nil {
+			return approval.Response{}, err
+		}
+		select {
+		case <-answer:
+			return approval.Response{Outcome: "selected", OptionID: "allow_once"}, nil
+		case <-ctx.Done():
+			return approval.Response{}, ctx.Err()
+		}
+	})
+	admission := policyAdmission{tool: command, mode: mode.ID, policy: mode, session: active, approval: approvalContext{ctx: owner, requester: requester}}
+	target := dispatchTool{base: command, before: admission.beforeTool}
+	_, err := target.Call(owner, tool.Call{ID: "async-admission", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo test", "yield_time_ms": 0})})
+	close(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.join(); !errors.Is(err, changed) || selected != "allow_once" || backend.startCalls() != 0 {
+		t.Fatalf("continuation error=%v option=%q command starts=%d", err, selected, backend.startCalls())
 	}
 }
 

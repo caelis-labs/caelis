@@ -16,7 +16,7 @@ import (
 // ParticipantStore is the participant persistence surface exercised by
 // ParticipantLifecycleConformance.
 type ParticipantStore interface {
-	session.Service
+	session.ManagedService
 	session.ParticipantLifecycleService
 	session.SessionFenceService
 	ParticipantCommittedFailureInjector

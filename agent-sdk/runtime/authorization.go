@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -21,7 +21,7 @@ type authorizationFlight struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	waiters  int
-	response agent.ApprovalResponse
+	response approval.Response
 	err      error
 }
 
@@ -146,7 +146,7 @@ func (r *Runtime) cancelAuthorizationFlights(scope session.AuthorizationScope) {
 	}
 }
 
-func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (t policyAdmission) resolvePolicyApproval(ctx context.Context, request approval.Request) (approval.Response, error) {
 	r := t.approval.runtime
 	a := request.Authorization
 	share := a != nil && !a.PerCall
@@ -164,12 +164,12 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 	evidence, err := r.checkAuthorization(ctx, t.session, a)
 	if err != nil {
 		r.authorizationMu.Unlock()
-		return agent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
 	for _, scope := range evidence.Consents {
 		if scope == a.Scope {
 			r.authorizationMu.Unlock()
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: a.Choices[0].OptionID, Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: a.Choices[0].OptionID, Approved: true}, nil
 		}
 	}
 	key := fmt.Sprintf("%s:%d:%v", a.Scope.Key(), a.Revocation, a.Choices)
@@ -187,7 +187,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 			if err != nil {
 				cancel()
 				r.authorizationMu.Unlock()
-				return agent.ApprovalResponse{}, err
+				return approval.Response{}, err
 			}
 			cancel()
 			work = continuation.ctx
@@ -223,10 +223,10 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 	}()
 	select {
 	case <-ctx.Done():
-		return agent.ApprovalResponse{}, ctx.Err()
+		return approval.Response{}, ctx.Err()
 	case <-flight.done:
 		if err := ctx.Err(); err != nil {
-			return agent.ApprovalResponse{}, err
+			return approval.Response{}, err
 		}
 		return flight.response, flight.err
 	}

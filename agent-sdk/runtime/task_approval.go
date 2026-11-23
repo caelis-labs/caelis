@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -17,14 +17,14 @@ type taskInvocationStart struct {
 
 type taskApproval struct {
 	owner      context.Context
-	request    agent.ApprovalRequest
-	resolve    func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+	request    approval.Request
+	resolve    func(context.Context, approval.Request) (approval.Response, error)
 	started    time.Time
 	generation uint64
 	admission  *codeModeAdmissionBinding
 }
 
-type approvedToolCall func(context.Context, tool.Call) (tool.Result, error)
+type approvedToolCall func(context.Context, tool.Call, string) (tool.Result, error)
 
 // taskApprovalProducer is implemented by trusted Runtime producers which own
 // durable submission, cancellation and observation. A tool name alone does not
@@ -34,17 +34,11 @@ type taskApprovalProducer interface {
 	submitApproval(context.Context, tool.Call, taskApproval, approvedToolCall) (tool.Result, error)
 }
 
-func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApproval, wrapped tool.Tool) (tool.Result, bool, error) {
+func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApproval, target tool.Tool, execute approvedToolCall) (tool.Result, bool, error) {
 	if taskScopeFromContext(approval.owner) == nil {
 		return tool.Result{}, false, nil
 	}
-	execute := wrapped.Call
-	producerTool := wrapped
-	if dispatch, ok := wrapped.(dispatchTool); ok {
-		producerTool = dispatch.base
-		execute = dispatch.Call
-	}
-	producer, ok := producerTool.(taskApprovalProducer)
+	producer, ok := target.(taskApprovalProducer)
 	if !ok {
 		return tool.Result{}, false, nil
 	}

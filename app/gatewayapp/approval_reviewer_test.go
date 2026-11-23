@@ -10,12 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -92,7 +94,7 @@ func TestApprovalReviewerFallsBackToTextForModelWithoutStructuredOutput(t *testi
 
 func TestGuardianPlannedActionIncludesOnlyRuntimeOwnedSandboxPolicy(t *testing.T) {
 	req := kernel.ApprovalReviewRequest{
-		RuntimeRequest: agent.ApprovalRequest{
+		RuntimeRequest: approval.Request{
 			Metadata: map[string]any{
 				policy.MetadataSandboxPolicy: sandbox.PolicySnapshot{
 					Route:            sandbox.RouteSandbox,
@@ -485,7 +487,7 @@ func ptrMessage(message model.Message) *model.Message {
 	return &out
 }
 
-func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.Service, session.Session) {
+func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.ManagedService, session.Session) {
 	t.Helper()
 	service := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -540,7 +542,7 @@ func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, r
 			Reason:   reason,
 			Status:   kernel.ApprovalStatusPending,
 		},
-		RuntimeRequest: agent.ApprovalRequest{
+		RuntimeRequest: approval.Request{
 			Tool: tool.Definition{Name: "custom_tool"},
 			Call: tool.Call{Name: "custom_tool", Input: raw},
 		},

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -81,7 +80,7 @@ func participantLifecycleIdempotencyKey(activeSession session.Session, binding s
 
 type controllerApprovalRequester struct {
 	runtime              *Runtime
-	requester            agent.ApprovalRequester
+	requester            approval.Requester
 	sessionRef           session.SessionRef
 	session              session.Session
 	runID                string
@@ -123,13 +122,13 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		metadata["participant_session_id"] = strings.TrimSpace(r.participantSessionID)
 		metadata["source"] = "acp_participant"
 	}
-	origin := &agent.ApprovalOrigin{Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointExternalACP, SessionID: req.EndpointSessionID, ToolCallID: req.ToolCall.ID, Agent: req.Agent, ParticipantID: r.participantID}
+	origin := &approval.Origin{Role: approval.RoleMain, Endpoint: approval.EndpointExternalACP, SessionID: req.EndpointSessionID, ToolCallID: req.ToolCall.ID, Agent: req.Agent, ParticipantID: r.participantID}
 
 	if r.participantID != "" {
-		origin.Role = agent.ApprovalRoleParticipant
+		origin.Role = approval.RoleParticipant
 		origin.ParentSessionID = r.sessionRef.SessionID
 	}
-	runtimeRequest := agent.ApprovalRequest{
+	runtimeRequest := approval.Request{
 		Origin:     origin,
 		SessionRef: session.NormalizeSessionRef(r.sessionRef),
 		Session:    session.CloneSession(r.session),
@@ -170,7 +169,7 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		return controller.ApprovalResponse{}, nil
 	}
 	permission := cloneApproval(runtimeRequest.Approval)
-	var resp agent.ApprovalResponse
+	var resp approval.Response
 	var err error
 	if r.runtime != nil {
 		resp, err = r.runtime.requestDurableApproval(ctx, runtimeRequest, r.requester)
@@ -189,4 +188,30 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		OptionID: strings.TrimSpace(resp.OptionID),
 		Approved: resp.Approved,
 	}, nil
+}
+
+func isACPControllerUserEcho(event *session.Event) bool {
+	if event == nil || event.Scope == nil {
+		return false
+	}
+	if session.EventTypeOf(event) != session.EventTypeUser {
+		return false
+	}
+	if event.Scope.Participant.ID != "" {
+		return false
+	}
+	return event.Scope.Controller.Kind == session.ControllerKindACP
+}
+
+func isACPParticipantUserEcho(event *session.Event) bool {
+	if event == nil || event.Scope == nil {
+		return false
+	}
+	if session.EventTypeOf(event) != session.EventTypeUser {
+		return false
+	}
+	if event.Scope.Participant.ID == "" {
+		return false
+	}
+	return event.Scope.Participant.Kind == session.ParticipantKindACP
 }

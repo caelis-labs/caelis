@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -63,7 +65,7 @@ func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testin
 		freshService := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 		fresh, err := New(Config{
 			Sessions: freshService, AgentFactory: chat.Factory{},
-			PolicyRegistry: allow, DefaultPolicyMode: "allow",
+			Hooks: hook.Set{ToolPolicy: allow}, DefaultPolicyMode: "allow",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -157,17 +159,17 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	}
 	core, err := New(Config{
 		Sessions: service, AgentFactory: chat.Factory{},
-		PolicyRegistry: ask, DefaultPolicyMode: "ask",
+		Hooks: hook.Set{ToolPolicy: ask}, DefaultPolicyMode: "ask",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var approvals []agent.ApprovalRequest
+	var approvals []approval.Request
 	run, err := core.Run(context.Background(), agent.RunRequest{
 		SessionRef: active.SessionRef, Input: "two steps",
-		ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 			approvals = append(approvals, req)
-			return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once", ReviewText: "approved"}, nil
+			return approval.Response{Approved: true, Outcome: "selected", OptionID: "allow_once", ReviewText: "approved"}, nil
 		}),
 		AgentSpec: agent.AgentSpec{Name: "chat", Model: &repeatedProviderToolIDModel{}, Tools: []tool.Tool{target}},
 	})
@@ -293,12 +295,12 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 	service, active := newTestSessionService(t, "shared-tool-step-sequence")
 	core, err := New(Config{
 		Sessions: service, AgentFactory: chat.Factory{},
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{
 			ID: "allow",
 			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			},
-		}},
+		}}},
 		DefaultPolicyMode: "allow",
 	})
 	if err != nil {

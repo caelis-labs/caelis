@@ -45,7 +45,7 @@ type SlashResultFormatter func(controlprompt.SlashCommandResult) string
 // instead of selecting the direct Runtime path.
 type Config struct {
 	Runtime  agent.Runtime
-	Sessions session.Service
+	Sessions session.ManagedService
 	// SessionClient is the principal-bound AppServer client used by product ACP
 	// assembly. When present, Session lifecycle mutations and ordinary prompt
 	// ingress stay on that client; Runtime and Sessions are inputs only to the
@@ -96,7 +96,7 @@ type Config struct {
 // ACP agent-side methods.
 type RuntimeAgent struct {
 	runtime               agent.Runtime
-	sessions              session.Service
+	sessions              session.ManagedService
 	sessionClient         appserver.SessionClient
 	configurationClient   appserver.ConfigurationClient
 	presentationClient    appserver.PresentationClient

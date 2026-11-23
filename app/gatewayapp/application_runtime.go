@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -37,7 +38,7 @@ import (
 
 // assembleProfileSnapshot binds execution authority once. Each main request
 // resolves its desired profile alongside Core's capability discovery.
-func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.Service) (*sessionRuntimeInstance, error) {
+func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.ManagedService) (*sessionRuntimeInstance, error) {
 	store := a.deps.authorities.sessionProfiles
 	if store == nil || !sessionvisibility.IsApplicationSession(active) {
 		return nil, fmt.Errorf("gatewayapp: application binding store unavailable")
@@ -158,9 +159,16 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
-		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
-		Hooks:       agent.Hooks{StreamMode: agent.StreamIncremental},
-		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules}, DefaultPolicyMode: mode,
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{},
+		Compaction:   compaction,
+		Hooks: hook.Set{
+			ToolPolicy:     toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules},
+			StreamMode:     hook.StreamIncremental,
+			ToolProjection: localResultProjection,
+		},
+		Diagnostics:          a.deps.authorities.diagnostics,
+		DefaultPolicyMode:    mode,
 		PersistPolicyConsent: instance.persistPolicyConsent,
 		SandboxPolicy:        sandboxPolicy,
 		TaskStore:            a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,

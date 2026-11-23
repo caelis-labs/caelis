@@ -32,10 +32,13 @@ effect until Runtime adopts it and Chat builds from the new history. The
 optional persist callback runs at provider start after admission accepts the
 request. Auxiliary requests use their own assembly or the frozen source request.
 
-`runtime.Config.Hooks` fixes typed registrations for each Run. Every entry has
-an explicit name and timeout (five seconds by default). Independent private
-loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
-`system_agent` and does not inherit main-conversation hooks.
+`runtime.Config.Hooks` accepts a `hook.Set` from `agent-sdk/hook` and snapshots
+its registrations for each Run. Input hooks receive the source, tool hooks
+receive detached occurrences and definitions, and model preparation and actual
+attempts have separate contexts. Each callback has a name and a timeout
+(five seconds by default). Policy and result projection have dedicated slots.
+Independent private loops can set `HookPurpose`. The default is `chat`.
+System-agent assembly selects `system_agent` and installs its own hooks.
 
 | Phase | Editable value |
 | --- | --- |
@@ -45,8 +48,10 @@ loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
 | ModelInvoke | One actual-attempt continuation, with a detached request |
 | ModelResult | Semantic Message; actual usage and provider identity stay fixed |
 | ToolPrepare | Final arguments, synthetic result or block, with fixed occurrence and target |
-| ToolInvoke | One Policy-admitted dispatch continuation |
+| ToolPolicy | Decide allow, deny or request approval for the final call |
+| ToolInvoke | One dispatch continuation after any configured Policy |
 | ToolResult | Ordered content blocks, including the optional structured block. Identity, error and system metadata stay fixed. |
+| ToolProjection | Bound the presentation and save large canonical results through the configured artifact store |
 | ModelView | Tool-result presentation content; the full business value stays fixed |
 | Completion | Accept, Replace, Continue with feedback or Reject before final commit |
 | Stream factory | Fresh text transformer for one actual attempt or synthetic candidate |
@@ -96,7 +101,7 @@ Tool-local execution errors and approval denials also return to the model so
 it can correct the call or choose another action. A malformed call envelope
 gets a bounded request to regenerate before any call in its batch executes.
 Invalid hook transformations fail preparation before batch commit.
-Synthetic success still passes Policy and final dispatch checks. Full results
+Synthetic success passes any configured Policy and the final dispatch checks. Full results
 and checked model views share one ToolResult commit, including nested Code Mode
 calls. ToolResult affects JS Body; ModelView does not. A failed transformation
 commits safe presentation and typed processing_failure separately from the
@@ -107,7 +112,7 @@ Buffered output is the SDK default: provider fragments remain private. The
 existing final output owner transforms the accepted candidate after ModelResult
 and Completion replacements and before canonical publication. Cache and Input
 or TurnStart early responses use that same boundary. Their factories identify
-`cache`, `input_early` or `turn_start_early` in HookContext.OutputSource and have
+`cache`, `input_early` or `turn_start_early` in hook.OutputContext.OutputSource and have
 no InvocationID, attempt ordinal, provider receipt or provider usage. Actual
 attempt factories identify `provider` and retain their real invocation identity,
 including attempts discarded by transport retry. A discarded candidate never
@@ -215,6 +220,11 @@ when the process starts. Control's automatic approval deadline includes queue
 time and is not renewed by Task observation. External ACP permission requests
 retain their synchronous contract.
 
+Each pending approval belongs to one Session and request ID. The first valid
+decision committed through its live owner settles the request. Repeating that
+decision is idempotent. An outstanding reviewer receives cancellation, and a
+later conflicting answer cannot change the tool outcome.
+
 Task-owned approval does not pause the whole Run. Runtime retains at most 32
 pending submission/start continuations per Run; excess submissions fail before
 approval or execution. Cancellation and accepted user steering revoke unclaimed
@@ -245,7 +255,9 @@ only while idle. Model-visible communication preserves the body and media first,
 then appends one `From` footer. Durable ActorRef values retain the full source
 identity; footer text does not grant routing or execution authority.
 
-The internal Task service remains the lifecycle and final-result abstraction. Command stdin is a
+Hosts can discover command inspection and process control through the optional
+`task/terminal.Provider` interface. The internal Task service owns the command
+lifecycle and final result. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
 The SDK may expose a bounded current/final command result and ACP child final
 result, but it does not retain Surface replay history or understand how a
@@ -302,6 +314,53 @@ written by the retired Continue saga. It never repeats the old remote effect.
 Remove it only after the supported upgrade floor reaches the first release that
 no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
+## Session storage for embedders
+
+A host supplies one `session.Service` to `runtime.Config.Sessions`.
+Each `Runtime.Run` selects an existing Session through `RunRequest.SessionRef`
+and calls `AcquireWriter` before reading history, binding a controller or writing
+input. One producer owns a Session until its tools, steering and
+final writes settle. Another prompt for that Session receives a conflict.
+Other Sessions can run concurrently, and readers can load committed history
+throughout a Turn. Control can delegate an existing execution claim. The
+SDK validates it and admits one producer under that claim.
+
+`session.NewService` builds the native service over four backend operations.
+
+| Operation | Backend contract |
+| --- | --- |
+| `AcquireWriter` | Claim the Session across backend instances and return a write context and release function. |
+| `LoadSession` | Read the Session, state and ordered events at one committed revision. |
+| `BindController` | Record the initial native controller binding under the writer's authority. |
+| `AppendEvents` | Commit an entire batch under the same authority before the first tool executes. |
+
+The service derives individual reads and single-event appends from those
+operations. The file and memory implementations also serve the individual
+reads directly. Hosts that create and list Sessions, manage participant bindings
+and edit state can use `session.ManagedService`. Features such as atomic Plan
+updates use their own optional contracts.
+
+Code Mode needs `session.StateWriter` to initialize the `js_exec` catalog for a
+new Session. Pass the file store directly as `runtime.Config.Sessions`, or
+implement `session.StateWriter` on the service supplied by the host.
+`session.NewService(store)` exposes only the four-operation adapter's core
+service. Initializing the catalog through that wrapper returns `Unsupported`.
+
+The file backend persists the Turn claim and validates writes under its file
+lock. A PostgreSQL adapter can hold the claim in a Session row alongside its
+revision and state. Short transactions lock that row to acquire or release
+ownership and to append events. Each append checks ownership, revision and
+existing event identities, assigns sequence numbers, inserts event rows and
+advances the header together. Snapshot reads can use repeatable read. An
+identical retry returns the original facts. `session.AcquireFencedWriter` and
+`session.PrepareAppendTransaction` share the claim and append semantics.
+`session.MarshalEventJSON` and `session.UnmarshalEventJSON` preserve the
+durable encoding, including supported schema upgrades and inline media.
+
+Backend implementers can run `sessiontest.ToolRunConformance` to compare the
+full model conversation across reopen, and `sessiontest.TurnAdmissionConformance`
+to check conflicting prompts and concurrent reads through two runtimes.
+
 ## Durable facts and replay
 
 `session.Event` and guarded Session state are durable truth:
@@ -315,7 +374,8 @@ no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
 ToolCall facts freeze the complete model batch before dispatch, including an
 occurrence identity independent of provider call IDs, effective arguments, parent
-and target binding. ToolResult stores the complete returned `tool.Result`; its
+and target binding. Model history keeps the declared tool name and call ID.
+ToolResult stores the complete returned `tool.Result`; its
 `Message` is the checked model view. Code Mode nested facts retain complete body
 and binding without introducing tool messages the model did not request.
 
@@ -339,6 +399,8 @@ legacy callers until that API requires an explicit identity. A yielded Task
 submission already has its single ToolResult; Task completion does not write
 another one.
 
+The optional `approval.Requester` receives tool and endpoint permission requests.
+`approval.Resolver` settles a pending request by its durable ID.
 Approval request/resolution facts live in `Event.Approval`. Runtime owns their
 persistence and reusable consent; Control projects their redacted request and
 live queue settlement without a second approval history writer. Restart does not
@@ -347,9 +409,9 @@ complete tool facts from schema 3 remain readable. The Session codec consumes kn
 for compatibility, preserving old messages and approval review; it never restores
 Run state, execution authority or tool bindings. Unknown future schemas fail closed.
 
-When a Session service implements `SessionFenceService`, SDK `Run` retains its
-exclusive fence until actual producers and finalization have drained. Control
-retains ownership of an inherited fence. A fenced file-backed Task store must
+Runtime releases its Session writer after producers and finalization have
+drained. The file and memory services enforce ownership with a Session fence.
+Control retains ownership of a fence it delegates to Runtime. A fenced file-backed Task store must
 use the same `file.Store` as its Session service; an independently configured
 Task store supports unguarded Task operations, not that Session's fence bearer.
 Missing-pair repair requires a valid fence even when the service does not expose
@@ -509,14 +571,18 @@ activity identity is limited to the first activity.
 
 ## Tools and instruction authority
 
-All tool sources use the same serialized result budget before model delivery and
-durable event validation. When truncation needs a recovery artifact, the bounded
-private artifact store retains the original content. A single text or structured
-JSON block is saved as-is; other results use the result codec's ordered `content`
-array, preserving media and resource blocks. The model receives bounded content
-with a runtime-owned artifact reference, whose budget is reserved even behind
-earlier text parts. Media remains unchanged. Artifact quota or write failure
-does not bypass the result budget or add a reference to an unavailable file.
+The chat loop bounds each tool result before sending it to the model. Session
+replays that recorded view. By default, the loop writes no temporary artifacts.
+Hosts configure the budget and optional store in `runtime.Config.Hooks.ToolProjection`.
+When a direct result exceeds the budget, the configured store retains the
+complete result and the model receives a bounded view with its reference.
+Storage failure leaves the bounded view available. Nested Code Mode calls use
+the same model budget and return the full business value to the script.
+Progress, nested projections and replay perform no artifact writes.
+
+The local Gateway shares one `artifact.FileStore` across its chat agents. It
+saves a single text or structured JSON block as-is and uses the result codec's
+ordered `content` array for multipart results, preserving media and resources.
 
 `tool.Definition.Name` is the sole executable identity. Names are exact and
 case-sensitive; assembly rejects empty, padded, or duplicate names. Durable
@@ -525,6 +591,10 @@ history and deferred admission preserve that identity.
 Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
+
+Session replay preserves the original `mcp_call` envelope, call ID and paired
+reply from v0.84.1 histories. The stored execution target remains available for
+display. This reader is needed while routed MCP histories are supported for resume.
 
 Code Mode Sessions expose a fixed `js_exec` definition. Its async body can call
 known-schema Session tools using original function or method syntax, such as
@@ -539,26 +609,25 @@ Code Mode reconstructs MCP bindings from canonical search receipts and typed nes
 and resume. A
 first direct call with no prior binding pins the current real Tool identity/version.
 A later change to the bound MCP source/schema fails stale until a successful
-`tools.search({name})` explicitly reloads the schema and binding. Historical name-only discovery does not
-authorize non-Code Mode `mcp_call`. Search grants no execution permission, and an
+`tools.search({name})` explicitly reloads the schema and binding. Search grants no execution permission, and an
 unknown effect is never replayed. Manager name-collision losers are absent from the
 Session tool set and cannot be restored through qualified paths.
 
 Runtime resolves every route to a real Tool, validates the accepted schema and
 arguments, and enters the same policy, Guardian/approval, cancellation, dispatch admission,
 invocation owners and typed hooks as other calls. Display and approval data name
-the real target and arguments. The effective ModelCall envelope keeps non-Code
-Mode history paired under the outer call ID and `mcp_call` name; ProposedCall
-retains the original proposal separately. MCP schemas never join model
+the real target and arguments. Calls inside `js_exec` carry their own parent-linked execution facts. The model
+receives the result under the outer `js_exec` call ID. Deferred MCP schemas never join model
 `tools`, and no per-run exposure limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md)
 describes refresh and final dispatch. The stable-tools contract does not promise
 that the entire model request prefix is unchanged.
 
-Every tool invocation reaches the same Runtime Policy admission, whether called
-directly, through deferred MCP discovery, or from Code Mode. Policy is the sole
-Allow/Deny/Ask authority. SDK embedders can supply their own final policy;
-Runtime adds no MCP-specific approval gate. Discovery and server annotations do
-not themselves authorize execution.
+The host installs Policy through `runtime.Config.Hooks.ToolPolicy`. Without a
+registry or requested profile, Runtime dispatches the host's tools directly
+after argument preparation. A named profile requires a matching registered
+mode. With Policy installed, direct calls and Code Mode targets share its
+Allow/Deny/Ask decision on the effective arguments. An approval resumes the same guarded dispatch, including its final revocation check. A synthetic reply consumes the same admission. The Caelis Gateway explicitly installs its product
+policy. MCP discovery and server annotations only describe available tools.
 
 The product's `control/toolpolicy` mode combines native per-call restrictions
 with source consent into one decision and approval request. Ordinary MCP offers

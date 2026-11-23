@@ -26,7 +26,7 @@ type storeRootLock struct {
 	recoveryInitialized bool
 }
 
-// Config defines one single-file durable session store instance.
+// Config configures a file-backed Session store rooted at RootDir.
 type Config struct {
 	RootDir            string
 	SessionIDGenerator func() string
@@ -78,7 +78,7 @@ type Store struct {
 	eventLogLineRead func(path string, lineNo int, offset int64)
 }
 
-// TaskStore is the task.Store facade backed by the same file store index.
+// TaskStore persists Task records in the SQLite database shared with the Session index.
 type TaskStore struct {
 	store *Store
 }

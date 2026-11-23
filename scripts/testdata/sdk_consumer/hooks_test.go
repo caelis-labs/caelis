@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -42,22 +43,22 @@ func TestSDKHooksToolArgumentsFullResultAndModelView(t *testing.T) {
 		}
 		return tool.Result{Content: []tool.ContentBlock{tool.Text("original business")}}, nil
 	}}
-	hooks := agent.Hooks{
-		ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "cache-tool-proposal", Apply: func(_ context.Context, _ agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+	hooks := hook.Set{
+		ModelPrepare: []hook.ModelPrepare{{Name: "cache-tool-proposal", Apply: func(_ context.Context, _ hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 			if prepares.Add(1) == 1 {
 				p.Response = &model.Response{Message: model.MessageFromAssistantParts("", "", []model.ToolCall{{ID: "lookup-1", Name: "lookup", Args: "{\"app\":\"A\"}"}})}
 			}
 			return p, nil
 		}}},
-		ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "final-arguments", Apply: func(_ context.Context, _ agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
+		ToolPrepare: []hook.ToolPrepare{{Name: "final-arguments", Apply: func(_ context.Context, _ hook.ToolContext, p hook.ToolPreparation) (hook.ToolPreparation, error) {
 			p.Input = json.RawMessage("{\"app\":\"B\"}")
 			return p, nil
 		}}},
-		ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{{Name: "business", Apply: func(_ context.Context, _ agent.HookContext, o agent.ToolOutcome) (tool.Result, error) {
+		ToolResult: []hook.ToolResult{{Name: "business", Apply: func(_ context.Context, _ hook.ToolContext, o hook.ToolOutcome) (tool.Result, error) {
 			o.Result.Content = []tool.ContentBlock{tool.Text("full accepted business")}
 			return o.Result, nil
 		}}},
-		ModelView: []agent.Hook[model.Message, model.Message]{{Name: "summary", Apply: func(_ context.Context, _ agent.HookContext, m model.Message) (model.Message, error) {
+		ModelView: []hook.ModelView{{Name: "summary", Apply: func(_ context.Context, _ hook.ToolContext, m model.Message) (model.Message, error) {
 			m.Parts[0].ToolResult.Content = []model.Part{model.NewTextPart("model summary")}
 			return m, nil
 		}}},
@@ -109,38 +110,38 @@ func TestSDKHooksRetrievalCacheEarlyAnswerAndBoundedFeedback(t *testing.T) {
 			}
 			primary, preferred := &sdkHookModel{}, &sdkHookModel{}
 			var prepares, completions atomic.Int64
-			hooks := agent.Hooks{
-				StreamMode: agent.StreamBuffered,
-				Stream: []agent.Hook[struct{}, agent.StreamTransformer]{{Name: "redact-final", Apply: func(_ context.Context, e agent.HookContext, _ struct{}) (agent.StreamTransformer, error) {
-					if e.OutputSource != agent.HookOutputProvider && (e.InvocationID != "" || e.AttemptOrdinal != 0) {
+			hooks := hook.Set{
+				StreamMode: hook.StreamBuffered,
+				Stream: []hook.Stream{{Name: "redact-final", Apply: func(_ context.Context, e hook.OutputContext) (hook.StreamTransformer, error) {
+					if e.OutputSource != hook.OutputProvider && (e.InvocationID != "" || e.AttemptOrdinal != 0) {
 						t.Error("synthetic output claimed provider identity")
 					}
 					return &sdkOutputRedactor{}, nil
 				}}},
-				Input: []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "normalize", Apply: func(_ context.Context, _ agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
+				Input: []hook.Input{{Name: "normalize", Apply: func(_ context.Context, _ hook.InputContext, v hook.InputView) (hook.InputDecision, error) {
 					v.Message.Parts[0].Text.Text = strings.ToUpper(v.Message.Parts[0].Text.Text)
-					d := agent.InputDecision{Message: v.Message}
+					d := hook.InputDecision{Message: v.Message}
 					if early {
 						m := model.NewTextMessage(model.RoleAssistant, "local answer")
 						d.Response = &m
 					}
 					return d, nil
 				}}},
-				ModelPrepare: []agent.Hook[agent.ModelPreparation, agent.ModelPreparation]{{Name: "retrieve", Apply: func(_ context.Context, e agent.HookContext, p agent.ModelPreparation) (agent.ModelPreparation, error) {
+				ModelPrepare: []hook.ModelPrepare{{Name: "retrieve", Apply: func(_ context.Context, e hook.PrepareContext, p hook.ModelPreparation) (hook.ModelPreparation, error) {
 					p.ModelName = "preferred"
 					p.Request.Instructions = []model.Part{model.NewTextPart("Use the retrieved context.")}
 					if prepares.Add(1) == 1 {
-						p.ContextEdit = &agent.ContextEdit{Source: e.ContextSource, Append: []model.Part{model.NewTextPart("Retrieved source: version 4.")}}
+						p.ContextEdit = &hook.ContextEdit{Source: e.ContextSource, Append: []model.Part{model.NewTextPart("Retrieved source: version 4.")}}
 						p.Response = &model.Response{Message: model.NewTextMessage(model.RoleAssistant, "cached candidate"), Usage: model.Usage{TotalTokens: 999}}
 					}
 					return p, nil
 				}}},
-				Completion: []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "review", Apply: func(context.Context, agent.HookContext, model.Message) (agent.CompletionDecision, error) {
+				Completion: []hook.Completion{{Name: "review", Apply: func(context.Context, hook.OutputContext, model.Message) (hook.CompletionDecision, error) {
 					if completions.Add(1) == 1 && !early {
-						return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: []model.Part{model.NewTextPart("Include the source version.")}}, nil
+						return hook.CompletionDecision{Kind: hook.CompletionContinue, Feedback: []model.Part{model.NewTextPart("Include the source version.")}}, nil
 					}
 					m := model.NewTextMessage(model.RoleAssistant, "Accepted sensitive answer, source version 4.")
-					return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &m}, nil
+					return hook.CompletionDecision{Kind: hook.CompletionReplace, Message: &m}, nil
 				}}},
 			}
 			core, err := runtime.New(runtime.Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hooks})

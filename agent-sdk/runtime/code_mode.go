@@ -22,7 +22,6 @@ import (
 )
 
 type codeModeAdmissionKey struct{}
-type codeModeValidationKey struct{}
 type nestedToolEventSinkKey struct{}
 
 var errCodeModeHostClosed = errors.New("code mode host admission is closed")
@@ -34,7 +33,7 @@ type runtimeCodeModeTool struct {
 	declaration    *codemode.Tool
 	tasks          *taskRuntime
 	active         session.Session
-	sessions       session.Service
+	sessions       session.Reader
 	ref            session.SessionRef
 	availableTools func() []tool.Tool
 	lookup         func(context.Context, string) (tool.Tool, bool, error)

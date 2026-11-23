@@ -19,8 +19,7 @@ import (
 )
 
 type usageTestStore interface {
-	session.Service
-	session.EventBatchService
+	session.ManagedService
 	session.EventBatchStateService
 	session.PagedReader
 	session.EventCheckpointReader

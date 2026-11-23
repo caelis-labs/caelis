@@ -148,7 +148,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 			t.Fatal("model tools mutated after discovery")
 		}
 		for _, def := range req.Tools {
-			if def.Function != nil && (def.Function.Name == mcp.SearchToolName || def.Function.Name == mcp.CallToolName || def.Function.Name == "fixture__exec") {
+			if def.Function != nil && (def.Function.Name == mcp.SearchToolName || def.Function.Name == "fixture__exec") {
 				t.Fatalf("dynamic entry exposed: %s", def.Function.Name)
 			}
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -49,7 +50,7 @@ func TestGuardianDetachedReviewPersistsUsageDuringParentTurn(t *testing.T) {
 			reviewer := newGuardianApprovalApprover(store)
 			req := approvalReviewerTestRequest(active, llm, "inspect", nil)
 			req.RuntimeRequest.SessionRef = active.SessionRef
-			req.RuntimeRequest.Origin = &agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, ParentSessionID: active.SessionID, TaskID: "child-task"}
+			req.RuntimeRequest.Origin = &approval.Origin{Role: approval.RoleSubagent, ParentSessionID: active.SessionID, TaskID: "child-task"}
 			result, err := reviewer.Decide(ctx, req)
 			if err != nil || result.Approved != decision.approved || len(llm.Requests()) != 1 {
 				t.Fatalf("decision changed or repeated: %#v, %v; calls=%d", result, err, len(llm.Requests()))

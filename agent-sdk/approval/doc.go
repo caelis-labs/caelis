@@ -1,6 +1,5 @@
-// Package approval defines approval review contracts for the Agent SDK.
-//
-// It owns modes, payloads, review requests and results, option normalization,
-// Runtime response bridging, and Session-state helpers. Concrete reviewer
-// implementations remain in the product Host.
+// Package approval defines permission requests, responses, and resolution for
+// Agent SDK tools and delegated endpoints. It also defines review modes,
+// reviewer contracts, and the mapping between review results and Session facts.
+// The host supplies the reviewer.
 package approval

@@ -74,8 +74,7 @@ func TestProductionRuntimeCompositionPreservesTerminalControlThroughDecorators(t
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	defer stack.Close()
-	provider := stack.runtimeProjection().KernelTerminals()
-	if provider == nil || provider.Terminals() == nil {
-		t.Fatalf("KernelTerminals().Terminals() = %#v, want production terminal control", provider)
+	if stack.runtimeProjection().KernelTerminals() == nil {
+		t.Fatal("KernelTerminals() returned no production terminal control")
 	}
 }

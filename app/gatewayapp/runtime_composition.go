@@ -2,6 +2,8 @@ package gatewayapp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -9,12 +11,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/artifact"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
+
+// Local agents share the retention quota for the host's temporary result directory.
+var localResultProjection = tool.ResultProjection{Artifacts: artifact.NewFileStore(filepath.Join(os.TempDir(), "caelis", "tool-results"))}
 
 // runtimeComposition groups the mutable execution snapshot and the resources
 // built from it. Stack owns one as a named field for the process root, while
@@ -25,7 +32,7 @@ type runtimeComposition struct {
 	// only; one Runtime composition never owns or replaces their lifecycle.
 	authorities         runtimeHostAuthorities
 	applicationChildren *applicationChildren
-	sessions            session.Service
+	sessions            session.ManagedService
 	workspace           session.WorkspaceRef
 
 	// process is present only on the Host root. Detached Session Runtime

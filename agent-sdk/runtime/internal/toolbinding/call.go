@@ -3,7 +3,6 @@ package toolbinding
 import (
 	"context"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -14,7 +13,7 @@ import (
 // Dispatch carries Runtime-owned inputs alongside, not inside, a tool call.
 type Dispatch struct {
 	Model model.LLM
-	Step  *agent.ModelStepRef
+	Step  *tool.ModelStepRef
 }
 
 type runtimeCaller interface {

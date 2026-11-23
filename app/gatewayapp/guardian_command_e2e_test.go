@@ -23,8 +23,10 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -207,7 +209,11 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRuntime, err := sdkruntime.New(sdkruntime.Config{Sessions: service, TaskStore: sessionfile.NewTaskStore(service), AgentFactory: chat.Factory{}, SandboxPolicy: sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Backend: native.Describe().Backend, Permission: sandbox.PermissionWorkspaceWrite, Network: sandbox.NetworkEnabled, WritableRoots: []string{workspace}}})
+	policies, err := presets.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRuntime, err := sdkruntime.New(sdkruntime.Config{Hooks: hook.Set{ToolPolicy: policies}, Sessions: service, TaskStore: sessionfile.NewTaskStore(service), AgentFactory: chat.Factory{}, SandboxPolicy: sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Backend: native.Describe().Backend, Permission: sandbox.PermissionWorkspaceWrite, Network: sandbox.NetworkEnabled, WritableRoots: []string{workspace}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,19 +225,19 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	var review approval.ReviewResult
 	var reviewErr error
 	var reviews int
-	requester := guardianCommandRequester(func(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := guardianCommandRequester(func(ctx context.Context, request approval.Request) (approval.Response, error) {
 		ctx, cancel := kernel.WithAutoReviewBudget(ctx)
 		defer cancel()
 		if request.OnAdmission != nil {
 			if err := request.OnAdmission(ctx); err != nil {
-				return agent.ApprovalResponse{}, err
+				return approval.Response{}, err
 			}
 		}
 		reviews++
 		payload := approval.PayloadFromRuntimeRequest(request)
 		review, reviewErr = reviewer.Decide(ctx, approval.ReviewRequest{SessionRef: request.SessionRef, RunID: request.RunID, TurnID: request.TurnID, ReviewID: request.Call.ID, Mode: approval.ModeAutoReview, Model: guardian, Approval: payload, RuntimeRequest: request})
 		if reviewErr != nil {
-			return agent.ApprovalResponse{}, reviewErr
+			return approval.Response{}, reviewErr
 		}
 		return approval.RuntimeResponseFromFinalReview(review), nil
 	})
@@ -346,9 +352,9 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	}
 }
 
-type guardianCommandRequester func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
+type guardianCommandRequester func(context.Context, approval.Request) (approval.Response, error)
 
-func (f guardianCommandRequester) RequestApproval(ctx context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+func (f guardianCommandRequester) RequestApproval(ctx context.Context, r approval.Request) (approval.Response, error) {
 	return f(ctx, r)
 }
 

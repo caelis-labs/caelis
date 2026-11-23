@@ -1,7 +1,5 @@
-// Package runtime owns the reusable local Runtime implementation.
-//
-// Public cross-domain contracts such as agent specs, run requests, context
-// helpers, and approval bridge values belong in the agentsdk root package.
-// Subpackages assembly, compact, and controller hold focused runtime contracts;
-// chat holds the model-backed chat agent implementation.
+// Package runtime executes Agent turns against a host-provided Session service
+// and Agent factory. The agentsdk root defines Agent and Run contracts.
+// Package approval defines the optional permission request and response.
+// Package chat provides the model-backed Agent loop.
 package runtime

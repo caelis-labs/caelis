@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -47,14 +49,14 @@ func TestCodeModeGojaUsesFrozenOccurrence(t *testing.T) {
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "allow"})
+			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "allow"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
-			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 				approvalExecution = req.Execution
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 			}), AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
 			if err != nil {
 				t.Fatal(err)

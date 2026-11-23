@@ -25,24 +25,16 @@ func (r router) dispatchDirectSkill(ctx context.Context, command string, args st
 	if err != nil {
 		return Result{}, true, FriendlyCommandError("skill", err)
 	}
-	if resolution.Canonical == "" && len(resolution.Matches) > 0 {
-		id, err := r.recordInteraction(ctx, req, submission.Text)
-		if err != nil {
-			return Result{InteractionMessageID: id}, true, err
-		}
-		result := r.skillResolutionNotice(command, resolution.Matches)
-		result.InteractionMessageID = id
-		return result, true, nil
-	}
-	if resolution.Canonical == "" {
+	if resolution.Canonical == "" && len(resolution.Matches) == 0 {
 		return Result{}, false, nil
 	}
-	id, err := r.recordInteraction(ctx, req, submission.Text)
-	if err != nil {
-		return Result{InteractionMessageID: id}, true, err
+	if resolution.Canonical == "" {
+		if err := req.beforeCommand(ctx); err != nil {
+			return Result{}, true, err
+		}
+		return r.skillResolutionNotice(command, resolution.Matches), true, nil
 	}
 	result, err := r.submitResolvedSkill(ctx, submission, resolution.Canonical, args, argsStart)
-	result.InteractionMessageID = id
 	return result, true, err
 }
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -165,12 +166,12 @@ func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
 	}
 	publish("concurrent-v1", &oldEffects)
 	asked, release := make(chan struct{}), make(chan struct{})
-	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		if mcp.BindingForDefinition(req.Tool).Version == "concurrent-v1" {
 			close(asked)
 			<-release
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
 	var checked atomic.Bool
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {

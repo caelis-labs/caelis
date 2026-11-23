@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -26,14 +26,14 @@ func TestPolicyIsOnlyMCPApprovalDecision(t *testing.T) {
 			var decisions, approvals, effects atomic.Int32
 			def := fixtureMCPDefinition("source")
 			base := tool.NamedTool{Def: def, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}
-			wrapped := policyWrappedTool{tool: base, mode: "custom", policy: policy.NamedMode{ID: "custom", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+			wrapped := policyAdmission{tool: base, mode: "custom", policy: policy.NamedMode{ID: "custom", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				decisions.Add(1)
 				return policy.Decision{Action: action, Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "approve", Kind: "allow_once"}, {ID: "reject", Kind: "reject_once"}}}}, nil
-			}}, approval: approvalContext{requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			}}, approval: approvalContext{requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 				approvals.Add(1)
-				return agent.ApprovalResponse{Outcome: "selected", OptionID: "approve", Approved: true}, nil
+				return approval.Response{Outcome: "selected", OptionID: "approve", Approved: true}, nil
 			})}}
-			_, err := wrapped.Call(t.Context(), tool.Call{ID: "original-call", Name: def.Name, Input: []byte(`{}`)})
+			_, err := (dispatchTool{base: wrapped.tool, before: wrapped.beforeTool}).Call(t.Context(), tool.Call{ID: "original-call", Name: def.Name, Input: []byte(`{}`)})
 			if err != nil && action != policy.ActionDeny {
 				t.Fatal(err)
 			}
@@ -72,8 +72,8 @@ func authorizationTestRequirement(active session.Session) *session.ApprovalAutho
 	return &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Scope: session.AuthorizationScope{Authority: "owner", Workspace: active.CWD, SessionID: active.SessionID, SessionIncarnation: active.CreatedAt.UTC().Format(time.RFC3339Nano), SourceID: "source", SourceRevision: "v1", PolicyRevision: "p1", CapabilitySet: "atomic-app", CapabilityRevision: "14-v1", ResourceKind: "application", Resource: "com.example.A"}, CallDigest: "frozen-call", Choices: []session.AuthorizationChoice{{OptionID: "allow_app", Persistence: session.AuthorizationSession}}}
 }
 
-func authorizationTestRequest(active session.Session, a *session.ApprovalAuthorization) agent.ApprovalRequest {
-	return agent.ApprovalRequest{SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn", Authorization: a, Call: tool.Call{ID: "call", Name: "fixture", Input: []byte(`{"app":"com.example.A"}`)}, Tool: tool.Definition{Name: "fixture"}, Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow_app", Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}}}}
+func authorizationTestRequest(active session.Session, a *session.ApprovalAuthorization) approval.Request {
+	return approval.Request{SessionRef: active.SessionRef, Session: active, RunID: "run", TurnID: "turn", Authorization: a, Call: tool.Call{ID: "call", Name: "fixture", Input: []byte(`{"app":"com.example.A"}`)}, Tool: tool.Definition{Name: "fixture"}, Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow_app", Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}}}}
 }
 
 func TestAuthorizationFlightSurvivesFirstCallerCancellation(t *testing.T) {
@@ -82,14 +82,14 @@ func TestAuthorizationFlightSurvivesFirstCallerCancellation(t *testing.T) {
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var asks atomic.Int32
-	target := policyWrappedTool{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	target := policyAdmission{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
 		asks.Add(1)
 		close(entered)
 		select {
 		case <-release:
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
 		case <-ctx.Done():
-			return agent.ApprovalResponse{}, ctx.Err()
+			return approval.Response{}, ctx.Err()
 		}
 	})}}
 	request := authorizationTestRequest(active, authorizationTestRequirement(active))
@@ -173,8 +173,8 @@ func TestSessionConsentRebuildsFromFileStoreWithoutExecuting(t *testing.T) {
 	r, active, store := authorizationTestSession(t)
 	a := authorizationTestRequirement(active)
 	request := authorizationTestRequest(active, a)
-	_, err := r.requestDurableApproval(t.Context(), request, approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
+	_, err := r.requestDurableApproval(t.Context(), request, approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
+		return approval.Response{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -208,19 +208,19 @@ func TestAuthorizationLastWaiterAndRevocationRejectLateResolution(t *testing.T) 
 		t.Run(fmt.Sprint(revoke), func(t *testing.T) {
 			r, active, store := authorizationTestSession(t)
 			request := authorizationTestRequest(active, authorizationTestRequirement(active))
-			entered := make(chan agent.ApprovalRequest, 1)
+			entered := make(chan approval.Request, 1)
 			workerDone := make(chan struct{})
 			releaseRequester := make(chan struct{})
 			var releaseOnce sync.Once
 			defer releaseOnce.Do(func() { close(releaseRequester) })
 			root, stopRoot := context.WithCancel(t.Context())
 			defer stopRoot()
-			target := policyWrappedTool{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			target := policyAdmission{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				entered <- req
 				<-ctx.Done()
 				close(workerDone)
 				<-releaseRequester
-				return agent.ApprovalResponse{}, ctx.Err()
+				return approval.Response{}, ctx.Err()
 			})}}
 			waiter, stopWaiter := context.WithCancel(root)
 			defer stopWaiter()
@@ -245,7 +245,7 @@ func TestAuthorizationLastWaiterAndRevocationRejectLateResolution(t *testing.T) 
 			case <-time.After(time.Second):
 				t.Fatal("approval producer outlived last waiter/revocation")
 			}
-			if err := r.ResolveApproval(t.Context(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: req.ApprovalRequestID, Decision: agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}}); err == nil {
+			if err := r.ResolveApproval(t.Context(), approval.ResolveRequest{SessionRef: active.SessionRef, RequestID: req.ApprovalRequestID, Decision: approval.Response{Outcome: "selected", OptionID: "allow_app", Approved: true}}); err == nil {
 				t.Fatal("late resolution restored cancelled consent")
 			}
 			releaseOnce.Do(func() { close(releaseRequester) })
@@ -289,10 +289,10 @@ func TestAuthorizationCommittedRuleFailedSessionSettlementStopsEffect(t *testing
 		return "original-rule", 7, nil
 	}
 	req := authorizationTestRequest(active, a)
-	target := policyWrappedTool{session: active, sessionRef: active.SessionRef, tool: tool.NamedTool{Def: req.Tool, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, approval: approvalContext{ctx: t.Context(), runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
+	target := policyAdmission{session: active, tool: tool.NamedTool{Def: req.Tool, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, approval: approvalContext{ctx: t.Context(), runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
+		return approval.Response{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
 	})}}
-	_, err := target.requestApproval(t.Context(), req.Call, policy.Decision{Action: policy.ActionAskApproval, Approval: req.Approval, Authorization: a}, toolbinding.Dispatch{})
+	_, err := target.requestApproval(t.Context(), req.Call, policy.Decision{Action: policy.ActionAskApproval, Approval: req.Approval, Authorization: a}, toolbinding.Dispatch{}, dispatchTool{base: target.tool}.invoke)
 	if err == nil || !strings.Contains(err.Error(), "original-rule committed at configuration revision 7") || effects.Load() != 0 || writes.Load() != 1 {
 		t.Fatalf("settlement: err=%v writes=%d effects=%d", err, writes.Load(), effects.Load())
 	}

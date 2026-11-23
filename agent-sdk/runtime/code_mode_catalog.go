@@ -6,6 +6,7 @@ import (
 	"sort"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -23,6 +24,10 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 	}
 	if text, ok := state[codemode.MetadataCatalog].(string); ok {
 		return text, nil
+	}
+	writer, ok := r.sessions.(session.StateWriter)
+	if !ok {
+		return "", errorcode.New(errorcode.Unsupported, "Code Mode catalog initialization requires Session state writes")
 	}
 	type hint struct {
 		Name        string `json:"name"`
@@ -96,7 +101,7 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 		raw, _ := json.Marshal(hints)
 		text += "\n\nPartial tool hint snapshot; use tools.search for other capabilities.\n" + string(raw)
 	}
-	_, err = r.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Update: func(current map[string]any) (map[string]any, error) {
+	_, err = writer.UpdateState(ctx, session.UpdateStateRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Update: func(current map[string]any) (map[string]any, error) {
 		if prior, ok := current[codemode.MetadataCatalog].(string); ok {
 			text = prior
 			return current, nil

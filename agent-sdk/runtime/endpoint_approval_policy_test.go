@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -18,9 +20,9 @@ import (
 func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t *testing.T) {
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "controller")
 	requesterCalls := 0
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		requesterCalls++
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	bridge := controllerApprovalRequester{
 		runtime:    runtime,
@@ -57,9 +59,9 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
 		runtime: runtime,
-		requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 			requesterCalls++
-			return agent.ApprovalResponse{}, nil
+			return approval.Response{}, nil
 		}),
 		sessionRef:           activeSession.SessionRef,
 		session:              activeSession,
@@ -89,12 +91,70 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 	}
 }
 
+func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
+	for _, cancelApproval := range []bool{false, true} {
+		t.Run(map[bool]string{false: "settle_after_parent_starts", true: "register_and_cancel_during_parent"}[cancelApproval], func(t *testing.T) {
+			store, active := newTestSessionService(t, "parent")
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous, release, err := store.AcquireWriter(t.Context(), active.SessionRef, "spawn-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = release(); err != nil {
+				t.Fatal(err)
+			}
+			startParent := func() {
+				t.Helper()
+				blocking := &blockingTestAgent{started: make(chan struct{})}
+				run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Agent: blocking, Input: "next"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					_ = run.Handle.Close()
+					_ = run.Handle.WaitCompletion(context.Background())
+				})
+				<-blocking.started
+			}
+			if cancelApproval {
+				startParent()
+			}
+			var requestID string
+			bridge := newSubagentApprovalRequester(rt, presets.ModeWorkspaceWrite, approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+				requestID = req.ApprovalRequestID
+				if cancelApproval {
+					return approval.Response{}, context.Canceled
+				}
+				startParent()
+				return approval.Response{Outcome: "selected", OptionID: "allow_once"}, nil
+			}), active, active.SessionRef)
+			resp, err := bridge.RequestSubagentApproval(previous, subagent.ApprovalRequest{TaskID: "child", ParentCallID: "spawn", ToolCall: subagent.ApprovalToolCall{ID: "req", Name: "lookup"}, Options: endpointApprovalTestOptions()})
+			want := session.ApprovalRecordResolved
+			if cancelApproval {
+				want = session.ApprovalRecordCancelled
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancel: %v", err)
+				}
+			} else if err != nil || !resp.Approved {
+				t.Fatalf("settle: %+v, %v", resp, err)
+			}
+			record, err := rt.approvalRecord(t.Context(), active.SessionRef, requestID)
+			if err != nil || record.Status != want || record.Revision != 2 {
+				t.Fatalf("durable record=%+v err=%v", record, err)
+			}
+		})
+	}
+}
+
 func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *testing.T) {
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "subagent")
 	requesterCalls := 0
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		requesterCalls++
-		return agent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	})
 	bridge := newSubagentApprovalRequester(runtime, presets.ModeDangerFullAccess, requester, activeSession, activeSession.SessionRef)
 	response, err := bridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
@@ -123,14 +183,14 @@ func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T)
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
 		runtime: runtime,
-		requester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 			requesterCalls++
-			return agent.ApprovalResponse{Approved: true}, nil
+			return approval.Response{Approved: true}, nil
 		}),
 		sessionRef: activeSession.SessionRef,
 		session:    activeSession,
 	}
-	tests := map[string][]agent.ApprovalOption{
+	tests := map[string][]approval.Option{
 		"unknown kind":   {{ID: "allow_once", Name: "Allow once", Kind: "vendor_custom"}},
 		"uppercase kind": {{ID: "allow_once", Name: "Allow once", Kind: "ALLOW_ONCE"}},
 		"spaced kind":    {{ID: "allow_once", Name: "Allow once", Kind: " allow_once "}},
@@ -169,7 +229,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 		t.Fatal(err)
 	}
 	runtime := &Runtime{
-		policies:          registry,
+		hooks:             hook.Set{ToolPolicy: registry},
 		defaultPolicyMode: presets.ModeWorkspaceWrite,
 	}
 	mode := runtime.policyMode(agent.AgentSpec{Metadata: map[string]any{
@@ -180,9 +240,9 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 	}
 	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "sess-unregistered-danger"}}
 	requesterCalls := 0
-	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		requesterCalls++
-		return agent.ApprovalResponse{Approved: true}, nil
+		return approval.Response{Approved: true}, nil
 	})
 
 	for _, participant := range []bool{false, true} {
@@ -228,8 +288,8 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 
 func TestDangerFullAccessEndpointPolicyRegistryFailureFailsClosed(t *testing.T) {
 	wantErr := errors.New("registry unavailable")
-	runtime := &Runtime{policies: errorPolicyRegistry{err: wantErr}}
-	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), presets.ModeDangerFullAccess, agent.ApprovalRequest{
+	runtime := &Runtime{hooks: hook.Set{ToolPolicy: errorPolicyRegistry{err: wantErr}}}
+	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), presets.ModeDangerFullAccess, approval.Request{
 		Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}}},
 	})
 	if !handled {
@@ -268,7 +328,7 @@ func newDangerFullAccessEndpointTestRuntime(t *testing.T, suffix string) (*Runti
 	runtime, err := New(Config{
 		Sessions:          sessions,
 		AgentFactory:      chat.Factory{},
-		PolicyRegistry:    registry,
+		Hooks:             hook.Set{ToolPolicy: registry},
 		DefaultPolicyMode: presets.ModeDangerFullAccess,
 	})
 	if err != nil {
@@ -277,8 +337,8 @@ func newDangerFullAccessEndpointTestRuntime(t *testing.T, suffix string) (*Runti
 	return runtime, activeSession
 }
 
-func endpointApprovalTestOptions() []agent.ApprovalOption {
-	return []agent.ApprovalOption{
+func endpointApprovalTestOptions() []approval.Option {
+	return []approval.Option{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 	}

@@ -18,7 +18,9 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -183,16 +185,6 @@ func TestCodeModeLive(t *testing.T) {
 			}}
 		}
 	}
-	if mode == "baseline" {
-		kept := tools[:0]
-		for _, one := range tools {
-			if one.Definition().Name != codemode.ToolName {
-				kept = append(kept, one)
-			}
-		}
-		tools = kept
-	}
-
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(stateRoot, "sessions")})
 	var active session.Session
 	if resume {
@@ -257,12 +249,12 @@ func TestCodeModeLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task with actual tools. Do not invent tool output. Use only the task-owned workspace and the explicitly named fixture application. Do not use shell or mutate external services. No automatic replay after an unknown effect."}, PolicyRegistry: registry, DefaultPolicyMode: "code-mode-local"})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task with actual tools. Do not invent tool output. Use only the task-owned workspace and the explicitly named fixture application. Do not use shell or mutate external services. No automatic replay after an unknown effect."}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "code-mode-local"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	requester := liveApprovalFunc(func(_ context.Context, r agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	requester := liveApprovalFunc(func(_ context.Context, r approval.Request) (approval.Response, error) {
 		approved := false
 		remote, _ := r.Tool.Metadata[mcp.MetadataTool].(string)
 		switch remote {
@@ -285,11 +277,11 @@ func TestCodeModeLive(t *testing.T) {
 					break
 				}
 			}
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: option, Approved: true}, nil
+			return approval.Response{Outcome: "selected", OptionID: option, Approved: true}, nil
 		}
-		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
+		return approval.Response{Outcome: "selected", OptionID: "cancel"}, nil
 	})
-	route := "Use native filesystem tools and the existing tool_search/mcp_call extension entries."
+	route := "Use native filesystem tools directly. Use js_exec for extension calls."
 	if mode == "js_exec" {
 		route = "Use js_exec with tools.search and tools.call for extensions and JS orchestration. Native filesystem calls may write/edit workflow.js; execute the actual saved file with js_exec file. Select only the aggregate/documentation and screenshot outputs. Shell must remain native and is forbidden for this task."
 	}

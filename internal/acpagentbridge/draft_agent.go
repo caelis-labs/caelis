@@ -12,6 +12,7 @@ import (
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -29,14 +30,15 @@ type DraftCallbacks interface {
 // DraftAgent projects the pinned asynchronous ACP protocol over the same
 // principal-bound Control clients as product v1. It never invokes v1 Prompt.
 type DraftAgent struct {
-	inner       *RuntimeAgent
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.Mutex
-	initialized bool
-	callbacks   DraftCallbacks
-	ready       chan struct{}
-	sessions    map[string]*draftSession
+	inner                *RuntimeAgent
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	mu                   sync.Mutex
+	initialized          bool
+	idleCommandAdmission bool
+	callbacks            DraftCallbacks
+	ready                chan struct{}
+	sessions             map[string]*draftSession
 }
 
 type draftSession struct {
@@ -80,12 +82,12 @@ type draftPromptAdmission struct {
 }
 
 type draftReceipt struct {
-	operationID   string
-	interactionID string
-	target        appserver.TurnTarget
-	steer         bool
-	message       chan string
-	failed        chan error
+	operationID string
+	commandID   string
+	target      appserver.TurnTarget
+	steer       bool
+	message     chan string
+	failed      chan error
 }
 
 // NewGatewayDraftAgent constructs the experimental facade from the existing
@@ -146,15 +148,13 @@ func (a *DraftAgent) Initialize(ctx context.Context, req v2.InitializeRequest) (
 	if err != nil {
 		return v2.InitializeResponse{}, err
 	}
-	if !slices.Contains(info.Capabilities, appserver.CapabilityConversationInteractions) {
-		return v2.InitializeResponse{}, acp.NewInvalidRequest(map[string]any{"error": "ACP draft requires durable conversation interactions"})
-	}
+	a.idleCommandAdmission = slices.Contains(info.Capabilities, appserver.CapabilityIdleCommandAdmission)
 	var prompt v2.PromptCapabilities
 	if caps.Image {
 		prompt.Image = &v2.PromptImageCapabilities{}
 	}
 	a.initialized = true
-	return v2.InitializeResponse{ProtocolVersion: 2, Info: v2.Implementation{Name: a.inner.agentInfo.Name, Title: a.inner.agentInfo.Title, Version: a.inner.agentInfo.Version}, Meta: acpdraft.InitializeMeta(), Capabilities: v2.AgentCapabilities{Session: &v2.SessionCapabilities{Prompt: &prompt}}}, nil
+	return v2.InitializeResponse{ProtocolVersion: 2, Info: v2.Implementation{Name: a.inner.agentInfo.Name, Title: a.inner.agentInfo.Title, Version: a.inner.agentInfo.Version}, Meta: acpdraft.InitializeMetaWithIdleOnly(a.idleCommandAdmission), Capabilities: v2.AgentCapabilities{Session: &v2.SessionCapabilities{Prompt: &prompt}}}, nil
 }
 
 func (a *DraftAgent) admitted() error {
@@ -329,6 +329,14 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 	if err != nil {
 		return v2.PromptResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
+	if guard != nil && guard.IdleOnly {
+		a.mu.Lock()
+		supported := a.idleCommandAdmission
+		a.mu.Unlock()
+		if !supported {
+			return v2.PromptResponse{}, errorcode.New(errorcode.Unsupported, "Control Host does not support idle-only admission")
+		}
+	}
 	input, contentParts, err := draftPromptContent(req)
 	if err != nil {
 		return v2.PromptResponse{}, err
@@ -374,10 +382,6 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 	s.mu.Lock()
 	clear(s.users)
 	s.waiter = waiter
-	if state.Run.Active {
-		pending.target = draftRunTarget(state.Run)
-		waiter.target = pending.target
-	}
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
@@ -396,6 +400,7 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 		}
 		s.mu.Lock()
 		waiter.target = draftRunTarget(state.Run)
+		pending.target = waiter.target
 		s.mu.Unlock()
 		result, err = a.inner.sessionClient.Steer(ctx, appserver.SteerRequest{WriteBase: base, Target: waiter.target, Input: input, ContentParts: contentParts})
 	} else {
@@ -421,6 +426,7 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 		waiter.target = result.Target
 		pending.target = result.Target
 	}
+	commandID := waiter.commandID
 	for _, env := range s.users {
 		s.settleReceiptLocked(env)
 	}
@@ -432,6 +438,9 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 		cancelCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer stop()
 		_ = a.cancelDraftTarget(cancelCtx, s.id, result.Target)
+	}
+	if commandID != "" {
+		return s.promptReceipt(waiter, commandID), nil
 	}
 	select {
 	case messageID := <-waiter.message:
@@ -445,10 +454,9 @@ func (a *DraftAgent) Prompt(ctx context.Context, req v2.PromptRequest) (v2.Promp
 		}
 	case <-ctx.Done():
 		s.mu.Lock()
-		insertedCommand := waiter.interactionID != ""
 		cancelledAdmittedTurn := waiter.target.TurnID != "" && errors.Is(context.Cause(ctx), controlprompt.ErrUserInterrupt)
 		s.mu.Unlock()
-		if insertedCommand || cancelledAdmittedTurn {
+		if cancelledAdmittedTurn {
 			// Session cancellation cannot erase an inserted input whose echo is
 			// still being published. An admitted Turn's native terminal also
 			// proves when the pending input was never inserted.
@@ -489,7 +497,7 @@ func (s *draftSession) promptReceipt(waiter *draftReceipt, messageID string) v2.
 	s.mu.Lock()
 	activityID := waiter.target.TurnID
 	if activityID == "" {
-		activityID = waiter.interactionID
+		activityID = waiter.commandID
 	}
 	s.mu.Unlock()
 	return v2.PromptResponse{MessageId: v2.MessageId(messageID), Meta: acpdraft.ActivityMeta(activityID)}
@@ -507,19 +515,30 @@ func (a *DraftAgent) routePrompt(ctx context.Context, s *draftSession, state app
 	if err := ctx.Err(); err != nil {
 		return appserver.CommandResult{}, err
 	}
-	commandStarted := false
+	var commandID string
 	result, routeErr := router.Route(ctx, controlprompt.Request{
-		Submission:                controlprompt.Submission{Text: input, Attachments: promptRouterAttachmentsFromContentParts(input, parts)},
-		RequireInteractionReceipt: true,
-		RequireIdleRun:            requireIdle,
-		InteractionObserver: func(ctx context.Context, id string) error {
+		Submission: controlprompt.Submission{Text: input, Attachments: promptRouterAttachmentsFromContentParts(input, parts)},
+		BeforeCommand: func(ctx context.Context) error {
+			if requireIdle {
+				current, err := a.inner.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: s.id, RequireIdle: true})
+				if errorcode.Is(err, errorcode.Conflict) || (err == nil && current.Run.Active) {
+					return appserver.NewOutcomeError(appserver.OutcomeConflicted, acpdraft.InactivePromptError())
+				}
+				if err != nil {
+					return err
+				}
+			}
+			id := newACPSessionOperationID("command")
+			if err := s.echoCommand(ctx, id, input); err != nil {
+				return err
+			}
+			commandID = id
 			s.mu.Lock()
-			waiter.interactionID, waiter.steer = id, false
+			waiter.commandID = id
 			s.mu.Unlock()
 			if state.Run.Active {
 				return nil
 			}
-			commandStarted = true
 			return s.emitCommandState(id, true, "")
 		},
 	})
@@ -529,22 +548,16 @@ func (a *DraftAgent) routePrompt(ctx context.Context, s *draftSession, state app
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
 	}
-	if routeErr != nil && result.InteractionMessageID == "" {
+	if routeErr != nil && commandID == "" {
 		return appserver.CommandResult{}, routeErr
 	}
 	projectionCtx := ctx
-	if result.InteractionMessageID != "" {
+	if commandID != "" {
 		projectionCtx = s.ctx
 	}
 	s.mu.Lock()
-	waiter.interactionID = result.InteractionMessageID
 	waiter.steer = false
 	s.mu.Unlock()
-	if result.InteractionMessageID != "" && !state.Run.Active && !commandStarted {
-		if err := s.emitCommandState(result.InteractionMessageID, true, ""); err != nil {
-			return appserver.CommandResult{}, err
-		}
-	}
 	if result.ParticipantTask != nil {
 		s.mu.Lock()
 		mux := s.mux
@@ -587,10 +600,10 @@ func (a *DraftAgent) routePrompt(ctx context.Context, s *draftSession, state app
 	if result.Turn != nil {
 		target = appserver.TurnTarget{HandleID: result.Turn.HandleID(), RunID: result.Turn.RunID(), TurnID: result.Turn.TurnID()}
 	}
-	if result.InteractionMessageID == "" && target.TurnID == "" {
-		return appserver.CommandResult{}, errors.New("ACP draft command did not admit a canonical conversation message")
+	if commandID == "" && target.TurnID == "" {
+		return appserver.CommandResult{}, errors.New("ACP draft prompt returned without an echo or Turn")
 	}
-	if result.InteractionMessageID != "" && !state.Run.Active {
+	if commandID != "" && target.TurnID == "" {
 		stopReason := "end_turn"
 		if routeErr != nil {
 			stopReason = "error"
@@ -598,17 +611,8 @@ func (a *DraftAgent) routePrompt(ctx context.Context, s *draftSession, state app
 				stopReason = "cancelled"
 			}
 		}
-		current, inspectErr := a.inner.sessionClient.InspectSession(projectionCtx, appserver.StateRequest{SessionID: s.id})
-		if inspectErr != nil {
-			stopReason = "error"
-			if err := a.draftNotice(projectionCtx, s.id, inspectErr.Error()); err != nil {
-				return appserver.CommandResult{}, err
-			}
-		}
-		if !current.Run.Active && target.TurnID == "" {
-			if err := s.emitCommandState(result.InteractionMessageID, false, stopReason); err != nil {
-				return appserver.CommandResult{}, err
-			}
+		if err := s.emitCommandState(commandID, false, stopReason); err != nil {
+			return appserver.CommandResult{}, err
 		}
 	}
 	return appserver.CommandResult{OperationID: waiter.operationID, Outcome: appserver.OutcomeCommitted, SessionID: s.id, Target: target}, nil

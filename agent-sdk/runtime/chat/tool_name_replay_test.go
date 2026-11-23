@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -12,6 +13,38 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+func TestRecordedToolReplySurvivesDifferentOutputBudget(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	cfg := sessionfile.Config{RootDir: t.TempDir()}
+	store := sessionfile.NewStore(cfg)
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	call := model.ToolCall{ID: "call-1", Name: "read_record", Args: `{"key":"row-7"}`}
+	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
+	result := textToolResult(strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2))
+	reply := toolResultMessageFromCanonical(call, result, nil)
+	events := append(modelToolCallEvents(assistant, nil, "", nil), toolResultEvent(call, result, nil, &reply))
+	for _, event := range events {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reopened := sessionfile.NewStore(cfg)
+	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: ctx, Events: loaded.Events}))
+	if !reflect.DeepEqual(got, []model.Message{assistant, reply}) {
+		t.Fatal("reopened context differs from the original assistant call and tool reply")
+	}
+}
 
 func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 	t.Parallel()

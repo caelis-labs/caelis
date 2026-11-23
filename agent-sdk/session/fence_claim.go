@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"strings"
+	"sync/atomic"
 )
 
 // NewSessionFenceClaim attaches a one-shot, unforgeable mutation claim to a
@@ -22,6 +23,7 @@ func NewSessionFenceClaim(fence SessionFence) (SessionFence, error) {
 	if _, err := rand.Read(value[:]); err != nil {
 		return SessionFence{}, err
 	}
+	fence.turnInUse = new(atomic.Bool)
 	fence.claimToken = hex.EncodeToString(value[:])
 	fence.claimDigest = sessionFenceClaimDigest(fence.claimToken)
 	return fence, nil
@@ -30,6 +32,7 @@ func NewSessionFenceClaim(fence SessionFence) (SessionFence, error) {
 // SessionFenceForStorage removes the bearer claim while retaining the digest
 // required to authorize future mutations and exact release.
 func SessionFenceForStorage(fence SessionFence) SessionFence {
+	fence.turnInUse = nil
 	fence.claimToken = ""
 	return fence
 }
@@ -37,6 +40,7 @@ func SessionFenceForStorage(fence SessionFence) SessionFence {
 // SessionFenceForObservation removes all claim material from a fence returned
 // by a read-only observation API.
 func SessionFenceForObservation(fence SessionFence) SessionFence {
+	fence.turnInUse = nil
 	fence.claimToken = ""
 	fence.claimDigest = ""
 	return fence
@@ -49,6 +53,7 @@ func SessionFenceClaimDigest(fence SessionFence) string {
 
 // RestoreSessionFenceClaimDigest restores a persisted non-bearer digest.
 func RestoreSessionFenceClaimDigest(fence SessionFence, digest string) SessionFence {
+	fence.turnInUse = nil
 	fence.claimToken = ""
 	fence.claimDigest = strings.TrimSpace(digest)
 	return fence

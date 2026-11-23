@@ -31,7 +31,7 @@ func (r *Runtime) persistCompactionInvocations(ctx context.Context, active *sess
 		event := normalizeEvent(*active, turnID, session.NewModelInvocationReceipt(attempt, "compaction"))
 		_, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 		if err != nil {
-			persisted, readErr := r.reconcileCompactionAppend(cleanup, active.SessionRef, event)
+			persisted, readErr := r.reconcileEventAppend(cleanup, active.SessionRef, event)
 			if readErr != nil || persisted == nil {
 				return fmt.Errorf("persist model invocation receipt: %w", errors.Join(err, readErr))
 			}

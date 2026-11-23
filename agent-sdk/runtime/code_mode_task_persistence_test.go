@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -143,7 +144,7 @@ func TestLiveScriptTaskWaitWithCancelReturnsSelectedResult(t *testing.T) {
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	hook := agent.Hook[agent.ToolOutcome, tool.Result]{Name: "observe-cancel-status", Apply: func(_ context.Context, info agent.HookContext, outcome agent.ToolOutcome) (tool.Result, error) {
+	observeResult := hook.ToolResult{Name: "observe-cancel-status", Apply: func(_ context.Context, info hook.ToolContext, outcome hook.ToolOutcome) (tool.Result, error) {
 		if info.Tool.ID == "cancel" {
 			close(cancelReturned)
 		}
@@ -170,8 +171,7 @@ func TestLiveScriptTaskWaitWithCancelReturnsSelectedResult(t *testing.T) {
 	}}
 	events := runNativeOrdering(t, store, active, driver, []tool.Tool{script, terminal, effect}, Config{
 		TaskActivityChanged: func(session.SessionRef) { markCommitted() },
-		PolicyRegistry:      registry,
-		Hooks:               agent.Hooks{ToolResult: []agent.Hook[agent.ToolOutcome, tool.Result]{hook}},
+		Hooks:               hook.Set{ToolPolicy: registry, ToolResult: []hook.ToolResult{observeResult}},
 	})
 	if len(driver.requests) != 3 || earlier.Load() != 1 || later.Load() != 1 {
 		t.Fatalf("batch ordering: model requests=%d preceding effects=%d later effects=%d", len(driver.requests), earlier.Load(), later.Load())
@@ -306,7 +306,7 @@ func TestJSExecInitialPersistenceFailureDoesNotBindOutput(t *testing.T) {
 		executed.Store(true)
 		return []byte(`42`), nil
 	})}
-	rt, err := New(Config{Sessions: store, TaskStore: failCodeModeInitialStore{Store: base, failure: failure}, TaskOutput: trace, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, TaskStore: failCodeModeInitialStore{Store: base, failure: failure}, TaskOutput: trace, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, TaskStore: independentFailScriptTerminalStore{Store: base, marker: marker}, TaskOutput: trace, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, TaskStore: independentFailScriptTerminalStore{Store: base, marker: marker}, TaskOutput: trace, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

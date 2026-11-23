@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -18,7 +18,7 @@ func TestPureTimeoutDiscardsDetachedLateResult(t *testing.T) {
 	ctx := context.WithValue(t.Context(), key{}, "private-bearer")
 	release := make(chan struct{})
 	finished := make(chan struct{})
-	h := agent.Hook[model.Message, model.Message]{Name: "late", Timeout: 10 * time.Millisecond, Apply: func(ctx context.Context, _ agent.HookContext, m model.Message) (model.Message, error) {
+	h := hook.BaseHook[func(context.Context, hook.TurnContext, model.Message) (model.Message, error)]{Name: "late", Timeout: 10 * time.Millisecond, Apply: func(ctx context.Context, _ hook.TurnContext, m model.Message) (model.Message, error) {
 		defer close(finished)
 		if ctx.Value(key{}) != nil {
 			t.Error("private context value leaked")
@@ -28,8 +28,8 @@ func TestPureTimeoutDiscardsDetachedLateResult(t *testing.T) {
 		return m, nil
 	}}
 	original := model.NewTextMessage(model.RoleUser, "original")
-	out, err := Call(ctx, "input", h, agent.HookContext{}, original, model.CloneMessage, model.CloneMessage)
-	var hookErr *agent.HookError
+	out, err := Call(ctx, "input", h, hook.TurnContext{}, original, model.CloneMessage, model.CloneMessage)
+	var hookErr *hook.Error
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &hookErr) || hookErr.Phase != "input" || hookErr.Name != "late" {
 		t.Fatalf("error=%v", err)
 	}
@@ -108,9 +108,9 @@ func TestAroundDrainsUncooperativeProducer(t *testing.T) {
 }
 
 func TestPurePanicIdentifiesPhaseAndName(t *testing.T) {
-	h := agent.Hook[int, int]{Name: "panic", Apply: func(context.Context, agent.HookContext, int) (int, error) { panic("broken") }}
-	_, err := Call(t.Context(), "model_prepare", h, agent.HookContext{}, 1, func(v int) int { return v }, func(v int) int { return v })
-	var e *agent.HookError
+	h := hook.BaseHook[func(context.Context, hook.TurnContext, int) (int, error)]{Name: "panic", Apply: func(context.Context, hook.TurnContext, int) (int, error) { panic("broken") }}
+	_, err := Call(t.Context(), "model_prepare", h, hook.TurnContext{}, 1, func(v int) int { return v }, func(v int) int { return v })
+	var e *hook.Error
 	if !errors.As(err, &e) || e.Phase != "model_prepare" || e.Name != "panic" {
 		t.Fatalf("panic error=%v", err)
 	}

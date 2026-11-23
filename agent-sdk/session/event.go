@@ -70,8 +70,9 @@ type EventTool struct {
 	Error     string           `json:"error,omitempty"`
 	ErrorCode string           `json:"error_code,omitempty"`
 	Parent    *EventParentTool `json:"parent,omitempty"`
-	// ModelCall retains the effective protocol envelope when execution targets another tool.
-	ModelCall *model.ToolCall `json:"model_call,omitempty"`
+	// LegacyModelCall preserves the model envelope of routed MCP history through
+	// v0.84.1. Remove when those Sessions leave the supported resume window.
+	LegacyModelCall *model.ToolCall `json:"model_call,omitempty"`
 	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
 	ProposedCall *model.ToolCall `json:"proposed_call,omitempty"`
 	ID           string          `json:"id,omitempty"`
@@ -104,6 +105,9 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 	}{toolAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
+	}
+	if call := decoded.LegacyModelCall; call != nil && (call.Name != "mcp_call" || call.ID == "" || call.ID != decoded.ID || call.Args == "") {
+		return coreEventValidationError("invalid historical MCP envelope")
 	}
 	if len(fields.Input) > 0 && string(fields.Input) != "null" {
 		decoder := json.NewDecoder(bytes.NewReader(fields.Input))

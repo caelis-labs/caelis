@@ -50,6 +50,11 @@ func (s *Store) SessionFence(ctx context.Context, ref session.SessionRef) (sessi
 	return out, err
 }
 
+// AcquireWriter admits a single producer until the returned release completes.
+func (s *Store) AcquireWriter(ctx context.Context, ref session.SessionRef, owner string) (context.Context, func() error, error) {
+	return session.AcquireFencedWriter(ctx, s, ref, owner)
+}
+
 func (s *Store) AcquireSessionFence(ctx context.Context, req session.AcquireSessionFenceRequest) (session.SessionFence, error) {
 	return s.acquireSessionFence(ctx, req, false)
 }

@@ -15,7 +15,7 @@ import (
 )
 
 type idleBackend interface {
-	session.Service
+	session.ManagedService
 	session.SessionFenceService
 	session.IdleCompactionStore
 	session.CompactionReceiptStore

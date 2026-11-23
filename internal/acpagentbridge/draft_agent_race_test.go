@@ -382,23 +382,19 @@ func TestDraftProductionOutboundBindsReceiptAfterAnotherCallersCompleteActivity(
 	}
 }
 
-func TestDraftProductionOutboundCommandReceiptSurvivesReplayAndFailure(t *testing.T) {
-	for _, failAt := range []string{"none", "ledger_receipt", "dispatch"} {
+func TestDraftProductionOutboundCommandEchoIsLiveOnly(t *testing.T) {
+	for _, failAt := range []string{"none", "dispatch"} {
 		t.Run(failAt, func(t *testing.T) {
 			f := newDraftNativeFixture(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			svc := &draftReceiptRouterService{fixture: f}
-			switch failAt {
-			case "ledger_receipt":
-				svc.recordErr = errors.New("completion failed after append")
-			case "dispatch":
+			svc := &draftReceiptRouterService{}
+			if failAt == "dispatch" {
 				svc.dispatchErr = errors.New("command effect failed")
 			}
 			updates := make(chan client.UpdateEnvelope, 100)
 			outbound, _ := connectDraftProductionOutbound(t, ctx, f, client.Config{OnUpdate: func(update client.UpdateEnvelope) { updates <- update }}, func(inner *RuntimeAgent) {
 				inner.promptRouterFactory = func(_ context.Context, native session.Session) (controlprompt.Router, error) {
-					svc.id = native.SessionID
 					return controlprompt.New(controlprompt.RouterConfig{Service: svc}), nil
 				}
 			})
@@ -415,13 +411,6 @@ func TestDraftProductionOutboundCommandReceiptSurvivesReplayAndFailure(t *testin
 			} else if err == nil || client.PromptOutcomeUnknown(err) || !strings.Contains(err.Error(), "foreground Activity failed") {
 				t.Fatalf("inserted failure lost conclusive receipt=%#v, %v", result, err)
 			}
-			firstID := svc.messageID
-			if firstID == "" {
-				t.Fatal("command has no canonical persisted input")
-			}
-			if failAt == "ledger_receipt" && svc.effects != 0 {
-				t.Fatalf("failed ledger dispatched command effect=%d", svc.effects)
-			}
 			if _, err := outbound.LoadSession(ctx, created.SessionID, cwd, nil); err != nil {
 				t.Fatalf("command replay=%v", err)
 			}
@@ -435,17 +424,17 @@ func TestDraftProductionOutboundCommandReceiptSurvivesReplayAndFailure(t *testin
 				if err := json.Unmarshal(update.Raw, &fields); err != nil {
 					t.Fatal(err)
 				}
-				if strings.HasPrefix(fields.SessionUpdate, "user_message") && fields.MessageID == firstID {
+				if strings.HasPrefix(fields.SessionUpdate, "user_message") && fields.MessageID != "" {
 					echoCount++
 				}
 			}
-			if echoCount != 2 {
-				t.Fatalf("live+replay canonical command echo count=%d", echoCount)
+			if echoCount != 1 {
+				t.Fatalf("live and replay command echo count=%d", echoCount)
 			}
-			svc.recordErr, svc.dispatchErr = nil, nil
+			svc.dispatchErr = nil
 			result, err = outbound.Prompt(ctx, created.SessionID, "/model fixture high", nil)
-			if err != nil || result.StopReason != "end_turn" || svc.messageID == firstID {
-				t.Fatalf("next command after replay=%#v, %v; IDs=%q/%q", result, err, firstID, svc.messageID)
+			if err != nil || result.StopReason != "end_turn" {
+				t.Fatalf("next command after replay=%#v, %v", result, err)
 			}
 		})
 	}
@@ -462,14 +451,13 @@ func (s draftCancelledCommandService) UseModel(ctx context.Context, _, _ string,
 	return controlstatus.StatusSnapshot{}, ctx.Err()
 }
 
-func TestDraftProductionOutboundCancelledCommandKeepsDurableReceipt(t *testing.T) {
+func TestDraftProductionOutboundCancelledCommandSettlesLiveActivity(t *testing.T) {
 	f := newDraftNativeFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	svc := draftCancelledCommandService{draftReceiptRouterService: &draftReceiptRouterService{fixture: f}, started: make(chan struct{})}
+	svc := draftCancelledCommandService{draftReceiptRouterService: &draftReceiptRouterService{}, started: make(chan struct{})}
 	outbound, agent := connectDraftProductionOutbound(t, ctx, f, client.Config{}, func(inner *RuntimeAgent) {
 		inner.promptRouterFactory = func(_ context.Context, native session.Session) (controlprompt.Router, error) {
-			svc.id = native.SessionID
 			return controlprompt.New(controlprompt.RouterConfig{Service: svc}), nil
 		}
 	})
@@ -496,14 +484,60 @@ func TestDraftProductionOutboundCancelledCommandKeepsDurableReceipt(t *testing.T
 	}
 	select {
 	case result := <-completed:
-		if result.err != nil || result.response.StopReason != "cancelled" || svc.messageID == "" {
-			t.Fatalf("post-insertion command cancellation=%#v, canonical=%q", result, svc.messageID)
+		if result.err != nil || result.response.StopReason != "cancelled" {
+			t.Fatalf("command cancellation=%#v", result)
 		}
 	case <-ctx.Done():
-		t.Fatal("cancelled durable command did not settle")
+		t.Fatal("cancelled command did not settle")
 	}
 	if svc.effects != 0 {
 		t.Fatalf("cancelled command committed a model effect=%d", svc.effects)
+	}
+}
+
+func TestDraftCancellingLiveCommandLeavesExistingTurnRunning(t *testing.T) {
+	f := newDraftNativeFixture(t)
+	client, agent, _ := connectDraftNative(t, f)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	created, err := client.NewSession(ctx, v2.NewSessionRequest{Cwd: v2.AbsolutePath(t.TempDir())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := string(created.SessionId)
+	turn := appserver.RunState{Active: true, Kind: appserver.RunKindKernel, TurnID: "existing", HandleID: "handle", RunID: "run"}
+	f.mu.Lock()
+	state := f.states[id]
+	state.Run = turn
+	f.states[id] = state
+	f.mu.Unlock()
+	command := draftCancelledCommandService{draftReceiptRouterService: &draftReceiptRouterService{}, started: make(chan struct{})}
+	agent.inner.promptRouterFactory = func(context.Context, session.Session) (controlprompt.Router, error) {
+		return controlprompt.New(controlprompt.RouterConfig{Service: command}), nil
+	}
+	ended := make(chan error, 1)
+	go func() { _, err := client.Prompt(ctx, draftNativePrompt(id, "/model fixture high")); ended <- err }()
+	select {
+	case <-command.started:
+	case err := <-ended:
+		t.Fatalf("command returned before dispatch: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := agent.Cancel(ctx, v2.CancelSessionNotification{SessionId: created.SessionId}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-ended:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	current, err := f.InspectSession(ctx, appserver.StateRequest{SessionID: id})
+	if err != nil || current.Run != turn {
+		t.Fatalf("command cancellation changed another Turn: %+v, %v", current.Run, err)
 	}
 }
 

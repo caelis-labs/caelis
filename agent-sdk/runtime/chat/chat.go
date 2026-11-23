@@ -10,15 +10,14 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	"github.com/google/uuid"
 )
 
@@ -39,21 +38,18 @@ type Agent struct {
 	yieldedResults       map[*session.Event]bool
 	outputStream         *textStream
 
-	name                string
-	model               model.LLM
-	tools               []tool.Tool
-	deferredTools       toolset.Source
-	toolsByName         map[string]tool.Tool
-	systemPrompt        string
-	reasoning           model.ReasoningConfig
-	request             agent.ModelRequestOptions
-	toolResultArtifacts *toolResultArtifactStore
+	name         string
+	model        model.LLM
+	tools        []tool.Tool
+	toolsByName  map[string]tool.Tool
+	systemPrompt string
+	reasoning    model.ReasoningConfig
+	request      agent.ModelRequestOptions
+
 	resolveModelRequest agent.ModelRequestResolver
 	instructions        []model.Part
 	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
 	releaseModelRequest func()
-	discoveries         map[string]tool.Binding
-	boundCalls          map[string]boundMCPCall
 
 	resolveSessionInstructions agent.SessionInstructionsResolver
 	summaryID                  string
@@ -69,11 +65,10 @@ func New(name string, model model.LLM, systemPrompt string) (*Agent, error) {
 		name = "chat"
 	}
 	return &Agent{
-		name:                name,
-		model:               model,
-		toolsByName:         map[string]tool.Tool{},
-		systemPrompt:        strings.TrimSpace(systemPrompt),
-		toolResultArtifacts: defaultToolResultArtifactStore(),
+		name:         name,
+		model:        model,
+		toolsByName:  map[string]tool.Tool{},
+		systemPrompt: strings.TrimSpace(systemPrompt),
 	}, nil
 }
 
@@ -112,7 +107,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 			name = "chat"
 		}
 		return &Agent{name: name, models: spec.Models, resolveModelRequest: spec.ResolveModelRequest,
-			resolveSessionInstructions: spec.ResolveSessionInstructions, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
+			resolveSessionInstructions: spec.ResolveSessionInstructions}, nil
 	}
 	systemPrompt := ""
 	if raw, ok := spec.Metadata["system_prompt"].(string); ok {
@@ -129,7 +124,6 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 		return nil, err
 	}
 	chatAgent.models = spec.Models
-	chatAgent.deferredTools = spec.DeferredTools
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})
 	chatAgent.resolveSessionInstructions = spec.ResolveSessionInstructions
@@ -157,14 +151,10 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			yield(nil, historyErr)
 			return
 		}
-		a.discoveries = mcpdiscovery.FromContext(ctx)
 		a.summaryID = ""
 		events := ctx.Events()
 		if a.resolveSessionInstructions != nil && events.Len() > 0 {
 			a.summaryID = promptSummaryID(events.At(0))
-		}
-		for event := range events.All() {
-			mcpdiscovery.Apply(a.discoveries, event)
 		}
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := newToolVisibility(a.tools)
@@ -182,7 +172,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					yield(nil, err)
 					return
 				}
-				evidence := early.Evidence
+				evidence := hook.OutputContext{RequestContext: hook.RequestContext{TurnContext: hookrun.FromContext(ctx).Evidence}, OutputSource: early.Source}
 				evidence.ConfigurationRevision = a.modelRevision
 				a.outputStream, err = newTextStream(ctx, evidence)
 				if err != nil {
@@ -291,8 +281,6 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				if !a.yieldedResults[toolEvent] && !yield(toolEvent, nil) {
 					return
 				}
-				// yield returns only after Runtime confirms the canonical append.
-				mcpdiscovery.Apply(a.discoveries, toolEvent)
 			}
 			if err != nil {
 				yield(nil, err)
@@ -355,11 +343,8 @@ func (a *Agent) collectCanonicalModelStep(
 
 		run := hookrun.FromContext(ctx)
 		logicalID, assembly := run.RequestAssembly(uuid.NewString)
-		evidence := run.Evidence
-		evidence.ConfigurationRevision = a.modelRevision
-		evidence.LogicalRequestID = logicalID
-		evidence.AssemblyRevision = assembly
-		prepared, cached, prepareErr := a.prepareModel(ctx, evidence, request)
+		requestContext := hook.RequestContext{TurnContext: run.Evidence, ConfigurationRevision: a.modelRevision, LogicalRequestID: logicalID, AssemblyRevision: assembly}
+		prepared, cached, prepareErr := a.prepareModel(ctx, hook.PrepareContext{RequestContext: requestContext}, request)
 		// ContextEdit updates the same Run context before tools, feedback or a
 		// stale assembly can continue. Only the checkpoint owner mutates it.
 		*messages = model.CloneMessages(request.Messages)
@@ -401,14 +386,15 @@ func (a *Agent) collectCanonicalModelStep(
 				return persistErr
 			})
 		}
-		modelCtx = modelHookContext(modelCtx, evidence)
+		modelCtx = modelHookContext(modelCtx, requestContext)
+		evidence := hook.OutputContext{RequestContext: requestContext}
 		final := cached
 		var err error
 		if final == nil {
-			evidence.OutputSource = agent.HookOutputProvider
+			evidence.OutputSource = hook.OutputProvider
 			final, a.outputStream, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
 		} else {
-			evidence.OutputSource = agent.HookOutputCache
+			evidence.OutputSource = hook.OutputCache
 			a.outputStream, err = newTextStream(ctx, evidence)
 		}
 		for _, receipt := range receipts {
@@ -430,7 +416,7 @@ func (a *Agent) collectCanonicalModelStep(
 		if err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		if hookrun.FromContext(ctx).Hooks.StreamMode != agent.StreamIncremental {
+		if hookrun.FromContext(ctx).Hooks.StreamMode != hook.StreamIncremental {
 			final.Message = normalizeAssistantCitations(final.Message, *messages)
 		}
 

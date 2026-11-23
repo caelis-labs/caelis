@@ -200,7 +200,10 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		}
 		if message.Role == "assistant" && len(message.ToolCalls) != 0 {
 			call := message.ToolCalls[len(message.ToolCalls)-1].Function
-			latestTool = gatewayapp.CodeModeFixturePhase(call.Name, call.Arguments)
+			latestTool = call.Name
+			if call.Name == "js_exec" && strings.Contains(call.Arguments, "return await tools.search(") {
+				latestTool = "tool_search"
+			}
 		}
 	}
 	name, args := "", ""
@@ -231,15 +234,13 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	case strings.Contains(latestUser, "UTIL"):
 		name, args = "tool_search", `{"query":"utilities lookup"}`
 	}
-	if strings.HasSuffix(name, "__lookup") {
-		args = fmt.Sprintf(`{"tool_name":%q,"arguments":%s}`, name, args)
-		name = "mcp_call"
+	if name == "tool_search" {
+		args = gatewayapp.CodeModeFixtureArgs("return await tools.search(" + args + ");")
+		name = "js_exec"
+	} else if strings.HasSuffix(name, "__lookup") {
+		args = gatewayapp.CodeModeFixtureArgs(fmt.Sprintf("await tools.search({name:%q});return await tools.call(%q,%s);", name, name, args))
+		name = "js_exec"
 	}
-	hasJS := false
-	for _, one := range payload.Tools {
-		hasJS = hasJS || one.Function.Name == "js_exec"
-	}
-	name, args = gatewayapp.CodeModeFixtureCall(hasJS, name, args)
 	message := map[string]any{"role": "assistant", "content": "ATOMIC_DIALOGUE_OK"}
 	finish := "stop"
 	if name != "" {

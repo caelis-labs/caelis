@@ -4,34 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
-	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/google/jsonschema-go/jsonschema"
 )
-
-// ParseMCPCall converts the model envelope into a real call, preserving its ID.
-// It performs no lookup and grants no authority to the returned name.
-func ParseMCPCall(call model.ToolCall) (model.ToolCall, error) {
-	var args struct {
-		Name      string          `json:"tool_name"`
-		Arguments json.RawMessage `json:"arguments"`
-	}
-	dec := json.NewDecoder(strings.NewReader(call.Args))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&args); err != nil {
-		return model.ToolCall{}, NewError(ErrorCodeInvalidInput, "invalid mcp_call envelope")
-	}
-	if err := dec.Decode(new(any)); err != io.EOF {
-		return model.ToolCall{}, NewError(ErrorCodeInvalidInput, "mcp_call requires exactly one JSON object")
-	}
-	if args.Name == "" || args.Name != strings.TrimSpace(args.Name) || len(args.Arguments) == 0 || bytes.TrimSpace(args.Arguments)[0] != '{' {
-		return model.ToolCall{}, NewError(ErrorCodeInvalidInput, "mcp_call requires an exact tool_name and object arguments")
-	}
-	return model.ToolCall{ID: call.ID, Name: args.Name, Args: string(args.Arguments)}, nil
-}
 
 // ValidateMCPArguments validates against the exact accepted schema without
 // fetching references, applying defaults, or changing the invocation arguments.
