@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.85.0](https://github.com/caelis-labs/caelis/compare/v0.84.1...v0.85.0) (2026-11-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **agent-sdk:** simplify session ownership and tool execution hooks ([#279](https://github.com/caelis-labs/caelis/issues/279))
+
+### Features
+
+* **agent-sdk:** simplify session ownership and tool execution hooks ([#279](https://github.com/caelis-labs/caelis/issues/279)) ([2a95c1e](https://github.com/caelis-labs/caelis/commit/2a95c1efbc04bf969e8b93d7656f5538ae09dd55))
+* bundle Desktop World 0.6.0 on Linux ([#282](https://github.com/caelis-labs/caelis/issues/282)) ([2ab8703](https://github.com/caelis-labs/caelis/commit/2ab87033a5207f4ade5a6fd4b6502fe8dc9662e4))
+
 ## [0.84.1](https://github.com/caelis-labs/caelis/compare/v0.84.0...v0.84.1) (2026-11-22)
 
 
