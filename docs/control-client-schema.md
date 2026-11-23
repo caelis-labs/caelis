@@ -45,6 +45,12 @@ Turn target requirement.
 
 ## Peer versions
 
+The optional `idle-command-admission-v1` capability enables
+`GET /sessions/{session_id}/state/idle`. The Host accepts an idle-only command
+at this check when both the foreground Run and the Session execution claim are
+idle. ACP performs admission before publishing the command echo or dispatching
+its handler. A peer without the capability can still submit ordinary commands.
+
 The unified Session protocol is the current baseline. Pre-unification Application
 routes and credentials are removed; old clients need an update. This breaking
 cutover does not discard their durable Stores: the isolated Store importer owns

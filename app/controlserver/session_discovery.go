@@ -10,6 +10,9 @@ import (
 
 func sessionServerInfo(info appserver.ServerInfo, services appserver.AppServerServices) appserver.ServerInfo {
 	info = normalizeServerInfo(info)
+	if !slices.Contains(info.Capabilities, appserver.CapabilityIdleCommandAdmission) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityIdleCommandAdmission)
+	}
 	if !slices.Contains(info.Capabilities, appserver.CapabilitySessionInterrupt) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilitySessionInterrupt)
 	}

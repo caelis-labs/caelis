@@ -490,7 +490,20 @@ func (s *draftSession) echoCommand(ctx context.Context, id, text string) error {
 func (s *draftSession) emitCommandState(messageID string, active bool, stopReason string) error {
 	s.projectionMu.Lock()
 	defer s.projectionMu.Unlock()
-	return s.emitForegroundStateLocked(draftForegroundState{activityID: messageID, active: active, stopReason: stopReason})
+	previous := s.lastForeground
+	otherActive := previous != nil && previous.active && previous.activityID != messageID
+	if active && otherActive {
+		return nil
+	}
+	if err := s.emitForegroundStateLocked(draftForegroundState{activityID: messageID, active: active, stopReason: stopReason}); err != nil {
+		return err
+	}
+	if otherActive {
+		// Settle this receipt and restore the observed foreground Turn in the
+		// same ordered notification sequence, including its approval state.
+		return s.emitForegroundStateLocked(*previous)
+	}
+	return nil
 }
 
 func (s *draftSession) cancelApproval() {

@@ -318,11 +318,11 @@ func (c *Client) InspectSession(ctx context.Context, request appserver.StateRequ
 	if err != nil {
 		return appserver.SessionState{}, err
 	}
-	var query url.Values
+	path := "/sessions/" + sessionID + "/state"
 	if request.RequireIdle {
-		query = url.Values{"require_idle": {"true"}}
+		path += "/idle"
 	}
-	response, err := c.do(ctx, http.MethodGet, "/sessions/"+sessionID+"/state", query, nil, nil)
+	response, err := c.do(ctx, http.MethodGet, path, nil, nil, nil)
 	if err != nil {
 		return appserver.SessionState{}, err
 	}

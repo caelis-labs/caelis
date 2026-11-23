@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
@@ -85,11 +86,40 @@ func TestHostHealthReadinessAndInitializeExposeOneInstance(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.ServerID != appserver.ServerIdentity || info.InstanceID != instanceID ||
+		!slices.Contains(info.Capabilities, appserver.CapabilityIdleCommandAdmission) ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityMultiWorkspace) ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceCWDList) ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceTrust) ||
 		!slices.Contains(info.Capabilities, appserver.CapabilityWorkspaceTrustPreflight) {
 		t.Fatalf("initialize = %#v", info)
+	}
+}
+
+type leasedSessionService struct{ fakeService }
+
+func (*leasedSessionService) InspectSession(_ context.Context, _ appserver.Principal, req appserver.StateRequest) (appserver.SessionState, error) {
+	if req.RequireIdle {
+		return appserver.SessionState{}, errorcode.New(errorcode.Conflict, "session has an execution lease")
+	}
+	return appserver.SessionState{ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion, APIVersion: appserver.HTTPAPIVersion}, nil
+}
+
+func TestIdleAdmissionUsesDedicatedHTTPRoute(t *testing.T) {
+	server := newTestServer(t, &leasedSessionService{}, 0)
+	client, err := httpclient.New(httpclient.Config{
+		BaseURL: "http://127.0.0.1", BearerToken: "test-token", Compatibility: appserver.CurrentCompatibility(),
+		HTTPClient: &http.Client{Transport: controlHandlerRoundTripper{handler: server}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := appserver.StateRequest{SessionID: "session-1"}
+	if state, err := client.InspectSession(t.Context(), req); err != nil || state.Run.Active {
+		t.Fatalf("ordinary state: %+v, %v", state, err)
+	}
+	req.RequireIdle = true
+	if _, err := client.InspectSession(t.Context(), req); !errorcode.Is(err, errorcode.Conflict) {
+		t.Fatalf("idle-only admission: %v", err)
 	}
 }
 

@@ -40,6 +40,7 @@ type draftNativeFixture struct {
 	inserts      chan draftNativeInput
 	resolved     chan appserver.ResolveApprovalRequest
 	beforePrompt func()
+	legacyHost   bool
 	// The terminal hooks model native state becoming inactive before its
 	// notification is accepted by the broker. They are protected by mu.
 	beforeTerminalPublish func()
@@ -67,7 +68,10 @@ func newDraftNativeFixture(t *testing.T) *draftNativeFixture {
 }
 
 func (f *draftNativeFixture) Initialize(context.Context) (appserver.ServerInfo, error) {
-	return appserver.ServerInfo{}, nil
+	if f.legacyHost {
+		return appserver.ServerInfo{}, nil
+	}
+	return appserver.ServerInfo{Capabilities: []string{appserver.CapabilityIdleCommandAdmission}}, nil
 }
 
 func (f *draftNativeFixture) CreateSession(ctx context.Context, request appserver.CreateSessionRequest) (appserver.CommandResult, error) {
@@ -299,6 +303,7 @@ func connectDraftNative(t *testing.T, f *draftNativeFixture, wrapClient ...func(
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	inner := &RuntimeAgent{sessionClient: f, presentationClient: draftNativePresentation{}, appName: "draft-fixture", userID: "owner", agentInfo: &acp.Implementation{Name: "fixture", Version: "test"}, managedSessions: make(map[string]struct{})}
+	inner.slashResultFormatter = func(controlprompt.SlashCommandResult) string { return "command result" }
 	inner.promptRouterFactory = func(_ context.Context, s session.Session) (controlprompt.Router, error) {
 		return draftNativeRouter{fixture: f, id: s.SessionID}, nil
 	}
@@ -543,6 +548,127 @@ type draftReceiptRouterService struct {
 	controlprompt.RouterService
 	dispatchErr error
 	effects     int
+}
+
+func (s *draftReceiptRouterService) Status(context.Context) (controlstatus.StatusSnapshot, error) {
+	s.effects++
+	return controlstatus.StatusSnapshot{}, s.dispatchErr
+}
+
+func TestDraftStatusCommandSettlesDuringActiveTurn(t *testing.T) {
+	f := newDraftNativeFixture(t)
+	client, agent, peer := connectDraftNative(t, f)
+	created, err := client.NewSession(t.Context(), v2.NewSessionRequest{Cwd: v2.AbsolutePath(t.TempDir())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := string(created.SessionId)
+	svc := &draftReceiptRouterService{}
+	agent.inner.promptRouterFactory = func(context.Context, session.Session) (controlprompt.Router, error) {
+		return controlprompt.New(controlprompt.RouterConfig{Service: svc}), nil
+	}
+	foreground, err := f.Prompt(t.Context(), appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: id}, Input: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := 0
+	nextState := func() (string, string) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			peer.mu.Lock()
+			updates := append([]v2.UpdateSessionNotification(nil), peer.updates[cursor:]...)
+			peer.mu.Unlock()
+			for _, n := range updates {
+				cursor++
+				if n.Update.StateUpdate == nil {
+					continue
+				}
+				var wire struct {
+					State string                     `json:"state"`
+					Meta  map[string]json.RawMessage `json:"_meta"`
+				}
+				if err := draftJSONConvert(n.Update, &wire); err != nil {
+					t.Fatal(err)
+				}
+				return acpdraft.ActivityID(wire.Meta), wire.State
+			}
+			select {
+			case <-peer.changed:
+			case <-deadline:
+				t.Fatal("timed out waiting for Activity state")
+			}
+		}
+	}
+	for {
+		activity, state := nextState()
+		if activity == foreground.Target.TurnID && state == "running" {
+			break
+		}
+	}
+	receipt, err := client.Prompt(t.Context(), draftNativePrompt(id, "/status"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := acpdraft.ActivityID(receipt.Meta)
+	if command == "" || command != string(receipt.MessageId) || command == foreground.Target.TurnID || svc.effects != 1 {
+		t.Fatalf("command receipt=%+v effects=%d", receipt, svc.effects)
+	}
+	for {
+		activity, state := nextState()
+		if activity == command && state == "idle" {
+			break
+		}
+		if activity == foreground.Target.TurnID && state == "idle" {
+			t.Fatal("command settled original Turn")
+		}
+	}
+	if activity, state := nextState(); activity != foreground.Target.TurnID || state != "running" {
+		t.Fatalf("foreground after command=%s/%s", activity, state)
+	}
+	f.finish(id, false)
+	for {
+		activity, state := nextState()
+		if activity == foreground.Target.TurnID && state == "idle" {
+			break
+		}
+	}
+}
+
+func TestDraftIdleOnlyCommandRequiresHostAdmissionCapability(t *testing.T) {
+	f := newDraftNativeFixture(t)
+	f.legacyHost = true
+	client, agent, peer := connectDraftNative(t, f)
+	created, err := client.NewSession(t.Context(), v2.NewSessionRequest{Cwd: v2.AbsolutePath(t.TempDir())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := string(created.SessionId)
+	_, release, err := f.store.AcquireWriter(t.Context(), session.SessionRef{SessionID: id}, "unpublished-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := release(); err != nil {
+			t.Error(err)
+		}
+	}()
+	svc := &draftReceiptRouterService{}
+	agent.inner.promptRouterFactory = func(context.Context, session.Session) (controlprompt.Router, error) {
+		return controlprompt.New(controlprompt.RouterConfig{Service: svc}), nil
+	}
+	request := draftNativePrompt(id, "/status")
+	request.Meta = acpdraft.IdleOnlyMeta()
+	if resp, err := client.Prompt(t.Context(), request); err == nil || resp.MessageId != "" || svc.effects != 0 {
+		t.Fatalf("legacy Host admitted guarded command: %+v, %v, effects=%d", resp, err, svc.effects)
+	}
+	peer.mu.Lock()
+	defer peer.mu.Unlock()
+	for _, n := range peer.updates {
+		if n.Update.UserMessage != nil {
+			t.Fatal("rejected command emitted an echo")
+		}
+	}
 }
 
 func (s *draftReceiptRouterService) UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error) {
