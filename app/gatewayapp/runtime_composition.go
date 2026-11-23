@@ -2,19 +2,26 @@ package gatewayapp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/artifact"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
+
+// Local agents share the retention quota for the host's temporary result directory.
+var localChatFactory = chat.Factory{ResultArtifacts: artifact.NewFileStore(filepath.Join(os.TempDir(), "caelis", "tool-results"))}
 
 // runtimeComposition groups the mutable execution snapshot and the resources
 // built from it. Stack owns one as a named field for the process root, while

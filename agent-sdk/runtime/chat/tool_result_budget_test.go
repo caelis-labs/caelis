@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/artifact"
 )
 
 func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
@@ -40,7 +41,7 @@ func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
 			t.Parallel()
 			result := tool.Result{Content: parts}
 			call := model.ToolCall{ID: "budget", Name: "fixture", Args: `{}`}
-			canonical, meta := canonicalToolResult(result, nil)
+			canonical, meta := canonicalToolResult(t.Context(), result, nil)
 			if tool.ResultNeedsTruncation(canonical, tool.DefaultTruncationPolicy()) {
 				t.Fatal("canonical result still exceeds the shared content budget")
 			}
@@ -87,8 +88,8 @@ func TestCanonicalToolResultPreservesArtifactWhenOnlySerializedOutputExceedsBudg
 	if len(raw) >= tool.DefaultTruncationPolicy().ByteBudget() {
 		t.Fatal("fixture must fit before JSON serialization")
 	}
-	store := testToolResultArtifactStore(t, 8, 1024*1024)
-	canonical, meta := canonicalToolResult(textToolResult(raw), store)
+	store := artifact.NewFileStore(t.TempDir())
+	canonical, meta := canonicalToolResult(t.Context(), textToolResult(raw), store)
 	var path string
 	for _, block := range canonical.Content {
 		if text, ok := block.(tool.Text); ok && strings.Contains(string(text), toolResultArtifactHintPrefix) {

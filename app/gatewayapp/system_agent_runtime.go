@@ -170,7 +170,7 @@ func newSystemManagedAgentRuntime(factory agent.AgentFactory) *systemManagedAgen
 
 func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConfig) *systemManagedAgentRuntime {
 	if config.AgentFactory == nil {
-		config.AgentFactory = chat.Factory{}
+		config.AgentFactory = localChatFactory
 	}
 	if config.StagingSessions == nil {
 		config.StagingSessions = func() session.Service {

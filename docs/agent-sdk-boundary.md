@@ -512,15 +512,15 @@ activity identity is limited to the first activity.
 
 ## Tools and instruction authority
 
-The chat loop applies its serialized result budget before model delivery.
-Session persists and replays the recorded model view independently of the
-current budget. When truncation needs a recovery artifact, the bounded
-private artifact store retains the original content. A single text or structured
-JSON block is saved as-is; other results use the result codec's ordered `content`
-array, preserving media and resource blocks. The model receives bounded content
-with a runtime-owned artifact reference, whose budget is reserved even behind
-earlier text parts. Media remains unchanged. Artifact quota or write failure
-does not bypass the result budget or add a reference to an unavailable file.
+The chat loop bounds each tool result before sending it to the model. Session
+replays that recorded view. By default, the loop writes no temporary artifacts.
+Hosts can set `chat.Factory.ResultArtifacts` to retain complete results on
+truncation and include the returned reference in the model view. Storage failure
+leaves the bounded view available. Progress and replay never write artifacts.
+
+The local Gateway shares one `artifact.FileStore` across its chat agents. It
+saves a single text or structured JSON block as-is and uses the result codec's
+ordered `content` array for multipart results, preserving media and resources.
 
 `tool.Definition.Name` is the sole executable identity. Names are exact and
 case-sensitive; assembly rejects empty, padded, or duplicate names. Durable

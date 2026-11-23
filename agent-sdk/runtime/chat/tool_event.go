@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -48,7 +49,7 @@ func applyToolResultPresentation(event *session.Event, call model.ToolCall, resu
 	if message != nil && len(message.ToolResults()) > 0 {
 		parts = message.ToolResults()[0].Content
 	} else {
-		view, _ := canonicalToolResult(result, nil)
+		view, _ := canonicalToolResult(context.Background(), result, nil)
 		parts = tool.ModelParts(view.Content)
 	}
 	rawOutput := toolResultRawOutput(parts, err != nil)

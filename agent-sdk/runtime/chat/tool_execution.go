@@ -66,7 +66,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				if yieldProgress == nil {
 					continue
 				}
-				canonical, truncationMeta := canonicalToolResult(progress.Result, nil)
+				canonical, truncationMeta := canonicalToolResult(ctx, progress.Result, nil)
 				event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
 				_ = yieldProgress(event)
 			default:
@@ -80,7 +80,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 			if yieldProgress == nil {
 				continue
 			}
-			canonical, truncationMeta := canonicalToolResult(progress.Result, nil)
+			canonical, truncationMeta := canonicalToolResult(ctx, progress.Result, nil)
 			event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
 			if !yieldProgress(event) {
 				cancel()
@@ -118,7 +118,7 @@ func (a *Agent) executeToolCallAdmitted(
 		result := tool.Result{
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(rawOutput)}},
 		}
-		canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
+		canonical, truncationMeta := canonicalToolResult(ctx, result, a.toolResultArtifacts)
 		message := toolResultMessageFromCanonical(call, canonical, bindingErr)
 		event := toolResultEvent(call, result, bindingErr, &message, truncationMeta)
 		a.applyPreparedFact(event)
@@ -146,7 +146,7 @@ func (a *Agent) executeToolCallAdmitted(
 			observation = &toolbinding.Observation{ScriptCompletion: completion}
 		}
 	}
-	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
+	canonical, truncationMeta := canonicalToolResult(ctx, result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical, err)
 	effectErr := hookrun.EffectError(err)
 	originalView := model.CloneMessage(message)
@@ -205,28 +205,6 @@ func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
 	return configured, ok
 }
 
-func canonicalToolResult(result tool.Result, artifacts *toolResultArtifactStore) (tool.Result, map[string]any) {
-	policy := tool.DefaultTruncationPolicy()
-	original := result
-	result, reservedCollision := toolResultWithoutReservedNamespace(result)
-	var protectedJSONFields map[string]any
-	if artifacts != nil && tool.ResultNeedsTruncation(result, policy) {
-		if path, ok := artifacts.write(original); ok {
-			if withHint, protected, ok := toolResultWithArtifactHint(result, path, reservedCollision); ok {
-				result = withHint
-				protectedJSONFields = protected
-			} else {
-				_ = artifacts.remove(path)
-			}
-		}
-	}
-	canonical, info := tool.TruncateResultWithInfoAndProtectedJSONFields(result, policy, protectedJSONFields)
-	return canonical, mergeEventMeta(
-		toolTruncationEventMeta(info),
-		toolReservedNamespaceCollisionEventMeta(reservedCollision),
-	)
-}
-
 func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result, err error) model.Message {
 	parts := tool.ModelParts(result.Content)
 	if len(parts) == 0 {
@@ -260,7 +238,7 @@ func (a *Agent) lookupRunTool(name string, visibility *toolVisibility) (tool.Too
 // CanonicalToolResult projects a complete result for a nested fact without
 // changing the value returned to the calling script.
 func CanonicalToolResult(call model.ToolCall, result tool.Result, err error) model.Message {
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := canonicalToolResult(context.Background(), result, nil)
 	return toolResultMessageFromCanonical(call, canonical, err)
 }
 

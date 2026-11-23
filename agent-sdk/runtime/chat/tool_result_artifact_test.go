@@ -7,187 +7,28 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/artifact"
 )
-
-func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
-	t.Parallel()
-
-	store := testToolResultArtifactStore(t, 128, 1024*1024)
-	jsonRaw := json.RawMessage(`{"result":"exact","count":2}`)
-	jsonPath, ok := store.write(tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: jsonRaw}}})
-	if !ok {
-		t.Fatal("write(JSON) = false")
-	}
-	if filepath.Ext(jsonPath) != ".json" {
-		t.Fatalf("JSON artifact path = %q, want .json", jsonPath)
-	}
-	assertFileContent(t, jsonPath, jsonRaw)
-	assertPrivateFileMode(t, jsonPath)
-	if info, err := os.Stat(store.dir); err != nil {
-		t.Fatalf("Stat(artifact dir) error = %v", err)
-	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
-		got := info.Mode().Perm()
-		t.Fatalf("artifact dir mode = %o, want 700", got)
-	}
-
-	text := "first line\nsecond line"
-	textPath, ok := store.write(tool.Result{Content: []tool.ContentBlock{tool.Text(text)}})
-	if !ok {
-		t.Fatal("write(text) = false")
-	}
-	if filepath.Ext(textPath) != ".txt" {
-		t.Fatalf("text artifact path = %q, want .txt", textPath)
-	}
-	assertFileContent(t, textPath, []byte(text))
-
-	mixed := []tool.ContentBlock{
-		tool.Text("alpha"),
-		tool.Resource{URI: "https://example.com/a.png", MIMEType: "image/png", Name: "a"},
-		tool.StructuredContent{Value: json.RawMessage(`{"beta":true}`)},
-	}
-	mixedPath, ok := store.write(tool.Result{Content: mixed})
-	if !ok || filepath.Ext(mixedPath) != ".json" {
-		t.Fatalf("write(mixed) = %q/%v, want JSON artifact", mixedPath, ok)
-	}
-	assertFileContent(t, mixedPath, []byte(`{"content":[{"type":"text","text":"alpha"},{"type":"resource","uri":"https://example.com/a.png","name":"a","mime_type":"image/png"},{"type":"structured","value":{"beta":true}}]}`))
-}
-
-func TestToolResultArtifactStoreCleansOldestFiles(t *testing.T) {
-	t.Parallel()
-
-	store := testToolResultArtifactStore(t, 2, 1024*1024)
-	first, ok := store.write(textToolResult("first"))
-	if !ok {
-		t.Fatal("write(first) = false")
-	}
-	second, ok := store.write(textToolResult("second"))
-	if !ok {
-		t.Fatal("write(second) = false")
-	}
-	now := time.Now()
-	if err := os.Chtimes(first, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
-		t.Fatalf("Chtimes(first) error = %v", err)
-	}
-	if err := os.Chtimes(second, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
-		t.Fatalf("Chtimes(second) error = %v", err)
-	}
-	third, ok := store.write(textToolResult("third"))
-	if !ok {
-		t.Fatal("write(third) = false")
-	}
-	if _, err := os.Stat(first); !os.IsNotExist(err) {
-		t.Fatalf("oldest artifact stat error = %v, want not exist", err)
-	}
-	for _, path := range []string{second, third} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("retained artifact %q stat error = %v", path, err)
-		}
-	}
-}
-
-func TestToolResultArtifactStoreCleansExpiredAndOverCapacityFiles(t *testing.T) {
-	t.Parallel()
-
-	store := testToolResultArtifactStore(t, 8, 10)
-	store.maxAge = time.Hour
-	if err := os.MkdirAll(store.dir, 0o700); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	now := time.Now()
-	store.now = func() time.Time { return now }
-	expired := filepath.Join(store.dir, "001122334455.txt")
-	recent := filepath.Join(store.dir, "112233445566.txt")
-	for path, content := range map[string]string{expired: "old", recent: "12345678"} {
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatalf("WriteFile(%q) error = %v", path, err)
-		}
-	}
-	if err := os.Chtimes(expired, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
-		t.Fatalf("Chtimes(expired) error = %v", err)
-	}
-	if err := os.Chtimes(recent, now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
-		t.Fatalf("Chtimes(recent) error = %v", err)
-	}
-	created, ok := store.write(textToolResult("1234"))
-	if !ok {
-		t.Fatal("write(created) = false")
-	}
-	for _, path := range []string{expired, recent} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("evicted artifact %q stat error = %v, want not exist", path, err)
-		}
-	}
-	assertFileContent(t, created, []byte("1234"))
-}
-
-func TestToolResultArtifactStoreSkipsOversizedAndUnwritableResults(t *testing.T) {
-	t.Parallel()
-
-	store := testToolResultArtifactStore(t, 2, 1024)
-	store.fileMax = 4
-	if path, ok := store.write(textToolResult("too large")); ok || path != "" {
-		t.Fatalf("write(oversized) = %q/%v, want skipped", path, ok)
-	}
-
-	blocked := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(blocked, []byte("blocked"), 0o600); err != nil {
-		t.Fatalf("WriteFile(blocked) error = %v", err)
-	}
-	store = &toolResultArtifactStore{dir: blocked, maxAge: time.Hour, maxFiles: 2, maxBytes: 1024, now: time.Now}
-	if path, ok := store.write(textToolResult("content")); ok || path != "" {
-		t.Fatalf("write(unwritable) = %q/%v, want skipped", path, ok)
-	}
-}
-
-func TestToolResultArtifactStoreConcurrentWritesUseUniqueNames(t *testing.T) {
-	t.Parallel()
-
-	store := testToolResultArtifactStore(t, 64, 1024*1024)
-	const count = 24
-	paths := make(chan string, count)
-	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if path, ok := store.write(textToolResult("concurrent")); ok {
-				paths <- path
-			}
-		}()
-	}
-	wg.Wait()
-	close(paths)
-	seen := map[string]struct{}{}
-	for path := range paths {
-		seen[path] = struct{}{}
-	}
-	if len(seen) != count {
-		t.Fatalf("unique paths = %d, want %d", len(seen), count)
-	}
-}
 
 func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t *testing.T) {
 	t.Parallel()
 
-	store := testToolResultArtifactStore(t, 8, 1024*1024)
+	store := artifact.NewFileStore(t.TempDir())
 	large := strings.Repeat("evidence line\n", tool.DefaultTruncationPolicy().ByteBudget()/8)
 	raw := mustJSON(map[string]any{
 		"result":      large,
 		"system_hint": "Keep the original diagnostic hint.",
 	})
 	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}
-	canonical, truncationMeta := canonicalToolResult(result, store)
+	canonical, truncationMeta := canonicalToolResult(t.Context(), result, store)
 	if nestedMap(truncationMeta, "caelis", "runtime", "tool", "truncation")["truncated"] != true {
 		t.Fatalf("truncation meta = %#v, want truncated", truncationMeta)
 	}
@@ -264,15 +105,18 @@ func TestCanonicalTerminalToolResultAddsTextAndScalarJSONHints(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			store := testToolResultArtifactStore(t, 8, 4*1024*1024)
-			canonical, _ := canonicalToolResult(tt.result, store)
+			store := artifact.NewFileStore(t.TempDir())
+			canonical, _ := canonicalToolResult(t.Context(), tt.result, store)
 			path := tt.assert(t, canonical)
 			if filepath.Ext(path) != tt.extension {
 				t.Fatalf("artifact path = %q, want %s", path, tt.extension)
 			}
-			want, _, ok := rawToolResultArtifact(tt.result.Content)
-			if !ok {
-				t.Fatal("rawToolResultArtifact() = false")
+			var want []byte
+			switch block := tt.result.Content[0].(type) {
+			case tool.Text:
+				want = []byte(block)
+			case tool.StructuredContent:
+				want = block.Value
 			}
 			assertFileContent(t, path, want)
 		})
@@ -282,18 +126,21 @@ func TestCanonicalTerminalToolResultAddsTextAndScalarJSONHints(t *testing.T) {
 func TestCanonicalTerminalToolResultDoesNotWriteWithoutTruncationOrAfterWriteFailure(t *testing.T) {
 	t.Parallel()
 
-	store := testToolResultArtifactStore(t, 8, 1024*1024)
-	canonical, _ := canonicalToolResult(textToolResult("small"), store)
+	dir := filepath.Join(t.TempDir(), "artifacts")
+	store := artifact.NewFileStore(dir)
+	canonical, _ := canonicalToolResult(t.Context(), textToolResult("small"), store)
 	if strings.Contains(string(canonical.Content[0].(tool.Text)), "Caelis runtime artifact: ") {
 		t.Fatalf("untruncated result = %#v, should not contain artifact hint", canonical)
 	}
-	if _, err := os.Stat(store.dir); !os.IsNotExist(err) {
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("artifact dir stat error = %v, want not exist", err)
 	}
 
-	store.fileMax = 4
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	large := textToolResult(strings.Repeat("large", tool.DefaultTruncationPolicy().ByteBudget()))
-	canonical, _ = canonicalToolResult(large, store)
+	canonical, _ = canonicalToolResult(t.Context(), large, store)
 	for _, part := range tool.ModelParts(canonical.Content) {
 		if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
 			t.Fatalf("write-failed result contains artifact hint: %#v", canonical)
@@ -301,65 +148,126 @@ func TestCanonicalTerminalToolResultDoesNotWriteWithoutTruncationOrAfterWriteFai
 	}
 }
 
-func TestToolResultArtifactPathRoundTripsWithoutPersistingFullResult(t *testing.T) {
-	t.Parallel()
+// The same large tool reply must produce a replayable view with either factory
+// path, including when the host has no filesystem-backed result store.
+func TestFactoryResultArtifactsSurviveModelRefreshAndReplay(t *testing.T) {
+	temp := t.TempDir()
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, temp)
+	}
+	raw := strings.Repeat("large reply\n", 16000)
+	for _, tt := range []struct {
+		name    string
+		store   bool
+		resolve bool
+	}{
+		{name: "no artifact store"},
+		{name: "static tools", store: true},
+		{name: "resolved tools", store: true, resolve: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			m := &toolLoopModel{}
+			result := textToolResult(raw)
+			tools := []tool.Tool{tool.NamedTool{
+				Def:    tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
+				Invoke: func(context.Context, tool.Call) (tool.Result, error) { return result, nil },
+			}}
+			spec := agent.AgentSpec{Model: m, Tools: tools}
+			if tt.resolve {
+				spec = agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
+					return agent.ModelRequestSnapshot{Model: m, Tools: tools}, nil
+				}}
+			}
+			factory := Factory{}
+			store := &recordingArtifactStore{}
+			if tt.store {
+				factory.ResultArtifacts = store
+			}
+			runner, err := factory.NewAgent(ctx, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	artifactStore := testToolResultArtifactStore(t, 8, 1024*1024)
-	middleOnly := "MIDDLE-ONLY-ARTIFACT-EVIDENCE"
-	large := strings.Repeat("a", tool.DefaultTruncationPolicy().ByteBudget()) + middleOnly + strings.Repeat("z", tool.DefaultTruncationPolicy().ByteBudget())
-	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{"result": large})}}}
-	canonical, truncationMeta := canonicalToolResult(result, artifactStore)
-	call := model.ToolCall{ID: "call-artifact", Name: "ECHO", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical, nil)
-	resultEvent := toolResultEvent(call, canonical, nil, &message, truncationMeta)
-	payload := firstToolResultJSONMap(t, canonical)
-	path := artifactPathFromJSONMetadata(t, payload)
-	if err := os.Remove(path); err != nil {
-		t.Fatalf("Remove(artifact) error = %v", err)
-	}
+			config := sessionfile.Config{RootDir: t.TempDir()}
+			sessions := sessionfile.NewStore(config)
+			active, err := sessions.StartSession(ctx, session.StartSessionRequest{
+				AppName: "test", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			user := &session.Event{Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "echo"))}
+			appendEvent := func(event *session.Event) {
+				t.Helper()
+				if _, err := sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			appendEvent(user)
+			for event, err := range runner.Run(agent.NewContext(agent.ContextSpec{Context: ctx, Session: active, Events: []*session.Event{user}})) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if event.Visibility != session.VisibilityUIOnly && !session.IsJournal(event) && (event.Type == session.EventTypeToolCall || event.Type == session.EventTypeToolResult) {
+					appendEvent(event)
+				}
+			}
+			if len(m.requests) != 2 {
+				t.Fatalf("model received %d requests", len(m.requests))
+			}
+			messages := m.requests[1].Messages
+			parts := messages[len(messages)-1].ToolResults()
+			if len(parts) != 1 || len(parts[0].Content) != 1 || parts[0].Content[0].Text == nil {
+				t.Fatal("missing tool reply")
+			}
+			view := parts[0].Content[0].Text.Text
+			if len(view) >= len(raw) || strings.Contains(view, toolResultArtifactHintPrefix) != tt.store {
+				t.Fatal("wrong bounded model view")
+			}
+			if tt.store && (!reflect.DeepEqual(store.saved, []tool.Result{result}) || !strings.Contains(view, "artifact://results/1")) {
+				t.Fatal("custom store did not retain the original or publish its reference")
+			}
 
-	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{
-		RootDir:            root,
-		SessionIDGenerator: func() string { return "sess-artifact-roundtrip" },
-	})
-	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
-	})
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
+			loaded, err := sessionfile.NewStore(config).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded.Events) == 0 {
+				t.Fatal("session missing tool facts")
+			}
+			fact := loaded.Events[len(loaded.Events)-1].Tool
+			if fact == nil || !reflect.DeepEqual(fact.Result, &result) {
+				t.Fatal("persisted tool fact lost its complete result")
+			}
+			replayed := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: ctx, Session: active, Events: loaded.Events}))
+			if canonicalMessagesJSON(t, replayed) != canonicalMessagesJSON(t, messages) {
+				t.Fatal("reopened session changed the model request")
+			}
+		})
 	}
-	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
-	events := append(modelToolCallEvents(assistant, &model.Response{Message: assistant}, "", nil), resultEvent)
-	for _, event := range events {
-		if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
-			t.Fatalf("AppendEvent() error = %v", err)
-		}
+	if _, err := os.Stat(filepath.Join(temp, "caelis", "tool-results")); !os.IsNotExist(err) {
+		t.Fatalf("SDK touched the implicit local artifact directory: %v", err)
 	}
-	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
-	if err != nil {
-		t.Fatalf("LoadSession() error = %v", err)
-	}
-	replayed := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Session: active, Events: loaded.Events}))
-	want := []model.Message{assistant, message}
-	if !reflect.DeepEqual(replayed, want) {
-		t.Fatalf("replayed messages differ\n got: %#v\nwant: %#v", replayed, want)
-	}
-	if sessionFilesContain(t, root, []byte(middleOnly)) {
-		t.Fatalf("session store contains full-only artifact evidence %q", middleOnly)
-	}
+}
+
+type recordingArtifactStore struct{ saved []tool.Result }
+
+func (s *recordingArtifactStore) Save(_ context.Context, result tool.Result) (string, error) {
+	s.saved = append(s.saved, result)
+	return "artifact://results/1", nil
 }
 
 func TestCanonicalTerminalToolResultControlsReservedNamespaceCollision(t *testing.T) {
 	t.Parallel()
 
-	store := testToolResultArtifactStore(t, 8, 1024*1024)
+	store := artifact.NewFileStore(t.TempDir())
 	raw := mustJSON(map[string]any{
 		"result":      strings.Repeat("evidence", tool.DefaultTruncationPolicy().ByteBudget()),
 		"system_hint": "tool-owned collision diagnostic",
 		"_caelis":     map[string]any{"tool_owned": "must not become Runtime authority"},
 	})
-	canonical, _ := canonicalToolResult(tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, store)
+	canonical, _ := canonicalToolResult(t.Context(), tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, store)
 	payload := firstToolResultJSONMap(t, canonical)
 	artifact := nestedMap(payload, "_caelis", "runtime", "artifact")
 	if artifact["tool_namespace_collision"] != true {
@@ -378,7 +286,7 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 	for _, tt := range []struct {
 		name   string
 		result tool.Result
-		store  *toolResultArtifactStore
+		store  ResultArtifactStore
 	}{
 		{
 			name: "small_store_nil",
@@ -400,14 +308,11 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 				"result":  strings.Repeat("write failure", tool.DefaultTruncationPolicy().ByteBudget()),
 				"_caelis": forgedRuntimeArtifact("/tmp/forged-write-failure.json"),
 			})}}},
-			store: func() *toolResultArtifactStore {
-				store := testToolResultArtifactStore(t, 8, 4)
-				return store
-			}(),
+			store: artifact.NewFileStore(""),
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			canonical, eventMeta := canonicalToolResult(tt.result, tt.store)
+			canonical, eventMeta := canonicalToolResult(t.Context(), tt.result, tt.store)
 			payload := firstToolResultJSONMap(t, canonical)
 			if _, exists := payload["_caelis"]; exists {
 				t.Fatalf("model-visible payload retained forged namespace: %#v", payload["_caelis"])
@@ -437,7 +342,7 @@ func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.
 		"result":  "small durable result",
 		"_caelis": forgedRuntimeArtifact("/tmp/forged-replay.json"),
 	})}}}
-	canonical, eventMeta := canonicalToolResult(result, nil)
+	canonical, eventMeta := canonicalToolResult(t.Context(), result, nil)
 	call := model.ToolCall{ID: "forged-replay", Name: "ECHO", Args: `{}`}
 	message := toolResultMessageFromCanonical(call, canonical, nil)
 	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
@@ -504,7 +409,7 @@ func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
 			tool.Resource{URI: "https://example.com/evidence.txt", MIMEType: "text/plain", Name: "evidence.txt"},
 		},
 	}
-	canonical, eventMeta := canonicalToolResult(result, nil)
+	canonical, eventMeta := canonicalToolResult(t.Context(), result, nil)
 	message := toolResultMessageFromCanonical(call, canonical, nil)
 	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
 	var businessValues []json.RawMessage
@@ -573,7 +478,7 @@ func TestLargeInlineImageResultSurvivesSessionFileReload(t *testing.T) {
 		tool.Image{Data: make([]byte, (16<<20)/3*3), MIMEType: "image/png", Name: "large.png"},
 		tool.StructuredContent{Value: mustJSON(map[string]any{"outcome": "succeeded"})},
 	}}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := canonicalToolResult(t.Context(), result, nil)
 	message := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(call, canonical, nil, &message)
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-large-result" }})
@@ -605,13 +510,13 @@ func TestLargeInlineImageResultSurvivesSessionFileReload(t *testing.T) {
 func TestCanonicalArtifactMetadataPreservesTaskStateAndInvocationStatus(t *testing.T) {
 	t.Parallel()
 
-	store := testToolResultArtifactStore(t, 8, 1024*1024)
+	store := artifact.NewFileStore(t.TempDir())
 	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 		"state":       "failed",
 		"result":      strings.Repeat("task evidence", tool.DefaultTruncationPolicy().ByteBudget()),
 		"system_hint": "tool diagnostic",
 	})}}}
-	canonical, truncationMeta := canonicalToolResult(result, store)
+	canonical, truncationMeta := canonicalToolResult(t.Context(), result, store)
 	call := model.ToolCall{ID: "task-wait-artifact", Name: "Task", Args: `{"action":"wait","handle":"command-task"}`}
 	message := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(call, canonical, nil, &message, truncationMeta)
@@ -628,18 +533,6 @@ func TestCanonicalArtifactMetadataPreservesTaskStateAndInvocationStatus(t *testi
 		t.Fatalf("Task system_hint = %#v, want tool-owned value", event.Tool.Output["system_hint"])
 	}
 	artifactPathFromJSONMetadata(t, event.Tool.Output)
-}
-
-func testToolResultArtifactStore(t *testing.T, maxFiles int, maxBytes int64) *toolResultArtifactStore {
-	t.Helper()
-	return &toolResultArtifactStore{
-		dir:      filepath.Join(t.TempDir(), "tool-results"),
-		maxAge:   24 * time.Hour,
-		maxFiles: maxFiles,
-		maxBytes: maxBytes,
-		fileMax:  maxBytes,
-		now:      time.Now,
-	}
 }
 
 func textToolResult(text string) tool.Result {
@@ -715,38 +608,4 @@ func assertFileContent(t *testing.T, path string, want []byte) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("file %q content differs: got %d bytes, want %d", path, len(got), len(want))
 	}
-}
-
-func assertPrivateFileMode(t *testing.T, path string) {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		return
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat(%q) error = %v", path, err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("file mode = %o, want 600", got)
-	}
-}
-
-func sessionFilesContain(t *testing.T, root string, needle []byte) bool {
-	t.Helper()
-	found := false
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || found {
-			return err
-		}
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		found = bytes.Contains(raw, needle)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("WalkDir(%q) error = %v", root, err)
-	}
-	return found
 }

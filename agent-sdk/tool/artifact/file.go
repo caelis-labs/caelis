@@ -1,6 +1,8 @@
-package chat
+// Package artifact provides temporary file storage for complete tool results.
+package artifact
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -16,13 +18,15 @@ import (
 )
 
 const (
-	defaultToolResultArtifactMaxAge   = 24 * time.Hour
-	defaultToolResultArtifactMaxFiles = 128
-	defaultToolResultArtifactMaxBytes = 64 * 1024 * 1024
-	defaultToolResultArtifactFileMax  = 64 * 1024 * 1024
+	defaultMaxAge   = 24 * time.Hour
+	defaultMaxFiles = 128
+	defaultMaxBytes = 64 * 1024 * 1024
+	defaultFileMax  = 64 * 1024 * 1024
 )
 
-type toolResultArtifactStore struct {
+// FileStore retains tool output in a private directory, evicting old files by age, count and size.
+// Share one store between agents that use the same directory.
+type FileStore struct {
 	dir      string
 	maxAge   time.Duration
 	maxFiles int
@@ -33,49 +37,54 @@ type toolResultArtifactStore struct {
 	mu sync.Mutex
 }
 
-type toolResultArtifactFile struct {
+type artifactFile struct {
 	path    string
 	size    int64
 	modTime time.Time
 }
 
-func defaultToolResultArtifactStore() *toolResultArtifactStore {
-	return &toolResultArtifactStore{
-		dir:      filepath.Join(os.TempDir(), "caelis", "tool-results"),
-		maxAge:   defaultToolResultArtifactMaxAge,
-		maxFiles: defaultToolResultArtifactMaxFiles,
-		maxBytes: defaultToolResultArtifactMaxBytes,
-		fileMax:  defaultToolResultArtifactFileMax,
+// NewFileStore uses a dedicated absolute directory, created on the first write.
+func NewFileStore(dir string) *FileStore {
+	return &FileStore{
+		dir:      filepath.Clean(dir),
+		maxAge:   defaultMaxAge,
+		maxFiles: defaultMaxFiles,
+		maxBytes: defaultMaxBytes,
+		fileMax:  defaultFileMax,
 		now:      time.Now,
 	}
 }
 
-func (s *toolResultArtifactStore) write(result tool.Result) (string, bool) {
-	if s == nil {
-		return "", false
+// Save returns the absolute path to the complete result for use in the model view.
+func (s *FileStore) Save(ctx context.Context, result tool.Result) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	content, extension, ok := rawToolResultArtifact(result.Content)
+	content, extension, ok := encodeContent(result.Content)
 	if !ok || len(content) == 0 || (s.fileMax > 0 && int64(len(content)) > s.fileMax) {
-		return "", false
+		return "", errors.New("tool result is empty, unencodable or exceeds the artifact limit")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := ensurePrivateToolResultArtifactDir(s.dir); err != nil {
-		return "", false
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := ensurePrivateDir(s.dir); err != nil {
+		return "", err
 	}
 	if err := s.cleanupLocked(int64(len(content))); err != nil {
-		return "", false
+		return "", err
 	}
 
-	target, ok := s.unusedPathLocked(extension)
-	if !ok {
-		return "", false
+	target, err := s.unusedPathLocked(extension)
+	if err != nil {
+		return "", err
 	}
 	temporary, err := os.CreateTemp(s.dir, ".tool-result-*")
 	if err != nil {
-		return "", false
+		return "", err
 	}
 	temporaryPath := temporary.Name()
 	written := false
@@ -86,56 +95,44 @@ func (s *toolResultArtifactStore) write(result tool.Result) (string, bool) {
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		return "", false
+		return "", err
 	}
 	if _, err := temporary.Write(content); err != nil {
-		return "", false
+		return "", err
 	}
 	if err := temporary.Close(); err != nil {
-		return "", false
+		return "", err
 	}
 	if err := os.Rename(temporaryPath, target); err != nil {
-		return "", false
+		return "", err
 	}
 	written = true
-	return target, true
+	return target, nil
 }
 
-func (s *toolResultArtifactStore) unusedPathLocked(extension string) (string, bool) {
+func (s *FileStore) unusedPathLocked(extension string) (string, error) {
 	for range 4 {
-		uid, err := randomToolResultArtifactID()
+		uid, err := randomID()
 		if err != nil {
-			return "", false
+			return "", err
 		}
 		path := filepath.Join(s.dir, uid+extension)
 		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-			return path, true
+			return path, nil
 		}
 	}
-	return "", false
+	return "", errors.New("cannot allocate unique tool result path")
 }
 
-func (s *toolResultArtifactStore) remove(path string) error {
-	if s == nil || filepath.Clean(filepath.Dir(path)) != filepath.Clean(s.dir) {
-		return errors.New("tool result artifact path is outside store")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return os.Remove(path)
-}
-
-func ensurePrivateToolResultArtifactDir(dir string) error {
-	dir = filepath.Clean(strings.TrimSpace(dir))
-	if dir == "." || !filepath.IsAbs(dir) {
-		return errors.New("tool result artifact directory must be absolute")
+func ensurePrivateDir(dir string) error {
+	if !filepath.IsAbs(dir) || dir == filepath.Dir(dir) || dir == filepath.Clean(os.TempDir()) {
+		return errors.New("tool result artifacts require a dedicated absolute directory")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	base := filepath.Clean(os.TempDir())
-	boundary := filepath.Dir(dir)
 	if strings.HasPrefix(dir, base+string(os.PathSeparator)) {
-		boundary = base
 		resolvedBase, baseErr := filepath.EvalSymlinks(base)
 		resolvedDir, dirErr := filepath.EvalSymlinks(dir)
 		if baseErr != nil || dirErr != nil {
@@ -146,19 +143,17 @@ func ensurePrivateToolResultArtifactDir(dir string) error {
 			return errors.New("tool result artifact directory contains a symbolic link")
 		}
 	}
-	for path := dir; path != boundary && path != filepath.Dir(path); path = filepath.Dir(path) {
-		info, err := os.Lstat(path)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("tool result artifact path is not a private directory")
-		}
-		if err := os.Chmod(path, 0o700); err != nil {
-			return err
-		}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
 	}
-	return nil
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("tool result artifact path is not a private directory")
+	}
+	return os.Chmod(dir, 0o700)
 }
 
-func (s *toolResultArtifactStore) cleanupLocked(requiredBytes int64) error {
+func (s *FileStore) cleanupLocked(requiredBytes int64) error {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return err
@@ -167,10 +162,10 @@ func (s *toolResultArtifactStore) cleanupLocked(requiredBytes int64) error {
 	if s.now != nil {
 		now = s.now()
 	}
-	files := make([]toolResultArtifactFile, 0, len(entries))
+	files := make([]artifactFile, 0, len(entries))
 	var totalBytes int64
 	for _, entry := range entries {
-		if entry.IsDir() || !isToolResultArtifactName(entry.Name()) {
+		if entry.IsDir() || !isArtifactName(entry.Name()) {
 			continue
 		}
 		info, err := entry.Info()
@@ -183,10 +178,10 @@ func (s *toolResultArtifactStore) cleanupLocked(requiredBytes int64) error {
 				continue
 			}
 		}
-		files = append(files, toolResultArtifactFile{path: path, size: info.Size(), modTime: info.ModTime()})
+		files = append(files, artifactFile{path: path, size: info.Size(), modTime: info.ModTime()})
 		totalBytes += info.Size()
 	}
-	slices.SortFunc(files, func(a, b toolResultArtifactFile) int {
+	slices.SortFunc(files, func(a, b artifactFile) int {
 		if a.modTime.Equal(b.modTime) {
 			return strings.Compare(a.path, b.path)
 		}
@@ -208,7 +203,7 @@ func (s *toolResultArtifactStore) cleanupLocked(requiredBytes int64) error {
 	return nil
 }
 
-func rawToolResultArtifact(blocks []tool.ContentBlock) ([]byte, string, bool) {
+func encodeContent(blocks []tool.ContentBlock) ([]byte, string, bool) {
 	if len(blocks) == 0 {
 		return nil, "", false
 	}
@@ -226,7 +221,7 @@ func rawToolResultArtifact(blocks []tool.ContentBlock) ([]byte, string, bool) {
 	return raw, ".json", err == nil
 }
 
-func randomToolResultArtifactID() (string, error) {
+func randomID() (string, error) {
 	raw := make([]byte, 6)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -234,7 +229,7 @@ func randomToolResultArtifactID() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-func isToolResultArtifactName(name string) bool {
+func isArtifactName(name string) bool {
 	extension := filepath.Ext(name)
 	if extension != ".txt" && extension != ".json" {
 		return false

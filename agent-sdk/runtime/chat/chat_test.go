@@ -2279,7 +2279,7 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 	result := tool.Result{
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`)}},
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := canonicalToolResult(t.Context(), result, nil)
 	message := toolResultMessageFromCanonical(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
@@ -2587,7 +2587,7 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("messageFromDurableEvent() = false, want Task result")
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := canonicalToolResult(t.Context(), result, nil)
 	live := toolResultMessageFromCanonical(call, canonical, nil)
 	if !reflect.DeepEqual(replayed, live) {
 		t.Fatalf("Task result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
@@ -2608,7 +2608,7 @@ func TestImageToolResultModelContextRoundTrip(t *testing.T) {
 			tool.Image{Data: []byte("img"), MIMEType: "image/png", Name: "pixel.png"},
 		},
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := canonicalToolResult(t.Context(), result, nil)
 	live := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(call, result, nil, &live)
 	replayed, ok := messageFromDurableEvent(event)
@@ -2882,7 +2882,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		Name: "RunCommand",
 		Args: `{"command":"find /tmp -delete"}`,
 	}
-	canonical, truncationMeta := canonicalToolResult(result, nil)
+	canonical, truncationMeta := canonicalToolResult(t.Context(), result, nil)
 	message := toolResultMessageFromCanonical(call, canonical, nil)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
@@ -2962,7 +2962,7 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 			"result": large,
 		})}},
 	}
-	canonical, _ := canonicalToolResult(result, nil)
+	canonical, _ := canonicalToolResult(t.Context(), result, nil)
 	message := toolResultMessageFromCanonical(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
