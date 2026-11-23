@@ -1,7 +1,20 @@
 package session
 
-import (
-	"strings"
+import "strings"
+
+// Visibility defines how one event participates in history and invocation
+// context reconstruction.
+type Visibility string
+
+const (
+	VisibilityCanonical Visibility = "canonical"
+	VisibilityUIOnly    Visibility = "ui_only"
+	VisibilityOverlay   Visibility = "overlay"
+	VisibilityMirror    Visibility = "mirror"
+	// VisibilityJournal marks durable execution-control facts that are excluded
+	// from canonical model history. Only completed reviewed approval decisions
+	// have a client projection; other journal facts remain internal.
+	VisibilityJournal Visibility = "journal"
 )
 
 // IsTransient reports whether one event is runtime-transient only.
@@ -46,6 +59,24 @@ func IsClientReplayEvent(event *Event) bool {
 		}
 	}
 	return IsCanonicalHistoryEvent(event) || IsMirror(event)
+}
+
+// ResolvedApprovalReview returns a completed reviewed approval decision for
+// client projection. Pending requests, cancellations and unreviewed decisions
+// remain internal. The returned record is borrowed and must not be modified.
+// Its display eligibility never makes the approval fact part of model context.
+func ResolvedApprovalReview(event *Event) *ApprovalRecord {
+	if !IsJournal(event) || EventTypeOf(event) != EventTypeLifecycle {
+		return nil
+	}
+	token := event.Approval
+	if token == nil || token.Status != ApprovalRecordResolved || strings.TrimSpace(token.ReviewText) == "" {
+		return nil
+	}
+	if strings.TrimSpace(token.ToolCallID) == "" && (token.Approval == nil || token.Approval.Context == nil) {
+		return nil
+	}
+	return token
 }
 
 // IsMainInvocationVisibleEvent reports whether one event belongs to the main
