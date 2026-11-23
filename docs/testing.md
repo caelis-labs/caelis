@@ -9,10 +9,10 @@ Go builds or tests:
 python3 scripts/prepare_builtin_dtw.py
 ```
 
-The normal Make build, test and lint targets run this step. `--all` prepares both
+The normal Make build, test and lint targets run this step. `--all` prepares all
 supported packages for cross builds, as GoReleaser does. The script reuses verified
 cache bytes, downloads only missing pinned assets, and writes ignored go:embed
-inputs. Native acceptance uses `TestBuiltinDesktopWorldLiveAgentTask` with an
+archives. Native acceptance uses `TestBuiltinDesktopWorldLiveAgentTask` with an
 explicit private model profile and artifact directory; ordinary tests never use
 live accounts. Fixture approval tests do not establish desktop effects.
 
@@ -77,9 +77,11 @@ approval. The single required `quality` result fails if classification, metadata
 validation, documentation validation, or any selected job fails or is cancelled.
 Only jobs outside the selected scope may be skipped.
 
-The Linux Go job installs bubblewrap and enables
+The Linux Go job uses Ubuntu 24.04 for the embedded DTW runtime. The separate
+Linux sandbox job installs bubblewrap and enables
 `CAELIS_LINUX_SANDBOX_SMOKE_E2E=1` for the bwrap package, covering real Run, Start,
-and TTY execution. It uses Ubuntu 22.04 for unprivileged user
+and TTY execution. It also runs native application execution tests. It uses
+Ubuntu 22.04 for unprivileged user
 namespaces without disabling Ubuntu 24.04's runner-wide AppArmor restriction.
 
 The branch rule does not require chasing the latest `main`. Advancing `main`

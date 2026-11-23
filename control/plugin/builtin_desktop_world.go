@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -18,7 +17,7 @@ import (
 )
 
 // The product pin records each platform's archive and build source separately.
-// Only the current platform's complete official ZIP is linked into the product.
+// Only the current platform's complete official archive is linked into the product.
 //
 //go:embed builtin/desktop-world.json
 var builtinDesktopWorldPin []byte
@@ -37,9 +36,9 @@ type builtinPlatform struct {
 	Source      builtinBuildSource `json:"source"`
 }
 
-func desktopWorldBundle() (*zip.Reader, builtinPlatform, string, error) {
+func desktopWorldBundle() (builtinArchive, builtinPlatform, string, error) {
 	if builtinDesktopWorldTarget == "" {
-		return nil, builtinPlatform{}, "", fmt.Errorf("builtin desktop-world is unsupported on %s/%s (requires macOS arm64 or Windows x64)", runtime.GOOS, runtime.GOARCH)
+		return builtinArchive{}, builtinPlatform{}, "", fmt.Errorf("builtin desktop-world is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	var release struct {
 		Schema    int               `json:"schema"`
@@ -47,7 +46,7 @@ func desktopWorldBundle() (*zip.Reader, builtinPlatform, string, error) {
 		Platforms []builtinPlatform `json:"platforms"`
 	}
 	if err := json.Unmarshal(builtinDesktopWorldPin, &release); err != nil || release.Schema != 1 || release.Version == "" {
-		return nil, builtinPlatform{}, "", fmt.Errorf("invalid builtin desktop-world release manifest")
+		return builtinArchive{}, builtinPlatform{}, "", fmt.Errorf("invalid builtin desktop-world release manifest")
 	}
 	for _, platform := range release.Platforms {
 		if platform.Target != builtinDesktopWorldTarget {
@@ -55,15 +54,11 @@ func desktopWorldBundle() (*zip.Reader, builtinPlatform, string, error) {
 		}
 		sum := sha256.Sum256(builtinDesktopWorldArchive)
 		if hex.EncodeToString(sum[:]) != platform.ArchiveHash {
-			return nil, platform, "", fmt.Errorf("builtin desktop-world archive checksum mismatch")
+			return builtinArchive{}, platform, "", fmt.Errorf("builtin desktop-world archive checksum mismatch")
 		}
-		reader, err := zip.NewReader(bytes.NewReader(builtinDesktopWorldArchive), int64(len(builtinDesktopWorldArchive)))
-		if err != nil {
-			return nil, platform, "", err
-		}
-		return reader, platform, release.Version, nil
+		return builtinArchive{name: platform.Archive, data: builtinDesktopWorldArchive}, platform, release.Version, nil
 	}
-	return nil, builtinPlatform{}, "", fmt.Errorf("builtin desktop-world platform missing from release manifest")
+	return builtinArchive{}, builtinPlatform{}, "", fmt.Errorf("builtin desktop-world platform missing from release manifest")
 }
 
 func materializeDesktopWorld(ctx context.Context, storeDir string) (string, error) {
@@ -98,7 +93,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 	}
 	defer release()
 	if _, err := os.Lstat(root); err == nil {
-		return root, verifyDesktopWorldBundle(root, reader, platform)
+		return root, verifyDesktopWorldBundle(root, reader)
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
@@ -107,33 +102,22 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
-	prefix := strings.TrimSuffix(platform.Archive, ".zip") + "/"
-	for _, entry := range reader.File {
+	if err := reader.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
 		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		rel, err := builtinEntryPath(entry, prefix)
-		if err != nil {
-			return "", err
-		}
-		if rel == "" {
-			continue
+			return err
 		}
 		dest := filepath.Join(tmp, rel)
-		if entry.FileInfo().IsDir() {
-			if err := os.MkdirAll(dest, 0o700); err != nil {
-				return "", err
-			}
-			continue
+		if mode.IsDir() {
+			return os.MkdirAll(dest, 0o700)
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
-			return "", err
+			return err
 		}
-		if err := extractBuiltinEntry(entry, dest); err != nil {
-			return "", err
-		}
+		return extractBuiltinEntry(src, mode, dest)
+	}); err != nil {
+		return "", err
 	}
-	if err := verifyDesktopWorldBundle(tmp, reader, platform); err != nil {
+	if err := verifyDesktopWorldBundle(tmp, reader); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -142,31 +126,15 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 	if err := os.Rename(tmp, root); err != nil {
 		// Another Host may have published the same bytes. Never replace or repair
 		// an existing root; readers can hold it across upgrades and rollbacks.
-		if verifyErr := verifyDesktopWorldBundle(root, reader, platform); verifyErr != nil {
+		if verifyErr := verifyDesktopWorldBundle(root, reader); verifyErr != nil {
 			return "", err
 		}
 	}
 	return root, nil
 }
 
-func builtinEntryPath(entry *zip.File, prefix string) (string, error) {
-	name, ok := strings.CutPrefix(entry.Name, prefix)
-	if !ok || entry.Mode()&os.ModeSymlink != 0 || (!entry.FileInfo().IsDir() && !entry.Mode().IsRegular()) || entry.UncompressedSize64 > 128<<20 {
-		return "", fmt.Errorf("invalid builtin archive entry %q", entry.Name)
-	}
-	if name == "" {
-		return "", nil
-	}
-	return filepath.Localize(strings.TrimSuffix(name, "/"))
-}
-
-func extractBuiltinEntry(entry *zip.File, dest string) error {
-	src, err := entry.Open()
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	mode := fs.FileMode(0o600) | entry.Mode().Perm()&0o111
+func extractBuiltinEntry(src io.Reader, mode fs.FileMode, dest string) error {
+	mode = 0o600 | mode.Perm()&0o111
 	out, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
@@ -179,7 +147,7 @@ func extractBuiltinEntry(entry *zip.File, dest string) error {
 	return closeErr
 }
 
-func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinPlatform) error {
+func verifyDesktopWorldBundle(root string, reader builtinArchive) error {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return err
@@ -187,33 +155,20 @@ func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinP
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("builtin package root is not a real directory")
 	}
-	prefix := strings.TrimSuffix(platform.Archive, ".zip") + "/"
-	for _, entry := range reader.File {
-		rel, err := builtinEntryPath(entry, prefix)
-		if err != nil {
-			return err
-		}
-		if rel == "" || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
-			continue
-		}
-		if entry.FileInfo().IsDir() {
-			continue
+	return reader.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
+		if mode.IsDir() || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
+			return nil
 		}
 		path := filepath.Join(root, rel)
 		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o111 != entry.Mode().Perm()&0o111) {
+		if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o111 != mode.Perm()&0o111) {
 			return fmt.Errorf("invalid builtin file mode: %s", rel)
-		}
-		src, err := entry.Open()
-		if err != nil {
-			return err
 		}
 		hash := sha256.New()
 		_, err = io.Copy(hash, src)
-		_ = src.Close()
 		if err != nil {
 			return err
 		}
@@ -230,8 +185,8 @@ func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinP
 		if !bytes.Equal(hash.Sum(nil), actualHash.Sum(nil)) {
 			return fmt.Errorf("builtin file checksum mismatch: %s", rel)
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // Runtime validation covers executable, configuration and Skill inputs. Release
@@ -263,6 +218,24 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	out, err := ResolveContributions([]Config{{ID: "desktop-world", Root: root, Enabled: true}}, paths)
 	if err == nil {
 		out.Sources[0].Status = "builtin"
+		if runtime.GOOS == "linux" {
+			// Only the bundled local service receives the Host's desktop session.
+			// The ordinary clean MCP environment still excludes unrelated variables.
+			for i := range out.MCPServerSpecs {
+				spec := &out.MCPServerSpecs[i]
+				if spec.Env == nil {
+					spec.Env = make(map[string]string)
+				}
+				for _, key := range []string{
+					"DISPLAY", "XAUTHORITY", "XDG_SESSION_TYPE", "WAYLAND_DISPLAY",
+					"DBUS_SESSION_BUS_ADDRESS", "XDG_DATA_HOME", "XDG_DATA_DIRS",
+				} {
+					if value, ok := os.LookupEnv(key); ok {
+						spec.Env[key] = value
+					}
+				}
+			}
+		}
 	}
 	return selectDesktopToolset(out), err
 }

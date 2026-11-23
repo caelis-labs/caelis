@@ -128,7 +128,7 @@ jobs:
           path: dist
       - name: Verify final assets before any publication
         run: bash scripts/verify_release_archives.sh "${RELEASE_TAG#v}" dist
-      - name: Verify embedded DTW in the final signed Core archives
+      - name: Verify embedded DTW in the final Core archives
         run: python3 scripts/prepare_builtin_dtw.py --all --verify-archives dist --core-version "${RELEASE_TAG#v}"
       - uses: actions/setup-node@v7
         with:

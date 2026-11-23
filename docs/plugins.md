@@ -12,15 +12,22 @@ native Caelis manifest takes precedence on a duplicate server name.
 
 ## Built-in computer use
 
-Desktop World is a fixed Core capability on macOS arm64 and Windows x64. The
-complete official plugin is embedded in the platform's Core executable and
-follows the Core version; no separate installation is required. Core materializes the verified package in its private Store cache and
-starts its standard stdio process for each Session Runtime. Single-binary
+Desktop World is a fixed Core capability on macOS arm64, Linux x86_64 and
+arm64, and Windows x64. The complete official plugin is embedded in the
+platform's Core executable and follows the Core version. Core materializes the
+verified package in its private Store cache and starts its standard stdio
+process for each Session Runtime. Single-binary
 distribution does not mean single-process execution. Unsupported platforms keep
 Core usable and report computer use as unavailable; OS permissions still apply.
 Runtime validation checks the packaged executable, manifests and Skill inputs.
 Unrelated files, including caches created by platform APIs, do not prevent
 activation. Release provenance is verified against the embedded archive.
+
+On Linux, the embedded DTW requires glibc 2.39 or newer and a local X11 session
+with an EWMH window manager, XRes 1.2, XInput 2, and XTest. Wayland and XWayland
+are unsupported. The bundled service receives the Host's desktop session
+environment through its clean MCP launch. Start the Host from the desktop
+session it should use.
 
 The existing parser supplies MCP and the Skill from the same package. Main
 Sessions, application profiles, native children and managed Workers receive the
@@ -59,9 +66,9 @@ Core's single release pin is
 [`control/plugin/builtin/desktop-world.json`](../control/plugin/builtin/desktop-world.json).
 CI and local builds run the same preparation script to fetch and verify the
 complete official target package, including BUILD provenance, binary, Skill,
-manifest and licenses. Generated ZIPs are not source-controlled. Core does not
+manifest and licenses. Generated archives are ignored by Git. Core does not
 build DTW's runtime or download it during execution. Release verification checks
-the actual signed Core archive for the complete pinned plugin bytes.
+the final Core archives for the complete pinned plugin bytes.
 
 ## Install optional plugins
 

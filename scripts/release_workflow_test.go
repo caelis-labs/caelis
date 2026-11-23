@@ -410,9 +410,10 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 		"fetch-depth: 0", "PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}",
 		"node --test scripts/ci_scope.test.mjs", "node scripts/ci_scope.mjs",
 		"if: steps.scope.outputs.docs == 'true'", "go run ./scripts/markdown_links",
-		"needs: [changes, govulncheck, go-quality]", "if: always()",
+		"needs: [changes, govulncheck, go-quality, linux-sandbox]", "if: always()",
 		"CHANGES_RESULT: ${{ needs.changes.result }}", "FULL: ${{ needs.changes.outputs.full }}",
 		"VULN_RESULT: ${{ needs.govulncheck.result }}", "GO_RESULT: ${{ needs.go-quality.result }}",
+		"SANDBOX_RESULT: ${{ needs.linux-sandbox.result }}",
 		"bash scripts/ci_result.sh",
 		"sudo apt-get install -y bubblewrap", "CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'",
 		"https://mirror.its.umich.edu/ubuntu jammy main universe",
@@ -435,7 +436,7 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 		if full == "false" {
 			expected = "skipped"
 		}
-		baseline := map[string]string{"CHANGES_RESULT": "success", "FULL": full, "VULN_RESULT": expected, "GO_RESULT": expected}
+		baseline := map[string]string{"CHANGES_RESULT": "success", "FULL": full, "VULN_RESULT": expected, "GO_RESULT": expected, "SANDBOX_RESULT": expected}
 		run := func(values map[string]string, want bool) {
 			t.Helper()
 			cmd := exec.Command(testBash(t), "./ci_result.sh")

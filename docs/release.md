@@ -267,9 +267,9 @@ Before declaring the release complete:
 ## Embedded computer-use package
 
 Core pins the official DTW release independently of its source repository. The
-GoReleaser preparation hook verifies the complete platform ZIP and embeds it
-only in supported Core targets. The final archive gate checks the actual signed
-Core executable for that complete pinned ZIP, including its original Skill and
+GoReleaser preparation hook verifies the complete platform archive and embeds it
+only in supported Core targets. The final archive gate checks the final
+Core executable for that complete pinned archive, including its original Skill and
 provenance; source CI alone is insufficient. User receipt/recovery and Store
 rollback rules above still apply. No runtime download or DTW source build is
 part of Core startup. See [plugin integration](plugins.md#built-in-computer-use).

@@ -12,7 +12,9 @@ import (
 )
 
 func builtinComputerUseSupported() bool {
-	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" || runtime.GOOS == "windows" && runtime.GOARCH == "amd64"
+	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" ||
+		runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") ||
+		runtime.GOOS == "windows" && runtime.GOARCH == "amd64"
 }
 
 func waitBuiltinDesktopWorldMCP(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string) {
