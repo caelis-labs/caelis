@@ -340,6 +340,12 @@ reads directly. Hosts that create and list Sessions, manage participant bindings
 and edit state can use `session.ManagedService`. Features such as atomic Plan
 updates use their own optional contracts.
 
+Code Mode needs `session.StateWriter` to initialize the `js_exec` catalog for a
+new Session. Pass the file store directly as `runtime.Config.Sessions`, or
+implement `session.StateWriter` on the service supplied by the host.
+`session.NewService(store)` exposes only the four-operation adapter's core
+service. Initializing the catalog through that wrapper returns `Unsupported`.
+
 The file backend persists the Turn claim and validates writes under its file
 lock. A PostgreSQL adapter can hold the claim in a Session row alongside its
 revision and state. Short transactions lock that row to acquire or release

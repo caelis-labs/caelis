@@ -143,6 +143,82 @@ func TestFileStoreSkipsOversizedAndUnwritableResults(t *testing.T) {
 	}
 }
 
+func TestFileStoreRejectsUntrustedTempParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix directory permissions")
+	}
+	for _, scenario := range []string{"writable", "symlink"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir())
+			parent := filepath.Join(os.TempDir(), "caelis")
+			if scenario == "symlink" {
+				if err := os.Symlink(t.TempDir(), parent); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Mkdir(parent, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(parent, 0o777); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dir := filepath.Join(parent, "tool-results")
+			ref, err := NewFileStore(dir).Save(t.Context(), textToolResult("content"))
+			if err == nil || ref != "" {
+				t.Fatalf("Save = %q, %v; want an error and no reference", ref, err)
+			}
+			if _, err := os.Lstat(dir); !os.IsNotExist(err) {
+				t.Fatalf("unexpected artifact directory: %v", err)
+			}
+			if scenario == "writable" {
+				info, err := os.Stat(parent)
+				if err != nil || info.Mode().Perm() != 0o777 {
+					t.Fatalf("parent permissions changed: %v, %v", info, err)
+				}
+			}
+		})
+	}
+}
+
+func TestFileStoreUsesOwnedBranchUnderSharedTemp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix directory permissions")
+	}
+	temp := t.TempDir()
+	t.Setenv("TMPDIR", temp)
+	if err := os.Chmod(temp, os.ModeSticky|0o777); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(temp, "caelis")
+	store := NewFileStore(filepath.Join(parent, "tool-results"))
+	ref, err := store.Save(t.Context(), textToolResult("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, ref, []byte("first"))
+	t.Run("foreign owner with read-only access for peers", func(t *testing.T) {
+		if os.Geteuid() != 0 {
+			t.Skip("changing the fixture owner requires root")
+		}
+		if err := os.Chmod(parent, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(parent, 65534, -1); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chown(parent, os.Geteuid(), -1); err != nil {
+				t.Error(err)
+			}
+		})
+		if ref, err := store.Save(t.Context(), textToolResult("second")); err == nil || ref != "" {
+			t.Fatalf("Save with foreign parent = %q, %v; want an error and no reference", ref, err)
+		}
+		assertFileContent(t, ref, []byte("first"))
+	})
+}
+
 func TestFileStoreConcurrentWritesUseUniqueNames(t *testing.T) {
 	t.Parallel()
 

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,6 +45,7 @@ type artifactFile struct {
 }
 
 // NewFileStore uses a dedicated absolute directory, created on the first write.
+// Outside the system temporary directory the host supplies trusted ancestors.
 func NewFileStore(dir string) *FileStore {
 	return &FileStore{
 		dir:      filepath.Clean(dir),
@@ -125,32 +127,50 @@ func (s *FileStore) unusedPathLocked(extension string) (string, error) {
 }
 
 func ensurePrivateDir(dir string) error {
-	if !filepath.IsAbs(dir) || dir == filepath.Dir(dir) || dir == filepath.Clean(os.TempDir()) {
+	base := filepath.Clean(os.TempDir())
+	relative, err := filepath.Rel(base, dir)
+	if !filepath.IsAbs(dir) || dir == filepath.Dir(dir) || relative == "." {
 		return errors.New("tool result artifacts require a dedicated absolute directory")
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err == nil && filepath.IsLocal(relative) {
+		// A shared sticky temp root protects an entry only once its owner is
+		// known. Check each parent before creating anything beneath it.
+		parent := base
+		for part := range strings.SplitSeq(relative, string(os.PathSeparator)) {
+			if err := checkTempParent(parent, parent == base); err != nil {
+				return err
+			}
+			parent = filepath.Join(parent, part)
+			if err := os.Mkdir(parent, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+				return err
+			}
+		}
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
-	}
-	base := filepath.Clean(os.TempDir())
-	if strings.HasPrefix(dir, base+string(os.PathSeparator)) {
-		resolvedBase, baseErr := filepath.EvalSymlinks(base)
-		resolvedDir, dirErr := filepath.EvalSymlinks(dir)
-		if baseErr != nil || dirErr != nil {
-			return errors.New("tool result artifact directory cannot be resolved")
-		}
-		relative, err := filepath.Rel(base, dir)
-		if err != nil || filepath.Clean(resolvedDir) != filepath.Join(filepath.Clean(resolvedBase), relative) {
-			return errors.New("tool result artifact directory contains a symbolic link")
-		}
 	}
 	info, err := os.Lstat(dir)
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() || !ownedArtifactDir(info) {
 		return errors.New("tool result artifact path is not a private directory")
 	}
 	return os.Chmod(dir, 0o700)
+}
+
+func checkTempParent(path string, tempRoot bool) error {
+	stat := os.Lstat
+	if tempRoot {
+		stat = os.Stat // The system temp path can itself be an alias.
+	}
+	info, err := stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || !trustedTempParent(info, tempRoot) {
+		return fmt.Errorf("untrusted tool result parent directory %q", path)
+	}
+	return nil
 }
 
 func (s *FileStore) cleanupLocked(requiredBytes int64) error {
