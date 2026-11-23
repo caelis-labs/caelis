@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// repairToolPairs executes no producer. A newly acquired or inherited exclusive
-// fence proves that the previous producer was drained or lost ownership at the
-// Host boundary. An empty local active map alone is never sufficient authority.
+// repairToolPairs records interrupted calls under the exclusive Turn admitted
+// by the Session service. Repair never dispatches a tool.
 func (r *Runtime) repairToolPairs(ctx context.Context, ref session.SessionRef) error {
 	for {
 		err := r.repairToolPairsAtCut(ctx, ref)
@@ -44,9 +42,6 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 	for _, pair := range pairs {
 		if pair.Result != nil || pair.Call.Seq > 0 && pair.Call.Seq <= through {
 			continue
-		}
-		if session.RuntimeMutationGuard(ctx).FenceID == "" {
-			return fmt.Errorf("missing tool results require an exclusive Session fence and ended prior producer")
 		}
 		call := pair.Call
 		event := session.CloneEvent(call)

@@ -14,8 +14,18 @@ func TestFileToolRunConformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessiontest.ToolRunConformance(t, active.SessionRef, func(*testing.T) session.RunStore {
+	sessiontest.ToolRunConformance(t, active.SessionRef, func(*testing.T) session.RunService {
 		store := file.NewStore(cfg)
-		return struct{ session.RunStore }{store}
+		return session.NewService(store)
 	})
+}
+
+func TestFileTurnAdmissionConformance(t *testing.T) {
+	cfg := file.Config{RootDir: t.TempDir()}
+	writer := file.NewStore(cfg)
+	active, err := writer.StartSession(t.Context(), session.StartSessionRequest{AppName: "conformance", UserID: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessiontest.TurnAdmissionConformance(t, active.SessionRef, session.NewService(writer), session.NewService(file.NewStore(cfg)))
 }

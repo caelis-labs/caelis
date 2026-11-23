@@ -50,6 +50,11 @@ func (s *Store) SessionFence(ctx context.Context, ref session.SessionRef) (sessi
 	return out, err
 }
 
+// BeginTurn admits a single producer until the returned release completes.
+func (s *Store) BeginTurn(ctx context.Context, ref session.SessionRef, owner string) (context.Context, func() error, error) {
+	return session.BeginFencedTurn(ctx, s, ref, owner)
+}
+
 func (s *Store) AcquireSessionFence(ctx context.Context, req session.AcquireSessionFenceRequest) (session.SessionFence, error) {
 	return s.acquireSessionFence(ctx, req, false)
 }

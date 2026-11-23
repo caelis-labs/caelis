@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -43,74 +43,6 @@ func (r *Runtime) kernelControllerBinding() session.ControllerBinding {
 	}
 }
 
-func (r *Runtime) runACPControllerTurn(
-	ctx context.Context,
-	cancel context.CancelFunc,
-	activeSession session.Session,
-	ref session.SessionRef,
-	req agent.RunRequest,
-) (out agent.RunResult, runErr error) {
-	if r == nil || r.controllers == nil {
-		cancel()
-		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend is not configured")
-	}
-	runID := r.nextID("run", r.runIDGenerator)
-	turnID := strings.TrimSpace(req.TurnID)
-	if turnID == "" {
-		turnID = r.nextID("turn", nil)
-	}
-	ctx = withLifecycleScope(ctx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
-	ctx = hookrun.WithRun(ctx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
-	hookrun.FromContext(ctx).Trace = r.lifecycle
-	if err := r.beginRun(ref, runID); err != nil {
-		cancel()
-		return agent.RunResult{}, err
-	}
-	ctx, releaseFence, fenceErr := r.ownRunFence(ctx, ref)
-	if fenceErr != nil {
-		r.unregisterActiveRun(runID)
-		cancel()
-		return agent.RunResult{}, fenceErr
-	}
-	started := false
-	defer func() {
-		if !started {
-			runErr = errors.Join(runErr, releaseFence())
-			r.unregisterActiveRun(runID)
-		}
-	}()
-	if err := r.reconcileTurnPlan(ctx, ref, turnID); err != nil {
-		cancel()
-		return agent.RunResult{}, err
-	}
-	if err := r.repairToolPairs(ctx, ref); err != nil {
-		cancel()
-
-		return agent.RunResult{}, err
-	}
-	handle := newRunner(ctx, runID, cancel, req.SourceObserver)
-	handle.controllerCalls = newControllerCallScope(ctx)
-
-	admission := newSteeringAdmission()
-	if err := handle.setSubmissionHandler(ctx, r.controllerSteeringHandler(
-		ctx, ref, turnID, handle, admission,
-	)); err != nil {
-		cancel()
-
-		return agent.RunResult{}, err
-	}
-	r.registerActiveRun(ref, activeSession, turnID, handle, req)
-	started = true
-	go func() {
-		defer cancel()
-		r.executeACPControllerTurn(ctx, activeSession, ref, req, runID, turnID, handle, admission, releaseFence)
-	}()
-	return agent.RunResult{
-		Session: activeSession,
-		Handle:  handle,
-	}, nil
-}
-
 func (r *Runtime) executeACPControllerTurn(
 	ctx context.Context,
 	activeSession session.Session,
@@ -120,15 +52,7 @@ func (r *Runtime) executeACPControllerTurn(
 	turnID string,
 	handle *runner,
 	admission *steeringAdmission,
-	releaseFence func() error,
 ) {
-	defer handle.finish()
-	defer func() {
-		if err := releaseFence(); err != nil {
-			handle.publishError(err)
-		}
-	}()
-	defer r.unregisterActiveRun(runID)
 	admitted := false
 	defer func() {
 		if !admitted {
@@ -260,35 +184,38 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(err)
 		return
 	}
-	if turnHandle != nil {
-		handle.setCancelHook(func() error {
-			return turnHandle.Cancel().Err
-		})
-		defer turnHandle.Close()
-		admission.resolve(nil)
-		admitted = true
-		err = turnHandle.WaitCompletion(ctx)
-		handle.controllerCalls.closeAndWait()
-		if err == nil && forwarding != nil {
-			err = forwarding.Complete(ctx)
-		} else if err == nil {
-			err = errors.New("agent-sdk/runtime: controller event forwarding session is unavailable")
-		}
-		if err != nil {
-
-			handle.publishError(err)
-			return
-		}
-		if err := r.updateControllerContextCheckpoint(ctx, ref); err != nil {
-
-			handle.publishError(err)
-			return
-		}
-	} else {
-		err := fmt.Errorf("agent-sdk/runtime: main controller returned no Turn handle")
-
+	if turnHandle == nil {
+		handle.publishError(errors.New("agent-sdk/runtime: main controller returned no Turn handle"))
+		return
+	}
+	defer turnHandle.Close()
+	admission.resolve(nil)
+	admitted = true
+	err = handle.waitController(ctx, turnHandle)
+	handle.controllerCalls.closeAndWait()
+	if err == nil && forwarding != nil {
+		err = forwarding.Complete(ctx)
+	} else if err == nil {
+		err = errors.New("agent-sdk/runtime: controller event forwarding session is unavailable")
+	}
+	if err != nil {
 		handle.publishError(err)
 		return
 	}
+	if err := r.updateControllerContextCheckpoint(ctx, ref); err != nil {
+		handle.publishError(err)
+	}
+}
 
+// Cancellation requests shutdown. Only the controller's completion proves
+// that it can no longer publish observations under this Turn's claim.
+func (r *runner) waitController(ctx context.Context, remote controller.TurnHandle) error {
+	cancel := sync.OnceValue(func() error { return remote.Cancel().Err })
+	r.setCancelHook(cancel)
+	stop := context.AfterFunc(ctx, func() { _ = cancel() })
+	defer stop()
+	if err := remote.WaitCompletion(context.WithoutCancel(ctx)); err != nil {
+		return err
+	}
+	return ctx.Err()
 }

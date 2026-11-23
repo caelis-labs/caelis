@@ -379,11 +379,22 @@ func participantLifecycleJSONEqual(left, right any) bool {
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
 }
 
-func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
+func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (out agent.RunResult, runErr error) {
 	if r == nil || r.controllers == nil {
 		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend is not configured")
 	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
+	runID := r.nextID("participant-run", nil)
+	ctx, endTurn, err := r.sessions.BeginTurn(ctx, ref, runID)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			runErr = errors.Join(runErr, endTurn())
+		}
+	}()
 	activeSession, err := r.sessions.Session(ctx, ref)
 	if err != nil {
 		return agent.RunResult{}, err
@@ -400,20 +411,14 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	releasePrompt, claimed := r.tryClaimParticipantPrompt(ref, binding)
-	if !claimed {
-		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: participant %q already has a prompt in progress", strings.TrimSpace(binding.ID))
-	}
 	contextTransfer, err := r.buildParticipantPromptContext(ctx, ref, binding.ContextSyncSeq)
 	if err != nil {
-		releasePrompt()
 		return agent.RunResult{}, err
 	}
 	turnID := strings.TrimSpace(req.TurnID)
 	if turnID == "" {
 		turnID = r.nextID("participant-turn", nil)
 	}
-	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runCtx, runID, cancel, req.SourceObserver)
 	admission := newSteeringAdmission()
@@ -426,11 +431,17 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 		handle,
 		admission,
 	)); err != nil {
-		releasePrompt()
 		cancel()
 		return agent.RunResult{}, err
 	}
-	go r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextTransfer, runID, turnID, handle, releasePrompt, admission)
+	started = true
+	go func() {
+		defer handle.finish(func() error {
+			cancel()
+			return endTurn()
+		})
+		r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextTransfer, runID, turnID, handle, admission)
+	}()
 	return agent.RunResult{
 		Session: activeSession,
 		Handle:  handle,
@@ -447,11 +458,8 @@ func (r *Runtime) executeACPParticipantTurn(
 	runID string,
 	turnID string,
 	handle *runner,
-	releasePrompt func(),
 	admission *steeringAdmission,
 ) {
-	defer handle.finish()
-	defer releasePrompt()
 	admitted := false
 	defer func() {
 		if !admitted {
@@ -531,13 +539,10 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishError(err)
 		return
 	}
-	handle.setCancelHook(func() error {
-		return turnHandle.Cancel().Err
-	})
 	defer turnHandle.Close()
 	admission.resolve(nil)
 	admitted = true
-	err = turnHandle.WaitCompletion(ctx)
+	err = handle.waitController(ctx, turnHandle)
 	if err == nil {
 		err = forwarding.Complete(ctx)
 	}
@@ -549,35 +554,6 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishError(err)
 		return
 	}
-}
-
-func (r *Runtime) tryClaimParticipantPrompt(ref session.SessionRef, binding session.ParticipantBinding) (func(), bool) {
-	if r == nil {
-		return func() {}, false
-	}
-	key := participantPromptKey{
-		sessionID:     strings.TrimSpace(ref.SessionID),
-		participantID: strings.TrimSpace(binding.ID),
-	}
-	if key.sessionID == "" || key.participantID == "" {
-		return func() {}, false
-	}
-	r.participantMu.Lock()
-	if r.participantPromptClaims == nil {
-		r.participantPromptClaims = map[participantPromptKey]struct{}{}
-	}
-	if _, exists := r.participantPromptClaims[key]; exists {
-		r.participantMu.Unlock()
-		return func() {}, false
-	}
-	r.participantPromptClaims[key] = struct{}{}
-	r.participantMu.Unlock()
-
-	return func() {
-		r.participantMu.Lock()
-		delete(r.participantPromptClaims, key)
-		r.participantMu.Unlock()
-	}, true
 }
 
 func (r *Runtime) ensureACPParticipantRun(

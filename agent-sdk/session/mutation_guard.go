@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 )
 
 // MutationAuthority identifies the explicit authority for a session mutation.
@@ -56,6 +57,7 @@ type MutationGuard struct {
 	OwnerID      string                 `json:"owner_id,omitempty"`
 	FencingToken uint64                 `json:"fencing_token,omitempty"`
 	claimToken   string
+	turnInUse    *atomic.Bool
 }
 
 type mutationGuardContextKey struct{}
@@ -67,7 +69,7 @@ func ContextWithRuntimeFence(ctx context.Context, fence SessionFence) context.Co
 	}
 	return context.WithValue(ctx, mutationGuardContextKey{}, MutationGuard{
 		Authority: MutationAuthorityRuntime, FenceID: fence.FenceID, OwnerID: fence.OwnerID, FencingToken: fence.FencingToken,
-		claimToken: fence.claimToken,
+		claimToken: fence.claimToken, turnInUse: fence.turnInUse,
 	})
 }
 

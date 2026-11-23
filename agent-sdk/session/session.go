@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -362,6 +363,7 @@ type SessionFence struct {
 	OwnerID      string     `json:"owner_id,omitempty"`
 	FencingToken uint64     `json:"fencing_token,omitempty"`
 	AcquiredAt   time.Time  `json:"acquired_at,omitempty"`
+	turnInUse    *atomic.Bool
 	claimToken   string
 	claimDigest  string
 }
@@ -722,23 +724,20 @@ type StateStore interface {
 	StateWriter
 }
 
-// RunStore persists an Agent turn in an existing Session. LoadSession reads the
-// Session, state and ordered history at one committed revision. BindController
-// records the native controller on first use. AppendEvents commits each model
-// tool batch or multi-message input atomically before dispatch.
-type RunStore interface {
+// RunService is the Runtime-facing Session service. The service admits a
+// writer before the first Turn mutation. Concurrent readers observe committed
+// snapshots while the producer runs. Model tool calls commit as one batch.
+type RunService interface {
+	Store
 	Reader
 	StateReader
 	EventAppender
-	EventBatchService
-	ControllerBindingStore
-	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
 }
 
 // Service is the full reference session service. Consumers should accept the
 // narrow interfaces above unless they genuinely need the aggregate.
 type Service interface {
-	RunStore
+	RunService
 	Lifecycle
 	ParticipantBindingStore
 	StateWriter

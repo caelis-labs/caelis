@@ -499,3 +499,49 @@ func (c *fenceTestClock) Advance(delta time.Duration) {
 	c.now = c.now.Add(delta)
 	c.mu.Unlock()
 }
+
+func TestDelegatedClaimAdmitsOneTurnAcrossContexts(t *testing.T) {
+	ctx := t.Context()
+	s := inmemory.NewStore(inmemory.Config{})
+	active, err := s.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin := func() (func() error, error) {
+		_, end, err := s.BeginTurn(session.ContextWithRuntimeFence(ctx, f), active.SessionRef, "producer")
+		return end, err
+	}
+	end, err := begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = begin(); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("same claim admitted two producers: %v", err)
+	}
+	if err = end(); err != nil {
+		t.Fatal(err)
+	}
+	next, err := begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = end(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = begin(); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("repeated release affected the next producer: %v", err)
+	}
+	if err = next(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(f)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = begin(); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("stale delegated claim admitted a producer: %v", err)
+	}
+}

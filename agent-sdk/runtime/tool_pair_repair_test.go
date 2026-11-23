@@ -191,18 +191,6 @@ func TestToolFactsCancellationHoldsFenceUntilProducerEnds(t *testing.T) {
 		t.Fatalf("late known result/effect lost: %v %v %d", pairs, err, effects.Load())
 	}
 }
-func TestToolFactsRepairRequiresFence(t *testing.T) {
-	store, active := newToolFactTestSession(t, "repair-fence")
-	call := &session.Event{ID: "call", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "protocol", Name: "Tool", Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "old", ItemID: "occurrence"}}}
-	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: call}); err != nil {
-		t.Fatal(err)
-	}
-	rt := &Runtime{sessions: store, clock: time.Now}
-	if err := rt.repairToolPairs(t.Context(), active.SessionRef); err == nil {
-		t.Fatal("unfenced repair accepted")
-	}
-}
-
 func TestToolFactsCompleteResultAndModelViewRoundTrip(t *testing.T) {
 	for _, backend := range []string{"memory", "file"} {
 		t.Run(backend, func(t *testing.T) {

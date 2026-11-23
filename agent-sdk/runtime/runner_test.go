@@ -20,7 +20,7 @@ func TestRunnerPublishesSynchronouslyToInstalledObserver(t *testing.T) {
 	runner := newRunner(t.Context(), "run-1", func() {}, observer)
 	runner.publishEvent(&session.Event{ID: "event-1", Type: session.EventTypeAssistant})
 	runner.publishError(errors.New("producer failed"))
-	runner.finish()
+	runner.finish(nil)
 
 	if len(got) != 2 || got[0].Canonical == nil || got[0].Canonical.ID != "event-1" || got[1].Err == nil {
 		t.Fatalf("observed SourceEvents = %#v", got)
@@ -35,7 +35,7 @@ func TestRunnerWithoutObserverRetainsNoPayloadQueue(t *testing.T) {
 	for range 1024 {
 		runner.publishEvent(&session.Event{ID: "event", Type: session.EventTypeAssistant})
 	}
-	runner.finish()
+	runner.finish(nil)
 	if err := runner.WaitCompletion(t.Context()); err != nil {
 		t.Fatalf("WaitCompletion() error = %v", err)
 	}
@@ -47,7 +47,7 @@ func TestRunnerObserverFailureDoesNotCancelProducer(t *testing.T) {
 		func(context.Context, agent.SourceEvent) error { return errors.New("spool unavailable") },
 	))
 	runner.publishEvent(&session.Event{ID: "event-1", Type: session.EventTypeAssistant})
-	runner.finish()
+	runner.finish(nil)
 	select {
 	case <-cancelled:
 		t.Fatal("observer failure cancelled the producer")

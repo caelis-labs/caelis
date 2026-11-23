@@ -540,7 +540,7 @@ func TestRuntimeParticipantPromptSingleFlightRejectsBeforeUserEventPersistence(t
 	}
 	if _, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef: active.SessionRef, ParticipantID: binding.ID, Input: "must-not-persist",
-	}); err == nil || !strings.Contains(err.Error(), "prompt in progress") {
+	}); !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("overlapping PromptParticipant() error = %v, want synchronous single-flight rejection", err)
 	}
 	after, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
