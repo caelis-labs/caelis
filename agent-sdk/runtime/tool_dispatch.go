@@ -6,15 +6,17 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
+type toolDispatch func(context.Context, tool.Call, toolbinding.Dispatch) (tool.Result, error)
+
 // dispatchTool owns the existing final dispatch checks. Accepted intent and
 // complete outcome are Session tool facts, never a second execution lifecycle.
 type dispatchTool struct {
+	before     func(context.Context, tool.Call, toolbinding.Dispatch, toolDispatch) (tool.Result, error)
 	base       tool.Tool
 	sessions   session.Reader
 	sessionRef session.SessionRef
@@ -30,6 +32,13 @@ func (t dispatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, er
 }
 
 func (t dispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call tool.Call, attachment toolbinding.Dispatch) (tool.Result, error) {
+	if t.before != nil {
+		return t.before(ctx, call, attachment, t.invoke)
+	}
+	return t.invoke(ctx, call, attachment)
+}
+
+func (t dispatchTool) invoke(ctx context.Context, call tool.Call, attachment toolbinding.Dispatch) (tool.Result, error) {
 	admission, err := codeModeAdmissionFor(ctx, call)
 	if err != nil {
 		return tool.Result{}, err
@@ -78,14 +87,4 @@ func (t dispatchTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, call
 		observation.BuiltinDisplay = nil
 	}
 	return result, err
-}
-
-func (r *Runtime) wrapToolsForDispatch(ref session.SessionRef, tools []tool.Tool) []tool.Tool {
-	out := make([]tool.Tool, 0, len(tools))
-	for _, one := range tools {
-		if one != nil {
-			out = append(out, dispatchTool{base: one, sessions: r.sessions, sessionRef: ref, writes: &r.sessionWrites})
-		}
-	}
-	return out
 }

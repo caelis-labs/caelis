@@ -17,11 +17,11 @@ import (
 func TestApprovalOriginBuiltinNoOptionsNormalizationAndReason(t *testing.T) {
 	var captured approval.Request
 	invoked := false
-	wrapped := policyWrappedTool{sessionRef: session.SessionRef{SessionID: "s"}, tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { invoked = true; return tool.Result{}, nil }}, approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+	wrapped := policyAdmission{session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}}, tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { invoked = true; return tool.Result{}, nil }}, approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 		captured = req
 		return approval.Response{OptionID: "reject_once", Outcome: "selected", Reason: "Destructive target is not authorized."}, nil
 	})}}
-	result, err := wrapped.requestApproval(t.Context(), tool.Call{ID: "call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "Probe"}}}, toolbinding.Dispatch{})
+	result, err := wrapped.requestApproval(t.Context(), tool.Call{ID: "call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "Probe"}}}, toolbinding.Dispatch{}, dispatchTool{base: wrapped.tool}.invoke)
 	if !tool.HasFailedReply(err) {
 		t.Fatalf("denial error = %v", err)
 	}

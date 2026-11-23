@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
-	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -36,10 +35,7 @@ type Config struct {
 	Compactor      compact.Engine
 	// Diagnostics receives fixed Runtime classifications only. Callers must not
 	// attach user content, Session identities, or workspace paths.
-	Diagnostics *slog.Logger
-	// PolicyRegistry installs tool admission for direct and Code Mode calls.
-	// With no registry or requested profile, the host tools execute directly.
-	PolicyRegistry      policy.Registry
+	Diagnostics         *slog.Logger
 	DefaultPolicyMode   string
 	SandboxPolicy       sandbox.PolicySnapshot
 	DefaultApprovalMode string
@@ -87,7 +83,6 @@ type Runtime struct {
 	compactionRequests       map[string]compactionRequestSnapshot
 	idleCandidateMu          sync.Mutex
 	idleCandidates           map[string]*idleCompactionCandidate
-	policies                 policy.Registry
 	defaultPolicyMode        string
 	sandboxPolicy            sandbox.PolicySnapshot
 	defaultApprovalMode      approval.Mode
@@ -147,7 +142,6 @@ func New(cfg Config) (*Runtime, error) {
 		diagnostics:              cfg.Diagnostics,
 		compactionRequests:       map[string]compactionRequestSnapshot{},
 		idleCandidates:           map[string]*idleCompactionCandidate{},
-		policies:                 cfg.PolicyRegistry,
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
@@ -170,10 +164,10 @@ func New(cfg Config) (*Runtime, error) {
 		r.clock = time.Now
 	}
 	r.lifecycle.Clock = r.clock
-	if r.policies == nil && r.defaultPolicyMode != "" {
+	if r.hooks.ToolPolicy == nil && r.defaultPolicyMode != "" {
 		return nil, errors.New("agent-sdk/runtime: default policy mode requires a policy registry")
 	}
-	if r.policies != nil {
+	if r.hooks.ToolPolicy != nil {
 		r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	}
 	r.participantBindings, _ = cfg.Sessions.(session.ParticipantBindingStore)

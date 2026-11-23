@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -240,16 +241,19 @@ type Stream = BaseHook[func(context.Context, OutputContext) (StreamTransformer, 
 // run in registration order; around phases unwind in reverse order. Observers
 // remain separate and have no authority over these values.
 type Set struct {
+	Input        []Input
+	TurnStart    []TurnStart
+	ModelPrepare []ModelPrepare
+	ModelInvoke  []ModelInvoke
+	ModelResult  []ModelResult
+	ToolPrepare  []ToolPrepare
+	// ToolPolicy selects the host admission hook for each bound tool. A named
+	// profile must resolve before either a synthetic or actual success can dispatch.
+	ToolPolicy policy.Registry
+	ToolInvoke []ToolInvoke
+	ToolResult []ToolResult
 	// ToolProjection bounds SDK-owned tool views after ToolResult and before ModelView.
 	ToolProjection tool.ResultProjection
-	Input          []Input
-	TurnStart      []TurnStart
-	ModelPrepare   []ModelPrepare
-	ModelInvoke    []ModelInvoke
-	ModelResult    []ModelResult
-	ToolPrepare    []ToolPrepare
-	ToolInvoke     []ToolInvoke
-	ToolResult     []ToolResult
 	ModelView      []ModelView
 	Completion     []Completion
 	Stream         []Stream

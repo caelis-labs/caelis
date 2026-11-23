@@ -14,6 +14,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -271,7 +272,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 			if tc.name == "settlement-failure" {
 				taskStore = &codeModeCommandFailingStore{TaskStore: tasks, err: persistErr}
 			}
-			rt, err := New(Config{Sessions: store, TaskStore: taskStore, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "mcp-test"})
+			rt, err := New(Config{Sessions: store, TaskStore: taskStore, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "mcp-test"})
 			if err != nil {
 				t.Fatal(err)
 			}

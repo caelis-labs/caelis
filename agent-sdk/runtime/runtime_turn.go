@@ -40,8 +40,7 @@ func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.R
 // wrapTurnTools is shared by native and externally controlled execution.
 func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester approval.Requester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
 	concrete := spec.Tools
-	spec.Tools = r.wrapToolsForDispatch(ref, spec.Tools)
-	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
+	spec.Tools = r.bindToolDispatch(activeSession, ref, state, spec, approvalContext{
 		ctx: ctx, requester: requester, runtime: r, runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)

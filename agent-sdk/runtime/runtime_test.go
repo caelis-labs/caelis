@@ -95,12 +95,12 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 	sessions, active := newTestSessionService(t, "agent-owned-watchdog")
 	runtime, err := New(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{},
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{
 			ID: "allow",
 			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			},
-		}},
+		}}},
 		DefaultPolicyMode: "allow",
 	})
 	if err != nil {
@@ -2439,12 +2439,12 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{
 			ID: "allow",
 			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			},
-		}},
+		}}},
 		DefaultPolicyMode: "allow",
 		RunIDGenerator:    func() string { return "run-tools" },
 	})
@@ -2689,7 +2689,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: workspacePolicyRegistry(t),
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2784,7 +2784,7 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry:    registry,
+		Hooks:             hook.Set{ToolPolicy: registry},
 		DefaultPolicyMode: presets.ModeDangerFullAccess,
 	})
 	if err != nil {
@@ -2837,7 +2837,7 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: workspacePolicyRegistry(t),
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2902,7 +2902,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 		t.Fatalf("policy.NewMemory() error = %v", err)
 	}
 	runtime := &Runtime{
-		policies:          registry,
+		hooks:             hook.Set{ToolPolicy: registry},
 		defaultPolicyMode: "locked-down",
 	}
 	targetTool := tool.NamedTool{
@@ -2912,7 +2912,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 			return tool.Result{}, nil
 		},
 	}
-	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Tools: []tool.Tool{targetTool},
 	}, approvalContext{ctx: context.Background()})
 	if got := len(wrapped); got != 1 {
@@ -2949,7 +2949,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 	runtime := &Runtime{
-		policies:          registry,
+		hooks:             hook.Set{ToolPolicy: registry},
 		defaultPolicyMode: presets.ModeWorkspaceWrite,
 	}
 	targetTool := tool.NamedTool{
@@ -2959,7 +2959,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 			return tool.Result{}, nil
 		},
 	}
-	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Metadata: map[string]any{policy.MetadataPolicyProfile: "unknown-policy"},
 		Tools:    []tool.Tool{targetTool},
 	}, approvalContext{ctx: context.Background()})
@@ -3010,8 +3010,8 @@ func TestRuntimePolicyRegistryErrorAndEmptyDecisionFailClosed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			runtime := &Runtime{policies: tt.registry, defaultPolicyMode: "empty"}
-			wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+			runtime := &Runtime{hooks: hook.Set{ToolPolicy: tt.registry}, defaultPolicyMode: "empty"}
+			wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 				Tools: []tool.Tool{targetTool},
 			}, approvalContext{ctx: context.Background()})
 			_, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
@@ -3077,7 +3077,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: workspacePolicyRegistry(t),
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3143,8 +3143,8 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: workspacePolicyRegistry(t),
-		SandboxPolicy:  sandboxPolicy,
+		Hooks:         hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
+		SandboxPolicy: sandboxPolicy,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3287,7 +3287,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	}}
 	traceSink := &concurrentTraceSink{}
 	runtime, err := New(Config{
-		Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: ask, DefaultPolicyMode: "ask",
+		Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: ask}, DefaultPolicyMode: "ask",
 		RunIDGenerator: func() string { return "run-durable-approval" },
 		TraceSink:      traceSink,
 	})
@@ -3517,7 +3517,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		PolicyRegistry: workspacePolicyRegistry(t),
+		Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

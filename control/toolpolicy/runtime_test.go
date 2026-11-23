@@ -75,7 +75,8 @@ func runPolicyScript(t *testing.T, store session.Service, active session.Session
 	if len(hooks) > 0 {
 		configured = hooks[0]
 	}
-	r, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store.(*sessionfile.Store)), AgentFactory: chat.Factory{}, PolicyRegistry: registry, Hooks: configured})
+	configured.ToolPolicy = registry
+	r, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store.(*sessionfile.Store)), AgentFactory: chat.Factory{}, Hooks: configured})
 	if err != nil {
 		t.Fatal(err)
 	}

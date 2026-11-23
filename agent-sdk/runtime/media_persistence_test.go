@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -47,7 +48,7 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	}}}
 	run := func(sessions session.Service, probe *mediaPersistenceModel, input string) {
 		t.Helper()
-		rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: allow, DefaultPolicyMode: "allow"})
+		rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: allow}, DefaultPolicyMode: "allow"})
 		if err != nil {
 			t.Fatal(err)
 		}

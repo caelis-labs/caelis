@@ -23,6 +23,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -212,7 +213,7 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRuntime, err := sdkruntime.New(sdkruntime.Config{PolicyRegistry: policies, Sessions: service, TaskStore: sessionfile.NewTaskStore(service), AgentFactory: chat.Factory{}, SandboxPolicy: sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Backend: native.Describe().Backend, Permission: sandbox.PermissionWorkspaceWrite, Network: sandbox.NetworkEnabled, WritableRoots: []string{workspace}}})
+	agentRuntime, err := sdkruntime.New(sdkruntime.Config{Hooks: hook.Set{ToolPolicy: policies}, Sessions: service, TaskStore: sessionfile.NewTaskStore(service), AgentFactory: chat.Factory{}, SandboxPolicy: sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Backend: native.Describe().Backend, Permission: sandbox.PermissionWorkspaceWrite, Network: sandbox.NetworkEnabled, WritableRoots: []string{workspace}}})
 	if err != nil {
 		t.Fatal(err)
 	}

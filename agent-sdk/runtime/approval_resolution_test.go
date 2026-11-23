@@ -44,8 +44,8 @@ func TestNativeApprovalDirectRequestersCannotChangeOriginalPermission(t *testing
 				var allowed bool
 				switch role {
 				case "builtin":
-					wrapped := policyWrappedTool{tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { allowed = true; return tool.Result{}, nil }}, approval: approvalContext{requester: requester}}
-					_, err = wrapped.requestApproval(t.Context(), tool.Call{ID: "native-call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: permission}, toolbinding.Dispatch{})
+					wrapped := policyAdmission{tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { allowed = true; return tool.Result{}, nil }}, approval: approvalContext{requester: requester}}
+					_, err = wrapped.requestApproval(t.Context(), tool.Call{ID: "native-call", Name: "Probe"}, policy.Decision{Action: policy.ActionAskApproval, Approval: permission}, toolbinding.Dispatch{}, dispatchTool{base: wrapped.tool}.invoke)
 				case "controller":
 					response, responseErr := (controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "owner"}, requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", Approval: permission})
 					allowed, err = response.Approved, responseErr

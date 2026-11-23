@@ -20,6 +20,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -248,7 +249,7 @@ func TestCodeModeLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task with actual tools. Do not invent tool output. Use only the task-owned workspace and the explicitly named fixture application. Do not use shell or mutate external services. No automatic replay after an unknown effect."}, PolicyRegistry: registry, DefaultPolicyMode: "code-mode-local"})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task with actual tools. Do not invent tool output. Use only the task-owned workspace and the explicitly named fixture application. Do not use shell or mutate external services. No automatic replay after an unknown effect."}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "code-mode-local"})
 	if err != nil {
 		t.Fatal(err)
 	}

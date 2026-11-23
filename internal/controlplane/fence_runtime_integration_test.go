@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	localruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -45,7 +46,7 @@ func TestStartupHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutco
 			return tool.Result{Content: []tool.ContentBlock{tool.Text("stale success")}}, nil
 		},
 	}
-	runtimeA, err := localruntime.New(localruntime.Config{Sessions: service, AgentFactory: chat.Factory{}, Clock: clock.Now, PolicyRegistry: registry, DefaultPolicyMode: "allow"})
+	runtimeA, err := localruntime.New(localruntime.Config{Sessions: service, AgentFactory: chat.Factory{}, Clock: clock.Now, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}

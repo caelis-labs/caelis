@@ -180,7 +180,7 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 		}}, nil
 	}}}
 	interceptor := &concurrentTraceSink{}
-	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", TraceSink: interceptor})
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "test", TraceSink: interceptor})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -274,7 +274,7 @@ func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,8 +449,8 @@ func runNativeOrdering(t *testing.T, store *sessionfile.Store, active session.Se
 	t.Helper()
 	cfg.Sessions, cfg.TaskStore = store, sessionfile.NewTaskStore(store)
 	cfg.AgentFactory, cfg.DefaultPolicyMode = chat.Factory{}, "mcp-test"
-	if cfg.PolicyRegistry == nil {
-		cfg.PolicyRegistry = mcpFixturePolicy()
+	if cfg.Hooks.ToolPolicy == nil {
+		cfg.Hooks.ToolPolicy = mcpFixturePolicy()
 	}
 	rt, err := New(cfg)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -19,14 +20,14 @@ func TestRuntimeApprovalStepWaitsForPolicyAdmissionNotEffectCompletion(t *testin
 	sessions, active := newTestSessionService(t, "mixed-approval-step")
 	rt, err := New(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, DefaultPolicyMode: "mixed",
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{ID: "mixed", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{ID: "mixed", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			if input.Call.ID == "allow" {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}
 			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name, Status: "pending"},
 			}}, nil
-		}}},
+		}}}},
 	})
 	if err != nil {
 		t.Fatal(err)

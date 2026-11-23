@@ -16,6 +16,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -59,7 +60,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, PolicyRegistry: workspacePolicyRegistry(t)})
+	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: workspacePolicyRegistry(t)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +265,9 @@ func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 					}
 					time.Sleep(delay)
 					return approval.Response{Approved: true}, nil
-				}}, target.Call)
+				}}, func(ctx context.Context, call tool.Call, _ string) (tool.Result, error) {
+					return target.Call(ctx, call)
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -359,7 +362,7 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 						return approval.Response{}, err
 					}
 					return approval.Response{Approved: true}, nil
-				}}, func(ctx context.Context, call tool.Call) (tool.Result, error) {
+				}}, func(ctx context.Context, call tool.Call, _ string) (tool.Result, error) {
 					close(approved)
 					<-start
 					return target.Call(ctx, call)
@@ -608,7 +611,7 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 	backend := newCommandStartProbe(newYieldProbeSandboxSession(), nil)
 	command := runtimeCommandTool{base: mustRuntimeRunCommandTool(t, backend), session: active, sessionRef: active.SessionRef, tasks: r.tasks}
 	var approvals int
-	target := policyWrappedTool{tool: command, mode: "ask", session: active, sessionRef: active.SessionRef,
+	target := policyAdmission{tool: command, mode: "ask", session: active,
 		policy: policy.NamedMode{ID: "ask", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			// Steering arrives after the call began but before Task registration.
 			scope.revoke(errTaskAuthorizationChanged, false)
@@ -619,7 +622,7 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 			return approval.Response{Approved: true}, nil
 		})},
 	}
-	result, err := target.Call(owner, tool.Call{ID: "late-admission", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo old request", "yield_time_ms": 0})})
+	result, err := (dispatchTool{base: target.tool, before: target.beforeTool}).Call(owner, tool.Call{ID: "late-admission", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo old request", "yield_time_ms": 0})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,6 +632,51 @@ func TestCommandApprovalSteeringInvalidatesInFlightAdmission(t *testing.T) {
 	}
 	if payload["state"] != "cancelled" || approvals != 0 || backend.startCalls() != 0 {
 		t.Fatalf("late admission = %#v, approvals=%d starts=%d", payload, approvals, backend.startCalls())
+	}
+}
+
+func TestDeferredCommandRevalidatesSelectedOptionBeforeStart(t *testing.T) {
+	t.Parallel()
+	_, active, r := newRuntimeRunCommandToolTestHarness(t)
+	r.tasks.store = newSagaTaskStore()
+	scope := newTaskContinuationScope()
+	owner := context.WithValue(t.Context(), taskScopeKey{}, scope)
+	backend := newCommandStartProbe(newYieldProbeSandboxSession(), nil)
+	command := runtimeCommandTool{base: mustRuntimeRunCommandTool(t, backend), session: active, sessionRef: active.SessionRef, tasks: r.tasks}
+
+	changed := errors.New("policy changed during approval")
+	var selected string
+	mode := policy.NamedMode{ID: "ask", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		return policy.Decision{
+			Action:   policy.ActionAskApproval,
+			Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name}},
+			Validate: func(_ context.Context, optionID string) (func(), error) {
+				selected = optionID
+				return nil, changed
+			},
+		}, nil
+	}}
+	answer := make(chan struct{})
+	requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
+		if err := req.OnAdmission(ctx); err != nil {
+			return approval.Response{}, err
+		}
+		select {
+		case <-answer:
+			return approval.Response{Outcome: "selected", OptionID: "allow_once"}, nil
+		case <-ctx.Done():
+			return approval.Response{}, ctx.Err()
+		}
+	})
+	admission := policyAdmission{tool: command, mode: mode.ID, policy: mode, session: active, approval: approvalContext{ctx: owner, requester: requester}}
+	target := dispatchTool{base: command, before: admission.beforeTool}
+	_, err := target.Call(owner, tool.Call{ID: "async-admission", Name: shell.RunCommandToolName, Input: mustJSONRaw(map[string]any{"command": "echo test", "yield_time_ms": 0})})
+	close(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.join(); !errors.Is(err, changed) || selected != "allow_once" || backend.startCalls() != 0 {
+		t.Fatalf("continuation error=%v option=%q command starts=%d", err, selected, backend.startCalls())
 	}
 }
 

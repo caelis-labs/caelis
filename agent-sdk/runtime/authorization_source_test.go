@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -66,7 +67,7 @@ func TestAuthorizationRevokeReadbackCancelsOriginalFlight(t *testing.T) {
 			req := authorizationTestRequest(active, authorizationTestRequirement(active))
 			entered := make(chan context.Context, 1)
 			finished := make(chan struct{})
-			target := policyWrappedTool{session: active, approval: approvalContext{ctx: t.Context(), runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
+			target := policyAdmission{session: active, approval: approvalContext{ctx: t.Context(), runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
 				entered <- ctx
 				<-ctx.Done()
 				return approval.Response{}, ctx.Err()
@@ -202,7 +203,7 @@ func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T)
 		}
 		return nil
 	}}
-	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: policies})
+	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: policies}})
 	if err != nil {
 		t.Fatal(err)
 	}

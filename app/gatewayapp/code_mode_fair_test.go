@@ -25,6 +25,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -634,7 +635,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 		return err
 	}
 	trace := &fairTrace{LLM: resolved.Model, root: root, turnCalls: map[int]int{}}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, PolicyRegistry: registry, DefaultPolicyMode: "fair-local"})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: manifest.System}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "fair-local"})
 	if err != nil {
 		return err
 	}

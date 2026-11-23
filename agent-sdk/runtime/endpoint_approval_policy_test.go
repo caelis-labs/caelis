@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -170,7 +171,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 		t.Fatal(err)
 	}
 	runtime := &Runtime{
-		policies:          registry,
+		hooks:             hook.Set{ToolPolicy: registry},
 		defaultPolicyMode: presets.ModeWorkspaceWrite,
 	}
 	mode := runtime.policyMode(agent.AgentSpec{Metadata: map[string]any{
@@ -229,7 +230,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 
 func TestDangerFullAccessEndpointPolicyRegistryFailureFailsClosed(t *testing.T) {
 	wantErr := errors.New("registry unavailable")
-	runtime := &Runtime{policies: errorPolicyRegistry{err: wantErr}}
+	runtime := &Runtime{hooks: hook.Set{ToolPolicy: errorPolicyRegistry{err: wantErr}}}
 	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), presets.ModeDangerFullAccess, approval.Request{
 		Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}}},
 	})
@@ -269,7 +270,7 @@ func newDangerFullAccessEndpointTestRuntime(t *testing.T, suffix string) (*Runti
 	runtime, err := New(Config{
 		Sessions:          sessions,
 		AgentFactory:      chat.Factory{},
-		PolicyRegistry:    registry,
+		Hooks:             hook.Set{ToolPolicy: registry},
 		DefaultPolicyMode: presets.ModeDangerFullAccess,
 	})
 	if err != nil {

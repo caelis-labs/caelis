@@ -22,6 +22,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -187,7 +188,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task using actual tools. The reports service and workspace are task-owned synthetic fixtures. Use only this workspace and the authorized command. Do not replay unknown effects."}, PolicyRegistry: policies, DefaultPolicyMode: "local-acceptance"})
+		rt, e := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{SystemPrompt: "Complete the user's task using actual tools. The reports service and workspace are task-owned synthetic fixtures. Use only this workspace and the authorized command. Do not replay unknown effects."}, Hooks: hook.Set{ToolPolicy: policies}, DefaultPolicyMode: "local-acceptance"})
 		if e != nil {
 			t.Fatal(e)
 		}

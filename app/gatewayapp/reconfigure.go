@@ -404,10 +404,9 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	localCfg := runtime.Config{
 		Sessions:                 s.sessions,
 		AgentFactory:             chat.Factory{},
-		Hooks:                    hook.Set{StreamMode: hook.StreamIncremental, ToolProjection: localResultProjection},
+		Hooks:                    hook.Set{ToolPolicy: policyRegistry, StreamMode: hook.StreamIncremental, ToolProjection: localResultProjection},
 		DefaultPolicyMode:        effectivePolicyProfile,
 		SandboxPolicy:            sandboxPolicySnapshot,
-		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		PersistPolicyConsent:     s.persistPolicyConsent,
 		Compaction:               compactionCfg,

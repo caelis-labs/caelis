@@ -83,8 +83,9 @@ func TestCodeModeMutationDisplayAndModelReplay(t *testing.T) {
 				t.Fatal(err)
 			}
 			hooks := mutationDisplayHooks(mode)
+			hooks.ToolPolicy = mcpFixturePolicy()
 			rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{}, Hooks: hooks,
-				PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+				DefaultPolicyMode: "mcp-test"})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -8,6 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -64,7 +65,7 @@ func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testin
 		freshService := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 		fresh, err := New(Config{
 			Sessions: freshService, AgentFactory: chat.Factory{},
-			PolicyRegistry: allow, DefaultPolicyMode: "allow",
+			Hooks: hook.Set{ToolPolicy: allow}, DefaultPolicyMode: "allow",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -158,7 +159,7 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	}
 	core, err := New(Config{
 		Sessions: service, AgentFactory: chat.Factory{},
-		PolicyRegistry: ask, DefaultPolicyMode: "ask",
+		Hooks: hook.Set{ToolPolicy: ask}, DefaultPolicyMode: "ask",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,12 +295,12 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 	service, active := newTestSessionService(t, "shared-tool-step-sequence")
 	core, err := New(Config{
 		Sessions: service, AgentFactory: chat.Factory{},
-		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+		Hooks: hook.Set{ToolPolicy: staticPolicyRegistry{mode: policy.NamedMode{
 			ID: "allow",
 			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			},
-		}},
+		}}},
 		DefaultPolicyMode: "allow",
 	})
 	if err != nil {

@@ -221,7 +221,7 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 		}
 		// The continuation reports through Task output, not invocation progress.
 		continuationCtx, _ := toolbinding.Observe(permitCtx)
-		_, executeErr := execute(toolbinding.WithProgress(continuationCtx, nil), call)
+		_, executeErr := execute(toolbinding.WithProgress(continuationCtx, nil), call, response.OptionID)
 		if executeErr == nil {
 			return nil
 		}

@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -40,7 +41,7 @@ func TestHostOwnsToolPolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active := newTestSessionService(t, "optional-policy")
-			cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: tc.registry}
+			cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: tc.registry}}
 			rt, err := New(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -107,7 +108,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 					call := tool.Call{ID: "command", Name: "RunCommand", Input: input}
 					observed := &commandApprovalCaptureTool{}
 					requests := 0
-					wrapped := policyWrappedTool{
+					wrapped := policyAdmission{
 						tool: observed, policy: presets.WorkspaceWriteMode(), mode: presets.ModeWorkspaceWrite,
 						options: policy.ModeOptions{WorkspaceRoot: "/workspace", WritableRoots: []string{"/workspace"}},
 						approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, request approval.Request) (approval.Response, error) {
@@ -122,7 +123,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 							return approval.Response{Approved: approved, Outcome: "selected", OptionID: id}, nil
 						})},
 					}
-					result, err := wrapped.Call(t.Context(), call)
+					result, err := (dispatchTool{base: wrapped.tool, before: wrapped.beforeTool}).Call(t.Context(), call)
 					if err != nil && approved {
 						t.Fatal(err)
 					}
@@ -174,24 +175,6 @@ func TestModeOptionsFromSessionUsesExplicitWritableRootMetadataOnly(t *testing.T
 	}
 	if !slices.Equal(opts.WritableRoots, []string{writable}) {
 		t.Fatalf("WritableRoots = %#v, want explicit metadata root", opts.WritableRoots)
-	}
-}
-
-func TestPolicyModelFeedbackDistinguishesResolvedDenialFromPendingApproval(t *testing.T) {
-	t.Parallel()
-
-	decision := policy.Decision{Action: policy.ActionAskApproval, Reason: "host execution requested"}
-	denied, deniedHint := policyModelFeedback(decision, approval.Response{
-		Outcome:  "selected",
-		OptionID: "reject_once",
-	})
-	if denied != "approval denied" || deniedHint != "" {
-		t.Fatalf("resolved denial feedback = (%q, %q), want denial without pending hint", denied, deniedHint)
-	}
-
-	pending, pendingHint := policyModelFeedback(decision, approval.Response{})
-	if pending != "host execution requested" || pendingHint == "" {
-		t.Fatalf("pending approval feedback = (%q, %q), want request reason and retry hint", pending, pendingHint)
 	}
 }
 

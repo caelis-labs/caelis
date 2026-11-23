@@ -146,7 +146,7 @@ func (r *Runtime) cancelAuthorizationFlights(scope session.AuthorizationScope) {
 	}
 }
 
-func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request approval.Request) (approval.Response, error) {
+func (t policyAdmission) resolvePolicyApproval(ctx context.Context, request approval.Request) (approval.Response, error) {
 	r := t.approval.runtime
 	a := request.Authorization
 	share := a != nil && !a.PerCall

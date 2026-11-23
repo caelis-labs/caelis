@@ -60,7 +60,8 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 					m.Parts[0].ToolResult.Content = []model.Part{model.NewTextPart("model view")}
 					return m, nil
 				}}}}
-				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", Hooks: hooks})
+				hooks.ToolPolicy = registry
+				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, DefaultPolicyMode: "test", Hooks: hooks})
 				if err != nil {
 					t.Fatal(err)
 				}

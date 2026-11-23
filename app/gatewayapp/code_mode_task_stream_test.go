@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -102,7 +103,7 @@ func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: tasks, TaskOutput: recorder, AgentFactory: chat.Factory{}, PolicyRegistry: policies, DefaultPolicyMode: "allow"})
+	rt, err := runtime.New(runtime.Config{Sessions: store, TaskStore: tasks, TaskOutput: recorder, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: policies}, DefaultPolicyMode: "allow"})
 	if err != nil {
 		t.Fatal(err)
 	}

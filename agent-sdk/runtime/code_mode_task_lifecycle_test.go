@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -84,7 +85,7 @@ func TestIndependentJSExecYieldDoesNotHideTerminalPersistenceFailure(t *testing.
 		return nil
 	}}
 	base := sessionfile.NewTaskStore(store)
-	rt, err := New(Config{Sessions: store, TaskStore: independentFailScriptTerminalStore{Store: base, marker: marker}, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, TaskStore: independentFailScriptTerminalStore{Store: base, marker: marker}, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

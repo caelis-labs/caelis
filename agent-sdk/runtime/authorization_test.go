@@ -26,14 +26,14 @@ func TestPolicyIsOnlyMCPApprovalDecision(t *testing.T) {
 			var decisions, approvals, effects atomic.Int32
 			def := fixtureMCPDefinition("source")
 			base := tool.NamedTool{Def: def, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}
-			wrapped := policyWrappedTool{tool: base, mode: "custom", policy: policy.NamedMode{ID: "custom", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+			wrapped := policyAdmission{tool: base, mode: "custom", policy: policy.NamedMode{ID: "custom", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
 				decisions.Add(1)
 				return policy.Decision{Action: action, Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "approve", Kind: "allow_once"}, {ID: "reject", Kind: "reject_once"}}}}, nil
 			}}, approval: approvalContext{requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 				approvals.Add(1)
 				return approval.Response{Outcome: "selected", OptionID: "approve", Approved: true}, nil
 			})}}
-			_, err := wrapped.Call(t.Context(), tool.Call{ID: "original-call", Name: def.Name, Input: []byte(`{}`)})
+			_, err := (dispatchTool{base: wrapped.tool, before: wrapped.beforeTool}).Call(t.Context(), tool.Call{ID: "original-call", Name: def.Name, Input: []byte(`{}`)})
 			if err != nil && action != policy.ActionDeny {
 				t.Fatal(err)
 			}
@@ -82,7 +82,7 @@ func TestAuthorizationFlightSurvivesFirstCallerCancellation(t *testing.T) {
 	defer cancel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var asks atomic.Int32
-	target := policyWrappedTool{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
+	target := policyAdmission{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, _ approval.Request) (approval.Response, error) {
 		asks.Add(1)
 		close(entered)
 		select {
@@ -215,7 +215,7 @@ func TestAuthorizationLastWaiterAndRevocationRejectLateResolution(t *testing.T) 
 			defer releaseOnce.Do(func() { close(releaseRequester) })
 			root, stopRoot := context.WithCancel(t.Context())
 			defer stopRoot()
-			target := policyWrappedTool{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
+			target := policyAdmission{session: active, approval: approvalContext{ctx: root, runtime: r, requester: approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
 				entered <- req
 				<-ctx.Done()
 				close(workerDone)
@@ -289,10 +289,10 @@ func TestAuthorizationCommittedRuleFailedSessionSettlementStopsEffect(t *testing
 		return "original-rule", 7, nil
 	}
 	req := authorizationTestRequest(active, a)
-	target := policyWrappedTool{session: active, sessionRef: active.SessionRef, tool: tool.NamedTool{Def: req.Tool, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, approval: approvalContext{ctx: t.Context(), runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
+	target := policyAdmission{session: active, tool: tool.NamedTool{Def: req.Tool, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, approval: approvalContext{ctx: t.Context(), runtime: r, runID: "run", turnID: "turn", requester: approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
 		return approval.Response{Outcome: "selected", OptionID: "allow_app", Approved: true}, nil
 	})}}
-	_, err := target.requestApproval(t.Context(), req.Call, policy.Decision{Action: policy.ActionAskApproval, Approval: req.Approval, Authorization: a}, toolbinding.Dispatch{})
+	_, err := target.requestApproval(t.Context(), req.Call, policy.Decision{Action: policy.ActionAskApproval, Approval: req.Approval, Authorization: a}, toolbinding.Dispatch{}, dispatchTool{base: target.tool}.invoke)
 	if err == nil || !strings.Contains(err.Error(), "original-rule committed at configuration revision 7") || effects.Load() != 0 || writes.Load() != 1 {
 		t.Fatalf("settlement: err=%v writes=%d effects=%d", err, writes.Load(), effects.Load())
 	}

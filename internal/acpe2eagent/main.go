@@ -15,6 +15,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -88,7 +89,7 @@ func main() {
 		log.Fatal(err)
 	}
 	localCfg := runtime.Config{
-		PolicyRegistry:           policies,
+		Hooks:                    hook.Set{ToolPolicy: policies},
 		Sessions:                 sessions,
 		TaskStore:                taskStore,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),

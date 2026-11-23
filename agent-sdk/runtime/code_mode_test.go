@@ -18,6 +18,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -82,7 +83,7 @@ func runCodeMode(t *testing.T, store session.Service, active session.Session, sp
 	if registry == nil {
 		registry = mcpFixturePolicy()
 	}
-	cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "mcp-test"}
+	cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "mcp-test"}
 	if files, ok := store.(*sessionfile.Store); ok {
 		cfg.TaskStore = sessionfile.NewTaskStore(files)
 	}

@@ -94,7 +94,8 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 				if nested {
 					targets = append(targets, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}})
 				}
-				rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{}, Hooks: hooks, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+				hooks.ToolPolicy = mcpFixturePolicy()
+				rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{}, Hooks: hooks, DefaultPolicyMode: "mcp-test"})
 				if err != nil {
 					t.Fatal(err)
 				}

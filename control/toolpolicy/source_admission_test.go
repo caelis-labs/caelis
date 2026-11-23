@@ -12,6 +12,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -108,7 +109,7 @@ func TestProductPolicyPendingCodeModeBindingChange(t *testing.T) {
 				}
 				return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 			})
-			rt, err := runtime.New(runtime.Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: policies})
+			rt, err := runtime.New(runtime.Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: policies}})
 			if err != nil {
 				t.Fatal(err)
 			}

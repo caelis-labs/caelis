@@ -669,7 +669,7 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "mcp-test"})
+			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: "mcp-test"})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -269,16 +269,16 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		if err != nil {
 			return systemManagedAgentRunResult{}, err
 		}
+		config.Hooks.ToolPolicy = policies
 		core, err = sdkruntime.New(sdkruntime.Config{
-			PolicyRegistry: policies,
-			Compactor:      compactor,
-			Sessions:       staging,
-			AgentFactory:   config.AgentFactory,
-			Compaction:     plan.Compaction,
-			TraceSink:      config.TraceSink,
-			Hooks:          config.Hooks,
-			HookPurpose:    hook.PurposeSystemAgent,
-			Diagnostics:    config.Diagnostics,
+			Compactor:    compactor,
+			Sessions:     staging,
+			AgentFactory: config.AgentFactory,
+			Compaction:   plan.Compaction,
+			TraceSink:    config.TraceSink,
+			Hooks:        config.Hooks,
+			HookPurpose:  hook.PurposeSystemAgent,
+			Diagnostics:  config.Diagnostics,
 		})
 		if err != nil {
 			return systemManagedAgentRunResult{}, err

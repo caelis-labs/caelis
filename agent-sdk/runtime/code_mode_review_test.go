@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -106,7 +107,7 @@ func testCodeModeDrain(t *testing.T, fenced bool) {
 		<-ctx.Done() // The adapter itself stops promptly and does no more work.
 		return nil, ctx.Err()
 	})}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +261,7 @@ func TestReviewCodeModeFileSourceUsesReadAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: presets.ModeWorkspaceWrite})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: presets.ModeWorkspaceWrite})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,10 +32,13 @@ effect until Runtime adopts it and Chat builds from the new history. The
 optional persist callback runs at provider start after admission accepts the
 request. Auxiliary requests use their own assembly or the frozen source request.
 
-`runtime.Config.Hooks` accepts a `hook.Set` from `agent-sdk/hook` and snapshots its registrations for each Run. Each stage declares its own callback signature. Input hooks receive the source, tool hooks receive detached occurrences and definitions, and model preparation and actual attempts have separate contexts. Every entry has
-an explicit name and timeout (five seconds by default). Independent private
-loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
-`system_agent` and does not inherit main-conversation hooks.
+`runtime.Config.Hooks` accepts a `hook.Set` from `agent-sdk/hook` and snapshots
+its registrations for each Run. Input hooks receive the source, tool hooks
+receive detached occurrences and definitions, and model preparation and actual
+attempts have separate contexts. Each callback has a name and a timeout
+(five seconds by default). Policy and result projection have dedicated slots.
+Independent private loops can set `HookPurpose`. The default is `chat`.
+System-agent assembly selects `system_agent` and installs its own hooks.
 
 | Phase | Editable value |
 | --- | --- |
@@ -45,8 +48,10 @@ loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
 | ModelInvoke | One actual-attempt continuation, with a detached request |
 | ModelResult | Semantic Message; actual usage and provider identity stay fixed |
 | ToolPrepare | Final arguments, synthetic result or block, with fixed occurrence and target |
+| ToolPolicy | Decide allow, deny or request approval for the final call |
 | ToolInvoke | One dispatch continuation after any configured Policy |
 | ToolResult | Ordered content blocks, including the optional structured block. Identity, error and system metadata stay fixed. |
+| ToolProjection | Bound the presentation and save large canonical results through the configured artifact store |
 | ModelView | Tool-result presentation content; the full business value stays fixed |
 | Completion | Accept, Replace, Continue with feedback or Reject before final commit |
 | Stream factory | Fresh text transformer for one actual attempt or synthetic candidate |
@@ -607,11 +612,11 @@ receives the result under the outer `js_exec` call ID. Deferred MCP schemas neve
 describes refresh and final dispatch. The stable-tools contract does not promise
 that the entire model request prefix is unchanged.
 
-The host installs Policy through `runtime.Config.PolicyRegistry`. Without a
+The host installs Policy through `runtime.Config.Hooks.ToolPolicy`. Without a
 registry or requested profile, Runtime dispatches the host's tools directly
 after argument preparation. A named profile requires a matching registered
 mode. With Policy installed, direct calls and Code Mode targets share its
-Allow/Deny/Ask decision. The Caelis Gateway explicitly installs its product
+Allow/Deny/Ask decision on the effective arguments. An approval resumes the same guarded dispatch, including its final revocation check. A synthetic reply consumes the same admission. The Caelis Gateway explicitly installs its product
 policy. MCP discovery and server annotations only describe available tools.
 
 The product's `control/toolpolicy` mode combines native per-call restrictions

@@ -162,7 +162,7 @@ func completedTaskExitCode(entry *taskapi.Entry) int {
 }
 
 func sandboxRuntimeFromTool(tool tool.Tool) (sandbox.Runtime, bool) {
-	provider, ok := tool.(sandboxRuntimeProvider)
+	provider, ok := tool.(interface{ SandboxRuntime() sandbox.Runtime })
 	if !ok || provider == nil {
 		return nil, false
 	}
