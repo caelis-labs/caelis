@@ -562,9 +562,12 @@ activity identity is limited to the first activity.
 
 The chat loop bounds each tool result before sending it to the model. Session
 replays that recorded view. By default, the loop writes no temporary artifacts.
-Hosts can set `chat.Factory.ResultArtifacts` to retain complete results on
-truncation and include the returned reference in the model view. Storage failure
-leaves the bounded view available. Progress and replay never write artifacts.
+Hosts configure the budget and optional store in `runtime.Config.Hooks.ToolProjection`.
+When a direct result exceeds the budget, the configured store retains the
+complete result and the model receives a bounded view with its reference.
+Storage failure leaves the bounded view available. Nested Code Mode calls use
+the same model budget and return the full business value to the script.
+Progress, nested projections and replay perform no artifact writes.
 
 The local Gateway shares one `artifact.FileStore` across its chat agents. It
 saves a single text or structured JSON block as-is and uses the result codec's

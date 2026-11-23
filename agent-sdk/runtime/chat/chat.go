@@ -27,9 +27,6 @@ func (Factory) SupportsLoopHooks() {}
 // Factory constructs baseline chat agents from one AgentSpec.
 type Factory struct {
 	SystemPrompt string
-	// ResultArtifacts optionally retains complete results when their model view is truncated.
-	// A nil store keeps the bounded view and performs no artifact I/O.
-	ResultArtifacts ResultArtifactStore
 }
 
 // Agent is the minimal model-backed chat agent.
@@ -41,14 +38,14 @@ type Agent struct {
 	yieldedResults       map[*session.Event]bool
 	outputStream         *textStream
 
-	name                string
-	model               model.LLM
-	tools               []tool.Tool
-	toolsByName         map[string]tool.Tool
-	systemPrompt        string
-	reasoning           model.ReasoningConfig
-	request             agent.ModelRequestOptions
-	toolResultArtifacts ResultArtifactStore
+	name         string
+	model        model.LLM
+	tools        []tool.Tool
+	toolsByName  map[string]tool.Tool
+	systemPrompt string
+	reasoning    model.ReasoningConfig
+	request      agent.ModelRequestOptions
+
 	resolveModelRequest agent.ModelRequestResolver
 	instructions        []model.Part
 	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
@@ -110,7 +107,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 			name = "chat"
 		}
 		return &Agent{name: name, models: spec.Models, resolveModelRequest: spec.ResolveModelRequest,
-			resolveSessionInstructions: spec.ResolveSessionInstructions, toolResultArtifacts: f.ResultArtifacts}, nil
+			resolveSessionInstructions: spec.ResolveSessionInstructions}, nil
 	}
 	systemPrompt := ""
 	if raw, ok := spec.Metadata["system_prompt"].(string); ok {
@@ -126,7 +123,6 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if err != nil {
 		return nil, err
 	}
-	chatAgent.toolResultArtifacts = f.ResultArtifacts
 	chatAgent.models = spec.Models
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})

@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
@@ -402,8 +403,8 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	localCfg := runtime.Config{
 		Sessions:                 s.sessions,
-		AgentFactory:             localChatFactory,
-		Hooks:                    hook.Set{StreamMode: hook.StreamIncremental},
+		AgentFactory:             chat.Factory{},
+		Hooks:                    hook.Set{StreamMode: hook.StreamIncremental, ToolProjection: localResultProjection},
 		DefaultPolicyMode:        effectivePolicyProfile,
 		SandboxPolicy:            sandboxPolicySnapshot,
 		PolicyRegistry:           policyRegistry,

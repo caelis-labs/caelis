@@ -240,18 +240,20 @@ type Stream = BaseHook[func(context.Context, OutputContext) (StreamTransformer, 
 // run in registration order; around phases unwind in reverse order. Observers
 // remain separate and have no authority over these values.
 type Set struct {
-	Input        []Input
-	TurnStart    []TurnStart
-	ModelPrepare []ModelPrepare
-	ModelInvoke  []ModelInvoke
-	ModelResult  []ModelResult
-	ToolPrepare  []ToolPrepare
-	ToolInvoke   []ToolInvoke
-	ToolResult   []ToolResult
-	ModelView    []ModelView
-	Completion   []Completion
-	Stream       []Stream
-	StreamMode   StreamMode
+	// ToolProjection bounds SDK-owned tool views after ToolResult and before ModelView.
+	ToolProjection tool.ResultProjection
+	Input          []Input
+	TurnStart      []TurnStart
+	ModelPrepare   []ModelPrepare
+	ModelInvoke    []ModelInvoke
+	ModelResult    []ModelResult
+	ToolPrepare    []ToolPrepare
+	ToolInvoke     []ToolInvoke
+	ToolResult     []ToolResult
+	ModelView      []ModelView
+	Completion     []Completion
+	Stream         []Stream
+	StreamMode     StreamMode
 	// CompletionLimit is shared by all hooks. Zero uses two feedback rounds.
 	CompletionLimit int
 }

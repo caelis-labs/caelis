@@ -65,7 +65,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				if yieldProgress == nil {
 					continue
 				}
-				canonical, truncationMeta := canonicalToolResult(ctx, progress.Result, nil)
+				canonical, truncationMeta := hookrun.FromContext(ctx).Hooks.ToolProjection.Preview(ctx, progress.Result)
 				event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
 				_ = yieldProgress(event)
 			default:
@@ -79,7 +79,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 			if yieldProgress == nil {
 				continue
 			}
-			canonical, truncationMeta := canonicalToolResult(ctx, progress.Result, nil)
+			canonical, truncationMeta := hookrun.FromContext(ctx).Hooks.ToolProjection.Preview(ctx, progress.Result)
 			event := session.MarkUIOnly(toolProgressEvent(call, canonical, progress.EventMeta, truncationMeta, progressTaskResultMeta))
 			if !yieldProgress(event) {
 				cancel()
@@ -117,7 +117,7 @@ func (a *Agent) executeToolCallAdmitted(
 		result := tool.Result{
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(rawOutput)}},
 		}
-		canonical, truncationMeta := canonicalToolResult(ctx, result, a.toolResultArtifacts)
+		canonical, truncationMeta := hookrun.FromContext(ctx).Hooks.ToolProjection.Project(ctx, result)
 		message := toolResultMessageFromCanonical(call, canonical, bindingErr)
 		event := toolResultEvent(call, result, bindingErr, &message, truncationMeta)
 		a.applyPreparedFact(event)
@@ -146,7 +146,7 @@ func (a *Agent) executeToolCallAdmitted(
 		}
 	}
 	effectErr := hookrun.EffectError(err)
-	message, truncationMeta, viewErr := ProjectToolResult(ctx, selectedTool.Definition(), invocation, result, err, a.toolResultArtifacts)
+	message, truncationMeta, viewErr := ProjectToolResult(ctx, selectedTool.Definition(), invocation, result, err, hookrun.FromContext(ctx).Hooks.ToolProjection.Project)
 	if viewErr != nil {
 		err = &hookrun.ProcessingError{Cause: viewErr, EffectError: effectErr}
 		observation.BuiltinDisplay = nil

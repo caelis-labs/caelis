@@ -34,7 +34,6 @@ func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	next.resolveModelRequest = a.resolveModelRequest
 	next.resolveSessionInstructions = a.resolveSessionInstructions
 	next.summaryID = a.summaryID
-	next.toolResultArtifacts = a.toolResultArtifacts
 	*a = *next
 	return nil
 }

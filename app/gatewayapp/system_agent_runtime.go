@@ -172,7 +172,10 @@ func newSystemManagedAgentRuntime(factory agent.AgentFactory) *systemManagedAgen
 
 func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConfig) *systemManagedAgentRuntime {
 	if config.AgentFactory == nil {
-		config.AgentFactory = localChatFactory
+		config.AgentFactory = chat.Factory{}
+		if config.Hooks.ToolProjection == (tool.ResultProjection{}) {
+			config.Hooks.ToolProjection = localResultProjection
+		}
 	}
 	if config.StagingSessions == nil {
 		config.StagingSessions = func() session.ManagedService {

@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -158,8 +159,8 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
-		Sessions: sessions, AgentFactory: localChatFactory, Compaction: compaction,
-		Hooks:       hook.Set{StreamMode: hook.StreamIncremental},
+		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
+		Hooks:       hook.Set{StreamMode: hook.StreamIncremental, ToolProjection: localResultProjection},
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules}, DefaultPolicyMode: mode,
 		PersistPolicyConsent: instance.persistPolicyConsent,
 		SandboxPolicy:        sandboxPolicy,

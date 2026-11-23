@@ -48,8 +48,11 @@ func applyToolResultPresentation(event *session.Event, call model.ToolCall, resu
 	var parts []model.Part
 	if message != nil && len(message.ToolResults()) > 0 {
 		parts = message.ToolResults()[0].Content
+	} else if statusOverride == "in_progress" {
+		// Progress carries the preview that was already bounded for live publication.
+		parts = tool.ModelParts(result.Content)
 	} else {
-		view, _ := canonicalToolResult(context.Background(), result, nil)
+		view, _ := (tool.ResultProjection{}).Preview(context.Background(), result)
 		parts = tool.ModelParts(view.Content)
 	}
 	rawOutput := toolResultRawOutput(parts, err != nil)

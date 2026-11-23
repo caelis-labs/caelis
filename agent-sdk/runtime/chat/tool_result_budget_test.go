@@ -41,7 +41,7 @@ func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
 			t.Parallel()
 			result := tool.Result{Content: parts}
 			call := model.ToolCall{ID: "budget", Name: "fixture", Args: `{}`}
-			canonical, meta := canonicalToolResult(t.Context(), result, nil)
+			canonical, meta := (tool.ResultProjection{}).Project(t.Context(), result)
 			if tool.ResultNeedsTruncation(canonical, tool.DefaultTruncationPolicy()) {
 				t.Fatal("canonical result still exceeds the shared content budget")
 			}
@@ -89,10 +89,10 @@ func TestCanonicalToolResultPreservesArtifactWhenOnlySerializedOutputExceedsBudg
 		t.Fatal("fixture must fit before JSON serialization")
 	}
 	store := artifact.NewFileStore(t.TempDir())
-	canonical, meta := canonicalToolResult(t.Context(), textToolResult(raw), store)
+	canonical, meta := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), textToolResult(raw))
 	var path string
 	for _, block := range canonical.Content {
-		if text, ok := block.(tool.Text); ok && strings.Contains(string(text), toolResultArtifactHintPrefix) {
+		if text, ok := block.(tool.Text); ok && strings.Contains(string(text), "Caelis runtime artifact: ") {
 			path = artifactPathFromHint(t, string(text))
 		}
 	}

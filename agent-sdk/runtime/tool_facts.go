@@ -65,7 +65,8 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			source = targets[0].source
 		}
 		observation.Apply(event.Tool, def, effectErr == nil)
-		message, _, viewErr := chat.ProjectToolResult(ctx, def, call, full, callErr, nil)
+		projection := hookrun.FromContext(ctx).Hooks.ToolProjection
+		message, _, viewErr := chat.ProjectToolResult(ctx, def, call, full, callErr, projection.Preview)
 		processingErr = viewErr
 		if viewErr != nil {
 			observation.BuiltinDisplay = nil
