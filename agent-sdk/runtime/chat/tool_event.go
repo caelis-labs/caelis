@@ -254,41 +254,6 @@ func toolMeta(name string) map[string]any {
 	}
 }
 
-func toolTruncationEventMeta(info tool.TruncationInfo) map[string]any {
-	truncation := tool.TruncationMetadata(info)
-	if len(truncation) == 0 {
-		return nil
-	}
-	return map[string]any{
-		"caelis": map[string]any{
-			"version": 1,
-			"runtime": map[string]any{
-				"tool": map[string]any{
-					"truncation": truncation,
-				},
-			},
-		},
-	}
-}
-
-func toolReservedNamespaceCollisionEventMeta(collision bool) map[string]any {
-	if !collision {
-		return nil
-	}
-	return map[string]any{
-		"caelis": map[string]any{
-			"version": 1,
-			"runtime": map[string]any{
-				"tool": map[string]any{
-					"provenance": map[string]any{
-						"reserved_namespace_collision": true,
-					},
-				},
-			},
-		},
-	}
-}
-
 func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any) *session.EventTool {
 	return &session.EventTool{
 		ID:     strings.TrimSpace(call.ID),

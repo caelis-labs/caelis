@@ -244,7 +244,9 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 	return r, err
 }
 
+// ModelView returns a safe reply with the original envelope if any transformation fails.
 func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model.Message) (model.Message, error) {
+	original := m
 	e := toolEvidence(ctx, def, call)
 	for _, h := range FromContext(ctx).Hooks.ModelView {
 		next, err := Call(ctx, "model_view", h, e, m, model.CloneMessage, model.CloneMessage)
@@ -261,7 +263,7 @@ func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model
 			}
 		}
 		if err != nil {
-			return model.Message{}, &agent.HookError{Phase: "model_view", Name: h.Name, Cause: err}
+			return failedView(original), &agent.HookError{Phase: "model_view", Name: h.Name, Cause: err}
 		}
 		m = next
 	}
@@ -291,7 +293,7 @@ func EffectError(err error) error {
 	}
 	return err
 }
-func FailedView(message model.Message) model.Message {
+func failedView(message model.Message) model.Message {
 	message = model.CloneMessage(message)
 	r := message.Parts[0].ToolResult
 	r.Content = []model.Part{model.NewTextPart("Tool completed; model projection failed. Do not repeat the operation.")}

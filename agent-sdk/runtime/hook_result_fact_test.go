@@ -129,6 +129,13 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 				if child.Tool.ProcessingFailure == nil || child.Tool.ProcessingFailure.Name == "" {
 					t.Fatal("typed processing failure absent")
 				}
+				if mode == "view-failure" {
+					reply := child.Message.ToolResults()
+					if len(reply) != 1 || reply[0].Name != child.Tool.Name || reply[0].ToolUseID != child.Tool.ID ||
+						len(reply[0].Content) != 1 || reply[0].Content[0].Text == nil || !strings.Contains(reply[0].Content[0].Text.Text, "model projection failed") {
+						t.Fatal("failed projection did not retain the child identity and safe reply")
+					}
+				}
 				if mode != "view-failure" && strings.Contains(string(mustMarshalHook(t, reopened.Events)), "secret") {
 					t.Fatal("failed result processing leaked original secret")
 				}

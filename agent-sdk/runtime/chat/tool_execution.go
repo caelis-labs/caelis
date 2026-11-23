@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"errors"
-	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -146,13 +145,9 @@ func (a *Agent) executeToolCallAdmitted(
 			observation = &toolbinding.Observation{ScriptCompletion: completion}
 		}
 	}
-	canonical, truncationMeta := canonicalToolResult(ctx, result, a.toolResultArtifacts)
-	message := toolResultMessageFromCanonical(call, canonical, err)
 	effectErr := hookrun.EffectError(err)
-	originalView := model.CloneMessage(message)
-	message, viewErr := hookrun.ModelView(ctx, selectedTool.Definition(), invocation, message)
+	message, truncationMeta, viewErr := ProjectToolResult(ctx, selectedTool.Definition(), invocation, result, err, a.toolResultArtifacts)
 	if viewErr != nil {
-		message = hookrun.FailedView(originalView)
 		err = &hookrun.ProcessingError{Cause: viewErr, EffectError: effectErr}
 		observation.BuiltinDisplay = nil
 	}
@@ -205,26 +200,6 @@ func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
 	return configured, ok
 }
 
-func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result, err error) model.Message {
-	parts := tool.ModelParts(result.Content)
-	if len(parts) == 0 {
-		parts = []model.Part{model.NewJSONPart(mustJSON(map[string]any{}))}
-	}
-	message := model.Message{
-		Role: model.RoleTool,
-		Parts: []model.Part{{
-			Kind: model.PartKindToolResult,
-			ToolResult: &model.ToolResultPart{
-				ToolUseID: strings.TrimSpace(call.ID),
-				Name:      strings.TrimSpace(call.Name),
-				Content:   parts,
-				IsError:   err != nil,
-			},
-		}},
-	}
-	return message
-}
-
 func (a *Agent) lookupRunTool(name string, visibility *toolVisibility) (tool.Tool, bool) {
 	if toolbinding.HideViewImage(a.toolsByName[name], a.model) {
 		return nil, false
@@ -233,13 +208,6 @@ func (a *Agent) lookupRunTool(name string, visibility *toolVisibility) (tool.Too
 		return a.lookupTool(name)
 	}
 	return visibility.lookupTool(name)
-}
-
-// CanonicalToolResult projects a complete result for a nested fact without
-// changing the value returned to the calling script.
-func CanonicalToolResult(call model.ToolCall, result tool.Result, err error) model.Message {
-	canonical, _ := canonicalToolResult(context.Background(), result, nil)
-	return toolResultMessageFromCanonical(call, canonical, err)
 }
 
 func processingOutcome(err error) session.ToolOutcome {

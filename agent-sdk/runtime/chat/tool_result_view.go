@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -21,6 +23,16 @@ type ResultArtifactStore interface {
 	Save(context.Context, tool.Result) (string, error)
 }
 
+// ProjectToolResult builds the bounded view of a completed call and applies ModelView
+// once. A hook failure returns a safe message paired with the same tool call.
+// Nested calls leave artifacts nil and keep their full return value for the script.
+func ProjectToolResult(ctx context.Context, def tool.Definition, call tool.Call, result tool.Result, cause error, artifacts ResultArtifactStore) (model.Message, map[string]any, error) {
+	bounded, meta := canonicalToolResult(ctx, result, artifacts)
+	message := toolResultMessageFromCanonical(model.ToolCall{ID: call.ID, Name: call.Name}, bounded, cause)
+	view, err := hookrun.ModelView(ctx, def, call, message)
+	return view, meta, err
+}
+
 func canonicalToolResult(ctx context.Context, result tool.Result, artifacts ResultArtifactStore) (tool.Result, map[string]any) {
 	policy := tool.DefaultTruncationPolicy()
 	original := result
@@ -32,10 +44,38 @@ func canonicalToolResult(ctx context.Context, result tool.Result, artifacts Resu
 		}
 	}
 	canonical, info := tool.TruncateResultWithInfoAndProtectedJSONFields(result, policy, protectedJSONFields)
-	return canonical, mergeEventMeta(
-		toolTruncationEventMeta(info),
-		toolReservedNamespaceCollisionEventMeta(reservedCollision),
-	)
+	truncation := tool.TruncationMetadata(info)
+	if len(truncation) == 0 && !reservedCollision {
+		return canonical, nil
+	}
+	fields := map[string]any{}
+	if len(truncation) > 0 {
+		fields["truncation"] = truncation
+	}
+	if reservedCollision {
+		fields["provenance"] = map[string]any{"reserved_namespace_collision": true}
+	}
+	return canonical, map[string]any{"caelis": map[string]any{"version": 1, "runtime": map[string]any{"tool": fields}}}
+}
+
+func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result, err error) model.Message {
+	parts := tool.ModelParts(result.Content)
+	if len(parts) == 0 {
+		parts = []model.Part{model.NewJSONPart(mustJSON(map[string]any{}))}
+	}
+	message := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{{
+			Kind: model.PartKindToolResult,
+			ToolResult: &model.ToolResultPart{
+				ToolUseID: strings.TrimSpace(call.ID),
+				Name:      strings.TrimSpace(call.Name),
+				Content:   parts,
+				IsError:   err != nil,
+			},
+		}},
+	}
+	return message
 }
 
 // toolResultWithArtifactHint prefers a structured payload for the trusted
