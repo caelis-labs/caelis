@@ -132,7 +132,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/compact", s.compactSession)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/interactions", s.recordInteraction)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
 	s.mux.HandleFunc("GET "+apiPrefix+"/status", s.sessionStatus)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/status", s.sessionStatus)
@@ -320,7 +319,16 @@ func (s *Server) sessionState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, appserver.StateRequest{SessionID: r.PathValue("session_id")})
+	req := appserver.StateRequest{SessionID: r.PathValue("session_id")}
+	if raw := r.URL.Query().Get("require_idle"); raw != "" {
+		idle, err := strconv.ParseBool(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "require_idle must be a boolean")
+			return
+		}
+		req.RequireIdle = idle
+	}
+	result, err := s.config.Services.Sessions.InspectSession(r.Context(), principal, req)
 	writeJSONResult(w, result, err)
 }
 

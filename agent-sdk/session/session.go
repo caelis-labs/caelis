@@ -206,8 +206,9 @@ type EventType string
 
 const (
 	EventTypeUser EventType = "user"
-	// EventTypeInteraction is durable conversation input dispatched by Control
-	// as a command. Mirror visibility excludes it from model context.
+	// EventTypeInteraction identifies command echoes in older Session histories.
+	// Control no longer writes these records. Keep the type while that event
+	// schema is supported by replay.
 	EventTypeInteraction EventType = "interaction"
 	EventTypeAssistant   EventType = "assistant"
 	EventTypePlan        EventType = "plan"

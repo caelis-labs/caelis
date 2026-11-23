@@ -2,11 +2,13 @@ package appserver
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
@@ -55,6 +57,40 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 	}
 	if state.Capabilities.ClientManagedTerminal || !state.Capabilities.CaelisTerminalStream || state.Capabilities.GoalBootstrapSupported || state.Capabilities.ManageLoopBootstrapSupported {
 		t.Fatalf("capabilities = %#v", state.Capabilities)
+	}
+}
+
+func TestStateServiceIdleReadChecksTurnClaimBeforeRunnerIsVisible(t *testing.T) {
+	ctx := t.Context()
+	store := inmemory.NewStore(inmemory.Config{})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := NewCursorCodec(CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewStateService(StateServiceConfig{Sessions: store, Runtime: staticRuntimeStateReader{}, Feeds: newTestFeedRegistry(t, FeedRegistryConfig{CursorCodec: codec})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, end, err := store.BeginTurn(ctx, active.SessionRef, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := StateRequest{SessionID: active.SessionID, RequireIdle: true}
+	if _, err = service.State(ctx, req); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("idle read during Turn: %v", err)
+	}
+	if _, err = service.State(ctx, StateRequest{SessionID: active.SessionID}); err != nil {
+		t.Fatalf("ordinary read during Turn: %v", err)
+	}
+	if err = end(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.State(ctx, req); err != nil {
+		t.Fatalf("idle read after Turn: %v", err)
 	}
 }
 

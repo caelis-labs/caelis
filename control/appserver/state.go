@@ -175,6 +175,8 @@ type SessionState struct {
 // StateRequest addresses exactly one Session ID.
 type StateRequest struct {
 	SessionID string `json:"session_id"`
+	// RequireIdle rejects the read if a foreground Run or its execution claim is active.
+	RequireIdle bool `json:"require_idle,omitempty"`
 }
 
 // StateReader returns consistent reconnect bootstrap state.

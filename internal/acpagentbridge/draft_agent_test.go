@@ -67,7 +67,7 @@ func newDraftNativeFixture(t *testing.T) *draftNativeFixture {
 }
 
 func (f *draftNativeFixture) Initialize(context.Context) (appserver.ServerInfo, error) {
-	return appserver.ServerInfo{Capabilities: []string{appserver.CapabilityConversationInteractions}}, nil
+	return appserver.ServerInfo{}, nil
 }
 
 func (f *draftNativeFixture) CreateSession(ctx context.Context, request appserver.CreateSessionRequest) (appserver.CommandResult, error) {
@@ -541,42 +541,8 @@ func TestDraftNativeSteeringReceiptRequiresAppliedInputAndPermissionKeepsNativeI
 
 type draftReceiptRouterService struct {
 	controlprompt.RouterService
-	fixture                *draftNativeFixture
-	id                     string
-	messageID              string
-	recordErr, dispatchErr error
-	effects                int
-}
-
-func (s *draftReceiptRouterService) RecordInteraction(ctx context.Context, text string) (string, error) {
-	s.fixture.mu.Lock()
-	ref, feed := s.fixture.refs[s.id], s.fixture.feeds[s.id]
-	s.fixture.mu.Unlock()
-	event, err := s.fixture.store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeInteraction), Event: &session.Event{
-		Type: session.EventTypeInteraction, Visibility: session.VisibilityMirror,
-		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeUserMessage), Content: session.ProtocolTextContent(text)}},
-	}})
-	if err != nil {
-		return "", err
-	}
-	s.messageID = event.ID
-	base := projection.EnvelopeBaseFromSessionEvent(ref, event, projection.SessionEventTransport{})
-	for _, env := range projection.ProjectSessionEventEnvelope(base, event) {
-		if err := feed.Publish(env); err != nil {
-			return event.ID, err
-		}
-	}
-	return event.ID, s.recordErr
-}
-
-func (s *draftReceiptRouterService) RecordInteractionIfIdle(ctx context.Context, text string) (string, error) {
-	s.fixture.mu.Lock()
-	active := s.fixture.states[s.id].Run.Active
-	s.fixture.mu.Unlock()
-	if active {
-		return "", appserver.NewOutcomeError(appserver.OutcomeConflicted, errors.New("native foreground is busy"))
-	}
-	return s.RecordInteraction(ctx, text)
+	dispatchErr error
+	effects     int
 }
 
 func (s *draftReceiptRouterService) UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error) {
@@ -584,8 +550,8 @@ func (s *draftReceiptRouterService) UseModel(context.Context, string, string, bo
 	return controlstatus.StatusSnapshot{}, s.dispatchErr
 }
 
-func TestDraftNativeCommandReceiptsSurvivePostInsertionFailures(t *testing.T) {
-	for _, failAt := range []string{"ledger_receipt", "dispatch"} {
+func TestDraftCommandEchoPrecedesDispatchAndSurvivesCommandFailure(t *testing.T) {
+	for _, failAt := range []string{"success", "dispatch"} {
 		t.Run(failAt, func(t *testing.T) {
 			f := newDraftNativeFixture(t)
 			client, agent, peer := connectDraftNative(t, f)
@@ -593,27 +559,21 @@ func TestDraftNativeCommandReceiptsSurvivePostInsertionFailures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			svc := &draftReceiptRouterService{fixture: f, id: string(created.SessionId)}
-			if failAt == "ledger_receipt" {
-				svc.recordErr = errors.New("record completion failed after append")
-			} else {
-				svc.dispatchErr = errors.New("model selection failed after insertion")
+			svc := &draftReceiptRouterService{}
+			if failAt == "dispatch" {
+				svc.dispatchErr = errors.New("model selection failed")
 			}
 			agent.inner.promptRouterFactory = func(context.Context, session.Session) (controlprompt.Router, error) {
 				return controlprompt.New(controlprompt.RouterConfig{Service: svc}), nil
 			}
-			receipt, err := client.Prompt(t.Context(), draftNativePrompt(svc.id, "/model missing high"))
-			if err != nil || string(receipt.MessageId) != svc.messageID || svc.messageID == "" {
-				t.Fatalf("receipt=%#v err=%v native=%q", receipt, err, svc.messageID)
+			receipt, err := client.Prompt(t.Context(), draftNativePrompt(string(created.SessionId), "/model missing high"))
+			if err != nil || receipt.MessageId == "" {
+				t.Fatalf("receipt=%#v err=%v", receipt, err)
 			}
-			if activityID := acpdraft.ActivityID(receipt.Meta); activityID != svc.messageID {
-				t.Fatalf("command receipt activity=%q, canonical=%q", activityID, svc.messageID)
+			if activityID := acpdraft.ActivityID(receipt.Meta); activityID != string(receipt.MessageId) {
+				t.Fatalf("command receipt activity=%q, canonical=%q", activityID, receipt.MessageId)
 			}
-			wantEffects := 1
-			if failAt == "ledger_receipt" {
-				wantEffects = 0
-			}
-			if svc.effects != wantEffects {
+			if svc.effects != 1 {
 				t.Fatalf("effects=%d", svc.effects)
 			}
 			peer.mu.Lock()
@@ -626,18 +586,18 @@ func TestDraftNativeCommandReceiptsSurvivePostInsertionFailures(t *testing.T) {
 				_ = draftJSONConvert(n.Update, &fields)
 				var meta map[string]json.RawMessage
 				_ = json.Unmarshal(fields["_meta"], &meta)
-				if n.Update.StateUpdate != nil && acpdraft.ActivityID(meta) == svc.messageID {
+				if n.Update.StateUpdate != nil && acpdraft.ActivityID(meta) == string(receipt.MessageId) {
 					state := n.Update.StateUpdate.StateUpdate
 					running = running || state.Running != nil
-					idle = idle || (state.Idle != nil && state.Idle.IdleStateUpdate.Error != nil)
+					idle = idle || (state.Idle != nil && (state.Idle.IdleStateUpdate.Error != nil) == (failAt == "dispatch"))
 				}
 			}
 			peer.mu.Unlock()
 			if !echo || !running || !idle {
 				t.Fatalf("echo=%v running=%v idle_error=%v", echo, running, idle)
 			}
-			guarded := draftNativePrompt(svc.id, "must not use command as a Turn")
-			guarded.Meta = acpdraft.ActiveOnlyMeta(svc.messageID)
+			guarded := draftNativePrompt(string(created.SessionId), "must not use command as a Turn")
+			guarded.Meta = acpdraft.ActiveOnlyMeta(string(receipt.MessageId))
 			if _, err = client.Prompt(t.Context(), guarded); !acpdraft.IsInactivePromptError(err) {
 				t.Fatalf("command activity guard=%v", err)
 			}
@@ -744,7 +704,7 @@ func TestDraftNativeIdleOnlyRejectsRacedPromptAndCommandBeforeInsertion(t *testi
 			var svc *draftReceiptRouterService
 			if command {
 				text = "/model missing high"
-				svc = &draftReceiptRouterService{fixture: f, id: id}
+				svc = &draftReceiptRouterService{}
 				agent.inner.promptRouterFactory = func(context.Context, session.Session) (controlprompt.Router, error) {
 					startOther()
 					return controlprompt.New(controlprompt.RouterConfig{Service: svc}), nil
@@ -758,8 +718,8 @@ func TestDraftNativeIdleOnlyRejectsRacedPromptAndCommandBeforeInsertion(t *testi
 			if !acpdraft.IsInactivePromptError(err) || response.MessageId != "" {
 				t.Fatalf("race response=%#v err=%v", response, err)
 			}
-			if svc != nil && (svc.effects != 0 || svc.messageID != "") {
-				t.Fatalf("raced command inserted or dispatched: id=%q effects=%d", svc.messageID, svc.effects)
+			if svc != nil && svc.effects != 0 {
+				t.Fatalf("raced command dispatched: effects=%d", svc.effects)
 			}
 			select {
 			case input := <-f.inserts:

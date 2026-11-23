@@ -31,9 +31,6 @@ func sessionServerInfo(info appserver.ServerInfo, services appserver.AppServerSe
 	if !slices.Contains(info.Capabilities, appserver.CapabilityDisplayReplacements) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityDisplayReplacements)
 	}
-	if appserver.SupportsConversationInteractions(services.Sessions) && !slices.Contains(info.Capabilities, appserver.CapabilityConversationInteractions) {
-		info.Capabilities = append(info.Capabilities, appserver.CapabilityConversationInteractions)
-	}
 	if services.SessionProfiles != nil {
 		for _, capability := range services.SessionProfiles.Capabilities() {
 			found := false

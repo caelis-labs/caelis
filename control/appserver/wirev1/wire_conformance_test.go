@@ -505,14 +505,13 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	dirs := []string{"/tmp/selected-skills"}
 	roots := []string{"/tmp/selected-skill"}
 	for name, value := range map[string]any{
-		"RecordInteractionRequest": appserver.RecordInteractionRequest{WriteBase: base, Text: "/status", RequireIdleRun: true},
-		"CreateSessionRequest":     appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-1"}, Profile: &profile},
-		"PromptRequest":            appserver.PromptRequest{WriteBase: base, Input: "Hello", SourceKind: "user"},
-		"SessionBinding":           binding,
-		"SessionChildRelation":     sessionprofile.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", ParentTaskID: "task", Source: sessionprofile.Source{Kind: "user", OperationID: "original-input"}},
-		"CommandResult":            appserver.CommandResult{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
-		"SessionToolCall":          sessionprofile.Call{ID: "receipt-1", CallContext: sessionprofile.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: sessionprofile.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
-		"SessionToolCallResult":    sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
+		"CreateSessionRequest":  appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-1"}, Profile: &profile},
+		"PromptRequest":         appserver.PromptRequest{WriteBase: base, Input: "Hello", SourceKind: "user"},
+		"SessionBinding":        binding,
+		"SessionChildRelation":  sessionprofile.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", ParentTaskID: "task", Source: sessionprofile.Source{Kind: "user", OperationID: "original-input"}},
+		"CommandResult":         appserver.CommandResult{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
+		"SessionToolCall":       sessionprofile.Call{ID: "receipt-1", CallContext: sessionprofile.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: sessionprofile.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
+		"SessionToolCallResult": sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
 		"SessionConfiguration": sessionprofile.Configuration{
 			SessionID: "session-1", Revision: 7, Profile: profile,
 			LastRequest: &sessionprofile.RequestConfiguration{Revision: 7, RequestID: "operation-1", TurnID: "turn-1"},

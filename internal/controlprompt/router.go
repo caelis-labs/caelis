@@ -50,13 +50,10 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 			return result, err
 		}
 		if r.shouldDispatchSlash(ctx, cmd) {
-			id, err := r.recordInteraction(ctx, req, text)
-			if err != nil {
-				return Result{InteractionMessageID: id}, err
+			if err := req.beforeCommand(ctx); err != nil {
+				return Result{}, err
 			}
-			result, err := r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
-			result.InteractionMessageID = id
-			return result, err
+			return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
 		}
 		if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req); handled || err != nil {
 			return result, err
@@ -74,35 +71,11 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 	return Result{Handled: true, Turn: turn}, nil
 }
 
-func (r router) recordInteraction(ctx context.Context, req Request, text string) (string, error) {
-	if !req.RequireInteractionReceipt {
-		return "", nil
+func (req Request) beforeCommand(ctx context.Context) error {
+	if req.BeforeCommand != nil {
+		return req.BeforeCommand(ctx)
 	}
-	recorder, ok := r.service.(InteractionRecorder)
-	if !ok {
-		return "", fmt.Errorf("control prompt: durable conversation receipt is unavailable")
-	}
-	var id string
-	var err error
-	if req.RequireIdleRun {
-		guarded, ok := r.service.(GuardedInteractionRecorder)
-		if !ok {
-			return "", fmt.Errorf("control prompt: atomic idle conversation admission is unavailable")
-		}
-		id, err = guarded.RecordInteractionIfIdle(ctx, text)
-	} else {
-		id, err = recorder.RecordInteraction(ctx, text)
-	}
-	if err != nil {
-		return id, err
-	}
-	if id == "" {
-		return "", fmt.Errorf("control prompt: durable conversation receipt is unavailable")
-	}
-	if req.InteractionObserver != nil {
-		return id, req.InteractionObserver(ctx, id)
-	}
-	return id, nil
+	return nil
 }
 
 func (r router) shouldDispatchSlash(ctx context.Context, cmd string) bool {

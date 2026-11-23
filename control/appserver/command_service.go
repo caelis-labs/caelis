@@ -349,16 +349,6 @@ func validateCommandRequest(action Action, request any) error {
 		return requireSession(typed.SessionID)
 	case RefreshMCPToolsRequest:
 		return validateRefreshMCPToolsRequest(typed)
-	case RecordInteractionRequest:
-		if err := requireSession(typed.SessionID); err != nil {
-			return err
-		}
-		if strings.TrimSpace(typed.Text) == "" {
-			return errors.New("controlclient: interaction text is required")
-		}
-		if len(typed.Text) > 1<<20 {
-			return errors.New("controlclient: interaction text exceeds 1 MiB")
-		}
 	case PromptRequest:
 		if typed.SourceKind != "" || typed.GrantID != "" {
 			if err := validateInputSource(typed.SourceKind, typed.GrantID); err != nil {
