@@ -15,7 +15,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -2225,7 +2224,7 @@ func newRuntimeRunCommandToolTestHarness(t *testing.T) (session.Service, session
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		PolicyRegistry: workspacePolicyRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

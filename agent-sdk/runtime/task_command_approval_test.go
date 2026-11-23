@@ -17,7 +17,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -59,7 +58,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeWorkspaceWrite})
+	r, err := New(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, PolicyRegistry: workspacePolicyRegistry(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

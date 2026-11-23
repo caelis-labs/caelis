@@ -22,6 +22,9 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 			mode = trimmed
 		}
 	}
+	if mode == "" {
+		return ""
+	}
 	return presets.NormalizeModeName(mode)
 }
 

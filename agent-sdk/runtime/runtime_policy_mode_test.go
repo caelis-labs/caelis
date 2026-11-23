@@ -8,12 +8,77 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+func workspacePolicyRegistry(t *testing.T) policy.Registry {
+	t.Helper()
+	registry, err := presets.NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func TestHostOwnsToolPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		registry                      policy.Registry
+		profile                       string
+		wantExecutions, wantApprovals int
+	}{
+		{name: "unconfigured", wantExecutions: 1},
+		{name: "workspace policy", registry: workspacePolicyRegistry(t), wantApprovals: 1},
+		{name: "requested profile missing", profile: presets.ModeWorkspaceWrite},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, active := newTestSessionService(t, "optional-policy")
+			cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: tc.registry}
+			rt, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+				if i == 0 {
+					return []model.ToolCall{{ID: "one", Name: "RunCommand", Args: `{"command":"printf hello","sandbox_permissions":"require_escalated","justification":"fixture"}`}}
+				}
+				return nil
+			}}
+			command := &commandApprovalCaptureTool{}
+			approvals := 0
+			run, err := rt.Run(t.Context(), agent.RunRequest{
+				SessionRef: active.SessionRef,
+				AgentSpec:  agent.AgentSpec{Model: driver, Tools: []tool.Tool{command}, Metadata: map[string]any{policy.MetadataPolicyProfile: tc.profile}},
+				ApprovalRequester: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+					approvals++
+					return agent.ApprovalResponse{Outcome: "selected", OptionID: "reject_once"}, nil
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if len(command.calls) != tc.wantExecutions || approvals != tc.wantApprovals {
+				t.Fatalf("executions=%d approvals=%d", len(command.calls), approvals)
+			}
+		})
+	}
+}
+
+func TestDefaultPolicyModeRequiresRegistry(t *testing.T) {
+	store, _ := newTestSessionService(t, "missing-registry")
+	if _, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeWorkspaceWrite}); err == nil {
+		t.Fatal("accepted a default policy mode without a registry")
+	}
+}
 
 func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 	const installURL = "https://caelis.dev/install.sh"

@@ -67,7 +67,11 @@ func (r *Runtime) wrapToolsForPolicy(
 	if len(spec.Tools) == 0 {
 		return spec.Tools
 	}
-	modeName, mode := r.policyForName(approval.ctx, r.policyMode(spec))
+	name := r.policyMode(spec)
+	if name == "" {
+		return spec.Tools
+	}
+	modeName, mode := r.policyForName(approval.ctx, name)
 	options := modeOptionsFromSession(activeSession, spec)
 	out := make([]tool.Tool, 0, len(spec.Tools))
 	for _, one := range spec.Tools {

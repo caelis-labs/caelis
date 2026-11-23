@@ -37,7 +37,9 @@ type Config struct {
 	Compactor      compact.Engine
 	// Diagnostics receives fixed Runtime classifications only. Callers must not
 	// attach user content, Session identities, or workspace paths.
-	Diagnostics         *slog.Logger
+	Diagnostics *slog.Logger
+	// PolicyRegistry installs tool admission for direct and Code Mode calls.
+	// With no registry or requested profile, the host tools execute directly.
 	PolicyRegistry      policy.Registry
 	DefaultPolicyMode   string
 	SandboxPolicy       sandbox.PolicySnapshot
@@ -170,17 +172,12 @@ func New(cfg Config) (*Runtime, error) {
 		r.clock = time.Now
 	}
 	r.lifecycle.Clock = r.clock
-	if r.policies == nil {
-		reg, err := presets.NewRegistry()
-		if err != nil {
-			return nil, err
-		}
-		r.policies = reg
+	if r.policies == nil && r.defaultPolicyMode != "" {
+		return nil, errors.New("agent-sdk/runtime: default policy mode requires a policy registry")
 	}
-	if r.defaultPolicyMode == "" {
-		r.defaultPolicyMode = presets.ModeDefault
+	if r.policies != nil {
+		r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	}
-	r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
 	if err := validateControllerForwarder(cfg); err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
@@ -82,7 +83,12 @@ func main() {
 	}
 	defer spoolStore.Close()
 	taskOutput := controltaskstream.NewRecorder(spoolStore, nil)
+	policies, err := presets.NewRegistry()
+	if err != nil {
+		log.Fatal(err)
+	}
 	localCfg := runtime.Config{
+		PolicyRegistry:           policies,
 		Sessions:                 sessions,
 		TaskStore:                taskStore,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),

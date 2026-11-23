@@ -15,6 +15,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -264,15 +265,20 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if previous != nil {
 		core = previous.core
 	} else {
+		policies, err := presets.NewRegistry()
+		if err != nil {
+			return systemManagedAgentRunResult{}, err
+		}
 		core, err = sdkruntime.New(sdkruntime.Config{
-			Compactor:    compactor,
-			Sessions:     staging,
-			AgentFactory: config.AgentFactory,
-			Compaction:   plan.Compaction,
-			TraceSink:    config.TraceSink,
-			Hooks:        config.Hooks,
-			HookPurpose:  agent.HookPurposeSystemAgent,
-			Diagnostics:  config.Diagnostics,
+			PolicyRegistry: policies,
+			Compactor:      compactor,
+			Sessions:       staging,
+			AgentFactory:   config.AgentFactory,
+			Compaction:     plan.Compaction,
+			TraceSink:      config.TraceSink,
+			Hooks:          config.Hooks,
+			HookPurpose:    agent.HookPurposeSystemAgent,
+			Diagnostics:    config.Diagnostics,
 		})
 		if err != nil {
 			return systemManagedAgentRunResult{}, err

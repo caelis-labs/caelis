@@ -2639,7 +2639,7 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		PolicyRegistry: workspacePolicyRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2787,7 +2787,7 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		PolicyRegistry: workspacePolicyRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2997,7 +2997,7 @@ func TestRuntimePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testin
 	t.Parallel()
 
 	tests := map[string]string{
-		"":                "workspace-write",
+		"":                "",
 		"auto":            "workspace-write",
 		"auto_review":     "workspace-write",
 		"manual":          "workspace-write",
@@ -3027,7 +3027,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		PolicyRegistry: workspacePolicyRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3093,8 +3093,8 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
-		SandboxPolicy:     sandboxPolicy,
+		PolicyRegistry: workspacePolicyRegistry(t),
+		SandboxPolicy:  sandboxPolicy,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3467,7 +3467,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: presets.ModeWorkspaceWrite,
+		PolicyRegistry: workspacePolicyRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

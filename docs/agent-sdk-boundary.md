@@ -556,11 +556,12 @@ receives the result under the outer `js_exec` call ID. Deferred MCP schemas neve
 describes refresh and final dispatch. The stable-tools contract does not promise
 that the entire model request prefix is unchanged.
 
-Every tool invocation reaches the same Runtime Policy admission, whether called
-directly, through deferred MCP discovery, or from Code Mode. Policy is the sole
-Allow/Deny/Ask authority. SDK embedders can supply their own final policy;
-Runtime adds no MCP-specific approval gate. Discovery and server annotations do
-not themselves authorize execution.
+The host installs Policy through `runtime.Config.PolicyRegistry`. Without a
+registry or requested profile, Runtime dispatches the host's tools directly
+after argument preparation. A named profile requires a matching registered
+mode. With Policy installed, direct calls and Code Mode targets share its
+Allow/Deny/Ask decision. The Caelis Gateway explicitly installs its product
+policy. MCP discovery and server annotations only describe available tools.
 
 The product's `control/toolpolicy` mode combines native per-call restrictions
 with source consent into one decision and approval request. Ordinary MCP offers
