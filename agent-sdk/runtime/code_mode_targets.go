@@ -12,28 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
-
-// Static registration owns its canonical name, as in model-request lookup.
-// Deferred tools have already received the same Runtime wrappers.
-func codeModeAvailableTools(static []tool.Tool, source toolset.Source) []tool.Tool {
-	items := append([]tool.Tool(nil), static...)
-	names := map[string]bool{}
-	for _, item := range static {
-		if item != nil {
-			names[item.Definition().Name] = true
-		}
-	}
-	if source != nil {
-		for _, item := range source.Tools() {
-			if item != nil && !names[item.Definition().Name] {
-				items = append(items, item)
-			}
-		}
-	}
-	return items
-}
 
 // Search results and accepted ToolCalls share the canonical binding order.
 // An accepted Code Mode intent retains its binding even if its outcome is unknown;

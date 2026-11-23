@@ -22,7 +22,6 @@ import (
 )
 
 type codeModeAdmissionKey struct{}
-type codeModeValidationKey struct{}
 type nestedToolEventSinkKey struct{}
 
 var errCodeModeHostClosed = errors.New("code mode host admission is closed")

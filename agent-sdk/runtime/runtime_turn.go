@@ -35,30 +35,6 @@ func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.R
 	return state, nil
 }
 
-func (r *Runtime) resolveAgent(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	state map[string]any,
-	runID string,
-	turnID string,
-	req agent.RunRequest,
-	toolStepSequence *atomic.Uint64,
-) (agent.Agent, error) {
-	if req.Agent != nil {
-		return req.Agent, nil
-	}
-	spec := cloneAgentSpec(req.AgentSpec)
-	spec.Request = req.Request.WithDefaults(spec.Request)
-	if spec.ResolveModelRequest != nil {
-		spec.ResolveModelRequest = r.wrapModelRequestResolver(ctx, activeSession, ref, state, spec, req, runID, turnID, toolStepSequence)
-	} else if err := r.prepareAgentSpec(ctx, activeSession, ref, state, &spec, req, runID, turnID, toolStepSequence); err != nil {
-		return nil, err
-	}
-
-	return r.agentFactory.NewAgent(ctx, spec)
-}
-
 // wrapTurnTools is shared by native and externally controlled execution.
 func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
 	concrete := spec.Tools
