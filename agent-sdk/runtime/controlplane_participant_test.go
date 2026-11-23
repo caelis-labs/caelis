@@ -179,7 +179,7 @@ func TestRuntimeDetachParticipantRollbackPreservesActiveSessionOnRemoveFailure(t
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
 	removeErr := errors.New("forced remove participant failure")
-	sessions := removeParticipantWithEventFailingService{Service: baseSessions, err: removeErr}
+	sessions := removeParticipantWithEventFailingService{ManagedService: baseSessions, err: removeErr}
 	detachReqCh := make(chan controller.DetachRequest, 1)
 	attachReqCh := make(chan controller.AttachRequest, 1)
 	testController := stubACPController{
@@ -259,7 +259,7 @@ func TestRuntimeDetachParticipantRollbackPublishesRotatedGeneration(t *testing.T
 		t.Fatal(err)
 	}
 	removeErr := errors.New("forced remove failure")
-	sessions := removeParticipantWithEventFailingService{Service: baseSessions, err: removeErr}
+	sessions := removeParticipantWithEventFailingService{ManagedService: baseSessions, err: removeErr}
 	var rollback session.ParticipantBinding
 	backend := stubACPController{
 		detach: func(context.Context, controller.DetachRequest) error { return nil },
@@ -302,7 +302,7 @@ func TestEnsureACPParticipantRunDetachesNewGenerationWhenPublishFails(t *testing
 		t.Fatal(err)
 	}
 	publishErr := errors.New("forced participant publish failure")
-	sessions := putParticipantFailingService{Service: baseSessions, err: publishErr}
+	sessions := putParticipantFailingService{ManagedService: baseSessions, err: publishErr}
 	attached := previous
 	attached.SessionID = "remote-new"
 	attached.AttachmentGeneration = "generation-new"
@@ -337,7 +337,7 @@ func TestEnsureACPParticipantRunDetachesNewGenerationWhenPublishFails(t *testing
 func TestRuntimeAttachParticipantDoesNotCompensateCommittedLifecycleWrite(t *testing.T) {
 	t.Parallel()
 	baseSessions, activeSession := newTestSessionService(t, "participant-committed-runtime")
-	sessions := committedParticipantLifecycleService{Service: baseSessions}
+	sessions := committedParticipantLifecycleService{ManagedService: baseSessions}
 	detachCalls := 0
 	backend := stubACPController{
 		attach: func(context.Context, controller.AttachRequest) (session.ParticipantBinding, error) {
@@ -369,7 +369,7 @@ func TestRuntimeAttachParticipantDoesNotCompensateCommittedLifecycleWrite(t *tes
 func TestRuntimeAttachParticipantRejectsUnconfirmedCommittedResult(t *testing.T) {
 	t.Parallel()
 	baseSessions, activeSession := newTestSessionService(t, "participant-false-committed-runtime")
-	sessions := falseCommittedParticipantLifecycleService{Service: baseSessions}
+	sessions := falseCommittedParticipantLifecycleService{ManagedService: baseSessions}
 	detachCalls := 0
 	backend := stubACPController{
 		attach: func(context.Context, controller.AttachRequest) (session.ParticipantBinding, error) {
@@ -413,7 +413,7 @@ func TestRuntimeDetachParticipantRestoresLiveEndpointWhenCommittedResultIsFalse(
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := falseCommittedRemoveParticipantLifecycleService{Service: baseSessions}
+	sessions := falseCommittedRemoveParticipantLifecycleService{ManagedService: baseSessions}
 	reattached := previous
 	reattached.SessionID = "remote-new"
 	reattached.AttachmentGeneration = "generation-new"
@@ -770,27 +770,27 @@ func TestRuntimeParticipantSteeringAdmissionFailureIsNoEffect(t *testing.T) {
 }
 
 type removeParticipantWithEventFailingService struct {
-	session.Service
+	session.ManagedService
 	err error
 }
 
 type putParticipantFailingService struct {
-	session.Service
+	session.ManagedService
 	err error
 }
 
-type committedParticipantLifecycleService struct{ session.Service }
+type committedParticipantLifecycleService struct{ session.ManagedService }
 
-type falseCommittedParticipantLifecycleService struct{ session.Service }
+type falseCommittedParticipantLifecycleService struct{ session.ManagedService }
 
-type falseCommittedRemoveParticipantLifecycleService struct{ session.Service }
+type falseCommittedRemoveParticipantLifecycleService struct{ session.ManagedService }
 
 func (s putParticipantFailingService) PutParticipant(context.Context, session.PutParticipantRequest) (session.Session, error) {
 	return session.Session{}, s.err
 }
 
 func (s committedParticipantLifecycleService) PutParticipantWithEvent(ctx context.Context, req session.PutParticipantWithEventRequest) (session.Session, *session.Event, error) {
-	lifecycle := s.Service.(session.ParticipantLifecycleService)
+	lifecycle := s.ManagedService.(session.ParticipantLifecycleService)
 	updated, event, err := lifecycle.PutParticipantWithEvent(ctx, req)
 	if err != nil {
 		return updated, event, err
@@ -799,7 +799,7 @@ func (s committedParticipantLifecycleService) PutParticipantWithEvent(ctx contex
 }
 
 func (s committedParticipantLifecycleService) RemoveParticipantWithEvent(ctx context.Context, req session.RemoveParticipantWithEventRequest) (session.Session, *session.Event, error) {
-	lifecycle := s.Service.(session.ParticipantLifecycleService)
+	lifecycle := s.ManagedService.(session.ParticipantLifecycleService)
 	return lifecycle.RemoveParticipantWithEvent(ctx, req)
 }
 
@@ -816,11 +816,11 @@ func (s falseCommittedParticipantLifecycleService) PutParticipantWithEvent(ctx c
 }
 
 func (s falseCommittedParticipantLifecycleService) RemoveParticipantWithEvent(ctx context.Context, req session.RemoveParticipantWithEventRequest) (session.Session, *session.Event, error) {
-	return s.Service.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
+	return s.ManagedService.(session.ParticipantLifecycleService).RemoveParticipantWithEvent(ctx, req)
 }
 
 func (s falseCommittedRemoveParticipantLifecycleService) PutParticipantWithEvent(ctx context.Context, req session.PutParticipantWithEventRequest) (session.Session, *session.Event, error) {
-	return s.Service.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
+	return s.ManagedService.(session.ParticipantLifecycleService).PutParticipantWithEvent(ctx, req)
 }
 
 func (s falseCommittedRemoveParticipantLifecycleService) RemoveParticipantWithEvent(ctx context.Context, req session.RemoveParticipantWithEventRequest) (session.Session, *session.Event, error) {
@@ -839,7 +839,7 @@ func (s removeParticipantWithEventFailingService) PutParticipantWithEvent(
 	ctx context.Context,
 	req session.PutParticipantWithEventRequest,
 ) (session.Session, *session.Event, error) {
-	lifecycle, ok := s.Service.(session.ParticipantLifecycleService)
+	lifecycle, ok := s.ManagedService.(session.ParticipantLifecycleService)
 	if !ok {
 		return session.Session{}, nil, errors.New("wrapped service does not support participant lifecycle")
 	}

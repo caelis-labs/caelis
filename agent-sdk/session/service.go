@@ -5,43 +5,70 @@ import (
 	"errors"
 )
 
-// Store supplies the durable operations behind NewService. LoadSession returns
-// a consistent snapshot and AppendEvents commits the whole batch. BeginTurn
-// reserves a producer across all service instances sharing the same storage.
-type Store interface {
-	TurnAdmission
-	EventBatchService
-	ControllerBindingStore
+// Service reads and updates existing sessions by SessionRef. A Runtime shares one
+// service across runs and acquires a writer for each prompt's session.
+// Readers can query committed history throughout the turn.
+type Service interface {
+	Reader
+	StateReader
+	EventAppender
 	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
+
+	// AcquireWriter rejects a competing writer across service instances. Use
+	// writeCtx for mutations and release after all producers stop, including
+	// after cancellation or failed startup.
+	AcquireWriter(ctx context.Context, ref SessionRef, owner string) (writeCtx context.Context, release func() error, err error)
+	// AppendEvents commits the entire batch before any event becomes visible.
+	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
+	// BindController records the active controller under the current writer's authority.
+	BindController(context.Context, BindControllerRequest) (Session, error)
 }
 
-type runService struct{ Store }
+// ManagedService adds host administration to the operations on an existing Session.
+type ManagedService interface {
+	Service
+	Lifecycle
+	ParticipantBindingStore
+	StateWriter
+}
 
-// NewService builds a native RunService over a storage adapter. An adapter can
-// implement RunService directly to optimize individual reads or single appends.
-func NewService(store Store) RunService {
+// Store supplies the durable operations behind NewService. LoadSession returns
+// a consistent snapshot and AppendEvents commits the whole batch. AcquireWriter
+// reserves a producer across all service instances sharing the same storage.
+type Store interface {
+	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
+	AcquireWriter(ctx context.Context, ref SessionRef, owner string) (writeCtx context.Context, release func() error, err error)
+	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
+	BindController(context.Context, BindControllerRequest) (Session, error)
+}
+
+type storedService struct{ Store }
+
+// NewService derives individual reads and single-event appends from a Store.
+// Hosts with a full-featured service can pass it directly to Runtime.
+func NewService(store Store) Service {
 	if store == nil {
 		return nil
 	}
-	return runService{store}
+	return storedService{store}
 }
 
-func (s runService) Session(ctx context.Context, ref SessionRef) (Session, error) {
+func (s storedService) Session(ctx context.Context, ref SessionRef) (Session, error) {
 	snapshot, err := s.LoadSession(ctx, LoadSessionRequest{SessionRef: ref, Limit: 1})
 	return snapshot.Session, err
 }
 
-func (s runService) SnapshotState(ctx context.Context, ref SessionRef) (map[string]any, error) {
+func (s storedService) SnapshotState(ctx context.Context, ref SessionRef) (map[string]any, error) {
 	snapshot, err := s.LoadSession(ctx, LoadSessionRequest{SessionRef: ref, Limit: 1})
 	return snapshot.State, err
 }
 
-func (s runService) Events(ctx context.Context, req EventsRequest) ([]*Event, error) {
+func (s storedService) Events(ctx context.Context, req EventsRequest) ([]*Event, error) {
 	snapshot, err := s.LoadSession(ctx, LoadSessionRequest(req))
 	return snapshot.Events, err
 }
 
-func (s runService) AppendEvent(ctx context.Context, req AppendEventRequest) (*Event, error) {
+func (s storedService) AppendEvent(ctx context.Context, req AppendEventRequest) (*Event, error) {
 	if req.Event == nil {
 		return nil, ErrInvalidEvent
 	}

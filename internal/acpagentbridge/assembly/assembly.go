@@ -17,7 +17,7 @@ import (
 // in durable session state; otherwise providers fall back to in-memory state.
 type ProviderConfig struct {
 	Assembly assembly.ResolvedAssembly
-	Sessions session.Service
+	Sessions session.ManagedService
 	AppName  string
 	UserID   string
 }
@@ -73,7 +73,7 @@ func ProvidersFromAssembly(cfg ProviderConfig) Providers {
 type modeProvider struct {
 	available []acpsdk.SessionMode
 	defaultID string
-	sessions  session.Service
+	sessions  session.ManagedService
 	appName   string
 	userID    string
 
@@ -81,7 +81,7 @@ type modeProvider struct {
 	current map[string]string
 }
 
-func newModeProvider(modes []assembly.ModeConfig, sessions session.Service, appName string, userID string) *modeProvider {
+func newModeProvider(modes []assembly.ModeConfig, sessions session.ManagedService, appName string, userID string) *modeProvider {
 	available := make([]acpsdk.SessionMode, 0, len(modes))
 	defaultID := ""
 	for _, one := range modes {
@@ -196,7 +196,7 @@ func (p *modeProvider) currentModeID(ctx context.Context, ref session.SessionRef
 
 type configProvider struct {
 	configs  []assembly.ConfigOption
-	sessions session.Service
+	sessions session.ManagedService
 	appName  string
 	userID   string
 
@@ -204,7 +204,7 @@ type configProvider struct {
 	current map[string]map[string]string
 }
 
-func newConfigProvider(configs []assembly.ConfigOption, sessions session.Service, appName string, userID string) *configProvider {
+func newConfigProvider(configs []assembly.ConfigOption, sessions session.ManagedService, appName string, userID string) *configProvider {
 	out := make([]assembly.ConfigOption, 0, len(configs))
 	for _, one := range configs {
 		id := strings.TrimSpace(one.ID)
@@ -315,7 +315,7 @@ func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acpsdk.
 
 func updateProviderSessionState(
 	ctx context.Context,
-	sessions session.Service,
+	sessions session.ManagedService,
 	ref session.SessionRef,
 	update func(map[string]any) (map[string]any, error),
 ) error {
@@ -428,7 +428,7 @@ func sessionRef(appName string, userID string, sessionID string) session.Session
 
 func resolveProviderSessionRef(
 	ctx context.Context,
-	sessions session.Service,
+	sessions session.Reader,
 	appName string,
 	userID string,
 	sessionID string,

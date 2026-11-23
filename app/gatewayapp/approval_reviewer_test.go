@@ -487,7 +487,7 @@ func ptrMessage(message model.Message) *model.Message {
 	return &out
 }
 
-func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.Service, session.Session) {
+func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.ManagedService, session.Session) {
 	t.Helper()
 	service := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := service.StartSession(ctx, session.StartSessionRequest{

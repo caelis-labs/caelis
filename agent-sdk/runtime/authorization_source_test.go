@@ -138,7 +138,7 @@ func TestAuthorizationRevokeReadbackCancelsOriginalFlight(t *testing.T) {
 // binding check and the single-use permission consumption. The Session lookup
 // is an existing yield point inside the permission owner, before consume.
 type refreshAuthorizationAtPermitStore struct {
-	session.Service
+	session.ManagedService
 	fired   atomic.Bool
 	refresh func() error
 }
@@ -149,7 +149,7 @@ func (s *refreshAuthorizationAtPermitStore) Session(ctx context.Context, ref ses
 			return session.Session{}, err
 		}
 	}
-	return s.Service.Session(ctx, ref)
+	return s.ManagedService.Session(ctx, ref)
 }
 func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
@@ -178,7 +178,7 @@ func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T)
 		t.Fatal(err)
 	}
 	files, active, _ := codeModeStore(t)
-	store := &refreshAuthorizationAtPermitStore{Service: files, refresh: func() error {
+	store := &refreshAuthorizationAtPermitStore{ManagedService: files, refresh: func() error {
 		publish("click", "v2")
 		if err := mgr.RefreshTools(ctx, "fixture", "fixture"); err != nil {
 			return err

@@ -198,7 +198,7 @@ func planWorkspaceIdentityRepairs(
 
 func listDurableWorkspaceIdentities(
 	ctx context.Context,
-	store session.Service,
+	store session.Lifecycle,
 ) ([]durableWorkspaceIdentity, error) {
 	var identities []durableWorkspaceIdentity
 	cursor := ""

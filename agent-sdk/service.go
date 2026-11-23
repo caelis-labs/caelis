@@ -33,7 +33,7 @@ func (e *RunConflictError) Error() string {
 
 func (e *RunConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
-// RunRequest is the minimal runtime execution request.
+// RunRequest binds one prompt or Agent communication batch to an existing Session.
 type RunRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
 	// TurnID is the trusted caller's semantic Turn identity. When omitted,

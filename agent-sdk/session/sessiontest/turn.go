@@ -15,9 +15,9 @@ import (
 // TurnAdmissionConformance runs two independent runtimes over the same Session.
 // The second can read committed tool calls during execution and start a prompt
 // after completion. A conflicting prompt must fail before recording any input.
-func TurnAdmissionConformance(t *testing.T, ref session.SessionRef, writer, reader session.RunService) {
+func TurnAdmissionConformance(t *testing.T, ref session.SessionRef, writer, reader session.Service) {
 	t.Helper()
-	newRuntime := func(s session.RunService) *runtime.Runtime {
+	newRuntime := func(s session.Service) *runtime.Runtime {
 		t.Helper()
 		rt, err := runtime.New(runtime.Config{Sessions: s, AgentFactory: chat.Factory{}})
 		if err != nil {

@@ -692,11 +692,6 @@ type EventAppender interface {
 	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
 }
 
-// ControllerBindingStore mutates the durable active-controller binding.
-type ControllerBindingStore interface {
-	BindController(context.Context, BindControllerRequest) (Session, error)
-}
-
 // ParticipantBindingStore mutates durable participant bindings.
 // Implementations must return RevisionConflictError for a failed revision CAS
 // and ParticipantBindingConflictError for a failed delegation CAS. If a
@@ -725,25 +720,6 @@ type StateStore interface {
 	StateWriter
 }
 
-// RunService is the Runtime-facing Session service. The service admits a
-// writer before the first Turn mutation. Concurrent readers observe committed
-// snapshots while the producer runs. Model tool calls commit as one batch.
-type RunService interface {
-	Store
-	Reader
-	StateReader
-	EventAppender
-}
-
-// Service is the full reference session service. Consumers should accept the
-// narrow interfaces above unless they genuinely need the aggregate.
-type Service interface {
-	RunService
-	Lifecycle
-	ParticipantBindingStore
-	StateWriter
-}
-
 // ParticipantLifecycleService is implemented by stores that can atomically
 // change participant bindings and append their replayable lifecycle events.
 // Implementations must enforce ExpectedRevision, MutationGuard, and the
@@ -759,12 +735,6 @@ type ParticipantLifecycleService interface {
 // controller binding and its matching durable handoff event.
 type ControllerHandoffService interface {
 	BindControllerWithEvent(context.Context, BindControllerWithEventRequest) (Session, *Event, error)
-}
-
-// EventBatchService is implemented by stores that can validate and append a
-// batch of events without exposing partially appended durable history.
-type EventBatchService interface {
-	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
 }
 
 // EventBatchStateService is implemented by stores that can append an event

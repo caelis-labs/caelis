@@ -23,6 +23,9 @@ func (r *Runtime) Run(
 		return agent.RunResult{}, err
 	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
+	if ref.SessionID == "" {
+		return agent.RunResult{}, session.ErrInvalidSession
+	}
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := strings.TrimSpace(req.TurnID)
 	if turnID == "" {
@@ -31,7 +34,7 @@ func (r *Runtime) Run(
 	if err := r.beginRun(ref, runID); err != nil {
 		return agent.RunResult{}, err
 	}
-	runCtx, endTurn, err := r.sessions.BeginTurn(ctx, ref, runID)
+	runCtx, releaseWriter, err := r.sessions.AcquireWriter(ctx, ref, runID)
 	if err != nil {
 		r.unregisterActiveRun(runID)
 		return agent.RunResult{}, err
@@ -40,7 +43,7 @@ func (r *Runtime) Run(
 	started := false
 	finish := func() error {
 		cancel()
-		err := endTurn()
+		err := releaseWriter()
 		r.unregisterActiveRun(runID)
 		return err
 	}
@@ -133,7 +136,6 @@ func validateRunInput(req agent.RunRequest) error {
 }
 
 func (r *Runtime) beginRun(ref session.SessionRef, runID string) error {
-	ref = session.NormalizeSessionRef(ref)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for id, current := range r.activeRunners {

@@ -287,14 +287,14 @@ func TestSessionRuntimeRegistryUsesInjectedDependenciesWithoutHost(t *testing.T)
 type recordingSessionRuntimeAssembler struct {
 	mu       sync.Mutex
 	calls    int
-	sessions session.Service
+	sessions session.ManagedService
 }
 
 func (a *recordingSessionRuntimeAssembler) assembleSnapshot(
 	_ context.Context,
 	_ session.Session,
 	_ sessionRuntimeActivity,
-	sessions session.Service,
+	sessions session.ManagedService,
 ) (*sessionRuntimeInstance, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -303,7 +303,7 @@ func (a *recordingSessionRuntimeAssembler) assembleSnapshot(
 	return &sessionRuntimeInstance{runtimeComposition: runtimeComposition{sessions: sessions}}, nil
 }
 
-func (a *recordingSessionRuntimeAssembler) snapshot() (int, session.Service) {
+func (a *recordingSessionRuntimeAssembler) snapshot() (int, session.ManagedService) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.calls, a.sessions

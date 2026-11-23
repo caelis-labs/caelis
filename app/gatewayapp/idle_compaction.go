@@ -234,7 +234,7 @@ func (r *sessionRuntimeRegistry) idleCompactionQuiet(ctx context.Context, runtim
 
 // recoverIdleCompactionAccounting is a startup-only use of the existing
 // exclusive Host capability. No activation, Turn or provider call is created.
-func recoverIdleCompactionAccounting(ctx context.Context, sessions session.Service, capability session.PriorHostFenceService, owner string) error {
+func recoverIdleCompactionAccounting(ctx context.Context, sessions session.Lifecycle, capability session.PriorHostFenceService, owner string) error {
 	recovery, ok := capability.(session.PriorHostCompactionReceiptRecovery)
 	if !ok {
 		return nil

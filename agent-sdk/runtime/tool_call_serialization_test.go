@@ -230,12 +230,12 @@ func TestCodeModeYieldedCallOverlapsSameTargetFromNativeSnapshot(t *testing.T) {
 }
 
 type taskWaitFactStore struct {
-	session.Service
+	session.ManagedService
 	started func(*session.EventTool)
 }
 
 func (s taskWaitFactStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	event, err := s.Service.AppendEvent(ctx, req)
+	event, err := s.ManagedService.AppendEvent(ctx, req)
 	if err == nil && req.Event != nil && req.Event.Type == session.EventTypeToolCall && req.Event.Tool != nil {
 		s.started(req.Event.Tool)
 	}
@@ -246,7 +246,7 @@ func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	files, active, _ := codeModeStore(t)
 	waitStarted := make(chan struct{})
 	markWait := sync.OnceFunc(func() { close(waitStarted) })
-	store := taskWaitFactStore{Service: files, started: func(record *session.EventTool) {
+	store := taskWaitFactStore{ManagedService: files, started: func(record *session.EventTool) {
 		if record.Name == tasktool.ToolName && record.Parent == nil && record.Status == "pending" {
 			markWait()
 		}

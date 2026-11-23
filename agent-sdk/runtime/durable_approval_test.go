@@ -17,17 +17,17 @@ import (
 )
 
 type postCommitApprovalService struct {
-	session.Service
+	session.ManagedService
 	failResolved atomic.Bool
 }
 
 type rejectResolvedApprovalService struct {
-	session.Service
+	session.ManagedService
 	rejectResolved atomic.Bool
 }
 
 type cancelAfterCommitApprovalService struct {
-	session.Service
+	session.ManagedService
 	armed  atomic.Bool
 	cancel context.CancelFunc
 }
@@ -38,11 +38,11 @@ func (s *rejectResolvedApprovalService) AppendEvent(ctx context.Context, req ses
 			return nil, errors.New("simulated durable resolve failure")
 		}
 	}
-	return s.Service.AppendEvent(ctx, req)
+	return s.ManagedService.AppendEvent(ctx, req)
 }
 
 func (s *cancelAfterCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	persisted, err := s.Service.AppendEvent(ctx, req)
+	persisted, err := s.ManagedService.AppendEvent(ctx, req)
 	if err != nil || !s.armed.CompareAndSwap(true, false) {
 		return persisted, err
 	}
@@ -58,11 +58,11 @@ func (s *cancelAfterCommitApprovalService) Events(ctx context.Context, req sessi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return s.Service.Events(ctx, req)
+	return s.ManagedService.Events(ctx, req)
 }
 
 func (s *postCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	persisted, err := s.Service.AppendEvent(ctx, req)
+	persisted, err := s.ManagedService.AppendEvent(ctx, req)
 	if err != nil || !s.failResolved.CompareAndSwap(true, false) {
 		return persisted, err
 	}
@@ -87,7 +87,7 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-approval-committed" },
 	})
-	sessions := &postCommitApprovalService{Service: base}
+	sessions := &postCommitApprovalService{ManagedService: base}
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -272,7 +272,7 @@ func TestRequestDurableApprovalResolveFailureLeavesStartedJournal(t *testing.T) 
 	t.Parallel()
 
 	base, activeSession := newTestSessionService(t, "approval-resolve-fail")
-	sessions := &rejectResolvedApprovalService{Service: base}
+	sessions := &rejectResolvedApprovalService{ManagedService: base}
 	sessions.rejectResolved.Store(true)
 	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
 	if err != nil {
@@ -391,7 +391,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 		kind := kind
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
-			var base session.Service
+			var base session.ManagedService
 			switch kind {
 			case "memory":
 				base = inmemory.NewStore(inmemory.Config{})
@@ -399,7 +399,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 				base = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 			}
 			resolverCtx, cancel := context.WithCancel(context.Background())
-			sessions := &cancelAfterCommitApprovalService{Service: base, cancel: cancel}
+			sessions := &cancelAfterCommitApprovalService{ManagedService: base, cancel: cancel}
 			active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "resolver-cancel", PreferredSessionID: "approval-" + kind})
 			if err != nil {
 				t.Fatal(err)
@@ -482,7 +482,7 @@ func TestRequestDurableApprovalHonorsFirstCommittedDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, release, err := sessions.BeginTurn(t.Context(), active.SessionRef, "foreground")
+	ctx, release, err := sessions.AcquireWriter(t.Context(), active.SessionRef, "foreground")
 	if err != nil {
 		t.Fatal(err)
 	}

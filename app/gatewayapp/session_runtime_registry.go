@@ -52,7 +52,7 @@ type sessionRuntime struct {
 // activations. Durable Session rows own workspace identity; observation does
 // not create an entry here.
 type sessionRuntimeRegistry struct {
-	sessionService   session.Service
+	sessionService   session.ManagedService
 	tasks            sessionRuntimeTaskReader
 	lifecycleCtx     context.Context
 	defaultWorkspace session.WorkspaceRef
@@ -80,12 +80,12 @@ type sessionRuntimeAssembler interface {
 		context.Context,
 		session.Session,
 		sessionRuntimeActivity,
-		session.Service,
+		session.ManagedService,
 	) (*sessionRuntimeInstance, error)
 }
 
 type sessionRuntimeRegistryConfig struct {
-	Sessions         session.Service
+	Sessions         session.ManagedService
 	Tasks            sessionRuntimeTaskReader
 	LifecycleContext context.Context
 	DefaultWorkspace session.WorkspaceRef
@@ -129,7 +129,7 @@ func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRun
 
 func loadDurableWorkspaceIdentities(
 	ctx context.Context,
-	sessions session.Service,
+	sessions session.Lifecycle,
 	defaultWorkspace session.WorkspaceRef,
 ) (map[string]string, error) {
 	identities := map[string]string{defaultWorkspace.Key: defaultWorkspace.CWD}
@@ -580,7 +580,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	}
 	var instance *sessionRuntimeInstance
 	if observer, ok := r.assembler.(interface {
-		assembleObservationSnapshot(context.Context, session.Session, session.Service) (*sessionRuntimeInstance, error)
+		assembleObservationSnapshot(context.Context, session.Session, session.ManagedService) (*sessionRuntimeInstance, error)
 	}); ok {
 		instance, err = observer.assembleObservationSnapshot(buildCtx, active, sessions)
 	} else {

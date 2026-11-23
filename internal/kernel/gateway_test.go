@@ -2937,7 +2937,7 @@ func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *tes
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := &revisionConflictOnceSessionService{Service: inmemory.NewStore(inmemory.Config{})}
+	sessions := &revisionConflictOnceSessionService{ManagedService: inmemory.NewStore(inmemory.Config{})}
 	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "u",

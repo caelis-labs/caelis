@@ -75,7 +75,7 @@ func TestStateServiceIdleReadChecksTurnClaimBeforeRunnerIsVisible(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, end, err := store.BeginTurn(ctx, active.SessionRef, "other")
+	_, end, err := store.AcquireWriter(ctx, active.SessionRef, "other")
 	if err != nil {
 		t.Fatal(err)
 	}

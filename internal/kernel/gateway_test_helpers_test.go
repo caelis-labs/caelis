@@ -30,7 +30,7 @@ func (mockRuntime) RunState(context.Context, session.SessionRef) (agent.RunState
 }
 
 type revisionConflictOnceSessionService struct {
-	session.Service
+	session.ManagedService
 	conflicted  atomic.Bool
 	updateCalls atomic.Int64
 }
@@ -48,7 +48,7 @@ func (s *revisionConflictOnceSessionService) UpdateState(ctx context.Context, re
 			Actual:    expected + 1,
 		}
 	}
-	return s.Service.UpdateState(ctx, req)
+	return s.ManagedService.UpdateState(ctx, req)
 }
 
 type recordingRuntime struct {

@@ -875,7 +875,7 @@ func (a *postAssemblyBlockingRuntimeAssembler) assembleSnapshot(
 	ctx context.Context,
 	active session.Session,
 	activity sessionRuntimeActivity,
-	sessions session.Service,
+	sessions session.ManagedService,
 ) (*sessionRuntimeInstance, error) {
 	instance, err := a.delegate.assembleSnapshot(ctx, active, activity, sessions)
 	if err != nil {
@@ -913,9 +913,9 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	lateID := profile.Backend.Provider.ModelConfigID
 	active = mustCurrentSession(t, stack, active.SessionID)
 	blocked := &blockingUpdateSessionService{
-		Service: runtime.instance.sessions,
-		entered: make(chan struct{}),
-		proceed: make(chan struct{}),
+		ManagedService: runtime.instance.sessions,
+		entered:        make(chan struct{}),
+		proceed:        make(chan struct{}),
 	}
 	runtime.instance.sessions = blocked
 
@@ -992,7 +992,7 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 }
 
 type blockingUpdateSessionService struct {
-	session.Service
+	session.ManagedService
 	entered chan struct{}
 	proceed chan struct{}
 	once    sync.Once
@@ -1004,7 +1004,7 @@ func (s *blockingUpdateSessionService) UpdateState(ctx context.Context, request 
 	case <-ctx.Done():
 		return session.Session{}, ctx.Err()
 	case <-s.proceed:
-		return s.Service.UpdateState(ctx, request)
+		return s.ManagedService.UpdateState(ctx, request)
 	}
 }
 
@@ -1144,7 +1144,7 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	original := stack.composition.sessions
-	conflicting := &alwaysRevisionConflictSessionService{Service: original}
+	conflicting := &alwaysRevisionConflictSessionService{ManagedService: original}
 	stack.composition.sessions = conflicting
 	t.Cleanup(func() { stack.composition.sessions = original })
 
@@ -1158,7 +1158,7 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 }
 
 type alwaysRevisionConflictSessionService struct {
-	session.Service
+	session.ManagedService
 	calls int
 }
 
@@ -2788,8 +2788,8 @@ func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 
 	originalSessions := stack.composition.sessions
 	stack.composition.sessions = sessionLookupErrorService{
-		Service: originalSessions,
-		err:     errors.New("synthetic routing read failure"),
+		ManagedService: originalSessions,
+		err:            errors.New("synthetic routing read failure"),
 	}
 	request := appserver.CloseSessionRequest{
 		WriteBase: appserver.WriteBase{
@@ -3258,7 +3258,7 @@ func newWorkspaceRuntimeHTTPClient(
 }
 
 type sessionLookupErrorService struct {
-	session.Service
+	session.ManagedService
 	err error
 }
 

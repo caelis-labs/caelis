@@ -14,7 +14,7 @@ func TestFileToolRunConformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessiontest.ToolRunConformance(t, active.SessionRef, func(*testing.T) session.RunService {
+	sessiontest.ToolRunConformance(t, active.SessionRef, func(*testing.T) session.Service {
 		store := file.NewStore(cfg)
 		return session.NewService(store)
 	})

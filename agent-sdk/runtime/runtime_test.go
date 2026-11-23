@@ -469,7 +469,25 @@ func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) 
 
 }
 
-func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
+func TestRuntimeRequiresSessionIDBeforeAcquiringWriter(t *testing.T) {
+	rt, err := New(Config{
+		Sessions:     inmemory.NewStore(inmemory.Config{}),
+		AgentFactory: chat.Factory{},
+		RunIDGenerator: func() string {
+			t.Fatal("unbound prompt entered run admission")
+			return ""
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = rt.Run(t.Context(), agent.RunRequest{SessionRef: session.SessionRef{SessionID: " "}, Input: "hello"})
+	if !errors.Is(err, session.ErrInvalidSession) {
+		t.Fatalf("Run() error = %v, want ErrInvalidSession", err)
+	}
+}
+
+func TestRuntimeAdmitsOnePromptPerSession(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-concurrent-run")
@@ -478,7 +496,7 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	blocking := &blockingTestAgent{started: make(chan struct{})}
-	first, err := runtime.Run(context.Background(), agent.RunRequest{
+	first, err := runtime.Run(t.Context(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "first",
 		Agent:      blocking,
@@ -486,6 +504,7 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(first) error = %v", err)
 	}
+	defer first.Handle.Close()
 	select {
 	case <-blocking.started:
 	case <-time.After(2 * time.Second):
@@ -502,6 +521,35 @@ func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
 	}
 	if conflict.ActiveRunID != first.Handle.RunID() {
 		t.Fatalf("conflict.ActiveRunID = %q, want %q", conflict.ActiveRunID, first.Handle.RunID())
+	}
+	other, err := sessions.StartSession(t.Context(), session.StartSessionRequest{
+		AppName: activeSession.AppName, UserID: activeSession.UserID, PreferredSessionID: "other",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parallel, err := runtime.Run(t.Context(), agent.RunRequest{SessionRef: other.SessionRef, Input: "independent", Agent: seqAgent{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parallel.Handle.Close()
+	if err := parallel.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for ref, want := range map[session.SessionRef]string{activeSession.SessionRef: "first", other.SessionRef: "independent"} {
+		events, err := sessions.Events(t.Context(), session.EventsRequest{SessionRef: ref})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var prompts []string
+		for _, event := range events {
+			if session.EventTypeOf(event) == session.EventTypeUser {
+				prompts = append(prompts, session.EventText(event))
+			}
+		}
+		if !reflect.DeepEqual(prompts, []string{want}) {
+			t.Fatalf("Session %s recorded prompts %q, want only %q", ref.SessionID, prompts, want)
+		}
 	}
 	first.Handle.Cancel()
 	if err := first.Handle.WaitCompletion(t.Context()); err == nil {

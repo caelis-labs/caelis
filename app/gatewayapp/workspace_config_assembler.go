@@ -47,7 +47,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	ctx context.Context,
 	active session.Session,
 	activity sessionRuntimeActivity,
-	sessions session.Service,
+	sessions session.ManagedService,
 ) (*sessionRuntimeInstance, error) {
 	if a == nil || sessions == nil {
 		return nil, errors.New("gatewayapp: workspace config assembler is unavailable")

@@ -830,7 +830,7 @@ func testShouldPersistExternalControllerEvent(event *session.Event) bool {
 	}
 }
 
-func newTestSessionService(t *testing.T, sessionID string) (session.Service, session.Session) {
+func newTestSessionService(t *testing.T, sessionID string) (session.ManagedService, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return sessionID },

@@ -139,7 +139,7 @@ type Stack struct {
 }
 
 // Sessions returns the Host's process-level Session authority.
-func (s *Stack) Sessions() session.Service {
+func (s *Stack) Sessions() session.ManagedService {
 	if runtime := s.runtimeProjection(); runtime != nil {
 		return runtime.sessions
 	}

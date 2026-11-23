@@ -311,9 +311,10 @@ no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
 ## Session storage for embedders
 
-A host supplies a `session.RunService` to `runtime.Config.Sessions`. Each
-prompt calls `BeginTurn` before reading history, binding a controller or
-writing input. One producer owns a Session until its tools, steering and
+A host supplies one `session.Service` to `runtime.Config.Sessions`.
+Each `Runtime.Run` selects an existing Session through `RunRequest.SessionRef`
+and calls `AcquireWriter` before reading history, binding a controller or writing
+input. One producer owns a Session until its tools, steering and
 final writes settle. Another prompt for that Session receives a conflict.
 Other Sessions can run concurrently, and readers can load committed history
 throughout a Turn. Control can delegate an existing execution claim. The
@@ -323,15 +324,16 @@ SDK validates it and admits one producer under that claim.
 
 | Operation | Backend contract |
 | --- | --- |
-| `BeginTurn` | Claim the Session across backend instances and return a write context and release function. |
+| `AcquireWriter` | Claim the Session across backend instances and return a write context and release function. |
 | `LoadSession` | Read the Session, state and ordered events at one committed revision. |
 | `BindController` | Record the initial native controller binding under the writer's authority. |
 | `AppendEvents` | Commit an entire batch under the same authority before the first tool executes. |
 
 The service derives individual reads and single-event appends from those
 operations. The file and memory implementations also serve the individual
-reads directly. Hosts can add Session creation and browsing, participant
-bindings, Code Mode state writes, or atomic Plan updates when needed.
+reads directly. Hosts that create and list Sessions, manage participant bindings
+and edit state can use `session.ManagedService`. Features such as atomic Plan
+updates use their own optional contracts.
 
 The file backend persists the Turn claim and validates writes under its file
 lock. A PostgreSQL adapter can hold the claim in a Session row alongside its
@@ -339,7 +341,7 @@ revision and state. Short transactions lock that row to acquire or release
 ownership and to append events. Each append checks ownership, revision and
 existing event identities, assigns sequence numbers, inserts event rows and
 advances the header together. Snapshot reads can use repeatable read. An
-identical retry returns the original facts. `session.BeginFencedTurn` and
+identical retry returns the original facts. `session.AcquireFencedWriter` and
 `session.PrepareAppendTransaction` share the claim and append semantics.
 `session.MarshalEventJSON` and `session.UnmarshalEventJSON` preserve the
 durable encoding, including supported schema upgrades and inline media.
@@ -396,9 +398,9 @@ complete tool facts from schema 3 remain readable. The Session codec consumes kn
 for compatibility, preserving old messages and approval review; it never restores
 Run state, execution authority or tool bindings. Unknown future schemas fail closed.
 
-When a Session service implements `SessionFenceService`, SDK `Run` retains its
-exclusive fence until actual producers and finalization have drained. Control
-retains ownership of an inherited fence. A fenced file-backed Task store must
+Runtime releases its Session writer after producers and finalization have
+drained. The file and memory services enforce ownership with a Session fence.
+Control retains ownership of a fence it delegates to Runtime. A fenced file-backed Task store must
 use the same `file.Store` as its Session service; an independently configured
 Task store supports unguarded Task operations, not that Session's fence bearer.
 Missing-pair repair requires a valid fence even when the service does not expose

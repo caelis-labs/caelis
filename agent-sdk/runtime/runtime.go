@@ -26,8 +26,8 @@ type Config struct {
 	Hooks agent.Hooks
 	// HookPurpose names this independently assembled model loop. Empty means chat.
 	HookPurpose agent.HookPurpose
-	// Sessions owns Turn admission and the committed history read by the model loop.
-	Sessions       session.RunService
+	// Sessions is shared across runs. Each RunRequest selects one Session by its ref.
+	Sessions       session.Service
 	AgentFactory   agent.AgentFactory
 	RunIDGenerator func() string
 	Clock          func() time.Time
@@ -74,7 +74,7 @@ type Runtime struct {
 	codeModeMu               sync.Mutex
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   approval.Requester
-	sessions                 session.RunService
+	sessions                 session.Service
 	participantBindings      session.ParticipantBindingStore
 	agentFactory             agent.AgentFactory
 	runIDGenerator           func() string

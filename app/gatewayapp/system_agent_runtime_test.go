@@ -24,7 +24,7 @@ func TestSystemManagedAgentUsesCoreRuntimeHooksAndFacts(t *testing.T) {
 	startHook := &systemManagedStartRecorder{}
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
 		AgentFactory:    chat.Factory{},
-		StagingSessions: func() session.Service { return staging },
+		StagingSessions: func() session.ManagedService { return staging },
 		TraceSink:       interceptor,
 		Hooks:           agent.Hooks{TurnStart: []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "start", Apply: startHook.Apply}}},
 	})
@@ -77,7 +77,7 @@ func TestSystemManagedAgentDoesNotInheritParentRuntimeFence(t *testing.T) {
 	staging := inmemory.NewStore(inmemory.Config{})
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
 		AgentFactory:    chat.Factory{},
-		StagingSessions: func() session.Service { return staging },
+		StagingSessions: func() session.ManagedService { return staging },
 	})
 	parent := session.Session{SessionRef: session.SessionRef{
 		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",

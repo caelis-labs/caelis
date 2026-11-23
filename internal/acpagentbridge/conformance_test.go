@@ -662,11 +662,11 @@ func agentMessageTexts(notifications []eventstream.SessionNotification) []string
 	return out
 }
 
-func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgent, session.Service) {
+func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgent, session.ManagedService) {
 	return newTestRuntimeAgentWithTools(t, model, nil)
 }
 
-func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.Tool) (*runtimeacp.RuntimeAgent, session.Service) {
+func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.Tool) (*runtimeacp.RuntimeAgent, session.ManagedService) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime, err := sdkruntime.New(sdkruntime.Config{

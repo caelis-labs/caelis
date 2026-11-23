@@ -451,7 +451,7 @@ func TestDisconnectACPDormantParticipantCommittedRemovalReleasesTaskOutput(t *te
 	}
 	fault := errors.New("participant removal committed but directory sync failed")
 	faultingSessions := &committedRemoveParticipantSessionService{
-		Service: originalSessions, lifecycle: lifecycle, fault: fault,
+		ManagedService: originalSessions, lifecycle: lifecycle, fault: fault,
 	}
 	stack.composition.sessions = faultingSessions
 	t.Cleanup(func() {
@@ -498,7 +498,7 @@ func TestDisconnectACPDormantParticipantCommittedRemovalReleasesTaskOutput(t *te
 }
 
 type committedRemoveParticipantSessionService struct {
-	session.Service
+	session.ManagedService
 	lifecycle session.ParticipantLifecycleService
 	fault     error
 	once      sync.Once

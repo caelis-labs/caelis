@@ -17,7 +17,7 @@ func (r *Runtime) finalizeTurn(ctx context.Context, ref session.SessionRef, turn
 	return r.clearTurnPlan(context.WithoutCancel(ctx), ref, turnID, false)
 }
 
-// reconcileTurnPlan runs after BeginTurn has granted exclusive ownership,
+// reconcileTurnPlan runs after AcquireWriter has granted exclusive ownership,
 // before the new input or compaction.
 func (r *Runtime) reconcileTurnPlan(ctx context.Context, ref session.SessionRef, turnID string) error {
 	return r.clearTurnPlan(ctx, ref, turnID, true)

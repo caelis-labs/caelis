@@ -120,7 +120,7 @@ type systemManagedAgentRuntime struct {
 }
 
 type systemManagedAgentExecution struct {
-	staging session.Service
+	staging session.ManagedService
 	core    *sdkruntime.Runtime
 	history []*session.Event
 	key     string
@@ -150,7 +150,7 @@ func systemManagedHistoryExtends(previous, next []*session.Event) bool {
 type systemManagedAgentRuntimeConfig struct {
 	AgentFactory    agent.AgentFactory
 	Hooks           agent.Hooks
-	StagingSessions func() session.Service
+	StagingSessions func() session.ManagedService
 	TraceSink       agent.TraceSink
 	Diagnostics     *slog.Logger
 }
@@ -174,7 +174,7 @@ func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConf
 		config.AgentFactory = localChatFactory
 	}
 	if config.StagingSessions == nil {
-		config.StagingSessions = func() session.Service {
+		config.StagingSessions = func() session.ManagedService {
 			return inmemory.NewStore(inmemory.Config{})
 		}
 	}
@@ -215,7 +215,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if r != nil && r.resident && r.execution != nil && r.execution.key == key && systemManagedHistoryExtends(r.execution.history, plan.Events) {
 		previous = r.execution
 	}
-	var staging session.Service
+	var staging session.ManagedService
 	seed := plan.Events
 	if previous != nil {
 		staging = previous.staging
@@ -393,7 +393,7 @@ func systemManagedAgentConversationEvents(events []*session.Event) []*session.Ev
 	return out
 }
 
-func startSystemManagedAgentStagingSession(ctx context.Context, service session.Service, planned session.Session) (session.Session, error) {
+func startSystemManagedAgentStagingSession(ctx context.Context, service session.Lifecycle, planned session.Session) (session.Session, error) {
 	ref := session.NormalizeSessionRef(planned.SessionRef)
 	if ref.AppName == "" {
 		ref.AppName = "caelis-system"

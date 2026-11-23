@@ -11,7 +11,7 @@ import (
 )
 
 type completionBenchmarkGateway struct {
-	sessions session.Service
+	sessions session.Lifecycle
 }
 
 func (g completionBenchmarkGateway) ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error) {

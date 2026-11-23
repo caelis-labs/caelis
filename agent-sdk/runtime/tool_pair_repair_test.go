@@ -194,7 +194,7 @@ func TestToolFactsCancellationHoldsFenceUntilProducerEnds(t *testing.T) {
 func TestToolFactsCompleteResultAndModelViewRoundTrip(t *testing.T) {
 	for _, backend := range []string{"memory", "file"} {
 		t.Run(backend, func(t *testing.T) {
-			var store session.Service
+			var store session.ManagedService
 			var active session.Session
 			var root string
 			if backend == "memory" {

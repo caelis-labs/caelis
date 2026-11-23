@@ -36,7 +36,7 @@ import (
 
 // assembleProfileSnapshot binds execution authority once. Each main request
 // resolves its desired profile alongside Core's capability discovery.
-func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.Service) (*sessionRuntimeInstance, error) {
+func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.ManagedService) (*sessionRuntimeInstance, error) {
 	store := a.deps.authorities.sessionProfiles
 	if store == nil || !sessionvisibility.IsApplicationSession(active) {
 		return nil, fmt.Errorf("gatewayapp: application binding store unavailable")

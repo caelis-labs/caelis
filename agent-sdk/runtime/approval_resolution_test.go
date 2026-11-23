@@ -69,7 +69,7 @@ func TestNativeApprovalResolutionValidatesPrivateRecoveredOptionsBeforeCommit(t 
 	for _, backend := range []string{"memory", "file"} {
 		for _, choice := range []string{"native-allow", "native-reject", "cancelled"} {
 			t.Run(backend+"/"+choice, func(t *testing.T) {
-				var sessions session.Service
+				var sessions session.ManagedService
 				if backend == "memory" {
 					sessions = inmemory.NewStore(inmemory.Config{})
 				} else {

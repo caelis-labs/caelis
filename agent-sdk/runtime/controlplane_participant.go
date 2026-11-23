@@ -384,15 +384,18 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend is not configured")
 	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
+	if ref.SessionID == "" {
+		return agent.RunResult{}, session.ErrInvalidSession
+	}
 	runID := r.nextID("participant-run", nil)
-	ctx, endTurn, err := r.sessions.BeginTurn(ctx, ref, runID)
+	ctx, releaseWriter, err := r.sessions.AcquireWriter(ctx, ref, runID)
 	if err != nil {
 		return agent.RunResult{}, err
 	}
 	started := false
 	defer func() {
 		if !started {
-			runErr = errors.Join(runErr, endTurn())
+			runErr = errors.Join(runErr, releaseWriter())
 		}
 	}()
 	activeSession, err := r.sessions.Session(ctx, ref)
@@ -438,7 +441,7 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	go func() {
 		defer handle.finish(func() error {
 			cancel()
-			return endTurn()
+			return releaseWriter()
 		})
 		r.executeACPParticipantTurn(runCtx, activeSession, ref, req, binding, contextTransfer, runID, turnID, handle, admission)
 	}()

@@ -13,7 +13,7 @@ const skillInstructionsStateKey = "runtime.skill_instructions"
 
 // Skill calls resolve live metadata independently. The rendered prefix is
 // durable so a new Turn or a reactivated Runtime cannot advance it early.
-func sessionSkillInstructions(sessions session.Service, ref session.SessionRef, resolve func(context.Context) (skill.Catalog, error)) agent.SessionInstructionsResolver {
+func sessionSkillInstructions(sessions session.StateStore, ref session.SessionRef, resolve func(context.Context) (skill.Catalog, error)) agent.SessionInstructionsResolver {
 	return func(ctx context.Context, summaryID string) (string, func(context.Context) error, error) {
 		state, err := sessions.SnapshotState(ctx, ref)
 		if err != nil {

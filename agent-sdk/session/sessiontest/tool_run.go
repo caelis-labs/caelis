@@ -18,7 +18,7 @@ import (
 // Runtime's model request with the full conversation observed during execution.
 // Supply an empty, dedicated Session. open is called once per turn and should
 // reopen durable backends on the second call. No Task store or artifacts are used.
-func ToolRunConformance(t *testing.T, ref session.SessionRef, open func(*testing.T) session.RunService) {
+func ToolRunConformance(t *testing.T, ref session.SessionRef, open func(*testing.T) session.Service) {
 	t.Helper()
 	effects := 0
 	lookup := tool.NamedTool{
@@ -31,7 +31,7 @@ func ToolRunConformance(t *testing.T, ref session.SessionRef, open func(*testing
 			return tool.Result{Content: []tool.ContentBlock{tool.Text("stored value")}}, nil
 		},
 	}
-	run := func(input string, probe *toolRunModel) session.RunService {
+	run := func(input string, probe *toolRunModel) session.Service {
 		t.Helper()
 		store := open(t)
 		core, err := runtime.New(runtime.Config{Sessions: store, AgentFactory: chat.Factory{}})

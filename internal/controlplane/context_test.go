@@ -347,7 +347,7 @@ func TestCoordinatorRequiresSessionFenceService(t *testing.T) {
 	t.Parallel()
 
 	sessions, _ := newControlTestSession(t, "handoff-requires-fence")
-	unfenced := struct{ session.Service }{Service: sessions}
+	unfenced := struct{ session.ManagedService }{ManagedService: sessions}
 	router, err := NewContextRouter(unfenced)
 	if err != nil {
 		t.Fatal(err)
@@ -443,7 +443,7 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	base, activeSession := newControlTestSession(t, "handoff-failure")
 	commitErr := errors.New("commit failed")
 	sessions := failingHandoffService{
-		Service: base, SessionFenceService: base.(session.SessionFenceService), err: commitErr,
+		ManagedService: base, SessionFenceService: base.(session.SessionFenceService), err: commitErr,
 	}
 	router, err := NewContextRouter(sessions)
 	if err != nil {
@@ -483,7 +483,7 @@ func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.
 		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "codex", EpochID: "remote-epoch",
 	}
 	sessions := committedHandoffService{
-		Service:             base,
+		ManagedService:      base,
 		SessionFenceService: base.(session.SessionFenceService),
 		binding:             committedBinding,
 		err:                 &session.CommittedError{Err: errors.New("index write failed after commit")},
@@ -561,7 +561,7 @@ func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T)
 }
 
 type failingHandoffService struct {
-	session.Service
+	session.ManagedService
 	session.SessionFenceService
 	err error
 }
@@ -571,7 +571,7 @@ func (s failingHandoffService) BindControllerWithEvent(context.Context, session.
 }
 
 type committedHandoffService struct {
-	session.Service
+	session.ManagedService
 	session.SessionFenceService
 	binding session.ControllerBinding
 	err     error
@@ -621,7 +621,7 @@ func (*recordingControllerBackend) Detach(context.Context, controller.DetachRequ
 	return nil
 }
 
-func newControlTestSession(t *testing.T, id string) (session.Service, session.Session) {
+func newControlTestSession(t *testing.T, id string) (session.ManagedService, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return id }})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{

@@ -32,7 +32,7 @@ type runtimeComposition struct {
 	// only; one Runtime composition never owns or replaces their lifecycle.
 	authorities         runtimeHostAuthorities
 	applicationChildren *applicationChildren
-	sessions            session.Service
+	sessions            session.ManagedService
 	workspace           session.WorkspaceRef
 
 	// process is present only on the Host root. Detached Session Runtime

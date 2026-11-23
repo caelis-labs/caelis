@@ -30,7 +30,7 @@ func TestReferenceParticipantStoresConform(t *testing.T) {
 }
 
 type participantBackend interface {
-	session.Service
+	session.ManagedService
 	session.ParticipantLifecycleService
 }
 

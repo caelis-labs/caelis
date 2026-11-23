@@ -13,7 +13,7 @@ import (
 // streams remain behind their dedicated AppServer services.
 type AppServerPresentationDependencies struct {
 	UIPreferences appserver.UIPreferencesStore
-	Sessions      session.Service
+	Sessions      session.ManagedService
 	Assembly      assembly.ResolvedAssembly
 	AppName       string
 	UserID        string
