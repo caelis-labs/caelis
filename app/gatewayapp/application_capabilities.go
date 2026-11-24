@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -30,25 +31,41 @@ type applicationCapabilities struct {
 }
 
 type applicationMCPSource struct {
-	selection mcp.Selection
+	manager   *mcp.Manager
+	selection uint64
 	resolver  *applicationTurnResolver
 }
 
 // CheckSearchScope checks the durable profile before using the resident graph.
 func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
-	return s.resolver.checkAppliedMCPConfiguration(ctx)
+	return s.resolver.checkAppliedMCPConfiguration(ctx, s.selection)
 }
 
 func (s applicationMCPSource) Tools() []tool.Tool {
-	return s.leaseTools(s.selection.Tools())
+	s.resolver.capabilitiesMu.Lock()
+	defer s.resolver.capabilitiesMu.Unlock()
+	if s.selection != s.resolver.mcpSelection {
+		return nil
+	}
+	return s.leaseTools(s.manager.Tools())
 }
 
 func (s applicationMCPSource) PrefixTools() []tool.Tool {
-	return s.leaseTools(s.selection.PrefixTools())
+	s.resolver.capabilitiesMu.Lock()
+	defer s.resolver.capabilitiesMu.Unlock()
+	if s.selection != s.resolver.mcpSelection {
+		return nil
+	}
+	return s.leaseTools(s.manager.PrefixTools())
 }
 
 func (s applicationMCPSource) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
-	one, found, err := s.selection.Lookup(ctx, name)
+	s.resolver.capabilitiesMu.Lock()
+	defer s.resolver.capabilitiesMu.Unlock()
+	if s.selection != s.resolver.mcpSelection {
+		return nil, false, tool.NewError(tool.ErrorCodeStaleRevision, "MCP configuration changed")
+	}
+	one, found, err := s.manager.Lookup(ctx, name)
 	if err != nil || !found {
 		return nil, false, err
 	}
@@ -77,9 +94,9 @@ func (t applicationMCPTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 // New calls require a graph for the latest committed revision. Checking the
 // applied revision rather than the request's original revision lets an
 // unchanged binding continue after a successful reload.
-func (r *applicationTurnResolver) checkAppliedMCPConfiguration(ctx context.Context) error {
+func (r *applicationTurnResolver) checkAppliedMCPConfiguration(ctx context.Context, selection uint64) error {
 	r.capabilitiesMu.Lock()
-	revision, closed := r.desiredRevision, r.capabilitiesClosed
+	revision, closed := r.desiredRevision, r.capabilitiesClosed || selection != r.mcpSelection
 	r.capabilitiesMu.Unlock()
 	if closed {
 		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP configuration is unavailable")
@@ -267,7 +284,7 @@ func (r *applicationTurnResolver) reconcileCapabilitiesLocked(ctx context.Contex
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD), r.binding.PrincipalID)
 	if err != nil {
 		return nil, err
 	}
@@ -307,16 +324,32 @@ func (r *applicationTurnResolver) liveSkillCatalog(ctx context.Context) (skill.C
 
 func (r *applicationTurnResolver) reconcileMCPLocked(ctx context.Context, configuration sessionprofile.Configuration, contributions plugin.Contributions) error {
 	declared := append(applicationMCPSpecs(configuration.Profile), contributions.MCPServerSpecs...)
-	specs := overlayApplicationMCP(r.inheritedMCP, declared)
-	var err error
-	if r.mcpManager == nil {
-		r.mcpManager, err = mcp.NewManager(context.WithoutCancel(ctx), specs, nil)
-	} else {
-		err = r.mcpManager.Reconcile(specs)
+	for i := range declared {
+		if declared[i].PluginID == "application" {
+			declared[i].ConnectionScope = r.binding.PrincipalID
+		}
 	}
+	var inherited []mcp.ServerSpec
+	if r.composition.authorities.mcp == nil {
+		doc, err := r.composition.loadGatewayAppConfig()
+		if err != nil {
+			return err
+		}
+		inherited, err = resolveConfiguredMCPServers(doc.MCPServers, doc.WorkspaceTrust, r.composition.workspace.CWD)
+		if err != nil {
+			return err
+		}
+	}
+	manager, err := r.composition.configureMCP(ctx, r.mcpManager, func(configured []mcp.ServerSpec) ([]mcp.ServerSpec, error) {
+		return overlayApplicationMCP(configured, declared), nil
+	}, inherited, r.composition.mcpFailureNotifier())
 	if err != nil {
 		return err
 	}
+	if !reflect.DeepEqual(r.declaredMCP, declared) {
+		r.mcpSelection++
+	}
+	r.mcpManager = manager
 	r.declaredMCP = declared
 	r.desiredRevision = configuration.Revision
 	r.failedMCPRevision = 0
@@ -324,26 +357,7 @@ func (r *applicationTurnResolver) reconcileMCPLocked(ctx context.Context, config
 }
 
 func (r *applicationTurnResolver) bindApplicationMCP(capabilities *applicationCapabilities) {
-	capabilities.source = applicationMCPSource{selection: r.mcpManager.Selection(), resolver: r}
-}
-
-func (r *applicationTurnResolver) updateInheritedMCP(specs []mcp.ServerSpec) error {
-	r.capabilitiesMu.Lock()
-	defer r.capabilitiesMu.Unlock()
-	if r.capabilitiesClosed {
-		return nil
-	}
-	if err := r.mcpManager.Reconcile(overlayApplicationMCP(specs, r.declaredMCP)); err != nil {
-		return err
-	}
-	r.inheritedMCP = specs
-	if r.capabilities != nil {
-		// In-flight requests keep the bindings they already received.
-		updated := *r.capabilities
-		r.bindApplicationMCP(&updated)
-		r.capabilities = &updated
-	}
-	return nil
+	capabilities.source = applicationMCPSource{manager: r.mcpManager, selection: r.mcpSelection, resolver: r}
 }
 
 func overlayApplicationMCP(inherited, declared []mcp.ServerSpec) []mcp.ServerSpec {
@@ -386,7 +400,7 @@ func (r *applicationTurnResolver) reloadProfileMCPLocked(ctx context.Context, co
 	if configuration.Revision < r.desiredRevision {
 		return sessionprofile.ErrConfigurationStale
 	}
-	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD), r.binding.PrincipalID)
 	if err != nil {
 		return err
 	}
@@ -405,6 +419,7 @@ func (r *applicationTurnResolver) closeCapabilities() {
 	manager := r.mcpManager
 	r.mcpManager, r.capabilities = nil, nil
 	r.capabilitiesMu.Unlock()
+	r.composition.detachMCP(manager)
 	_ = manager.Close()
 }
 
@@ -467,12 +482,22 @@ func (r *applicationTurnResolver) refreshMCPTools(ctx context.Context, pluginID,
 }
 
 func (s applicationMCPSource) SearchTools() []tool.Tool {
-	return s.leaseTools(s.selection.SearchTools())
+	s.resolver.capabilitiesMu.Lock()
+	defer s.resolver.capabilitiesMu.Unlock()
+	if s.selection != s.resolver.mcpSelection {
+		return nil
+	}
+	return s.leaseTools(s.manager.SearchTools())
 }
 
 func (s applicationMCPSource) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
 	if err := s.CheckSearchScope(ctx); err != nil {
 		return err
 	}
-	return s.selection.CheckToolBinding(ctx, binding)
+	s.resolver.capabilitiesMu.Lock()
+	defer s.resolver.capabilitiesMu.Unlock()
+	if s.selection != s.resolver.mcpSelection {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP configuration changed")
+	}
+	return s.manager.CheckToolBinding(ctx, binding)
 }

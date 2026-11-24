@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -14,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // The product pin records each platform's archive and build source separately.
@@ -36,9 +36,26 @@ type builtinPlatform struct {
 	Source      builtinBuildSource `json:"source"`
 }
 
-func desktopWorldBundle() (builtinArchive, builtinPlatform, string, error) {
+type desktopWorldRelease struct {
+	archive  builtinArchive
+	platform builtinPlatform
+	version  string
+	files    []builtinRuntimeFile
+}
+
+type builtinRuntimeFile struct {
+	path string
+	mode fs.FileMode
+	hash [sha256.Size]byte
+}
+
+// The executable's embedded bytes and pin are immutable. Only their expected
+// digests are reused; every activation still verifies its on-disk files.
+var desktopWorldBundle = sync.OnceValues(loadDesktopWorldRelease)
+
+func loadDesktopWorldRelease() (desktopWorldRelease, error) {
 	if builtinDesktopWorldTarget == "" {
-		return builtinArchive{}, builtinPlatform{}, "", fmt.Errorf("builtin desktop-world is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
+		return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	var release struct {
 		Schema    int               `json:"schema"`
@@ -46,7 +63,7 @@ func desktopWorldBundle() (builtinArchive, builtinPlatform, string, error) {
 		Platforms []builtinPlatform `json:"platforms"`
 	}
 	if err := json.Unmarshal(builtinDesktopWorldPin, &release); err != nil || release.Schema != 1 || release.Version == "" {
-		return builtinArchive{}, builtinPlatform{}, "", fmt.Errorf("invalid builtin desktop-world release manifest")
+		return desktopWorldRelease{}, fmt.Errorf("invalid builtin desktop-world release manifest")
 	}
 	for _, platform := range release.Platforms {
 		if platform.Target != builtinDesktopWorldTarget {
@@ -54,15 +71,32 @@ func desktopWorldBundle() (builtinArchive, builtinPlatform, string, error) {
 		}
 		sum := sha256.Sum256(builtinDesktopWorldArchive)
 		if hex.EncodeToString(sum[:]) != platform.ArchiveHash {
-			return builtinArchive{}, platform, "", fmt.Errorf("builtin desktop-world archive checksum mismatch")
+			return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world archive checksum mismatch")
 		}
-		return builtinArchive{name: platform.Archive, data: builtinDesktopWorldArchive}, platform, release.Version, nil
+		bundle := desktopWorldRelease{
+			archive:  builtinArchive{name: platform.Archive, data: builtinDesktopWorldArchive},
+			platform: platform, version: release.Version,
+		}
+		if err := bundle.archive.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
+			if mode.IsDir() || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
+				return nil
+			}
+			hash, err := builtinFileHash(src)
+			if err != nil {
+				return err
+			}
+			bundle.files = append(bundle.files, builtinRuntimeFile{path: rel, mode: mode, hash: hash})
+			return nil
+		}); err != nil {
+			return desktopWorldRelease{}, err
+		}
+		return bundle, nil
 	}
-	return builtinArchive{}, builtinPlatform{}, "", fmt.Errorf("builtin desktop-world platform missing from release manifest")
+	return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world platform missing from release manifest")
 }
 
 func materializeDesktopWorld(ctx context.Context, storeDir string) (string, error) {
-	reader, platform, _, err := desktopWorldBundle()
+	bundle, err := desktopWorldBundle()
 	if err != nil {
 		return "", err
 	}
@@ -86,14 +120,14 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 			return "", fmt.Errorf("builtin cache must be a real private directory")
 		}
 	}
-	root := filepath.Join(parent, platform.ArchiveHash)
+	root := filepath.Join(parent, bundle.platform.ArchiveHash)
 	release, err := acquireManagedPluginCacheOperation(ctx, root)
 	if err != nil {
 		return "", err
 	}
 	defer release()
 	if _, err := os.Lstat(root); err == nil {
-		return root, verifyDesktopWorldBundle(root, reader)
+		return root, verifyDesktopWorldBundle(root, bundle.files)
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
@@ -102,7 +136,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
-	if err := reader.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
+	if err := bundle.archive.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -117,7 +151,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 	}); err != nil {
 		return "", err
 	}
-	if err := verifyDesktopWorldBundle(tmp, reader); err != nil {
+	if err := verifyDesktopWorldBundle(tmp, bundle.files); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -126,7 +160,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 	if err := os.Rename(tmp, root); err != nil {
 		// Another Host may have published the same bytes. Never replace or repair
 		// an existing root; readers can hold it across upgrades and rollbacks.
-		if verifyErr := verifyDesktopWorldBundle(root, reader); verifyErr != nil {
+		if verifyErr := verifyDesktopWorldBundle(root, bundle.files); verifyErr != nil {
 			return "", err
 		}
 	}
@@ -147,7 +181,7 @@ func extractBuiltinEntry(src io.Reader, mode fs.FileMode, dest string) error {
 	return closeErr
 }
 
-func verifyDesktopWorldBundle(root string, reader builtinArchive) error {
+func verifyDesktopWorldBundle(root string, files []builtinRuntimeFile) error {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return err
@@ -155,38 +189,37 @@ func verifyDesktopWorldBundle(root string, reader builtinArchive) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("builtin package root is not a real directory")
 	}
-	return reader.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
-		if mode.IsDir() || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
-			return nil
-		}
-		path := filepath.Join(root, rel)
+	for _, file := range files {
+		path := filepath.Join(root, file.path)
 		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o111 != mode.Perm()&0o111) {
-			return fmt.Errorf("invalid builtin file mode: %s", rel)
-		}
-		hash := sha256.New()
-		_, err = io.Copy(hash, src)
-		if err != nil {
-			return err
+		if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o111 != file.mode.Perm()&0o111) {
+			return fmt.Errorf("invalid builtin file mode: %s", file.path)
 		}
 		actual, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		actualHash := sha256.New()
-		_, err = io.Copy(actualHash, actual)
+		hash, err := builtinFileHash(actual)
 		_ = actual.Close()
 		if err != nil {
 			return err
 		}
-		if !bytes.Equal(hash.Sum(nil), actualHash.Sum(nil)) {
-			return fmt.Errorf("builtin file checksum mismatch: %s", rel)
+		if hash != file.hash {
+			return fmt.Errorf("builtin file checksum mismatch: %s", file.path)
 		}
-		return nil
-	})
+	}
+	return nil
+}
+
+func builtinFileHash(r io.Reader) ([sha256.Size]byte, error) {
+	hash := sha256.New()
+	_, err := io.Copy(hash, r)
+	var digest [sha256.Size]byte
+	hash.Sum(digest[:0])
+	return digest, err
 }
 
 // Runtime validation covers executable, configuration and Skill inputs. Release
@@ -198,7 +231,7 @@ func desktopWorldRuntimeFile(name string) bool {
 }
 
 // ProductContributions assembles fixed Core capabilities separately from optional
-// user plugins. It uses the ordinary package parser and per-Session MCP paths.
+// user plugins. It uses the ordinary package parser and the product Store for default MCP data.
 // Unsupported platforms retain a diagnostic source without starting a process.
 func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if builtinDesktopWorldTarget == "" {
@@ -215,6 +248,7 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if err != nil {
 		return Contributions{}, fmt.Errorf("builtin desktop-world: %w", err)
 	}
+	paths.StoreDir = cacheDir
 	out, err := ResolveContributions([]Config{{ID: "desktop-world", Root: root, Enabled: true}}, paths)
 	if err == nil {
 		out.Sources[0].Status = "builtin"

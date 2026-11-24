@@ -132,85 +132,87 @@ func TestNativeSelfSnapshotSurvivesHostCapabilityEdit(t *testing.T) {
 
 func TestTeamChildPreparationUsesMaterializedCredentials(t *testing.T) {
 	for _, change := range []string{"added-key", "rotated-key"} {
-		for _, handle := range []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleOrbit, agentbinding.HandleZenith, agentbinding.HandleReviewer} {
-			t.Run(change+"/"+string(handle), func(t *testing.T) {
-				stack, parent := newLocalStateTestStack(t)
-				t.Cleanup(func() { _ = stack.Close() })
-				var requests atomic.Int32
-				var wrongCredential atomic.Bool
-				stack.composition.lookup.resolveTransportHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
-					return &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-						requests.Add(1)
-						if req.Header.Get("Authorization") != "Bearer synthetic-new" {
-							wrongCredential.Store(true)
-						}
-						return delegationResponse(req)
-					})}, nil
+		t.Run(change, func(t *testing.T) {
+			stack, parent := newLocalStateTestStack(t)
+			var requests atomic.Int32
+			var wrongCredential atomic.Bool
+			stack.composition.lookup.resolveTransportHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
+				return &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests.Add(1)
+					if req.Header.Get("Authorization") != "Bearer synthetic-new" {
+						wrongCredential.Store(true)
+					}
+					return delegationResponse(req)
+				})}, nil
+			}
+			configured := ModelConfig{Provider: "custom", API: model.APIOpenAIResponses, Model: "team-key", BaseURL: "https://team-key.example/v1", Token: "synthetic-old"}
+			if change == "rotated-key" {
+				if _, err := stack.connectTestModel(configured); err != nil {
+					t.Fatal(err)
 				}
-				configured := ModelConfig{Provider: "custom", API: model.APIOpenAIResponses, Model: "team-key", BaseURL: "https://team-key.example/v1", Token: "synthetic-old"}
-				if change == "rotated-key" {
-					if _, err := stack.connectTestModel(configured); err != nil {
+			}
+			runtime, release := activateHeldSessionRuntime(t, stack, parent.SessionID)
+			defer release()
+			configured.Token = "synthetic-new"
+			profile, err := stack.connectTestModel(configured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, handle := range []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleOrbit, agentbinding.HandleZenith, agentbinding.HandleReviewer} {
+				t.Run(string(handle), func(t *testing.T) {
+					if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort}); err != nil {
 						t.Fatal(err)
 					}
-				}
-				runtime, release := activateHeldSessionRuntime(t, stack, parent.SessionID)
-				defer release()
-				configured.Token = "synthetic-new"
-				profile, err := stack.connectTestModel(configured)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort}); err != nil {
-					t.Fatal(err)
-				}
-				ctx, err := runtime.instance.captureTeamSnapshot(t.Context())
-				if err != nil {
-					t.Fatal(err)
-				}
-				purpose := controlplacement.PurposeSpawn
-				if handle == agentbinding.HandleReviewer {
-					purpose = controlplacement.PurposeReviewer
-				}
-				placed, err := runtime.instance.resolveHandlePlacement(ctx, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
-				if err != nil {
-					t.Fatal(err)
-				}
-				agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: sdkdelegation.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
-				if err != nil {
-					t.Fatal(err)
-				}
-				child, err := startGatewayAppTestSession(t.Context(), stack, "team-key-child")
-				if err != nil {
-					t.Fatal(err)
-				}
-				options, err := runtime.instance.prepareSpawnedACPSession(ctx, child.SessionID, agent)
-				if err != nil {
-					t.Fatalf("real child preparation: %v", err)
-				}
-				defer runtime.instance.releaseSpawnedSessionModelPin(child.SessionID)
-				if options.ModelID != "" {
-					t.Fatal("process-local pin escaped into ACP options")
-				}
-				_, releaseChild := activateHeldSessionRuntime(t, stack, child.SessionID)
-				defer releaseChild()
-				promptDelegationSession(t, stack, child.SessionID, "team-key-request")
-				if requests.Load() != 1 || wrongCredential.Load() {
-					t.Fatal("child provider request missing or used an obsolete credential")
-				}
-				if change == "rotated-key" {
-					old, err := runtime.instance.lookup.ResolveConfig(profile.Backend.Provider.ModelConfigID)
+					ctx, err := runtime.instance.captureTeamSnapshot(t.Context())
 					if err != nil {
 						t.Fatal(err)
 					}
-					old, err = runtime.instance.lookup.materializeAPIKeyCredential(t.Context(), old)
-					if err != nil || old.Token != "synthetic-old" {
-						t.Fatal("Team refresh mutated parent main-model credential snapshot")
+					purpose := controlplacement.PurposeSpawn
+					if handle == agentbinding.HandleReviewer {
+						purpose = controlplacement.PurposeReviewer
 					}
-				} else if runtime.instance.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
-					t.Fatal("Team addition refreshed parent main-model lookup")
-				}
-			})
-		}
+					placed, err := runtime.instance.resolveHandlePlacement(ctx, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
+					if err != nil {
+						t.Fatal(err)
+					}
+					agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: sdkdelegation.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
+					if err != nil {
+						t.Fatal(err)
+					}
+					child, err := startGatewayAppTestSession(t.Context(), stack, "team-key-"+string(handle))
+					if err != nil {
+						t.Fatal(err)
+					}
+					options, err := runtime.instance.prepareSpawnedACPSession(ctx, child.SessionID, agent)
+					if err != nil {
+						t.Fatalf("real child preparation: %v", err)
+					}
+					defer runtime.instance.releaseSpawnedSessionModelPin(child.SessionID)
+					if options.ModelID != "" {
+						t.Fatal("process-local pin escaped into ACP options")
+					}
+					_, releaseChild := activateHeldSessionRuntime(t, stack, child.SessionID)
+					defer releaseChild()
+					before := requests.Load()
+					promptDelegationSession(t, stack, child.SessionID, "team-key-request-"+string(handle))
+					if requests.Load() != before+1 || wrongCredential.Load() {
+						t.Fatal("child provider request missing or used an obsolete credential")
+					}
+					if change == "rotated-key" {
+						old, err := runtime.instance.lookup.ResolveConfig(profile.Backend.Provider.ModelConfigID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						old, err = runtime.instance.lookup.materializeAPIKeyCredential(t.Context(), old)
+						if err != nil || old.Token != "synthetic-old" {
+							t.Fatal("Team refresh mutated parent main-model credential snapshot")
+						}
+					} else if runtime.instance.lookup.HasAlias(profile.Backend.Provider.ModelConfigID) {
+						t.Fatal("Team addition refreshed parent main-model lookup")
+					}
+				})
+			}
+		})
 	}
 }
 

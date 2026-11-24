@@ -15,9 +15,10 @@ native Caelis manifest takes precedence on a duplicate server name.
 Desktop World is a fixed Core capability on macOS arm64, Linux x86_64 and
 arm64, and Windows x64. The complete official plugin is embedded in the
 platform's Core executable and follows the Core version. Core materializes the
-verified package in its private Store cache and starts its standard stdio
-process for each Session Runtime. Single-binary
-distribution does not mean single-process execution. Unsupported platforms keep
+verified package in its private Store cache. Sessions that select the same
+Host default share its standard stdio process and product Store data.
+Explicit package selections use their own launch configuration and private data.
+Unsupported platforms keep
 Core usable and report computer use as unavailable; OS permissions still apply.
 Runtime validation checks the packaged executable, manifests and Skill inputs.
 Unrelated files, including caches created by platform APIs, do not prevent

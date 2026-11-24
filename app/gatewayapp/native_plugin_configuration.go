@@ -132,7 +132,7 @@ func (s *runtimeComposition) nativePluginContributions(configs []PluginConfig) (
 		contributions, err := resolveGatewayPluginContributions(configs, s.authorities.storeDir, s.workspace.CWD)
 		return contributions, &configuration, err
 	}
-	contributions, err := s.resolveAvailableApplicationPlugins(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD))
+	contributions, err := s.resolveAvailableApplicationPlugins(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD), active.UserID)
 	return contributions, &configuration, err
 }
 

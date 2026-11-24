@@ -60,9 +60,31 @@ func resolveExecutable(command string, workDir string) string {
 }
 
 func startClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) (*Client, error) {
-	transport, transportName, launchIdentity, err := transportForSpecWithIdentity(spec, httpClient)
-	if err != nil {
-		return nil, &startupError{Stage: "transport", Err: err}
+	launch := prepareLaunch(spec, httpClient)
+	return launch.start(ctx, spec)
+}
+
+type preparedLaunch struct {
+	transport mcpsdk.Transport
+	name      string
+	identity  string
+	err       error
+}
+
+func prepareLaunch(spec ServerSpec, httpClient *http.Client) preparedLaunch {
+	transport, name, identity, err := transportForSpecWithIdentity(spec, httpClient)
+	return preparedLaunch{transport, name, identity, err}
+}
+
+func (launch preparedLaunch) start(ctx context.Context, spec ServerSpec) (*Client, error) {
+	transport, transportName, launchIdentity := launch.transport, launch.name, launch.identity
+	if launch.err != nil {
+		return nil, &startupError{Stage: "transport", Err: launch.err}
+	}
+	if transportName == TransportStdio && spec.DataDir != "" {
+		if err := ensurePluginDataDir(spec.DataDir, transport.(*mcpsdk.CommandTransport).Command.Dir); err != nil {
+			return nil, &startupError{Stage: "transport", Err: fmt.Errorf("plugin data directory: %w", err)}
+		}
 	}
 	catalog := newClientCatalog()
 	options := &mcpsdk.ClientOptions{
@@ -91,6 +113,9 @@ func startClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) 
 	startup := &startupTransport{Transport: transport}
 	diagnostics := observeStartup(transport, spec)
 	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, startup, DefaultStartupTimeout)
+	if startup.stopAbort != nil {
+		startup.stopAbort()
+	}
 	reason := diagnostics.reason(err)
 	diagnostics.stopStderr()
 	if err != nil {
@@ -169,11 +194,6 @@ func transportForSpecWithIdentity(spec ServerSpec, httpClient *http.Client) (mcp
 		command := strings.TrimSpace(spec.Command)
 		if command == "" {
 			return nil, "", "", fmt.Errorf("command is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
-		}
-		if spec.DataDir != "" {
-			if err := ensurePluginDataDir(spec.DataDir, workDir); err != nil {
-				return nil, "", "", fmt.Errorf("plugin data directory: %w", err)
-			}
 		}
 		cmd := exec.Command(resolveExecutable(command, workDir), spec.Args...)
 		configureStdioProcess(cmd)

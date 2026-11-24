@@ -17,7 +17,7 @@ import (
 
 // Persisted package selections can become unavailable after admission. Resolve
 // each selected package separately so its failure cannot suppress its siblings.
-func (s *runtimeComposition) resolveAvailableApplicationPlugins(profile sessionprofile.Profile, paths plugin.RuntimePaths) (plugin.Contributions, error) {
+func (s *runtimeComposition) resolveAvailableApplicationPlugins(profile sessionprofile.Profile, paths plugin.RuntimePaths, principal string) (plugin.Contributions, error) {
 	doc, err := s.loadGatewayAppConfig()
 	if err != nil {
 		return plugin.Contributions{}, err
@@ -34,6 +34,9 @@ func (s *runtimeComposition) resolveAvailableApplicationPlugins(profile sessionp
 				source.ID, source.Version = installed.ID, installed.Version
 			}
 			part = plugin.Contributions{Sources: []plugin.Source{source}}
+		}
+		for i := range part.MCPServerSpecs {
+			part.MCPServerSpecs[i].ConnectionScope = principal
 		}
 		out.Sources = append(out.Sources, part.Sources...)
 		out.MCPServerSpecs = append(out.MCPServerSpecs, part.MCPServerSpecs...)

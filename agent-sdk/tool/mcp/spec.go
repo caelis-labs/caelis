@@ -6,7 +6,10 @@ import (
 
 // ServerSpec describes one MCP server connection.
 type ServerSpec struct {
-	PluginID string
+	// ConnectionScope partitions shared connections by the embedding owner's
+	// privacy boundary. It is never exposed in directory definitions.
+	ConnectionScope string `json:"-"`
+	PluginID        string
 	// PackageRoot and PackageVersion bind a Host-selected native package even
 	// when its declared connection is served through a Host-owned proxy.
 	PackageRoot    string `json:",omitempty"`

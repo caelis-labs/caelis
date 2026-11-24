@@ -15,7 +15,7 @@ import (
 )
 
 func TestMCPWatcherRetriesUnchangedFilesAndSeesSameTimestampReplacement(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	stack, err := newGatewayAppTestStack(t, Config{StoreDir: t.TempDir(), WorkspaceCWD: t.TempDir()})
 	if err != nil {
@@ -47,16 +47,22 @@ func TestMCPWatcherRetriesUnchangedFilesAndSeesSameTimestampReplacement(t *testi
 	}
 	write(path, "one")
 	attempts := make(chan []mcp.ServerSpec, 8)
-	first := true
-	stop := s.watchConfiguredMCP(doc, func(specs []mcp.ServerSpec) error {
+	applies := 0
+	manager, err := s.authorities.mcp.configure(ctx, nil, hostMCPView{workspace: s.workspace.CWD, compose: func(specs []mcp.ServerSpec) ([]mcp.ServerSpec, error) {
 		attempts <- specs
-		if first {
-			first = false
-			return errors.New("temporary reconciliation failure")
+		applies++
+		if applies == 2 {
+			return nil, errors.New("temporary reconciliation failure")
 		}
-		return nil
-	})
-	defer stop()
+		return nil, nil
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		s.detachMCP(manager)
+		_ = manager.Close()
+	}()
 	waitFor := func(name string) {
 		t.Helper()
 		for {
@@ -71,10 +77,10 @@ func TestMCPWatcherRetriesUnchangedFilesAndSeesSameTimestampReplacement(t *testi
 		}
 	}
 	waitFor("one")
-	waitFor("one")
 	write(path+".new", "two")
 	if err := os.Rename(path+".new", path); err != nil {
 		t.Fatal(err)
 	}
+	waitFor("two")
 	waitFor("two")
 }

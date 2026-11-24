@@ -23,17 +23,25 @@ type startupError struct {
 func (e *startupError) Error() string { return fmt.Sprintf("MCP %s: %v", e.Stage, e.Err) }
 func (e *startupError) Unwrap() error { return e.Err }
 
-// startupTransport observes the transport/initialize boundary without owning
-// transport lifetime or changing the SDK's cancellation path.
+// startupTransport observes the transport/initialize boundary and aborts a
+// stdio subprocess if initialization is cancelled.
 type startupTransport struct {
 	mcpsdk.Transport
 	connected atomic.Bool
+	stopAbort func() bool
 }
 
 func (t *startupTransport) Connect(ctx context.Context) (mcpsdk.Connection, error) {
 	conn, err := t.Transport.Connect(ctx)
 	if err == nil {
 		t.connected.Store(true)
+		if command, ok := t.Transport.(*mcpsdk.CommandTransport); ok {
+			// A peer that has not answered initialize may ignore stdin EOF.
+			// Unblock the SDK's process wait on cancellation. The SDK still
+			// reaps the command and owns graceful shutdown after startup.
+			process := command.Command.Process
+			t.stopAbort = context.AfterFunc(ctx, func() { _ = process.Kill() })
+		}
 	}
 	return conn, err
 }

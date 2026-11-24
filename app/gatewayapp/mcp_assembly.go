@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -23,6 +24,11 @@ func resolveConfiguredMCPServers(native mcpconfig.Servers, trust workspacetrust.
 		ProjectRoot:          workspaceDir,
 		AllowProjectOverlays: workspacetrust.Lookup(trust, workspaceDir) == workspacetrust.Trusted,
 	})
+	for i := range specs {
+		if specs[i].PluginID == mcpconfig.NamespaceProject {
+			specs[i].ConnectionScope = workspaceDir
+		}
+	}
 	return slices.DeleteFunc(specs, func(spec sdkmcp.ServerSpec) bool {
 		return reservedMCPNamespace(spec) != ""
 	}), err
@@ -61,4 +67,45 @@ func reservedMCPNamespace(spec sdkmcp.ServerSpec) string {
 		}
 	}
 	return ""
+}
+
+// The process-default Runtime keeps its configured startup selection. It
+// follows replacements of those services while resident Session views opt into
+// newly added services when the Host publishes them.
+func (s *runtimeComposition) configureNativeMCP(ctx context.Context, configured, plugins []sdkmcp.ServerSpec) (*sdkmcp.Manager, error) {
+	var startupNames map[string]bool
+	if s.activation == nil {
+		startupNames = make(map[string]bool, len(configured))
+		for _, spec := range configured {
+			startupNames[spec.Name] = true
+		}
+	}
+	return s.configureMCP(ctx, nil, func(current []sdkmcp.ServerSpec) ([]sdkmcp.ServerSpec, error) {
+		if startupNames != nil {
+			current = slices.DeleteFunc(slices.Clone(current), func(spec sdkmcp.ServerSpec) bool {
+				return !startupNames[spec.Name]
+			})
+		}
+		return mergeRuntimeMCPSpecs(current, plugins)
+	}, configured, s.mcpFailureNotifier())
+}
+
+func (s *runtimeComposition) configureMCP(ctx context.Context, manager *sdkmcp.Manager, compose func([]sdkmcp.ServerSpec) ([]sdkmcp.ServerSpec, error), configured []sdkmcp.ServerSpec, onFailure func(sdkmcp.ServerFailure)) (*sdkmcp.Manager, error) {
+	if host := s.authorities.mcp; host != nil {
+		return host.configure(ctx, manager, hostMCPView{workspace: s.workspace.CWD, compose: compose}, onFailure)
+	}
+	specs, err := compose(configured)
+	if err != nil {
+		return nil, err
+	}
+	if manager != nil {
+		return manager, manager.Reconcile(specs)
+	}
+	return sdkmcp.NewManager(context.WithoutCancel(ctx), specs, onFailure)
+}
+
+func (s *runtimeComposition) detachMCP(manager *sdkmcp.Manager) {
+	if host := s.authorities.mcp; host != nil && manager != nil {
+		host.detach(manager)
+	}
 }

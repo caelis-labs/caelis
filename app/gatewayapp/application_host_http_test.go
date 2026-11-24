@@ -205,6 +205,9 @@ func startApplicationHTTPHostWithSandbox(t *testing.T, store, workspace string, 
 
 func (h *applicationHTTPHost) close(t *testing.T) {
 	t.Helper()
+	// Active SSE handlers wait for the client to disconnect; Server.Close
+	// waits for those handlers. Disconnect fixture clients before joining.
+	h.server.CloseClientConnections()
 	h.server.Close()
 	if err := h.stack.Close(); err != nil {
 		t.Fatal(err)

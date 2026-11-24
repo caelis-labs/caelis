@@ -48,26 +48,30 @@ func (p *teamChildProvider) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 func TestRuntimeTeamApplicationChildrenUseNextBinding(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	provider := &teamChildProvider{}
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
+	defer host.close(t)
+	for _, name := range []string{"gpt-4.1", "team-luna", "team-sol"} {
+		connectApplicationChildModel(t, ctx, host, name)
+	}
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	for _, role := range []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleOrbit, agentbinding.HandleZenith} {
 		t.Run(string(role), func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-			defer cancel()
-			root := t.TempDir()
-			provider := &teamChildProvider{role: string(role)}
-			host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
-			defer host.close(t)
-			for _, name := range []string{"gpt-4.1", "team-luna", "team-sol"} {
-				connectApplicationChildModel(t, ctx, host, name)
-			}
-			client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
-			sid := createApplicationHTTPSession(t, ctx, client, "team-parent")
+			provider.mu.Lock()
+			provider.role = string(role)
+			firstRequest := len(provider.models)
+			provider.mu.Unlock()
+			sid := createApplicationHTTPSession(t, ctx, client, "team-parent-"+string(role))
 			for round, name := range []string{"team-luna", "team-sol"} {
 				label := fmt.Sprintf("leaf-%d", round)
 				provider.mu.Lock()
 				provider.label = label
 				provider.mu.Unlock()
-				bindRuntimeTeamHTTP(t, ctx, host, role, name, "bind-"+name)
-				backgroundPrompt(t, ctx, client, sid, "spawn-"+name, "SPAWN_TEAM_CHILD", "user", "")
+				bindRuntimeTeamHTTP(t, ctx, host, role, name, "bind-"+string(role)+"-"+name)
+				backgroundPrompt(t, ctx, client, sid, "spawn-"+string(role)+"-"+name, "SPAWN_TEAM_CHILD", "user", "")
 				child, taskID := applicationAttachedChild(t, ctx, client, sid, label)
 				tasks, err := httpclient.NewTaskClient(client)
 				if err != nil {
@@ -99,7 +103,7 @@ func TestRuntimeTeamApplicationChildrenUseNextBinding(t *testing.T) {
 			provider.mu.Lock()
 			defer provider.mu.Unlock()
 			var children []string
-			for _, name := range provider.models {
+			for _, name := range provider.models[firstRequest:] {
 				if name != "gpt-4.1" {
 					children = append(children, name)
 				}

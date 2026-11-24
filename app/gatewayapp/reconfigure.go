@@ -336,21 +336,14 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	mcpSpecs, err := mergeRuntimeMCPSpecs(plan.MCPServers, plan.Plugins.MCPServerSpecs)
-	if err != nil {
-		bundle.Close()
-		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
-	}
-	mcpMgr, err := mcp.NewManager(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier())
+	mcpMgr, err := s.configureNativeMCP(ctx, plan.MCPServers, plan.Plugins.MCPServerSpecs)
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
 	bundle.MCP = mcpMgr
 	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr)
-	if s.activation != nil && s.retainRuntimeWork != nil && s.authorities.store != nil {
-		bundle.CloseCapabilities = s.watchNativeMCP(mcpMgr, plan.Plugins.MCPServerSpecs)
-	}
+	bundle.CloseCapabilities = func() { s.detachMCP(mcpMgr) }
 	if err := ctx.Err(); err != nil {
 		bundle.Close()
 		return nil, err

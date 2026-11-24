@@ -31,9 +31,7 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 				})
 			}
 			install("first")
-			var promotedStartup atomic.Bool
-			initializing, initializeRelease := make(chan struct{}), make(chan struct{})
-			var initializeOnce sync.Once
+			var initializations atomic.Int32
 			var fail atomic.Bool
 			var lists atomic.Int32
 			initialListing, initialListRelease := make(chan struct{}), make(chan struct{})
@@ -46,13 +44,8 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			defer releaseBackground()
 			server.AddReceivingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 				return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
-					if method == "initialize" && promotedStartup.Load() {
-						initializeOnce.Do(func() { close(initializing) })
-						select {
-						case <-initializeRelease:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+					if method == "initialize" {
+						initializations.Add(1)
 					}
 					if method == "tools/list" {
 						count := lists.Add(1)
@@ -243,22 +236,14 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			promotedStartup.Store(true)
+			beforePromotion := initializations.Load()
 			promotedActive, releasePromoted := activateHeldSessionRuntime(t, stack, promoted.SessionID)
 			defer releasePromoted()
-			if profile {
-				_ = promotedActive.instance.capabilityStatus(1)
-			}
-			select {
-			case <-initializing:
-			case <-time.After(5 * time.Second):
-				t.Fatal("promoted Manager did not start")
-			}
 			request.WriteBase = appserver.WriteBase{OperationID: "always-on", SessionID: promoted.SessionID}
-			close(initializeRelease)
-			// Activation starts MCP asynchronously. Refresh tests must wait on the
-			// new activation's existing catalog status, not the previous Manager.
 			awaitExperimentalRefresh(t, func() bool { return ready(promotedActive) })
+			if got := initializations.Load(); beforePromotion != 1 || got != beforePromotion {
+				t.Fatalf("second activation restarted the same connection: before=%d after=%d", beforePromotion, got)
+			}
 			result, err = client.RefreshMCPTools(t.Context(), request)
 			if err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
 				t.Fatalf("built-in refresh rejected: %+v %v", result, err)

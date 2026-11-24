@@ -348,10 +348,10 @@ writes use revision-aware atomic replacement; readers observe a complete documen
 
 Native MCP configuration is assembled from AppConfig plus supported user
 overlays. Project `.agents/mcp.json` or `.mcp.json` files are sampled only after
-the exact canonical workspace is trusted. Resident Session Runtimes detect ordinary
-Host and overlay configuration changes and apply connection changes in place.
-Application Sessions use this same catalog and watcher, with their explicit
-Server definitions taking precedence by namespace.
+the exact canonical workspace is trusted. The Host watches inherited MCP
+configuration and publishes changes to all affected resident Sessions together.
+Application Sessions use the same inherited sources, with their explicit Server
+definitions taking precedence by namespace.
 During assembly and reload, a malformed overlay file or server
 entry is omitted; an invalid persisted native server is omitted individually.
 An invalid higher-priority entry cannot shadow a healthy lower-priority entry;
@@ -368,9 +368,13 @@ The TUI's Session presence subscription displays these notices during active
 and idle periods; Turn and reconnect views omit duplicate presentation.
 Overlapping tool namespaces wait for higher-priority initialization to settle
 before publication, preserving configured collision precedence.
-Unchanged connections continue serving across reload. A removed or replaced
-Server stops accepting new calls and closes once dispatched calls finish.
-Runtime release cancels and drains pending initialization and closes its clients.
+The Host shares equal effective MCP connections across ordinary and Application
+Sessions. Connection identity includes the launch or HTTP parameters, package
+identity and private scope. Each Session retains its own selected directory and
+invocation policy. The latest configuration replaces membership in those directories
+together. A superseded connection serves only calls already dispatched, then
+closes when no current directory uses it. Session release drops its connection
+references. The Host joins process cleanup on shutdown.
 
 Automatic Skill discovery omits malformed individual `SKILL.md` files from
 live catalogs and refreshed prompt metadata without a startup notice. An explicit
@@ -389,11 +393,9 @@ Agent Plugins 1.0 root `plugin.json`/`mcp.json` and Claude plugin root
 The standard manifest wins if both formats exist in one package. A standard
 plugin's `PLUGIN_DATA` lives under the Host Store by plugin identity, persists
 across package updates, and is created only when its stdio server starts. Its
-process receives a small platform environment and explicit package/Host values,
-not the Host's complete environment. A Runtime owns one MCP client per server;
-tool calls and Turns reuse that connection until the Runtime is released or the
-connection fails. Failed clients are removed from the callable catalog without
-replaying a call or promoting a lower-priority colliding server. See
+process receives a small platform environment plus explicit package and Host
+values. Failed clients leave the callable catalog. An unavailable namespace
+owner retains its priority, and existing effects are never replayed. See
 [Plugin integration](plugins.md) for supported content and authentication limits.
 
 ## Compatibility and current limits

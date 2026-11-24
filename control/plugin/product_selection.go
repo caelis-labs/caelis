@@ -36,6 +36,9 @@ func productOverride(configs []Config, paths RuntimePaths) (Contributions, bool,
 	}
 	configured := *selected
 	configured.ID = "desktop-world"
+	if paths.ProductStoreDir != "" {
+		paths.StoreDir = paths.ProductStoreDir
+	}
 	out, err := ResolveContributions([]Config{configured}, paths)
 	if err == nil {
 		err = validateProductPair(out)
@@ -44,11 +47,11 @@ func productOverride(configs []Config, paths RuntimePaths) (Contributions, bool,
 		out.Sources[0].Status = "override"
 	}
 	if err == nil && builtinDesktopWorldTarget != "" && productSemver(out.Sources[0].Version) != "" {
-		_, _, version, bundleErr := desktopWorldBundle()
+		bundle, bundleErr := desktopWorldBundle()
 		if bundleErr != nil {
 			return Contributions{}, true, bundleErr
 		}
-		if newerProductVersion(version, out.Sources[0].Version) {
+		if newerProductVersion(bundle.version, out.Sources[0].Version) {
 			out, err = ProductContributions(paths)
 		}
 	}

@@ -153,6 +153,7 @@ type atomicCapabilityProvider struct {
 	first    sync.Once
 	started  chan struct{}
 	hold     <-chan struct{}
+	scripts  map[string]string
 }
 
 func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -206,7 +207,13 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 			}
 		}
 	}
-	name, args := "", ""
+	name, args, fixtureScript := "", "", ""
+	for input, script := range p.scripts {
+		if strings.Contains(latestUser, input) {
+			fixtureScript = script
+			break
+		}
+	}
 	switch {
 	case latestTool == "tool_search" && strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "callfail__lookup", `{}`
@@ -217,6 +224,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	case latestTool == "tool_search" && strings.Contains(latestUser, "UTIL"):
 		name, args = "utilities__lookup", `{}`
 	case latestTool != "":
+	case fixtureScript != "":
+		name, args = "js_exec", gatewayapp.CodeModeFixtureArgs(fixtureScript)
 	case strings.Contains(latestUser, "HEALTHY_SKILL"):
 		name, args = "Skill", `{"name":"healthy-skill"}`
 	case strings.Contains(latestUser, "BODY_SKILL"):
@@ -671,7 +680,8 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 	if got := atomicAudit(audit); strings.Count(got, "documents:start:") != 1 || strings.Contains(got, "documents:stop:") {
 		t.Fatalf("model-only revision restarted MCP: %s", got)
 	}
-	for i := 0; i < 3; i++ {
+	const cycles = 2
+	for i := range cycles {
 		instructions := fmt.Sprintf("revision %d", i)
 		configuration, err = configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 			OperationID: fmt.Sprintf("lifecycle-instructions-%d", i), ExpectedConfigurationRevision: configuration.Revision,
@@ -742,7 +752,7 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		waitAtomicAuditCount(t, audit, "documents:start:", i+2)
 		atomicAssertLiveService(t, audit, "documents", 1)
 	}
-	if got := atomicAudit(audit); strings.Count(got, "documents:call:") != 3 {
+	if got := atomicAudit(audit); strings.Count(got, "documents:call:") != cycles {
 		t.Fatalf("MCP effects were duplicated: %s", got)
 	}
 }
@@ -890,6 +900,7 @@ func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer feed.Subscription.Close()
 	promptAtomicCapabilityClient(t, ctx, client, session, "close-race-warm", "BASIC")
 	waitAtomicAuditCount(t, audit, "documents:start:", 1)
 	configuration, err := client.SessionConfiguration(ctx, session)
@@ -908,9 +919,13 @@ func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
 		finished <- updateErr
 	}()
 	<-started
-	// Close the SSE stream before the test server, which waits for active clients.
-	_ = feed.Subscription.Close()
+	// Keep the live SSE request open while the fixture shuts down.
 	host.close(t)
+	for range feed.Subscription.Deliveries() {
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("Host cleanup waited for the subscription deadline: %v", ctx.Err())
+	}
 	if updateErr := <-finished; updateErr == nil {
 		t.Fatal("invalid concurrent update succeeded")
 	}

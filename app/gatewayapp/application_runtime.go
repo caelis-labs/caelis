@@ -108,10 +108,6 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 			resolver.closeCapabilities()
 		}
 	}()
-	resolver.inheritedMCP, err = resolveConfiguredMCPServers(modelDocument.MCPServers, modelDocument.WorkspaceTrust, workspace.CWD)
-	if err != nil {
-		return nil, err
-	}
 	configuration, err := store.Configuration(ctx, binding.Scope, binding.SessionID)
 	if err != nil {
 		return nil, err
@@ -179,11 +175,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		return nil, err
 	}
 	bundle := &gatewayRuntimeBundle{ACPControlPlane: childPlane, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
-	stop := instance.watchConfiguredMCP(modelDocument, resolver.updateInheritedMCP)
-	bundle.CloseCapabilities = func() {
-		stop()
-		resolver.closeCapabilities()
-	}
+	bundle.CloseCapabilities = resolver.closeCapabilities
 	bundle.CapabilityStatus = resolver.capabilityStatus
 	bundle.CapabilityRefresh = resolver.refreshMCPTools
 	bundle.CapabilityUpdated = resolver.configurationCommitted
@@ -247,7 +239,7 @@ type applicationTurnResolver struct {
 	capabilitiesMu     sync.Mutex
 	capabilities       *applicationCapabilities
 	mcpManager         *mcp.Manager
-	inheritedMCP       []mcp.ServerSpec
+	mcpSelection       uint64
 	declaredMCP        []mcp.ServerSpec
 	desiredRevision    uint64
 	failedMCPRevision  uint64
