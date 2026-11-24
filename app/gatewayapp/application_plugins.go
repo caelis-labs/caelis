@@ -116,7 +116,7 @@ func applicationPluginSkills(bundles []skill.PluginBundle) ([]skill.Meta, error)
 }
 
 // Runtime defaults remain available when the optional Profile selection is empty.
-func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths plugin.RuntimePaths, defaults ...plugin.Config) (plugin.Contributions, error) {
+func applicationRuntimePluginContributions(productDefaults productPluginDefaults, profile sessionprofile.Profile, paths plugin.RuntimePaths, defaults ...plugin.Config) (plugin.Contributions, error) {
 	optional, err := applicationPluginContributions(profile, paths)
 	if err != nil {
 		return plugin.Contributions{}, err
@@ -134,7 +134,7 @@ func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths
 			return combined, err
 		}
 	} else {
-		combined = plugin.WithAvailableProductContributions(optional, paths, defaults...)
+		combined = productDefaults.apply(optional, paths, defaults...)
 	}
 	if err := validateApplicationMCPNamespaces(profile, combined); err != nil {
 		return plugin.Contributions{}, err
@@ -158,7 +158,7 @@ func (s *runtimeComposition) resolveApplicationPlugins(profile sessionprofile.Pr
 	if err != nil {
 		return plugin.Contributions{}, err
 	}
-	contributions, err := applicationRuntimePluginContributions(profile, paths, doc.Plugins...)
+	contributions, err := applicationRuntimePluginContributions(s.authorities.productDefaults, profile, paths, doc.Plugins...)
 	if err != nil {
 		return contributions, errorcode.Wrap(errorcode.InvalidArgument, fmt.Sprintf("native plugin selection is invalid: %v", err), err)
 	}

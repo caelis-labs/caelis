@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/caelis-labs/caelis/control/plugin"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -331,6 +332,10 @@ type SandboxStatus struct {
 }
 
 func NewLocalStack(cfg Config) (*Stack, error) {
+	return newLocalStack(cfg, plugin.WithAvailableProductContributions)
+}
+
+func newLocalStack(cfg Config, productDefaults productPluginDefaults) (*Stack, error) {
 	if modelConfigSupplied(cfg.Model) {
 		return nil, fmt.Errorf("gatewayapp: runtime model overrides are unsupported; configure the model with /connect and select its ModelProfile")
 	}
@@ -532,6 +537,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
+				productDefaults:         productDefaults,
 				mcp:                     newHostMCP(newAppConfigStore(storeDir), doc, runtimeDiagnostics),
 				applicationChildClients: &applicationChildClientFactory{},
 				appName:                 appName,

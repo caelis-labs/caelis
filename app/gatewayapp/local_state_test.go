@@ -1567,7 +1567,7 @@ func newLocalStateTestHost(t *testing.T) *Stack {
 	t.Helper()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := newGatewayAppTestStack(t, Config{
+	stack, err := newIsolatedGatewayAppTestStack(t, Config{
 		AppName:      "caelis",
 		UserID:       "state-test",
 		StoreDir:     root,

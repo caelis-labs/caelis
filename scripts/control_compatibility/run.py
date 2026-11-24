@@ -1,9 +1,14 @@
-import os, json, secrets, subprocess, time, urllib.request, threading, http.server, socket, signal, pathlib, hashlib
+import os, json, secrets, subprocess, time, urllib.request, threading, http.server, socket, sys, pathlib, hashlib
 import argparse, tempfile
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from smoke_cleanup import handle_termination, foreground_store, foreground_host
+
 parser = argparse.ArgumentParser(description='Verify current Control restart, optionally interoperability with a compatible peer ref.')
 parser.add_argument('--peer-ref', help='Optional local ref implementing the unified Session protocol and compatible Store schema')
 parser.add_argument('--output', help='New evidence directory; created privately if omitted')
+parser.add_argument('--keep-stores', action='store_true', help='Retain full case Stores after shutdown')
 args = parser.parse_args()
+handle_termination()
 repo = pathlib.Path(__file__).resolve().parents[2]
 root = pathlib.Path(args.output).resolve() if args.output else pathlib.Path(tempfile.mkdtemp(prefix='caelis-control-compat-'))
 if args.output:
@@ -68,18 +73,22 @@ def run_pair(name, client, host, replacements):
     case.mkdir(exist_ok=False)
     (case / 'home').mkdir(mode=0o700)
     case_env = dict(env, HOME=str(case / 'home'), XDG_CONFIG_HOME=str(case / 'home' / '.config'))
-    (case / 'store').mkdir(mode=0o700)
     (case / 'workspace').mkdir(mode=0o700)
     (case / 'host.token').write_text(secrets.token_urlsafe(32) + '\n')
     os.chmod(case / 'host.token', 0o600)
+    with foreground_store(case / 'store', args.keep_stores):
+        run_phases(case, case_env, name, client, host, replacements)
+
+
+def run_phases(case, case_env, name, client, host, replacements):
     for index, (binary, phase) in enumerate([(host, 'create')] + [(x, 'observe') for x in replacements]):
         with socket.socket() as s:
             s.bind(('127.0.0.1', 0))
             port = s.getsockname()[1]
         origin = 'http://127.0.0.1:' + str(port)
-        log = open(case / f'host-{index}.log', 'w')
-        process = subprocess.Popen([str(root / binary), 'serve', '--store-dir', str(case / 'store'), '--listen', f'127.0.0.1:{port}', '--control-token-file', str(case / 'host.token')], cwd=case / 'workspace', env=case_env, stdout=log, stderr=subprocess.STDOUT)
-        try:
+        command = [str(root / binary), 'serve', '--store-dir', str(case / 'store'), '--listen', f'127.0.0.1:{port}', '--control-token-file', str(case / 'host.token')]
+        with (case / f'host-{index}.log').open('w') as log, foreground_host(
+                command, store=case / 'store', cwd=case / 'workspace', env=case_env, log=log) as process:
             ready = False
             for _ in range(150):
                 if process.poll() is not None:
@@ -100,14 +109,6 @@ def run_pair(name, client, host, replacements):
             if result.returncode:
                 raise RuntimeError('client failed')
             (case / f'evidence-{phase}-{index}.json').write_text((case / f'evidence-{phase}.json').read_text())
-        finally:
-            process.send_signal(signal.SIGINT)
-            try:
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-            log.close()
 try:
     run_pair('current-restart', 'current-client', 'current-host', ['current-host'])
     if args.peer_ref:

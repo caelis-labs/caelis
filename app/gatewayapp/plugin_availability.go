@@ -15,6 +15,17 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
+// productPluginDefaults adds the Host's built-in packages to the optional
+// contributions. Detached Session Runtimes inherit their Host's selection.
+type productPluginDefaults func(plugin.Contributions, plugin.RuntimePaths, ...plugin.Config) plugin.Contributions
+
+func (defaults productPluginDefaults) apply(optional plugin.Contributions, paths plugin.RuntimePaths, configs ...plugin.Config) plugin.Contributions {
+	if defaults == nil {
+		defaults = plugin.WithAvailableProductContributions
+	}
+	return defaults(optional, paths, configs...)
+}
+
 // Persisted package selections can become unavailable after admission. Resolve
 // each selected package separately so its failure cannot suppress its siblings.
 func (s *runtimeComposition) resolveAvailableApplicationPlugins(profile sessionprofile.Profile, paths plugin.RuntimePaths, principal string) (plugin.Contributions, error) {
@@ -48,7 +59,7 @@ func (s *runtimeComposition) resolveAvailableApplicationPlugins(profile sessionp
 			seen[source.ID] = true
 		}
 	}
-	out = plugin.WithAvailableProductContributions(out, paths, doc.Plugins...)
+	out = s.authorities.productDefaults.apply(out, paths, doc.Plugins...)
 	isolatePluginMCPConflicts(applicationMCPSpecs(profile), &out, &profile)
 	isolatePluginSkillConflicts(profile, &out)
 	return out, nil

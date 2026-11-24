@@ -726,7 +726,10 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 }
 
 func TestLoadGatewayBuildPlanSkipsInvalidPluginWithoutMutatingStack(t *testing.T) {
-	stack, _ := newLocalStateTestStack(t)
+	stack, err := newGatewayAppTestStack(t, Config{StoreDir: t.TempDir(), WorkspaceCWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	beforeGateway := stack.composition.gateway
 	beforeExec := stack.composition.exec
 	beforeMCP := stack.composition.mcpMgr

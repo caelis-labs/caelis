@@ -57,17 +57,20 @@ func TestLocalHostStartsWithBrokenOptionalExtensions(t *testing.T) {
 	if err := os.WriteFile(configStore.path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stack, err := NewLocalStack(Config{
+	stack, err := newIsolatedGatewayAppTestStack(t, Config{
 		AppName: "CAELIS", StoreDir: storeDir, WorkspaceCWD: workspace,
 		SkillDirs: []string{regular}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatalf("Host startup with broken extensions: %v", err)
 	}
-	t.Cleanup(func() { _ = stack.Close() })
 	catalog, err := stack.WorkspaceReads().CurrentSkillCatalog(context.Background(), stack.composition.workspace)
 	if err != nil {
 		t.Fatalf("current Skill catalog: %v", err)
+	}
+	// Catalog reads must honor the same isolated package selection as startup.
+	if _, err := os.Stat(filepath.Join(storeDir, "builtin-plugins", "desktop-world")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected bundled Desktop World directory or stat error: %v", err)
 	}
 	names := map[string]bool{}
 	for _, meta := range catalog.Metas() {

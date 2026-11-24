@@ -125,7 +125,7 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, err
 		}
 		lastAssistantEvent = runResult.AssistantEvent
-		parsed, err := parseGuardianAssessmentForMode(runResult.Text, outputSpec.Mode, options)
+		parsed, err := parseGuardianAssessmentForMode(req.RuntimeRequest.Authorization, runResult.Text, outputSpec.Mode, options)
 		if err != nil {
 			lastParseErr = err
 			continue
