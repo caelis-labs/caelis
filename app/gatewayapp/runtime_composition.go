@@ -88,6 +88,7 @@ type runtimeComposition struct {
 // Runtime compositions.
 type runtimeProcessState struct {
 	config           *runtimeProcessConfigSource
+	sessionScopedMCP bool
 	sandboxPersisted SandboxConfig
 	sandboxRevision  uint64
 }

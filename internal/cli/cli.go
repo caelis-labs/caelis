@@ -519,6 +519,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	}
 	defer func() { _ = ownership.Close() }()
 	cfg.HostOwnership = ownership
+	cfg.SessionScopedMCP = true
 	stack, err := gatewayapp.NewLocalStack(cfg)
 	if err != nil {
 		return sandboxStartupEscapeError(err)

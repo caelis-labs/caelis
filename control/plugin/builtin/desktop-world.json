@@ -1,65 +1,65 @@
 {
   "schema": 1,
   "repository": "caelis-labs/desktop-world",
-  "version": "0.6.0",
-  "tag": "v0.6.0",
+  "version": "0.6.2",
+  "tag": "v0.6.2",
   "platforms": [
     {
       "target": "aarch64-apple-darwin",
-      "archive": "desktop-world-0.6.0-aarch64-apple-darwin.zip",
-      "archive_sha256": "6aa3bcb160dd3936fb95480dd6d1a6a659f2ee7865a7c5f89fce1e3eaf0432b3",
-      "binary_sha256": "4e1eef80138416478918f09b109fdcd2433ce3c992763bed02cc859d92f9d925",
+      "archive": "desktop-world-0.6.2-aarch64-apple-darwin.zip",
+      "archive_sha256": "0c82f949f65a6a05d70cda04ee334014d90b227fe32865faac896be1c70ce75f",
+      "binary_sha256": "9a0fcc140d835f9073eb303fda260180950fd310dd3d12e4286828c1fed69e49",
       "source": {
-        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
-        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
-        "commit_unix_seconds": 1795443800,
-        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
+        "commit": "01928a643d61728f07f83be5fdb1860a4541940f",
+        "tree": "b9ecbea0143d1912a05ca78222fe7f761428c8c4",
+        "commit_unix_seconds": 1795515989,
+        "cargo_lock_sha256": "a31c1d570a6eff9fa3ce3b04781d28c723b68be1c1bc3daa70a42b43c53ff7bd"
       },
-      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
-      "build_sha256": "1ce95ca11c078569473d574e82b7f67ca6b486327c1e18aa7444b75015f5fbe4"
+      "skill_sha256": "0b7bfa1ce942b4cf10d9b1c1e5980af73f2be9980d7f1264c570a0bf66dbbdce",
+      "build_sha256": "6476c4c2da2be6c42b5439b85014eef33152548c04b5bafb1b45d72198fe51db"
     },
     {
       "target": "x86_64-unknown-linux-gnu",
-      "archive": "desktop-world-0.6.0-x86_64-unknown-linux-gnu.tar.gz",
-      "archive_sha256": "b78fd1212522b36f5f91dba711c706cce4df03ff6194e640594349074ddd4163",
-      "binary_sha256": "5b3cdda0ef3f43493e0d4023622708c028a099560640b64ef413a494620defa8",
+      "archive": "desktop-world-0.6.2-x86_64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "4d93a18cc1e121320915d5c15fd2141ad03bb5295097462cd63569eb3ba912fa",
+      "binary_sha256": "e30e4c2357f16af205fb4b330ca368e1096457e306cef54ca8ae25cf9aed35e6",
       "source": {
-        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
-        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
-        "commit_unix_seconds": 1795443800,
-        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
+        "commit": "01928a643d61728f07f83be5fdb1860a4541940f",
+        "tree": "b9ecbea0143d1912a05ca78222fe7f761428c8c4",
+        "commit_unix_seconds": 1795515989,
+        "cargo_lock_sha256": "a31c1d570a6eff9fa3ce3b04781d28c723b68be1c1bc3daa70a42b43c53ff7bd"
       },
-      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
-      "build_sha256": "f5d87fb7bca5d2ab6e568144265434545207a4f5ec4b1fd862f3328fd48efdb1"
+      "skill_sha256": "0b7bfa1ce942b4cf10d9b1c1e5980af73f2be9980d7f1264c570a0bf66dbbdce",
+      "build_sha256": "d1f361a9469da449da2d3109f104304a504ec59edfd7b973572bc2db2a2b6fc1"
     },
     {
       "target": "aarch64-unknown-linux-gnu",
-      "archive": "desktop-world-0.6.0-aarch64-unknown-linux-gnu.tar.gz",
-      "archive_sha256": "d71530b2beb0af2e0582dcbec6509d3c9984284e020248784eeea63ff15b9a59",
-      "binary_sha256": "99cf5bc1c4c1f3ba83c60020169b761e0c53c1db5f3c648bc5b51672bdefeb19",
+      "archive": "desktop-world-0.6.2-aarch64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "647ff87c35b0333d960fe45b7afcc86646e5fc1e14cbcf8b1836aaecccfad237",
+      "binary_sha256": "075e4bd877f09b700c1e12d86bf8aa277c7578d92562542403c94b0feff16438",
       "source": {
-        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
-        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
-        "commit_unix_seconds": 1795443800,
-        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
+        "commit": "01928a643d61728f07f83be5fdb1860a4541940f",
+        "tree": "b9ecbea0143d1912a05ca78222fe7f761428c8c4",
+        "commit_unix_seconds": 1795515989,
+        "cargo_lock_sha256": "a31c1d570a6eff9fa3ce3b04781d28c723b68be1c1bc3daa70a42b43c53ff7bd"
       },
-      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
-      "build_sha256": "71fc33f6d6535cd739398f0b0976f2880ff8f56ad4c3404f4c638a03af4ebce8"
+      "skill_sha256": "0b7bfa1ce942b4cf10d9b1c1e5980af73f2be9980d7f1264c570a0bf66dbbdce",
+      "build_sha256": "c3f0054bc369e3f96c9887a8dab951c077297263eb282cf4777175238abdf84b"
     },
     {
       "target": "x86_64-pc-windows-msvc",
-      "archive": "desktop-world-0.6.0-x86_64-pc-windows-msvc.zip",
-      "archive_sha256": "8797041e8eb3a79e96405ad13e7fbca78cae80ba9d612d1de2de05e2028f5d84",
-      "binary_sha256": "6c6c2493df178e0b9284016ce471ac162481594acf88385122ec620b19bdbe52",
+      "archive": "desktop-world-0.6.2-x86_64-pc-windows-msvc.zip",
+      "archive_sha256": "06e668d4b6cc534a50288e9840a2e1ba61431ab6833dd988560bd2749af2889c",
+      "binary_sha256": "8a3aec11dfcc65147a6c409e81fbdaa9cee5e61f0a26905fdabd5780a5d67eac",
       "source": {
-        "commit": "6e10d17c5846ed710512252f04b6ff058093ad44",
-        "tree": "5c5f32988e008b2f63d36439c3eadb633bcf484e",
-        "commit_unix_seconds": 1795443800,
-        "cargo_lock_sha256": "94794a21eeaef714155f9c9348649f94c550143f2227f5205c4e60bd7db863ea"
+        "commit": "01928a643d61728f07f83be5fdb1860a4541940f",
+        "tree": "b9ecbea0143d1912a05ca78222fe7f761428c8c4",
+        "commit_unix_seconds": 1795515989,
+        "cargo_lock_sha256": "a31c1d570a6eff9fa3ce3b04781d28c723b68be1c1bc3daa70a42b43c53ff7bd"
       },
-      "skill_sha256": "a7611728157b6663d14cb93ea92f246ed33bebb54b2ad340e3704e9c24b74f55",
-      "build_sha256": "a3c73c9216ae8d6fbd7217ee6625521c6702f3d8b01c85079758bb009f604c7a"
+      "skill_sha256": "0b7bfa1ce942b4cf10d9b1c1e5980af73f2be9980d7f1264c570a0bf66dbbdce",
+      "build_sha256": "2d5e45f1e75ce92002cf9560d1a4e0678ae45b6261581627169a676836920d75"
     }
   ],
-  "release_sha256": "6d4fc19e3c53c04ec3961e9c1214f67b4e20b5c3750a14f86df778e0bf9ae115"
+  "release_sha256": "094ef53bf35e429a68db2167ca159892027067c340e2909732a801c74846625e"
 }
