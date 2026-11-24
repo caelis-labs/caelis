@@ -495,34 +495,44 @@ func TestGeminiRequest_Pre3DisableReasoningUsesZeroBudget(t *testing.T) {
 	}
 }
 
-func TestGeminiRequest_BaseURLWithVersionPath(t *testing.T) {
-	var gotPath string
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
-	}))
-	defer server.Close()
+func TestGeminiRequest_BaseURLVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		baseURL    string
+		pathPrefix string
+	}{
+		{name: "default endpoint", pathPrefix: "/v1beta"},
+		{name: "unversioned proxy", baseURL: "http://provider.test/proxy", pathPrefix: "/proxy/v1beta"},
+		{name: "explicit v1beta", baseURL: "http://provider.test/v1beta", pathPrefix: "/v1beta"},
+		{name: "explicit v1", baseURL: "http://provider.test/proxy/v1", pathPrefix: "/proxy/v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotPath string
+			server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
+			}))
+			defer server.Close()
 
-	llm := newGemini(Config{
-		Provider:   "gemini",
-		Model:      "test-model",
-		BaseURL:    server.URL + "/v1beta",
-		HTTPClient: server.Client(),
-		Timeout:    2 * time.Second,
-	}, "token")
-
-	for _, err := range llm.Generate(context.Background(), &model.Request{
-		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
-		Stream:   false,
-	}) {
-		if err != nil {
-			t.Fatalf("expected no generate error, got %v", err)
-		}
-	}
-
-	if gotPath != "/v1beta/models/test-model:generateContent" {
-		t.Fatalf("unexpected request path %q", gotPath)
+			llm := newGemini(Config{
+				Provider:   "gemini",
+				Model:      "test-model",
+				BaseURL:    tc.baseURL,
+				HTTPClient: server.Client(),
+				Timeout:    2 * time.Second,
+			}, "token")
+			for _, err := range llm.Generate(t.Context(), &model.Request{
+				Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+			}) {
+				if err != nil {
+					t.Fatalf("expected no generate error, got %v", err)
+				}
+			}
+			if want := tc.pathPrefix + "/models/test-model:generateContent"; gotPath != want {
+				t.Fatalf("request path = %q, want %q", gotPath, want)
+			}
+		})
 	}
 }
 

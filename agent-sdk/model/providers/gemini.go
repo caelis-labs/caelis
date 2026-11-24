@@ -514,13 +514,15 @@ func geminiToolUsePartFromCall(call model.ToolCall) model.Part {
 
 func buildGeminiHTTPOptions(baseURL string, headers map[string]string) genai.HTTPOptions {
 	root, version := splitGeminiBaseURL(baseURL)
-	// Each actual HTTP attempt must cross Core admission and accounting.
-	opts := genai.HTTPOptions{RetryOptions: &genai.HTTPRetryOptions{Attempts: genai.Ptr[int32](1)}}
-	if root != "" {
-		opts.BaseURL = root
+	// Keep unversioned endpoints on the Gemini API version Caelis has used.
+	if version == "" {
+		version = "v1beta"
 	}
-	if version != "" {
-		opts.APIVersion = version
+	// Each actual HTTP attempt must cross Core admission and accounting.
+	opts := genai.HTTPOptions{
+		BaseURL:      root,
+		APIVersion:   version,
+		RetryOptions: &genai.HTTPRetryOptions{Attempts: genai.Ptr[int32](1)},
 	}
 	if len(headers) > 0 {
 		hdr := http.Header{}
