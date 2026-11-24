@@ -9,7 +9,6 @@ const (
 	CapabilityWorkspaceBinding          = "session-workspace-binding-v1"
 	CapabilityBackgroundActivation      = "session-background-activation-v1"
 	CapabilityResourceTransfer          = "session-resource-transfer-v1"
-	CapabilityToolResultContent         = "session-tool-result-content-v1"
 	CapabilityMediaResources            = "session-media-resources-v1"
 	CapabilityNativePlugins             = "session-native-plugins-v1"
 	CapabilityNativePluginConfiguration = "native-session-plugin-configuration-v1"

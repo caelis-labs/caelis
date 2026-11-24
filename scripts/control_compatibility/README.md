@@ -14,9 +14,8 @@ The peer source is extracted with `git archive` (tar is required).
 A loopback synthetic Responses provider drives real Host processes and SQLite
 Stores. The public probe verifies initialization, common-owner ordinary and
 explicit-profile Sessions, configuration CAS and original command receipts,
-callback claim/effect/result, immutable resource bytes, background grants and
-SSE transcript recovery. Every restart verifies the original identities and
-refuses a second callback claim. Source file hashes include uncommitted and new
+native Code Mode execution, immutable resource bytes, background grants and
+SSE transcript recovery. Every restart verifies the original identities. Source file hashes include uncommitted and new
 files, and binary hashes and per-phase evidence remain in the output directory.
 
 This is isolated process evidence with a deterministic provider. It does not

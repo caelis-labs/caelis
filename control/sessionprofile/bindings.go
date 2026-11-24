@@ -12,17 +12,12 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/google/jsonschema-go/jsonschema"
 )
 
-var toolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
 var mcpServerName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
-// ValidateProfile requires a complete profile. Core supplies default Skills and
-// MCP discovery. The profile selects its model, instructions and callback catalog.
-// Process environment inheritance follows the separate SDK execution contract.
+// ValidateProfile validates the executable fields of a current or stored profile.
+// Legacy callback definitions are inert and retained as configuration evidence.
 func ValidateProfile(p Profile) error {
 	if !validID(p.Version) || !validID(p.Model) || !validID(p.ToolsVersion) {
 		return fmt.Errorf("%w: explicit profile version, model and tools_version required", ErrInvalid)
@@ -62,7 +57,7 @@ func ValidateProfile(p Profile) error {
 	if err := validateReviewer(p); err != nil {
 		return err
 	}
-	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 || len(p.MCPServers) > 16 || len(p.Plugins) > 16 || len(p.SkillDirs)+len(p.SkillRoots) > 64 {
+	if len(p.Instructions) > 1<<20 || len(p.MCPServers) > 16 || len(p.Plugins) > 16 || len(p.SkillDirs)+len(p.SkillRoots) > 64 {
 		return fmt.Errorf("%w: profile size limit", ErrInvalid)
 	}
 	if err := validatePlugins(p.Plugins); err != nil {
@@ -118,72 +113,15 @@ func ValidateProfile(p Profile) error {
 		}
 		seenNative[name] = true
 	}
-	availableNative := seenNative
-	if p.NativeTools == nil {
-		availableNative = knownNative
-	}
-	seen := map[string]bool{}
-	for _, def := range p.Tools {
-		if !toolName.MatchString(def.Name) || seen[def.Name] {
-			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
-		}
-		seen[def.Name] = true
-		if def.Name == codemode.ToolName || def.Name == "Task" {
-			return fmt.Errorf("%w: callback collides with fixed Code Mode/Task entry", ErrInvalid)
-		}
-		if def.Name == "Skill" || def.Name == mcp.SearchToolName {
-			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
-		}
-		for _, server := range p.MCPServers {
-			if strings.HasPrefix(strings.ToLower(def.Name), server.Name+"__") {
-				return fmt.Errorf("%w: callback name %q reserves MCP server %q namespace", ErrInvalid, def.Name, server.Name)
-			}
-		}
-		if def.ApprovalPolicy != "" && def.ApprovalPolicy != "direct" && def.ApprovalPolicy != "required" {
-			return fmt.Errorf("%w: unsupported callback approval_policy for %s", ErrInvalid, def.Name)
-		}
-		// SDK tool dispatch is exact-case. Only actually selected native
-		// names and the always-present resource bridge are reserved.
-		if p.Execution == "workspace-write" && (availableNative[def.Name] || def.Name == "ReadResource" || def.Name == "PublishArtifact") {
-			return fmt.Errorf("%w: callback collides with a native execution tool", ErrInvalid)
-		}
-		if len(def.Description) > 65536 {
-			return ErrInvalid
-		}
-		if _, err := resolveSchema(def.InputSchema); err != nil {
-			return fmt.Errorf("%w: tool %s: %w", ErrInvalid, def.Name, err)
-		}
-		if def.ResultFormat != "" && def.ResultFormat != ResultFormatContentV1 {
-			return fmt.Errorf("%w: tool result_format", ErrUnsupported)
-		}
-		if def.OutputSchema != nil {
-			if def.ResultFormat != ResultFormatContentV1 {
-				return fmt.Errorf("%w: output_schema requires content-v1", ErrInvalid)
-			}
-			if _, err := resolveSchema(def.OutputSchema); err != nil {
-				return fmt.Errorf("%w: invalid tool output_schema", ErrInvalid)
-			}
-		}
-	}
 	return nil
 }
-func resolveSchema(value map[string]any) (*jsonschema.Resolved, error) {
-	if value == nil || value["type"] != "object" {
-		return nil, fmt.Errorf("schema must explicitly have object type")
+
+// ValidateNewProfile validates creation and rejects new callback catalogs.
+func ValidateNewProfile(p Profile) error {
+	if len(p.Tools) != 0 {
+		return ErrCallbackRetired
 	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > 256<<10 {
-		return nil, fmt.Errorf("schema exceeds size limit")
-	}
-	var schema jsonschema.Schema
-	if err = json.Unmarshal(raw, &schema); err != nil {
-		return nil, err
-	}
-	// Resolve's nil loader rejects remote references without making network requests.
-	return schema.Resolve(nil)
+	return ValidateProfile(p)
 }
 
 // ValidateSource verifies Control-bound prompt provenance, not background grant
@@ -246,7 +184,7 @@ func (s *Store) PutBinding(ctx context.Context, b Binding) error {
 	if !errors.Is(notFound(err), ErrNotFound) {
 		return err
 	}
-	if err := ValidateProfile(b.Profile); err != nil {
+	if err := ValidateNewProfile(b.Profile); err != nil {
 		return err
 	}
 	config := Configuration{SessionID: b.SessionID, Revision: 1, Profile: b.Profile}
@@ -362,20 +300,6 @@ func (s *Store) ArchiveBinding(ctx context.Context, scope Scope, id string) erro
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err = tx.ExecContext(ctx, `UPDATE session_profiles SET body=? WHERE session=? AND principal=?`, body, id, scope.PrincipalID); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE client_tool_calls SET state=CASE state WHEN 'pending' THEN 'cancelled' ELSE 'unknown' END WHERE principal=? AND session=? AND state IN ('pending','claimed')`, scope.PrincipalID, id); err != nil {
-		return err
-	}
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-	s.signal()
-	return nil
+	_, err = s.db.ExecContext(ctx, `UPDATE session_profiles SET body=? WHERE session=? AND principal=?`, body, id, scope.PrincipalID)
+	return err
 }

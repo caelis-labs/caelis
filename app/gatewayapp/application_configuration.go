@@ -90,7 +90,7 @@ func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profi
 }
 
 // ResolveCompaction selects the application's desired model without fabricating
-// a user/background Turn source or admitting callback capabilities. Compaction
+// a user/background Turn source. Compaction
 // remains the ordinary fenced Runtime operation and cannot dispatch tools.
 func (r *applicationTurnResolver) ResolveCompaction(ctx context.Context, ref session.SessionRef) (kernel.ResolvedTurn, error) {
 	if ref.SessionID != r.binding.SessionID {

@@ -340,7 +340,7 @@ func TestAdditiveControlResponseFamilies(t *testing.T) {
 	}
 }
 
-func TestAdditiveEmptyAndCallbackBodies(t *testing.T) {
+func TestAdditiveEmptyAndHistoricalReceiptBodies(t *testing.T) {
 	var empty struct{}
 	if err := DecodeRequest([]byte(`{"future_optional":true}`), &empty); err != nil {
 		t.Fatal(err)
@@ -354,7 +354,7 @@ func TestAdditiveEmptyAndCallbackBodies(t *testing.T) {
 		}
 	}
 	var result sessionprofile.CallResult
-	if err := DecodeRequest([]byte(`{"outcome":"succeeded","content":{"business_future":true},"future_optional":true}`), &result); err != nil {
+	if err := Unmarshal([]byte(`{"outcome":"succeeded","content":{"business_future":true},"future_optional":true}`), &result); err != nil {
 		t.Fatal(err)
 	}
 	if string(result.Content) != `{"business_future":true}` || result.Outcome != "succeeded" {
@@ -364,11 +364,11 @@ func TestAdditiveEmptyAndCallbackBodies(t *testing.T) {
 		`{"outcome":true,"content":null,"future_optional":true}`,
 		`{"outcome":"succeeded","content":null,"result_format":true,"future_optional":true}`,
 	} {
-		if err := DecodeRequest([]byte(raw), &sessionprofile.CallResult{}); err == nil {
+		if err := Unmarshal([]byte(raw), &sessionprofile.CallResult{}); err == nil {
 			t.Fatalf("accepted invalid callback field: %s", raw)
 		}
 	}
-	for _, name := range []string{"EmptyResult", "EmptyToolCallRequest"} {
+	for _, name := range []string{"EmptyResult"} {
 		if err := openAPIValidator(t, name).Validate(decodeJSONWithNumbers(t, []byte(`{"future_optional":true}`))); err != nil {
 			t.Fatal(err)
 		}

@@ -6,11 +6,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
-func TestAtomicCapabilitiesConfigurationAndCollision(t *testing.T) {
+func TestAtomicCapabilitiesConfiguration(t *testing.T) {
 	store, path := testStore(t)
 	owner := testOwner(t, store, 1)
 	binding := testBinding(t, store, owner, "atomic")
@@ -70,13 +68,6 @@ func TestAtomicCapabilitiesConfigurationAndCollision(t *testing.T) {
 		t.Fatal("creation binding mutated")
 	}
 
-	for _, name := range []string{"Skill", mcp.SearchToolName, "documents__lookup"} {
-		profile := enabled.Profile
-		profile.Tools = []ToolDefinition{{Name: name, InputSchema: map[string]any{"type": "object"}}}
-		if err := ValidateProfile(profile); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("collision %q = %v", name, err)
-		}
-	}
 	profile := enabled.Profile
 	profile.MCPServers = append(profile.MCPServers, services[0])
 	if err := ValidateProfile(profile); !errors.Is(err, ErrInvalid) {

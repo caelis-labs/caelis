@@ -22,7 +22,7 @@ require (
 	github.com/dop251/goja v0.0.0-20261103214539-f5d1d0025744
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
-	github.com/gorilla/websocket v1.5.3
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.8.1-0.20260916072216-3785c500b581
 	github.com/rivo/uniseg v0.4.7

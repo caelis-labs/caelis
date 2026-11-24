@@ -69,7 +69,3 @@ func (s *Server) requireSessionScope(w http.ResponseWriter, r *http.Request) (ap
 	}
 	return p, scope, true
 }
-func decodeEmptyToolCallBody(w http.ResponseWriter, r *http.Request) bool {
-	var empty struct{}
-	return decodeBody(w, r, &empty)
-}

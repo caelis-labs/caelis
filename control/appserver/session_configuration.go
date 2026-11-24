@@ -22,9 +22,6 @@ func (s *SessionProfileService) UpdateSessionConfiguration(ctx context.Context, 
 	if s.config.ValidateProfile == nil {
 		return CommandResult{}, sessionprofile.ErrUnsupported
 	}
-	if s.config.ReviewerState == nil && req.Patch.Tools != nil && requiresCallbackApproval(*req.Patch.Tools) {
-		return CommandResult{}, sessionprofile.ErrUnsupported
-	}
 	result, err := s.config.Commands.execute(ctx, p, ActionSessionConfigure, req.WriteBase, req.SessionID, req)
 	if err == nil && result.Configuration != nil && s.config.ConfigurationCommitted != nil {
 		s.config.ConfigurationCommitted(ctx, req.SessionID, *result.Configuration)

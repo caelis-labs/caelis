@@ -33,7 +33,6 @@ CREATE TABLE IF NOT EXISTS client_tool_calls (
  turn TEXT NOT NULL, item TEXT NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL,
  state TEXT NOT NULL, result BLOB, PRIMARY KEY(session,call), UNIQUE(session,turn,item)
 );
-CREATE INDEX IF NOT EXISTS client_tool_calls_pending ON client_tool_calls(principal,session) WHERE state='pending';
 CREATE TABLE IF NOT EXISTS session_resources (
  id TEXT PRIMARY KEY, principal TEXT NOT NULL, session TEXT NOT NULL,
  operation TEXT NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL, data BLOB NOT NULL,

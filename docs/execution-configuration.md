@@ -60,7 +60,7 @@ application leases and revocation remain independent authorities. An ordinary
 Session initially selecting an external ACP controller rejects non-null
 `execution_config`, because the Host cannot impose this contract on that Agent.
 A later handoff retains the configuration for native work but does not configure
-the external Agent's processes. MCP servers, application callbacks and ACP
+the external Agent's processes. MCP servers and ACP
 endpoint processes keep their own configuration contracts.
 
 ## Defaults and precedence

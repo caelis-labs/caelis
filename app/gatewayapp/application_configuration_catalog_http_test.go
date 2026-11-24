@@ -69,25 +69,24 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 		t.Fatalf("configuration update dispatched a provider request: %d", len(requests))
 	}
 	close(provider.release)
-	oldCall := claimAndCompleteRevisionCall(t, ctx, client, session, 1, profile.ToolsVersion, `{"key":"old"}`)
 	waitApplicationHTTPIdle(t, ctx, client, session)
 
 	requests := provider.snapshot()
 	if len(requests) != 2 {
-		t.Fatalf("Turn produced %d provider requests, want the old callback request and continuation on the newly connected model", len(requests))
+		t.Fatalf("Turn produced %d provider requests, want the native tool request and continuation on the newly connected model", len(requests))
 	}
 	oldWireInstructions, _ := requests[0]["instructions"].(string)
 	newWireInstructions, _ := requests[1]["instructions"].(string)
-	assertRevisionPrefix(t, requests[0], oldWireInstructions, "gpt-5.4-mini", "low", "", profile.Instructions, "string", false)
-	assertRevisionPrefix(t, requests[1], newWireInstructions, "gpt-5.4", "low", "", profile.Instructions, "string", true)
+	assertRevisionPrefix(t, requests[0], oldWireInstructions, "gpt-5.4-mini", "low", "", profile.Instructions)
+	assertRevisionPrefix(t, requests[1], newWireInstructions, "gpt-5.4", "low", "", profile.Instructions)
 	if oldWireInstructions != newWireInstructions {
 		t.Fatal("selecting the newly connected model changed the system instructions")
 	}
 	if !strings.Contains(fmt.Sprint(requests[1]["input"]), "CONFIGURATION_TOOL_SENTINEL") {
-		t.Fatal("new model request lost the callback result from the issued request")
+		t.Fatal("new model request lost the native tool result from the issued request")
 	}
 	observed, err := client.SessionConfiguration(ctx, session)
-	if err != nil || observed.LastRequest == nil || observed.LastRequest.Revision != 2 || observed.LastRequest.Model != "gpt-5.4" || observed.LastRequest.TurnID != oldCall.TurnID || observed.LastRequest.TurnID != issued.LastRequest.TurnID || observed.LastRequest.RequestID == issued.LastRequest.RequestID || observed.LastRequest.ReasoningEffort != "low" || observed.LastRequest.ToolsVersion != profile.ToolsVersion {
+	if err != nil || observed.LastRequest == nil || observed.LastRequest.Revision != 2 || observed.LastRequest.Model != "gpt-5.4" || observed.LastRequest.TurnID != issued.LastRequest.TurnID || observed.LastRequest.RequestID == issued.LastRequest.RequestID || observed.LastRequest.ReasoningEffort != "low" || observed.LastRequest.ToolsVersion != profile.ToolsVersion {
 		t.Fatalf("newly connected model did not execute under revision 2 in the same Turn: %+v %v", observed, err)
 	}
 	assertRevisionUserHistory(t, applicationHTTPHistory(t, ctx, client, session), 1)

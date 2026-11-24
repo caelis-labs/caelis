@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 	"time"
+
+	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 )
 
 // MaxResourceBytes bounds one immutable resource. Bytes stay in SQLite; resource
@@ -82,7 +83,7 @@ func (s *Store) CreateResourceWithExpiry(ctx context.Context, scope Scope, sessi
 	return r, err
 }
 
-// resource is the internal byte authority, including for callback content.
+// resource is the internal byte authority.
 func (s *Store) resource(ctx context.Context, scope Scope, session, id string) (Resource, []byte, error) {
 	r, data, err := s.resourceStored(ctx, scope, session, id)
 	if err != nil {

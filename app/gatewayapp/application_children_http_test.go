@@ -68,7 +68,8 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	defer cancel()
 	root := t.TempDir()
 	store := filepath.Join(root, "store")
-	model := &applicationHTTPModel{}
+	releaseModel := make(chan struct{})
+	model := &applicationHTTPModel{entered: make(chan struct{}), release: releaseModel}
 	host := startApplicationHTTPHost(t, store, root, model)
 	defer func() {
 		if host != nil {
@@ -111,7 +112,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if err != nil || bound.Child == nil || bound.Child.ParentSessionID != created.SessionID || bound.Child.RootSessionID != created.SessionID || bound.Child.ParentTaskID != task || bound.PrincipalID != connection.PrincipalID || bound.Child.Source != (sessionprofile.Source{Kind: "user", OperationID: "profile-child"}) {
 		t.Fatalf("durable child relation: %+v %v", bound, err)
 	}
-	if bound.Profile.Instructions != profile.Instructions || bound.Profile.Execution != profile.Execution || len(bound.Profile.Tools) != 1 || len(bound.Profile.MCPServers) != 1 || len(bound.Profile.SkillRoots) != 1 {
+	if bound.Profile.Instructions != profile.Instructions || bound.Profile.Execution != profile.Execution || len(bound.Profile.Tools) != 0 || len(bound.Profile.MCPServers) != 1 || len(bound.Profile.SkillRoots) != 1 {
 		t.Fatalf("profile inherited incorrectly: %+v", bound.Profile)
 	}
 	childBytes := []byte("CHILD_RESOURCE_BYTES")
@@ -139,29 +140,11 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if _, err = client.StartParticipant(ctx, appserver.StartParticipantRequest{WriteBase: appserver.WriteBase{OperationID: "nested", SessionID: child}, Handle: "self", Input: "nested", Background: true}); err == nil {
 		t.Fatal("child acquired nested delegation")
 	}
-	var call sessionprofile.Call
-	for {
-		calls, err := client.SessionToolCalls(ctx, child)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(calls) > 0 {
-			call = calls[0]
-			break
-		}
-		select {
-		case <-ctx.Done():
-			state, _ := client.InspectSession(context.WithoutCancel(ctx), appserver.StateRequest{SessionID: child})
-			parent, _ := client.InspectSession(context.WithoutCancel(ctx), appserver.StateRequest{SessionID: created.SessionID})
-			t.Fatalf("child callback missing: child=%+v parent=%+v model=%d", state, parent, model.requestCount())
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-model.entered:
+	case <-ctx.Done():
+		t.Fatal("child provider did not start")
 	}
-	if call.SessionID != child || call.Source != bound.Child.Source || call.TurnID == "" || call.ItemID == "" {
-		t.Fatalf("child callback provenance: %+v", call)
-	}
-	// A callback can arrive while the independently initialized MCP service
-	// is still connecting. Hold its startup to make this ordering deterministic.
 	health, err := client.SessionMCPStatus(ctx, child)
 	health = optionalCapabilityStatus(health)
 	childSkillReady := func(status sessionprofile.MCPStatus) bool {
@@ -198,19 +181,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if !slices.Equal(server.Tools, []string{"lookup"}) || len(server.ToolDetails) != 1 || server.ToolDetails[0].Name != "lookup" || !strings.Contains(server.ToolDetails[0].Description, "Look up a synthetic documents value") || !childSkillReady(health) {
 		t.Fatalf("child MCP/Skill assembly: %+v", health)
 	}
-	if _, err = client.SessionToolCall(ctx, created.SessionID, call.ID); err == nil {
-		t.Fatal("parent addressed child callback as its own")
-	}
-	if _, err = foreign.SessionToolCall(ctx, child, call.ID); err == nil {
-		t.Fatal("foreign connection addressed child callback")
-	}
-	claimed, err := client.ClaimSessionToolCall(ctx, child, call.ID)
-	if err != nil || claimed.SessionID != child {
-		t.Fatalf("claim child callback: %+v %v", claimed, err)
-	}
-	if err = client.CompleteSessionToolCall(ctx, child, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"child-complete"}`)}); err != nil {
-		t.Fatal(err)
-	}
+	close(releaseModel)
 	waitApplicationHTTPIdle(t, ctx, client, child)
 	childState, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: child})
 	if err != nil {
@@ -279,14 +250,10 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		t.Fatalf("resource recovery lost exact binding: %+v %v", retainedResource, err)
 	}
 
-	retained, err := client.SessionToolCall(ctx, child, call.ID)
-	if err != nil || retained.State != "completed" || retained.Source != call.Source {
-		t.Fatalf("retained callback receipt: %+v %v", retained, err)
-	}
 }
 
 // TestApplicationChildMCPStartupHelper keeps initialization pending until the
-// parent observes its independent callback and explicitly releases this fixture.
+// parent observes the independent model request and explicitly releases this fixture.
 func TestApplicationChildMCPStartupHelper(t *testing.T) {
 	if os.Getenv("CAELIS_ATOMIC_MCP_HELPER") != "1" {
 		return

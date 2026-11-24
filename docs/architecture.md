@@ -33,7 +33,7 @@ uses them.
 - [ACP Projection Contract](acp-projection-architecture.md) owns Envelope,
   live/replay, Task, and Surface projection rules.
 - [Participants](participants.md) owns user-facing collaboration setup and workspace controls.
-- [Session profiles](session-profiles.md) owns explicit Session profiles, revisioned configuration, background grants, callback
+- [Session profiles](session-profiles.md) owns explicit Session profiles, revisioned configuration, background grants, historical callback
   receipts, resources, and the legacy Bot Mode removal.
 - [Experimental features](experimental-features.md) owns the opt-in catalog, Host defaults, activation readback and TUI/API configuration.
 - [Execution Configuration](execution-configuration.md) owns native process
@@ -62,7 +62,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/streamspool`, `control/streamspool/file` | Product-neutral Control cache records and the bounded local append-only spool implementation |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
-| `control/sessionprofile` | Explicit Session execution profiles, revisioned desired configuration, MCP/Skill selection, background activation grants, native callback receipts and immutable resources; common command admission/receipts remain with `control/appserver` |
+| `control/sessionprofile` | Explicit Session execution profiles, revisioned desired configuration, MCP/Skill selection, background activation grants, historical callback receipts and immutable resources; common command admission/receipts remain with `control/appserver` |
 | `control/collaboration` | Session-scoped participant discovery, public-result observation, shared messages and reader positions, mailboxes, collaborator prompt slices, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
 | `app/controlserver` | Authenticated HTTP/SSE Host listener, policy, readiness, and drain |

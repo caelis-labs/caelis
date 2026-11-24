@@ -40,7 +40,7 @@ func AtomicOperations() []string {
 }
 
 // Mode adds product source and APP requirements inside the final Policy entry.
-// Base keeps native/callback restrictions. Rules is the canonical configuration
+// Base keeps native restrictions. Rules is the canonical configuration
 // reader; it is sampled for each call rather than frozen at Runtime activation.
 type Mode struct {
 	Base      policy.Mode

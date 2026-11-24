@@ -41,12 +41,15 @@ class Provider(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         with open(root / 'provider-requests.jsonl', 'a') as f:
             f.write(json.dumps(body) + '\n')
-        seen = any((m.get('type') == 'function_call_output' for m in body.get('input', [])))
-        if seen:
+        results = [item for item in body.get('input', []) if item.get('type') == 'function_call_output']
+        if results:
+            if not any(item.get('call_id') == 'matrix-call' and 'MATRIX_CODE_RESULT' in json.dumps(item.get('output')) for item in results):
+                self.send_error(400, 'The expected Code Mode result did not reach the provider')
+                return
             output = {'id': 'matrix-message', 'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'MATRIX_FINAL'}]}
             events = [{'type': 'response.output_text.delta', 'item_id': 'matrix-message', 'output_index': 0, 'delta': 'MATRIX_FINAL'}]
         else:
-            output = {'id': 'matrix-tool', 'type': 'function_call', 'call_id': 'matrix-call', 'name': 'MatrixLookup', 'arguments': '{"value":"synthetic"}'}
+            output = {'id': 'matrix-tool', 'type': 'function_call', 'call_id': 'matrix-call', 'name': 'js_exec', 'arguments': json.dumps({'code': 'return "MATRIX_" + "CODE_RESULT";'})}
             events = [{'type': 'response.output_item.added', 'output_index': 0, 'item': {k: v for k, v in output.items() if k != 'arguments'}}, {'type': 'response.function_call_arguments.delta', 'item_id': 'matrix-tool', 'output_index': 0, 'delta': output['arguments']}]
         events.append({'type': 'response.completed', 'response': {'model': body['model'], 'status': 'completed', 'output': [output]}})
         payload = ''.join(('data: ' + json.dumps(event) + '\n\n' for event in events))

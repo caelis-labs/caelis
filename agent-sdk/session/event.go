@@ -78,7 +78,7 @@ type EventTool struct {
 	ID           string          `json:"id,omitempty"`
 	// Discovery marks a successful Runtime directory lookup for restoring MCP bindings.
 	Discovery bool `json:"discovery,omitempty"`
-	// ResultIncludesReceipt records the bound tool's layout for replay.
+	// ResultIncludesReceipt preserves the display layout of historical callback results.
 	ResultIncludesReceipt bool                `json:"result_includes_receipt,omitempty"`
 	Name                  string              `json:"name,omitempty"`
 	Kind                  string              `json:"kind,omitempty"`

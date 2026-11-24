@@ -34,13 +34,6 @@ func write(path string, value any) {
 	must(err)
 	must(os.WriteFile(path, raw, 0600))
 }
-func equalJSON(a, b any) bool {
-	x, e := json.Marshal(a)
-	must(e)
-	y, e := json.Marshal(b)
-	must(e)
-	return string(x) == string(y)
-}
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -62,7 +55,6 @@ func main() {
 		Terminal       eventstream.Envelope
 		Config         sessionprofile.Configuration
 		Resource       sessionprofile.Resource
-		Call           sessionprofile.Call
 		Grant          sessionprofile.BackgroundGrant
 		Native         appserver.CommandResult
 	}
@@ -72,7 +64,7 @@ func main() {
 		connected, err := host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom", Model: "matrix", BaseURL: provider + "/v1", APIKey: "synthetic-matrix-only", ContextWindowTokens: 32768, MaxOutputTokens: 1024}})
 		must(err)
 		check(connected.Outcome == appserver.OutcomeCommitted, fmt.Sprintf("connect: %+v", connected))
-		profile := sessionprofile.Profile{Version: "matrix/1", Instructions: "Call MatrixLookup once.", Model: "custom/matrix", ToolsVersion: "matrix/1", Execution: "tools-only", Tools: []sessionprofile.ToolDefinition{{Name: "MatrixLookup", Description: "Return synthetic matrix value.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}}}}}
+		profile := sessionprofile.Profile{Version: "matrix/1", Instructions: "Use Code Mode once.", Model: "custom/matrix", ToolsVersion: "matrix/1", Execution: "tools-only"}
 		create := appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: &profile}
 		receipt.Create, err = client.CreateSession(ctx, create)
 		must(err)
@@ -81,7 +73,7 @@ func main() {
 		must(err)
 		check(reflect.DeepEqual(duplicate, receipt.Create), "creation receipt changed")
 		id := receipt.Create.SessionID
-		instructions := "MATRIX_CONFIG: call MatrixLookup once."
+		instructions := "MATRIX_CONFIG: use Code Mode once."
 		update := appserver.UpdateSessionConfigurationRequest{WriteBase: appserver.WriteBase{OperationID: "configure", SessionID: id}, ExpectedConfigurationRevision: 1, Patch: sessionprofile.ConfigurationPatch{Instructions: &instructions}}
 		configured, err := client.UpdateSessionConfiguration(ctx, update)
 		must(err)
@@ -108,33 +100,6 @@ func main() {
 		must(err)
 		receipt.Prompt, err = client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "prompt", SessionID: id}, Input: "Look up one synthetic value.", SourceKind: "user"})
 		must(err)
-		for {
-			calls, err := client.SessionToolCalls(ctx, id)
-			must(err)
-			if len(calls) > 0 {
-				check(len(calls) == 1, "more than one callback")
-				claimed, err := client.ClaimSessionToolCall(ctx, id, calls[0].ID)
-				must(err)
-				check(claimed.State == "claimed", "claim did not grant effect")
-				check(claimed.ConfigurationRevision == 2, "wrong callback config")
-				effect, err := os.OpenFile(filepath.Join(root, "callback-effect"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-				must(err)
-				_, err = effect.WriteString(claimed.ID)
-				must(err)
-				must(effect.Close())
-				result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`"MATRIX_CALLBACK_EFFECT"`)}
-				must(client.CompleteSessionToolCall(ctx, id, claimed.ID, result))
-				receipt.Call, err = client.SessionToolCall(ctx, id, claimed.ID)
-				must(err)
-				check(receipt.Call.State == "completed", "callback missing completion")
-				break
-			}
-			select {
-			case <-ctx.Done():
-				panic(ctx.Err())
-			case <-time.After(25 * time.Millisecond):
-			}
-		}
 		must(waitTranscript(ctx, client, id, receipt.Prompt.Target, &receipt.Terminal))
 		write(saved, receipt)
 	} else {
@@ -150,16 +115,8 @@ func main() {
 		config, err := client.Operation(ctx, "configure")
 		must(err)
 		check(config.Configuration != nil && reflect.DeepEqual(*config.Configuration, receipt.Config), "configuration operation changed")
-		call, err := client.SessionToolCall(ctx, receipt.Create.SessionID, receipt.Call.ID)
-		must(err)
-		check(equalJSON(call, receipt.Call), "callback receipt changed")
-		_, err = client.ClaimSessionToolCall(ctx, receipt.Create.SessionID, receipt.Call.ID)
-		check(err != nil, "completed callback was claimable twice")
 		must(waitTranscript(ctx, client, receipt.Create.SessionID, receipt.Prompt.Target, &receipt.Terminal))
 	}
-	effect, err := os.ReadFile(filepath.Join(root, "callback-effect"))
-	must(err)
-	check(string(effect) == receipt.Call.ID, "independent callback effect readback changed")
 	resource, err := client.SessionResourceContent(ctx, receipt.Create.SessionID, receipt.Resource.ID)
 	must(err)
 	check(string(resource.Data) == "MATRIX_RESOURCE", "resource readback")
@@ -174,7 +131,7 @@ func main() {
 	check(state.SessionID == receipt.Native.SessionID, "native session missing")
 	_, err = client.InspectSession(ctx, appserver.StateRequest{SessionID: receipt.Native.SessionID})
 	must(err)
-	write(filepath.Join(root, "evidence-"+phase+".json"), map[string]any{"phase": phase, "server": info, "session": receipt.Create.SessionID, "configuration_revision": receipt.Config.Revision, "operation_ids": []string{"create", "configure", "prompt"}, "callback_id": receipt.Call.ID, "callback_effect_verified": true, "resource_verified": true, "sse_replay_verified": true, "same_owner_native_session_verified": true})
+	write(filepath.Join(root, "evidence-"+phase+".json"), map[string]any{"phase": phase, "server": info, "session": receipt.Create.SessionID, "configuration_revision": receipt.Config.Revision, "operation_ids": []string{"create", "configure", "prompt"}, "resource_verified": true, "sse_replay_verified": true, "same_owner_native_session_verified": true})
 	fmt.Println("PASS", phase, receipt.Create.SessionID)
 }
 func waitTranscript(ctx context.Context, client *httpclient.Client, id string, target appserver.TurnTarget, terminal *eventstream.Envelope) error {

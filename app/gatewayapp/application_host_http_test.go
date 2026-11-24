@@ -29,12 +29,16 @@ import (
 
 // applicationHTTPModel is an in-process provider transport, not a Control HTTP
 // substitute: all Session work passes through the real Host, provider adapter,
-// Runtime, and public HTTP client. It returns a callback for each user turn and
+// Runtime, and public HTTP client. It returns a Code Mode call for each user Turn and
 // a terminal answer only after the native tool result enters the model context.
 type applicationHTTPModel struct {
 	mu       sync.Mutex
 	requests [][]byte
-	batch    bool
+	toolName string
+	toolArgs string
+	entered  chan struct{}
+	release  <-chan struct{}
+	first    sync.Once
 }
 
 func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -44,8 +48,18 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	m.mu.Lock()
 	m.requests = append(m.requests, append([]byte(nil), raw...))
-	batch := m.batch
 	m.mu.Unlock()
+	if m.entered != nil {
+		var first bool
+		m.first.Do(func() { first = true; close(m.entered) })
+		if first {
+			select {
+			case <-m.release:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		}
+	}
 	var decoded struct {
 		Messages []struct {
 			Role string `json:"role"`
@@ -61,18 +75,15 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 	message := map[string]any{"role": "assistant", "content": "APPLICATION_FINAL_SENTINEL"}
 	finish := "stop"
 	if last != "tool" {
+		name, args := m.toolName, m.toolArgs
+		if name == "" {
+			name, args = "js_exec", `{"code":"return [{value: 'APPLICATION_' + 'RESULT_SENTINEL'}, {background: 'BACKGROUND_' + 'RESULT_SENTINEL'}];"}`
+		}
 		message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{
 			"id": "provider-reused-id", "index": 0, "type": "function", "function": map[string]any{
-				"name": "ApplicationLookup", "arguments": `{"key":"one","execution":{"session_id":"forged-session","turn_id":"forged-turn","item_id":"forged-item"}}`,
+				"name": name, "arguments": args,
 			},
 		}}}
-		if batch {
-			message["tool_calls"] = append(message["tool_calls"].([]any), map[string]any{
-				"id": "provider-later-id", "index": 1, "type": "function", "function": map[string]any{
-					"name": "ApplicationLookup", "arguments": `{"key":"two"}`,
-				},
-			})
-		}
 		finish = "tool_calls"
 	}
 	payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": message, "finish_reason": finish}}})
@@ -225,12 +236,8 @@ func profilePointer(p sessionprofile.Profile) *sessionprofile.Profile { return &
 
 func applicationHTTPProfile() sessionprofile.Profile {
 	return sessionprofile.Profile{
-		Version: "lookup/1", Instructions: "APPLICATION_INSTRUCTION_SENTINEL: use only ApplicationLookup.",
-		Model: "custom/gpt-4.1", ToolsVersion: "lookup-tools/1", Execution: "tools-only",
-		Tools: []sessionprofile.ToolDefinition{{
-			Name: "ApplicationLookup", Description: "Return one application-owned lookup value.",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}},
-		}},
+		Version: "lookup/1", Instructions: "APPLICATION_INSTRUCTION_SENTINEL: use the available Session tools.",
+		Model: "custom/gpt-4.1", ToolsVersion: "empty-tools/1", Execution: "tools-only",
 	}
 }
 
@@ -401,53 +408,6 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 		}
 	}
 	prompt(appA, sessionA, "prompt-first")
-	evidence := []string{"source:user(admitted)"}
-	calls, err := appA.WaitSessionToolCalls(ctx, sessionA)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("WaitApplicationCalls(first) = %#v, %v", calls, err)
-	}
-	call := calls[0]
-	evidence = append(evidence, "call:"+call.State)
-	if call.ID == "" || call.CallID != "provider-reused-id" || call.SessionID != sessionA || call.TurnID == "" || call.ItemID == "" || call.PrincipalID != connectionA.PrincipalID || call.Source.OperationID != "prompt-first" {
-		t.Fatalf("native callback context = %#v", call)
-	}
-	if strings.Contains(call.ItemID, "forged-item") || strings.Contains(call.SessionID, "forged-session") {
-		t.Fatalf("provider arguments chose callback identity: %#v", call)
-	}
-	// Detaching a live UI observer while the model waits for the callback must
-	// neither cancel that Turn nor revoke the tool-host connection.
-	observer, err := appA.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionA})
-	if err != nil || !observer.State.Run.Active {
-		t.Fatalf("Reconnect(pending callback) = %#v, %v", observer.State, err)
-	}
-	if err := observer.Subscription.Close(); err != nil {
-		t.Fatal(err)
-	}
-	stillPending, err := appA.SessionToolCall(ctx, sessionA, call.ID)
-	if err != nil || stillPending.State != "pending" {
-		t.Fatalf("detaching observer cancelled pending callback: %#v, %v", stillPending, err)
-	}
-	if _, err := appB.ClaimSessionToolCall(ctx, sessionA, call.ID); err == nil {
-		t.Fatal("second application claimed first application's callback")
-	}
-	claimed, err := appA.ClaimSessionToolCall(ctx, sessionA, call.ID)
-	if err != nil || claimed.State != "claimed" {
-		t.Fatalf("ClaimApplicationCall = %#v, %v", claimed, err)
-	}
-	evidence = append(evidence, "claim:"+claimed.State)
-	if _, err := appA.ClaimSessionToolCall(ctx, sessionA, call.ID); err == nil {
-		t.Fatal("claimed callback was granted twice")
-	}
-	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"APPLICATION_RESULT_SENTINEL"}`)}
-	waitBuiltinDesktopWorldMCP(t, ctx, appA, sessionA)
-	if err := appA.CompleteSessionToolCall(ctx, sessionA, call.ID, result); err != nil {
-		t.Fatal(err)
-	}
-	completed, err := appA.SessionToolCall(ctx, sessionA, call.ID)
-	if err != nil || completed.State != "completed" {
-		t.Fatalf("ApplicationCall(after result) = %#v, %v", completed, err)
-	}
-	evidence = append(evidence, "result:"+completed.State)
 	waitApplicationHTTPIdle(t, ctx, appA, sessionA)
 	history := applicationHTTPHistory(t, ctx, appA, sessionA)
 	if len(history) == 0 {
@@ -466,17 +426,11 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 		}
 		switch update := envelope.Update.(type) {
 		case eventstream.ToolCall:
-			if update.ToolCallID == call.CallID {
-				if envelope.TurnID != call.TurnID {
-					t.Fatalf("callback TurnID %q disagrees with canonical tool event TurnID %q", call.TurnID, envelope.TurnID)
-				}
+			if update.ToolCallID == "provider-reused-id" {
 				seenTool = true
 			}
 		case eventstream.ToolCallUpdate:
-			if update.ToolCallID == call.CallID && update.Status != nil && *update.Status == "completed" {
-				if envelope.TurnID != call.TurnID {
-					t.Fatalf("callback TurnID %q disagrees with canonical result TurnID %q", call.TurnID, envelope.TurnID)
-				}
+			if update.ToolCallID == "provider-reused-id" && update.Status != nil && *update.Status == "completed" {
 				seenResult = true
 			}
 		}
@@ -484,8 +438,6 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	if !seenInput || !seenTool || !seenResult || !seenTerminal {
 		t.Fatalf("canonical reconnect lacks source/tool/result/terminal: events=%d source=%v call=%v result=%v terminal=%v", len(history), seenInput, seenTool, seenResult, seenTerminal)
 	}
-	evidence = append(evidence, "native:completed", "reconnect:canonical")
-	t.Logf("application HTTP sequence: %s", strings.Join(evidence, " -> "))
 	// Upload and read immutable bytes through the same public scope. An upload
 	// with a mismatched digest or another application's credential is rejected.
 	data := []byte("RESOURCE_SNAPSHOT_SENTINEL")
@@ -511,7 +463,6 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	before := provider.snapshotFrom(0)
 	beforeCount := provider.requestCount()
 	beforeSystem, _ := applicationHTTPPrefix(t, provider.requestAt(0))
-	_, beforeTools := applicationHTTPPrefix(t, provider.requestAt(beforeCount-1))
 	for _, sentinel := range []string{"APPLICATION_INSTRUCTION_SENTINEL", "APPLICATION_RESULT_SENTINEL"} {
 		if !strings.Contains(before, sentinel) {
 			t.Fatalf("provider request missing %s: %s", sentinel, before)
@@ -550,30 +501,14 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 		t.Fatalf("reopened resource = %#v, %v", content, err)
 	}
 	prompt(appA, sessionA, "prompt-after-restart")
-	calls, err = appA.WaitSessionToolCalls(ctx, sessionA)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("WaitApplicationCalls(after restart) = %#v, %v", calls, err)
-	}
-	if calls[0].ID == call.ID || calls[0].CallID != call.CallID || calls[0].TurnID == call.TurnID || calls[0].ItemID == "" {
-		t.Fatalf("provider ID reuse collapsed canonical callback: original=%#v after=%#v", call, calls[0])
-	}
-	if _, err := appA.ClaimSessionToolCall(ctx, sessionA, calls[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	waitBuiltinDesktopWorldMCP(t, ctx, appA, sessionA)
-	if err := appA.CompleteSessionToolCall(ctx, sessionA, calls[0].ID, result); err != nil {
-		t.Fatal(err)
-	}
 	waitApplicationHTTPIdle(t, ctx, appA, sessionA)
 	after := provider.snapshotFrom(beforeCount)
 	if after == "" || !strings.Contains(after, "APPLICATION_INSTRUCTION_SENTINEL") || !strings.Contains(after, "APPLICATION_RESULT_SENTINEL") || strings.Contains(after, "WORKSPACE_INSTRUCTION_LEAK_SENTINEL") || strings.Contains(after, "MODEL_CREDENTIAL_LEAK_SENTINEL") {
 		t.Fatalf("reopened provider context lost prefix or leaked workspace/credential: %s", after)
 	}
 	afterSystem, _ := applicationHTTPPrefix(t, provider.requestAt(beforeCount))
-	// Both continuations sample the full catalog after Desktop World is ready.
-	_, afterTools := applicationHTTPPrefix(t, provider.requestAt(provider.requestCount()-1))
-	if !reflect.DeepEqual(beforeSystem, afterSystem) || !reflect.DeepEqual(beforeTools, afterTools) {
-		t.Fatal("immutable application system/tool prefix changed across Host replacement")
+	if !reflect.DeepEqual(beforeSystem, afterSystem) {
+		t.Fatal("immutable application system prefix changed across Host replacement")
 	}
 
 	// Application-authored summary is admitted as AgentCommunication evidence,
@@ -587,16 +522,6 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	})
 	if err != nil || (summary.Outcome != appserver.OutcomeAccepted && summary.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("PromptApplication(summary) = %#v, %v", summary, err)
-	}
-	summaryCalls, err := appA.WaitSessionToolCalls(ctx, sessionA)
-	if err != nil || len(summaryCalls) != 1 || summaryCalls[0].Source.Kind != "application_summary" {
-		t.Fatalf("WaitApplicationCalls(summary) = %#v, %v", summaryCalls, err)
-	}
-	if _, err := appA.ClaimSessionToolCall(ctx, sessionA, summaryCalls[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := appA.CompleteSessionToolCall(ctx, sessionA, summaryCalls[0].ID, result); err != nil {
-		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, appA, sessionA)
 	seenSummary := false
@@ -646,99 +571,5 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	content, err = appA.SessionResourceContent(ctx, sessionA, resource.ID)
 	if err != nil || string(content.Data) != string(data) {
 		t.Fatalf("archive lost immutable resource = %#v, %v", content, err)
-	}
-}
-
-func TestApplicationHTTPCallbackBatchCompletesThroughModel(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
-	defer cancel()
-	root := t.TempDir()
-	workspace := filepath.Join(root, "workspace")
-	if err := os.MkdirAll(workspace, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	provider := &applicationHTTPModel{batch: true}
-	store := filepath.Join(root, "store")
-	host := startApplicationHTTPHost(t, store, workspace, provider)
-	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "connect-batch-model", ExpectedRevision: &status.Configuration.Revision},
-		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_KEY"},
-	})
-	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("ConnectModel = %+v, %v", connected, err)
-	}
-	credentialPath := filepath.Join(root, "application.credential")
-	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", credentialPath)
-	sessionID := createApplicationHTTPSession(t, ctx, client, "batch")
-	prompt, err := client.Prompt(ctx, appserver.PromptRequest{
-		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "prompt-batch"}, Input: "Look up both keys.", SourceKind: "user"})
-	if err != nil || (prompt.Outcome != appserver.OutcomeCommitted && prompt.Outcome != appserver.OutcomeAccepted) {
-		t.Fatalf("PromptApplication = %+v, %v", prompt, err)
-	}
-	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`)}
-	completed := map[string]sessionprofile.Call{}
-	for len(completed) < 2 {
-		calls, err := client.WaitSessionToolCalls(ctx, sessionID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, call := range calls {
-			if _, ok := completed[call.CallID]; ok {
-				t.Fatalf("duplicate callback: %s", call.CallID)
-			}
-			if _, err := client.ClaimSessionToolCall(ctx, sessionID, call.ID); err != nil {
-				t.Fatal(err)
-			}
-			if err := client.CompleteSessionToolCall(ctx, sessionID, call.ID, result); err != nil {
-				t.Fatal(err)
-			}
-			completed[call.CallID] = call
-		}
-	}
-	call := completed["provider-reused-id"]
-	if call.ID == "" || completed["provider-later-id"].TurnID != call.TurnID {
-		t.Fatalf("callback identities: %+v", completed)
-	}
-	waitApplicationHTTPIdle(t, ctx, client, sessionID)
-	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
-	if err != nil || state.Run.Active || state.Run.Status != "" {
-		t.Fatalf("completed Turn retained live state = %+v, %v", state.Run, err)
-	}
-	calls, err := client.SessionToolCalls(ctx, sessionID)
-	if err != nil || len(calls) != 2 {
-		t.Fatalf("callback receipts = %+v, %v", calls, err)
-	}
-	for _, c := range calls {
-		if c.State != "completed" || c.Result == nil || string(c.Result.Content) != string(result.Content) {
-			t.Fatalf("callback receipt: %+v", c)
-		}
-	}
-	if provider.requestCount() != 2 {
-		t.Fatalf("model requests = %d, want 2", provider.requestCount())
-	}
-	var turnCompleted bool
-	for _, event := range applicationHTTPHistory(t, ctx, client, sessionID) {
-		if event.TurnID == call.TurnID && event.Lifecycle != nil && event.Lifecycle.State == eventstream.LifecycleStateCompleted {
-			turnCompleted = true
-		}
-	}
-	if !turnCompleted {
-		t.Fatal("original Turn has no canonical completed lifecycle")
-	}
-	host.close(t)
-	host = startApplicationHTTPHost(t, store, workspace, provider)
-	defer host.close(t)
-	secret, err := os.ReadFile(credentialPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	client = host.app(string(secret))
-	restored, err := client.SessionToolCall(ctx, sessionID, call.ID)
-	if err != nil || restored.State != "completed" || restored.Result == nil || string(restored.Result.Content) != string(result.Content) {
-		t.Fatalf("restarted original receipt = %+v, %v", restored, err)
 	}
 }

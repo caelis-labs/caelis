@@ -30,7 +30,7 @@ Explicit profiles require `session-profiles-v1`. Optional functions advertise
 `session-hot-configuration-v1`, `session-native-execution-v1`,
 `session-workspace-binding-v1`, `session-background-activation-v1`,
 `session-resource-transfer-v1`, `session-model-capabilities-v1`,
-`session-tool-result-content-v1`, `session-media-resources-v1`,
+`session-media-resources-v1`,
 `session-guardian-review-v1`, `runtime-agent-team-v1`, and
 `session-atomic-capabilities-v1`.
 `session-profile-control-v1` and `session-profile-children-v1` identify the
@@ -48,15 +48,12 @@ Paths below are relative to `/api/control/v1`:
 | Model, reviewer and extension health | `GET /sessions/{session_id}/model-capabilities`, `/reviewer-state`, `/mcp-status` |
 | Original command result | `GET /operations/{operation_id}` |
 | Background authorization | `GET/POST /sessions/{session_id}/background-grants`; `GET .../{grant_id}`; `POST .../{grant_id}/revoke` |
-| Callback observation | `GET /sessions/{session_id}/tool-calls`, optionally `?wait=true`; `GET .../{call_id}` |
-| Callback claim and completion | `POST /sessions/{session_id}/tool-calls/{call_id}/claim` and `/result` |
+| Historical callback receipts | `GET /sessions/{session_id}/tool-calls` and `GET .../{call_id}` |
 | Immutable resource upload | `POST /sessions/{session_id}/resources` |
 | Resource descriptor and bytes | `GET /sessions/{session_id}/resources/{resource_id}` and `/content` |
 
 There are no `/application/*` routes. Old application credentials are not accepted.
-Callbacks have their own native call/result identity, not a second Session command
-namespace. An empty claim body is `{}`; background revocation is a command with a
-stable operation ID.
+Background revocation uses a stable operation ID.
 
 ## Operation ownership and recovery
 
@@ -137,33 +134,38 @@ choices in one Session owner. Updating an ignored native model field on an
 explicit-profile Session is rejected; use its configuration patch.
 
 Creation requires `version`, `model`, `tools_version` and `execution`. It may
-supply instructions, callback definitions, selected MCP servers and Skill roots,
+supply instructions, selected MCP servers and Skill roots,
 workspace access, permissions and process configuration. Workspace instructions
 stay outside Profile assembly. A Bot can provide its private memory through an
-explicit MCP, Skill or callback integration. Control still owns history, tools, approvals,
+explicit MCP or Skill integration. Control still owns history, tools, approvals,
 sandbox policy and recovery.
 
-`execution: tools-only` exposes selected callbacks and extensions without native
+`execution: tools-only` exposes selected extensions and coordination tools without native
 file/command tools. `workspace-write` uses the ordinary native sandbox and
 approval owner. `permissions.mode: danger-full-access` selects the ordinary Host
-execution route; it does not auto-approve callbacks, MCP, OS privacy access or
-external effects. Workspace CWD/access, execution, process environment, permissions
+execution route; MCP and external effects still pass the relevant approval checks. Workspace CWD/access, execution, process environment, permissions
 are creation-bound. Canonical directories are checked at activation
 and before effects; redirection cannot expand a bound directory.
 
 Omitted native tool selection uses the default native catalog. Explicit `[]`
-selects none. Names and callback collisions are validated. Native command/file
+selects none. Core validates the selected native tool names. Native command/file
 execution uses the SDK Runtime lifecycle; closing that Runtime rejects delayed
 launches, filesystem effects and interactive input. No independent client lease
 can revive it. See [Execution Configuration](execution-configuration.md) for
 shell/environment behavior.
 
 `POST .../configuration` requires `expected_configuration_revision` and `patch`.
-Instructions, model, effort, tier, callback catalog/version, native tools, MCP
+Instructions, model, effort, tier, native tools, MCP
 servers and Skill selections can change. Omitted fields preserve values, explicit
 empty values clear supported selections, and null is rejected. Workspace,
 execution and permissions cannot be changed through a patch. The legacy reviewer
 field is retained as immutable creation evidence and cannot be patched.
+
+For compatibility, create with `tools_version` and either omit `tools` or send
+`"tools": []`. To upgrade a stored profile, submit `tools: []`, the desired
+`tools_version`, and any MCP selections in the same configuration CAS. The old
+catalog is inert even before the update. Its original creation and historical
+revisions remain readable. Nonempty `tools` is rejected in new writes.
 
 Configuration revision is separate from native history revision. The immutable
 creation profile/revision remains evidence; `configuration.profile` is the sole
@@ -171,8 +173,7 @@ current desired configuration. `last_request` records the revision and native
 request/Turn identity actually admitted. Rejected updates alter neither desired
 configuration nor an already issued request. A successful update affects the next
 model request, including a continuation in the same Turn, subject to the pinned
-Skill metadata described below. It does not replace
-in-flight callback names, arguments, catalog version or permission decisions.
+Skill metadata described below. Already admitted work keeps its original snapshot.
 
 Application Sessions discover Skills in Core's workspace and global directories.
 They also load the Host MCP catalog and MCP files in a trusted workspace. Use
@@ -342,33 +343,18 @@ choices. Reviewer readiness is observational and creation-bound. Only the first
 valid decision for the current approval head settles it; other Surfaces observe
 the same settlement. Provider call IDs may repeat and are not canonical item IDs.
 
-## Callback effects and content
+## Historical callback receipts
 
-A callback binds principal, Session, Turn, canonical item, provider call ID,
-configuration revision, tools version and original source. Its opaque `id` is the
-HTTP receipt address. Preserve it and the exact request before claiming.
+When Core opens an existing Store, it settles unclaimed callbacks as
+`cancelled` and claimed callbacks without a result as `unknown`. The original
+call ID, arguments, source and configuration revision remain available to the
+same owner through the read-only tool-call endpoints. Completed receipts retain
+their original outcomes and content. The history records what the Store knows
+about the original effect and grants no execution authority.
 
-1. Read/wait for calls and record the original native identity.
-2. Claim once; only a successful claim authorizes a new business effect.
-3. Execute through the tool's durable effect owner.
-4. Submit the exact succeeded, failed or unknown result.
-
-A lost claim response stays uncertain. A query saying `claimed` is not another
-grant. A lost result response permits observing or resending only the same result
-bytes; conflicting results fail. Core does not replay unknown external effects or
-infer success from prose. Host restart/close cancels abandoned pending calls and
-marks claimed calls unknown. Closing a Session seals new claims and execution
-while retaining observations and resources. Detaching a UI does not close work.
-
-The default result content is opaque JSON. Tools opting into `result_format:
-content-v1` use declared text, image and resource-link blocks and may declare an
-output schema for `structuredContent`. Empty structured objects remain present.
-Validate size, format, image dimensions, MIME type and resource hash before model
-admission. Media capability comes from the selected/frozen model; unknown image
-support is not permission to inject an image. See OpenAPI for exact block limits.
-
-After the application submits its receipt, the model receives the result and can finish the
-Turn or request more tools. The application owns any subsequent Session handoff.
+The Session codec retains historical callback result layout markers for replay,
+including typed text, media and the original receipt. Keep profile and receipt
+readers until the supported upgrade floor excludes callback-writing Hosts.
 
 ## Resources
 
@@ -387,7 +373,7 @@ deletion and arbitrary outside-workspace publication are not supported.
 
 ## Persistence compatibility
 
-Store schema 4 has one profile/configuration, callback, resource, grant and common
+Store schema 4 has one profile/configuration, historical callback receipt, resource, grant and common
 operation owner. The isolated importer
 [`control/internal/storemigration/applicationv3`](../control/internal/storemigration/applicationv3/doc.go)
 transactionally imports schema 1/2 data, validates identity/digests, then drops
@@ -400,7 +386,7 @@ The schema-3 upgrade raises only the format marker; existing profile and receipt
 bytes are unchanged. Schema 4 adds ordinary native plugin selectors to the same
 configuration owner. Older writers reject the Store so an empty override cannot
 silently become Host inheritance. Native selectors never classify their Session
-as an explicit Profile or enable application callback/grant capabilities.
+as an explicit Profile or enable application background grants.
 
 Historical connection-scoped operation IDs map deterministically into the common
 principal namespace. The importer owns this mapping; clients migrating journals

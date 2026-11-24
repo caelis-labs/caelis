@@ -53,7 +53,7 @@ func (p *applicationChildrenModel) RoundTrip(req *http.Request) (*http.Response,
 	if len(payload.Messages) > 0 && payload.Messages[len(payload.Messages)-1].Role == "tool" {
 		return reviewerHTTPStream(req, map[string]any{"role": "assistant", "content": "PROFILE_CHILD_DONE"}, "stop")
 	}
-	name, input := "ApplicationLookup", `{"key":"child"}`
+	name, input := "js_exec", `{"code":"return 1;"}`
 	if bytes.Contains(raw, []byte("SPAWN_PROFILE_CHILD")) && !bytes.Contains(raw, []byte("CHILD_PROFILE_INPUT")) {
 		name, input = "StartThread", `{"agent":"self","handle":"leaf","prompt":"CHILD_PROFILE_INPUT"}`
 	}
@@ -108,11 +108,6 @@ func TestApplicationProfileChildModelSpawnKeepsBackgroundSource(t *testing.T) {
 	if binding.Child == nil || binding.Child.Source != want || binding.Child.ParentTaskID != task {
 		t.Fatalf("source lost: %+v", binding)
 	}
-	call := backgroundCall(t, ctx, client, child)
-	if call.Source != want || call.SessionID != child {
-		t.Fatalf("callback source relabeled: %+v", call)
-	}
-	completeBackgroundCall(t, ctx, client, call)
 	waitApplicationHTTPIdle(t, ctx, client, sid)
 	tasks, err := httpclient.NewTaskClient(client)
 	if err != nil {
@@ -164,7 +159,7 @@ func TestSessionClosureCancelsProviderBeforeCollaborationEffect(t *testing.T) {
 	client, connection := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	sid := createApplicationHTTPSession(t, ctx, client, "parent")
 	child, _ := applicationProfileChild(t, ctx, client, sid)
-	completeBackgroundCall(t, ctx, client, backgroundCall(t, ctx, client, child))
+	waitApplicationHTTPIdle(t, ctx, client, child)
 	backgroundPrompt(t, ctx, client, sid, "delayed-mail", "DELAYED_PROFILE_MAIL", "user", "")
 	select {
 	case <-provider.reached:
@@ -229,19 +224,26 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			root := t.TempDir()
-			host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, &applicationHTTPModel{})
+			audit := filepath.Join(root, "mcp-audit")
+			t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+			t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+			ready := make(chan struct{})
+			model := &applicationHTTPModel{toolName: "js_exec", toolArgs: reviewerMCPArgs, entered: make(chan struct{}), release: ready}
+			host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, model)
 			defer host.close(t)
 			connectApplicationChildModel(t, ctx, host, "gpt-4.1")
 			client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 			foreign, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "foreign.token"))
 			profile := applicationHTTPProfile()
 			profile.Permissions.ApprovalMode = "manual"
-			profile.Tools[0].ApprovalPolicy = "required"
+			profile.MCPServers = []sessionprofile.MCPServer{reviewerFixtureMCP(root)}
 			created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "approval-parent"}, Profile: profilePointer(profile)})
 			if err != nil {
 				t.Fatal(err)
 			}
 			child, task := applicationProfileChild(t, ctx, client, created.SessionID)
+			waitAtomicApplicationMCPRunning(t, ctx, client, child, "documents")
+			close(ready)
 			var pending *appserver.ActiveApproval
 			for pending == nil {
 				state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: created.SessionID})
@@ -261,11 +263,10 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 				t.Fatalf("child approval native owner lost: %+v", pending)
 			}
 			if pending.Permission.ToolCall.RawInput["key"] != "one" {
-				t.Fatal("native child approval lost actual callback arguments")
+				t.Fatal("native child approval lost actual MCP arguments")
 			}
-			calls, err := client.SessionToolCalls(ctx, child)
-			if err != nil || len(calls) != 0 {
-				t.Fatalf("callback preceded approval: %+v %v", calls, err)
+			if strings.Contains(atomicAudit(audit), "documents:call:") {
+				t.Fatal("MCP effect occurred before approval")
 			}
 			replay, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
 			if err != nil {
@@ -301,19 +302,15 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 			if _, err := client.ResolveApproval(ctx, request); err != nil {
 				t.Fatal(err)
 			}
-			if test.kind == "reject_once" {
-				waitApplicationHTTPIdle(t, ctx, client, child)
-				calls, err := client.SessionToolCalls(ctx, child)
-				if err != nil || len(calls) != 0 {
-					t.Fatalf("native rejection executed callback: %+v %v", calls, err)
-				}
-				return
+			waitApplicationHTTPIdle(t, ctx, client, child)
+			wantCalls := 0
+			if test.kind == "allow_once" {
+				wantCalls = 1
 			}
-			call := backgroundCall(t, ctx, client, child)
-			if call.Source != (sessionprofile.Source{Kind: "user", OperationID: "profile-child"}) {
-				t.Fatalf("approval relabeled source: %+v", call)
+			if got := strings.Count(atomicAudit(audit), "documents:call:"); got != wantCalls {
+				t.Fatalf("native child option %s dispatched %d effects, want %d", test.kind, got, wantCalls)
 			}
-			completeBackgroundCall(t, ctx, client, call)
+
 		})
 	}
 }
@@ -322,7 +319,9 @@ func TestApplicationProfileChildUsesTeamDespiteLegacyReviewer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: `{"key":"one"}`, decision: `{"option_id":"allow_once"}`}
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	ready := make(chan struct{})
+	provider := &reviewerHTTPProvider{toolName: "js_exec", args: reviewerMCPArgs, decision: `{"option_id":"allow_once"}`, toolReady: ready}
 	host, client, sid := setupReviewerHTTP(t, ctx, root, provider)
 	defer host.close(t)
 	child, _ := applicationProfileChild(t, ctx, client, sid)
@@ -330,8 +329,9 @@ func TestApplicationProfileChildUsesTeamDespiteLegacyReviewer(t *testing.T) {
 	if err != nil || binding.Profile.Reviewer == nil || binding.Profile.Reviewer.Model != "retired-mimo" {
 		t.Fatalf("reviewer inheritance: %+v %v", binding, err)
 	}
-	call := backgroundCall(t, ctx, client, child)
-	completeBackgroundCall(t, ctx, client, call)
+	waitAtomicApplicationMCPRunning(t, ctx, client, child, "documents")
+	close(ready)
+	waitApplicationHTTPIdle(t, ctx, client, child)
 	reviewed := false
 	for _, request := range provider.snapshot() {
 		if request["model"] == "reviewer-model" {
@@ -365,14 +365,13 @@ func TestApplicationProfileForegroundParticipantHasIndependentSession(t *testing
 	if err != nil || binding.Child == nil || binding.Child.ParentSessionID != sid || binding.Child.ParentTaskID != "" || child == sid {
 		t.Fatalf("direct relation: %+v %v", binding, err)
 	}
-	call := backgroundCall(t, ctx, client, child)
-	completeBackgroundCall(t, ctx, client, call)
+	waitApplicationHTTPIdle(t, ctx, client, child)
 	grandchild, grandTask := applicationProfileChild(t, ctx, client, child)
 	grandBinding, err := client.SessionProfile(ctx, grandchild)
 	if err != nil || grandBinding.Child == nil || grandBinding.Child.RootSessionID != sid || grandBinding.Child.ParentSessionID != child || grandBinding.Child.ParentTaskID != grandTask {
 		t.Fatalf("recursive native relation: %+v %v", grandBinding, err)
 	}
-	completeBackgroundCall(t, ctx, client, backgroundCall(t, ctx, client, grandchild))
+	waitApplicationHTTPIdle(t, ctx, client, grandchild)
 
 	taskClient, err := httpclient.NewTaskClient(client)
 	if err != nil {
@@ -457,9 +456,9 @@ func TestApplicationProfileNamedNativeModelKeepsProfileAuthority(t *testing.T) {
 		t.Fatalf("named profile child: %+v %v", result, err)
 	}
 	child, _ := applicationAttachedChild(t, ctx, client, sid, "research")
-	completeBackgroundCall(t, ctx, client, backgroundCall(t, ctx, client, child))
+	waitApplicationHTTPIdle(t, ctx, client, child)
 	configuration, err := client.SessionConfiguration(ctx, child)
-	if err != nil || !strings.HasSuffix(configuration.Profile.Model, "/gpt-4.2") || configuration.Profile.Instructions != applicationHTTPProfile().Instructions || len(configuration.Profile.Tools) != 1 {
+	if err != nil || !strings.HasSuffix(configuration.Profile.Model, "/gpt-4.2") || configuration.Profile.Instructions != applicationHTTPProfile().Instructions || len(configuration.Profile.Tools) != 0 {
 		t.Fatalf("native model override expanded profile: %+v %v", configuration, err)
 	}
 	parent, err := client.SessionConfiguration(ctx, sid)

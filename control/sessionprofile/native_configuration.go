@@ -15,7 +15,7 @@ import (
 
 // The ordinary Session selector shares the existing configuration table and
 // transaction receipt. This adjunct marker is not an explicit execution Profile
-// and must never enter profile admission, callbacks or application assembly.
+// and must never enter profile admission or application assembly.
 type nativeConfigurationBinding struct {
 	Native bool `json:"native_configuration"`
 }

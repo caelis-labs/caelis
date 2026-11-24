@@ -130,13 +130,11 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	compaction := defaultCompactionConfig(contextWindow)
 	compaction.Async.Enabled = instance.activeRuntime.Experimental[experimental.AsyncCompact]
 	compaction.Idle.Enabled = instance.activeRuntime.Experimental[experimental.IdleCompact]
-	// The complete tool set is independent of Turn source. An unavailable
-	// callback provenance is rejected during resolution, never silently widened.
 	estimateCapabilities, err := resolver.capabilitiesFor(ctx, configuration)
 	if err != nil {
 		return nil, err
 	}
-	estimateTools, err := resolver.tools(ctx, configuration, sessionprofile.Source{Kind: "user", OperationID: "estimate"}, estimateCapabilities)
+	estimateTools, err := resolver.tools(ctx, configuration.Profile.NativeTools, estimateCapabilities)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +224,6 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 
 // applicationLeasedTool guards resource materialization and publication after
 // approval resumes, rather than trusting only the Turn's initial lease check.
-// Callback tools enforce this natively in the application Store.
 type applicationLeasedTool struct {
 	tool.Tool
 	store *sessionprofile.Store
@@ -257,34 +254,26 @@ type applicationTurnResolver struct {
 	capabilitiesClosed bool
 }
 
-func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessionprofile.Configuration, source sessionprofile.Source, capabilities *applicationCapabilities) ([]tool.Tool, error) {
-	tools, err := r.composition.authorities.sessionProfiles.ToolsForConfiguration(ctx, r.binding, configuration, source)
-	if err != nil {
-		return nil, err
-	}
+func (r *applicationTurnResolver) tools(ctx context.Context, nativeTools []string, capabilities *applicationCapabilities) ([]tool.Tool, error) {
+	var tools []tool.Tool
 	if r.binding.Profile.Execution == "workspace-write" {
-		native, err := newApplicationNativeTools(r.execution, r.composition.authorities.sessionProfiles, r.binding, r.composition.workspace.CWD, configuration.Profile.NativeTools)
+		native, err := newApplicationNativeTools(r.execution, r.composition.authorities.sessionProfiles, r.binding, r.composition.workspace.CWD, nativeTools)
 		if err != nil {
 			return nil, err
 		}
 		tools = append(tools, native...)
 	}
-	hasCodeMode := false
-	for _, one := range tools {
-		if one.Definition().Name == codemode.ToolName {
+	var hasCodeMode, hasTask bool
+	for _, native := range tools {
+		switch native.Definition().Name {
+		case codemode.ToolName:
 			hasCodeMode = true
-			break
+		case tasktool.ToolName:
+			hasTask = true
 		}
 	}
 	if !hasCodeMode {
 		tools = append(tools, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}})
-	}
-	hasTask := false
-	for _, one := range tools {
-		if one.Definition().Name == tasktool.ToolName {
-			hasTask = true
-			break
-		}
 	}
 	if !hasTask {
 		tools = append(tools, tasktool.New())
@@ -296,27 +285,9 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessi
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]bool, len(tools))
-	for _, t := range tools {
-		seen[t.Definition().Name] = true
-	}
-	for _, t := range children {
-		name := t.Definition().Name
-		if !seen[name] {
-			tools = append(tools, t)
-			seen[name] = true
-		}
-	}
+	tools = append(tools, children...)
 	if mcpSource, ok := capabilities.source.(applicationMCPSource); ok {
-		// Explicit callbacks keep their names when the MCP catalog becomes ready.
-		// Code Mode likewise resolves registered tools before the deferred source.
-		for _, t := range mcpSource.PrefixTools() {
-			name := t.Definition().Name
-			if !seen[name] {
-				tools = append(tools, t)
-				seen[name] = true
-			}
-		}
+		tools = append(tools, mcpSource.PrefixTools()...)
 	}
 	return tools, nil
 }
@@ -329,7 +300,7 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 	if !ok || sessionprofile.ValidateSource(source) != nil {
 		return kernel.ResolvedTurn{}, fmt.Errorf("gatewayapp: application Turn is missing trusted source admission")
 	}
-	snapshot, err := r.resolveModelRequest(ctx, source)
+	snapshot, err := r.resolveModelRequest(ctx)
 	if err != nil {
 		return kernel.ResolvedTurn{}, err
 	}
@@ -357,12 +328,12 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 		AgentSpec: agent.AgentSpec{Name: "application", Model: snapshot.Model, Tools: snapshot.Tools, Metadata: metadata,
 			ResolveSessionInstructions: sessionSkillInstructions(r.composition.sessions, intent.SessionRef, r.liveSkillCatalog),
 			ResolveModelRequest: func(ctx context.Context) (agent.ModelRequestSnapshot, error) {
-				return r.resolveModelRequest(ctx, source)
+				return r.resolveModelRequest(ctx)
 			}},
 	}}, nil
 }
 
-func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, source sessionprofile.Source) (agent.ModelRequestSnapshot, error) {
+func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context) (agent.ModelRequestSnapshot, error) {
 	store := r.composition.authorities.sessionProfiles
 	configuration, capabilities, err := r.currentCapabilities(ctx)
 	if err != nil {
@@ -372,7 +343,7 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
-	tools, err := r.tools(ctx, configuration, source, capabilities)
+	tools, err := r.tools(ctx, configuration.Profile.NativeTools, capabilities)
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
@@ -415,11 +386,6 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 		}
 	}
 	registry, err := policy.NewMemory(policy.NamedMode{ID: mode, Decide: func(ctx context.Context, input policy.ToolContext) (policy.Decision, error) {
-		// Only the stored, request-pinned callback catalog supplies callback
-		// policy; names and model arguments cannot opt into this path.
-		if decision, handled, err := sessionprofile.CallbackPolicyDecision(input); handled || err != nil {
-			return decision, err
-		}
 		if input.Tool.Name == codemode.ToolName && codemode.IsDefinition(input.Tool) {
 			var source struct {
 				File string `json:"file"`
@@ -453,7 +419,7 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 		if native != nil {
 			return native.DecideTool(ctx, input)
 		}
-		return policy.Decision{Action: policy.ActionDeny, Reason: "tools-only application execution admits only stored callbacks"}, nil
+		return policy.Decision{Action: policy.ActionDeny, Reason: "tool is unavailable in tools-only execution"}, nil
 	}})
 	return registry, mode, err
 }

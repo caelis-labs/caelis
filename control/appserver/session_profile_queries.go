@@ -23,7 +23,7 @@ const CapabilitySessionProfileChildren = "session-profile-children-v1"
 func (s *SessionProfileService) Capabilities() []string {
 	out := []string{
 		sessionprofile.Capability, sessionprofile.CapabilityResourceTransfer,
-		sessionprofile.CapabilityToolResultContent, sessionprofile.CapabilityMediaResources,
+		sessionprofile.CapabilityMediaResources,
 		sessionprofile.CapabilityBackgroundActivation, CapabilityTurnSteering, CapabilitySessionProfileControl,
 		CapabilityExecutionConfiguration,
 	}

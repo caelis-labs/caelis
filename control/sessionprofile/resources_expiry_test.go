@@ -65,11 +65,11 @@ func TestResourceExpiryImmutableRetryAndRestart(t *testing.T) {
 	if len(readData) != 0 {
 		t.Fatalf("expired byte read exposed data: %q", readData)
 	}
-	// The internal callback byte path shares the same expiry gate.
+	// The internal byte path shares the same expiry gate.
 	_, readData, err = s.resource(t.Context(), owner.Scope, binding.SessionID, r.ID)
 	assertError(t, err, ErrResourceExpired)
 	if len(readData) != 0 {
-		t.Fatalf("expired callback byte read exposed data: %q", readData)
+		t.Fatalf("expired internal byte read exposed data: %q", readData)
 	}
 	retry, err = s.CreateResourceWithExpiry(t.Context(), owner.Scope, binding.SessionID, "upload", "photo.png", "image/png", []byte("owned immutable media"), &retryExpiry)
 	if err != nil || !reflect.DeepEqual(retry, r) {

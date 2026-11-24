@@ -39,7 +39,6 @@ func Observed(ctx context.Context) *Observation {
 // Apply records the declared result layout and admitted discovery on the Session fact.
 func (o *Observation) Apply(fact *session.EventTool, def tool.Definition, success bool) {
 	fact.Discovery = o.Discovery && success
-	fact.ResultIncludesReceipt = def.ResultIncludesReceipt
 }
 
 // EventMeta builds the presentation data attached to the Session event.

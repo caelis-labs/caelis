@@ -247,7 +247,7 @@ func TestSessionProfileCreationRecoveryKeepsOriginalRevision(t *testing.T) {
 	}
 }
 
-func TestSessionBackgroundAndToolCallsUseCommonOwnerAndReceipts(t *testing.T) {
+func TestSessionBackgroundUsesCommonOwnerAndReceipts(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	provider := &applicationHTTPModel{}
@@ -273,36 +273,9 @@ func TestSessionBackgroundAndToolCallsUseCommonOwnerAndReceipts(t *testing.T) {
 		t.Fatalf("grant = %+v, %v", grant, err)
 	}
 	prompt := appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "timer-turn", SessionID: created.SessionID}, Input: "Perform the authorized lookup.", SourceKind: "authorized_background", GrantID: grant.BackgroundGrant.ID}
-	started, err := host.host.Prompt(ctx, prompt)
+	_, err = host.host.Prompt(ctx, prompt)
 	if err != nil {
 		t.Fatal(err)
-	}
-	calls, err := host.host.WaitSessionToolCalls(ctx, created.SessionID)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("tool calls = %+v, %v", calls, err)
-	}
-	call := calls[0]
-	if call.Source.Kind != "authorized_background" || call.Source.GrantID != grant.BackgroundGrant.ID || call.Source.AuthorizedSource != grantRequest.Source || call.TurnID != started.Target.TurnID || call.ToolsVersion != profile.ToolsVersion {
-		t.Fatalf("tool identity/source changed: %+v", call)
-	}
-	nextVersion := "lookup-tools/2"
-	_, err = host.host.UpdateSessionConfiguration(ctx, appserver.UpdateSessionConfigurationRequest{WriteBase: appserver.WriteBase{OperationID: "new-tools", SessionID: created.SessionID}, ExpectedConfigurationRevision: 1, Patch: sessionprofile.ConfigurationPatch{ToolsVersion: &nextVersion}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := host.host.ClaimSessionToolCall(ctx, created.SessionID, call.ID)
-	if err != nil || claimed.State != "claimed" || claimed.ToolsVersion != profile.ToolsVersion {
-		t.Fatalf("claim = %+v, %v", claimed, err)
-	}
-	if _, err := host.host.ClaimSessionToolCall(ctx, created.SessionID, call.ID); errorcode.CodeOf(err) != errorcode.Conflict {
-		t.Fatalf("second claim = %v", err)
-	}
-	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"original result"}`)}
-	if err := host.host.CompleteSessionToolCall(ctx, created.SessionID, call.ID, result); err != nil {
-		t.Fatal(err)
-	}
-	if err := host.host.CompleteSessionToolCall(ctx, created.SessionID, call.ID, result); err != nil {
-		t.Fatalf("exact result retry = %v", err)
 	}
 	waitApplicationHTTPIdle(t, ctx, host.host, created.SessionID)
 	revoked, err := host.host.RevokeSessionBackgroundGrant(ctx, appserver.RevokeSessionBackgroundGrantRequest{WriteBase: appserver.WriteBase{OperationID: "revoke-consent", SessionID: created.SessionID}, GrantID: grant.BackgroundGrant.ID})
