@@ -2,18 +2,12 @@ package sessionprofile
 
 import (
 	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
-	"reflect"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func testStore(t *testing.T) (*Store, string) {
@@ -27,7 +21,7 @@ func testStore(t *testing.T) (*Store, string) {
 	return s, path
 }
 func testProfile() Profile {
-	return Profile{Version: "v1", Instructions: "Use the explicitly provided callback.", Model: "test/model", ToolsVersion: "tools-v1", Execution: "tools-only", Tools: []ToolDefinition{{Name: "WriteNote", Description: "Record one note.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"note": map[string]any{"type": "string"}}, "required": []any{"note"}, "additionalProperties": false}}}}
+	return Profile{Version: "v1", Instructions: "Use the Session capabilities.", Model: "test/model", ToolsVersion: "tools-v1", Execution: "tools-only"}
 }
 
 type testPrincipal struct{ Scope }
@@ -43,92 +37,6 @@ func testBinding(t *testing.T, s *Store, c testPrincipal, id string) Binding {
 		t.Fatal(err)
 	}
 	return b
-}
-func testCall(b Binding) CallContext {
-	return CallContext{Scope: b.Scope, SessionID: b.SessionID, TurnID: "turn-1", ItemID: "item-1", CallID: "provider-call", ToolsVersion: b.Profile.ToolsVersion, ConfigurationRevision: 1, Source: Source{Kind: "user", OperationID: "prompt-1"}}
-}
-func enqueueTest(t *testing.T, s *Store, c CallContext) string {
-	t.Helper()
-	id, err := s.enqueue(t.Context(), c, "WriteNote", json.RawMessage(`{"note":"hello"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return id
-}
-func testResult() CallResult {
-	return CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"recorded":true}`)}
-}
-
-func TestApplicationReceiptPersistsOnOriginalCall(t *testing.T) {
-	s, path := testStore(t)
-	connection := testOwner(t, s, 9123)
-	binding := testBinding(t, s, connection, "terminal-session")
-	provenance := testCall(binding)
-	id := enqueueTest(t, s, provenance)
-	if _, err := s.ClaimCall(t.Context(), connection.Scope, binding.SessionID, id); err != nil {
-		t.Fatal(err)
-	}
-	invalid := CallResult{Outcome: "invalid", Content: json.RawMessage(`null`)}
-	assertError(t, s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, invalid), ErrInvalid)
-	result := CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`)}
-	if err := s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, result); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, result); err != nil {
-		t.Fatalf("same original receipt was not idempotent: %v", err)
-	}
-	if err := s.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	call, err := reopened.GetCall(t.Context(), connection.Scope, binding.SessionID, id)
-	if err != nil || call.State != "completed" || call.Result == nil || string(call.Result.Content) != string(result.Content) || call.ID != id {
-		t.Fatalf("recovered original call = %+v, %v", call, err)
-	}
-	projected, err := reopened.projectResult(t.Context(), provenance, call.ID, "", *call.Result)
-	if err != nil || len(projected.Content) != 1 {
-		t.Fatalf("projected callback content = %+v, %v", projected, err)
-	}
-}
-
-func TestLegacyCallbackReceiptAfterSQLiteReopen(t *testing.T) {
-	ctx := t.Context()
-	s, path := testStore(t)
-	b := contentBinding(t, s, testOwner(t, s, 9123), "legacy-callback-session")
-	legacy := claimContent(t, s, b, "legacy")
-	const raw = `{"outcome":"succeeded","content":[{"type":"text","text":"recorded"}],"turn_complete":true,"result_format":"content-v1","structuredContent":{"n":9007199254740993}}`
-	// Install the historical result exactly as the v0.83.1 completion writer did.
-	if _, err := s.db.ExecContext(ctx, `UPDATE client_tool_calls SET state='completed',result=? WHERE call=?`, []byte(raw), legacy.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	var request CallResult
-	assertError(t, json.Unmarshal([]byte(raw), &request), ErrInvalid)
-	current := claimContent(t, reopened, b, "current")
-	updated := contentResult(t)
-	if err := reopened.CompleteCall(ctx, b.Scope, b.SessionID, current.ID, updated); err != nil {
-		t.Fatal(err)
-	}
-	got, err := reopened.GetCall(ctx, b.Scope, b.SessionID, legacy.ID)
-	want := &CallResult{Outcome: "succeeded", Content: json.RawMessage(`[{"type":"text","text":"recorded"}]`), ResultFormat: ResultFormatContentV1, StructuredContent: map[string]any{"n": json.Number("9007199254740993")}}
-	if err != nil || got.ID != legacy.ID || got.State != "completed" || !reflect.DeepEqual(got.Result, want) {
-		t.Fatalf("historical call = %+v, result = %+v, error = %v", got, got.Result, err)
-	}
-	calls, err := reopened.ListCalls(ctx, b.Scope, b.SessionID)
-	if err != nil || len(calls) != 2 || !reflect.DeepEqual(calls[0], got) || calls[1].ID != current.ID || !reflect.DeepEqual(calls[1].Result, &updated) {
-		t.Fatalf("mixed history = %+v, %v", calls, err)
-	}
 }
 func assertError(t *testing.T, err, want error) {
 	t.Helper()
@@ -148,11 +56,6 @@ func TestA05ProfileRejectsInheritedAndIncompleteAuthority(t *testing.T) {
 		{"tools-version", func(p *Profile) { p.ToolsVersion = "" }, ErrInvalid},
 		{"execution", func(p *Profile) { p.Execution = "" }, ErrInvalid},
 		{"all-inheritance", func(p *Profile) { p.Inherit = Inheritance{true, true, true, true} }, ErrUnsupported},
-		{"duplicate", func(p *Profile) { p.Tools = append(p.Tools, p.Tools[0]) }, ErrInvalid},
-		{"schema", func(p *Profile) { p.Tools[0].InputSchema = nil }, ErrInvalid},
-		{"remote-schema", func(p *Profile) {
-			p.Tools[0].InputSchema = map[string]any{"type": "object", "$ref": "https://invalid.example/schema"}
-		}, ErrInvalid},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { p := testProfile(); tc.change(&p); assertError(t, ValidateProfile(p), tc.want) })
@@ -161,150 +64,6 @@ func TestA05ProfileRejectsInheritedAndIncompleteAuthority(t *testing.T) {
 	assertError(t, err, ErrUnsupported)
 	if errorcode.CodeOf(err) != errorcode.Unsupported {
 		t.Fatal("unsupported code missing")
-	}
-}
-
-func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
-	s, _ := testStore(t)
-	c := testOwner(t, s, 1)
-	b := testBinding(t, s, c, "s")
-	source := Source{Kind: "user", OperationID: "prompt"}
-	configuration, err := s.Configuration(t.Context(), c.Scope, b.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tools, err := s.ToolsForConfiguration(t.Context(), b, configuration, source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	type returned struct {
-		result tool.Result
-		err    error
-	}
-	done := make(chan returned, 1)
-	native := tool.Call{ID: "provider-id", Name: "WriteNote", Input: json.RawMessage(`{"note":"hello"}`)}
-	go func() {
-		r, e := tools[0].(callbackTool).invoke(ctx, native, tool.InvocationContext{SessionID: b.SessionID, TurnID: "turn", ItemID: "step"})
-		done <- returned{r, e}
-	}()
-	calls, err := s.WaitCalls(ctx, c.Scope, b.SessionID)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("intent = %+v %v", calls, err)
-	}
-	call := calls[0]
-	if call.CallID != native.ID || call.ItemID != "step" || call.TurnID != "turn" || call.Source != source || call.ToolsVersion != b.Profile.ToolsVersion {
-		t.Fatalf("lost native provenance: %+v", call)
-	}
-	claimed, err := s.ClaimCall(ctx, c.Scope, b.SessionID, call.ID)
-	if err != nil || claimed.State != "claimed" {
-		t.Fatalf("claim = %+v %v", claimed, err)
-	}
-	_, err = s.ClaimCall(ctx, c.Scope, b.SessionID, call.ID)
-	assertError(t, err, ErrAlreadyClaimed)
-	if err = s.CompleteCall(ctx, c.Scope, b.SessionID, call.ID, testResult()); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case outcome := <-done:
-		if outcome.err != nil || len(outcome.result.Content) != 1 {
-			t.Fatalf("native result %+v %v", outcome.result, outcome.err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	// Retrying exact completed intent returns its result without granting another claim.
-	result, receiptID, err := s.invoke(ctx, call.CallContext, call.Name, call.Arguments)
-	if err != nil || receiptID != call.ID || !reflect.DeepEqual(result, testResult()) {
-		t.Fatalf("requery = %+v %v", result, err)
-	}
-	_, _, err = s.invoke(ctx, call.CallContext, call.Name, json.RawMessage(`{"note":"different"}`))
-	assertError(t, err, ErrConflict)
-	changed := call.CallContext
-	changed.TurnID = "other-turn"
-	id := enqueueTest(t, s, changed)
-	if id == call.ID {
-		t.Fatal("provider id reuse aliased prior effect")
-	}
-	native.Metadata = map[string]any{"session_id": b.SessionID, "turn_id": "forged", "item_id": "forged"}
-	_, err = tools[0].Call(ctx, native)
-	assertError(t, err, ErrUnauthorized)
-}
-
-func TestA06ConcurrentClaimGrantsExactlyOnce(t *testing.T) {
-	s, _ := testStore(t)
-	c := testOwner(t, s, 1)
-	b := testBinding(t, s, c, "s")
-	id := enqueueTest(t, s, testCall(b))
-	const n = 12
-	start := make(chan struct{})
-	results := make(chan error, n)
-	var wg sync.WaitGroup
-	for range n {
-		wg.Go(func() { <-start; _, err := s.ClaimCall(t.Context(), c.Scope, b.SessionID, id); results <- err })
-	}
-	close(start)
-	wg.Wait()
-	close(results)
-	granted := 0
-	for err := range results {
-		if err == nil {
-			granted++
-		} else {
-			assertError(t, err, ErrAlreadyClaimed)
-		}
-	}
-	if granted != 1 {
-		t.Fatalf("claims granted %d", granted)
-	}
-}
-
-func TestA06CrashRecoveryNeverRegrantsAndPreservesCompleted(t *testing.T) {
-	s, path := testStore(t)
-	c := testOwner(t, s, 1)
-	b := testBinding(t, s, c, "s")
-	base := testCall(b)
-	ids := map[string]string{}
-	for _, state := range []string{"pending", "claimed", "completed"} {
-		cc := base
-		cc.ItemID = state
-		id := enqueueTest(t, s, cc)
-		ids[state] = id
-		if state != "pending" {
-			if _, err := s.ClaimCall(t.Context(), c.Scope, b.SessionID, id); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if state == "completed" {
-			if err := s.CompleteCall(t.Context(), c.Scope, b.SessionID, id, testResult()); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	// Simulate lost process without orderly Close terminalization.
-	if err := s.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = reopened.Close() }()
-	for original, id := range ids {
-		call, err := reopened.GetCall(t.Context(), c.Scope, b.SessionID, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := map[string]string{"pending": "cancelled", "claimed": "unknown", "completed": "completed"}[original]
-		if call.State != want {
-			t.Fatalf("%s recovered %s", original, call.State)
-		}
-		_, err = reopened.ClaimCall(t.Context(), c.Scope, b.SessionID, id)
-		assertError(t, err, ErrAlreadyClaimed)
-		if original == "completed" && !reflect.DeepEqual(call.Result, &CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"recorded":true}`)}) {
-			t.Fatal("completed outcome changed")
-		}
 	}
 }
 
@@ -359,67 +118,4 @@ func TestA08ResourcesImmutableScopedVerifiedAndReopen(t *testing.T) {
 	}
 	_, _, err = reopened.ReadResource(t.Context(), c.Scope, b.SessionID, r.ID)
 	assertError(t, err, ErrInvalid)
-}
-
-func TestA02CallsCannotCrossConnectionOrSession(t *testing.T) {
-	s, _ := testStore(t)
-	c := testOwner(t, s, 1)
-	b := testBinding(t, s, c, "owned")
-	second := testBinding(t, s, c, "same-connection-other-session")
-	foreign := testOwner(t, s, 2)
-	id := enqueueTest(t, s, testCall(b))
-	for _, target := range []struct {
-		scope   Scope
-		session string
-	}{{foreign.Scope, b.SessionID}, {c.Scope, second.SessionID}} {
-		_, err := s.GetCall(t.Context(), target.scope, target.session, id)
-		assertError(t, err, ErrNotFound)
-		_, err = s.ClaimCall(t.Context(), target.scope, target.session, id)
-		assertError(t, err, ErrNotFound)
-		assertError(t, s.CompleteCall(t.Context(), target.scope, target.session, id, testResult()), ErrNotFound)
-		assertError(t, s.CancelCall(t.Context(), target.scope, target.session, id), ErrNotFound)
-	}
-	_, err := s.ListCalls(t.Context(), foreign.Scope, b.SessionID)
-	assertError(t, err, ErrNotFound)
-	call, err := s.GetCall(t.Context(), c.Scope, b.SessionID, id)
-	if err != nil || call.State != "pending" {
-		t.Fatalf("cross-scope access changed call: %+v %v", call, err)
-	}
-}
-
-func TestA06InvalidAdmissionPersistsNoIntent(t *testing.T) {
-	s, _ := testStore(t)
-	c := testOwner(t, s, 1)
-	b := testBinding(t, s, c, "s")
-	base := testCall(b)
-	cases := []struct {
-		name   string
-		change func(*CallContext)
-		tool   string
-		args   string
-		want   error
-	}{
-		{"unknown-tool", nil, "RunCommand", `{"note":"hello"}`, ErrUnauthorized},
-		{"extra-argument", nil, "WriteNote", `{"note":"hello","scope":"forged"}`, ErrInvalid},
-		{"missing-argument", nil, "WriteNote", `{}`, ErrInvalid},
-		{"wrong-type", nil, "WriteNote", `{"note":7}`, ErrInvalid},
-		{"malformed", nil, "WriteNote", `{"note":`, ErrInvalid},
-		{"missing-item", func(c *CallContext) { c.ItemID = "" }, "WriteNote", `{"note":"hello"}`, ErrInvalid},
-		{"tools-version", func(c *CallContext) { c.ToolsVersion = "changed" }, "WriteNote", `{"note":"hello"}`, ErrConflict},
-		{"background", func(c *CallContext) { c.Source.Kind = "background" }, "WriteNote", `{"note":"hello"}`, ErrUnsupported},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cc := base
-			if tc.change != nil {
-				tc.change(&cc)
-			}
-			_, _, err := s.invoke(t.Context(), cc, tc.tool, json.RawMessage(tc.args))
-			assertError(t, err, tc.want)
-		})
-	}
-	calls, err := s.ListCalls(t.Context(), c.Scope, b.SessionID)
-	if err != nil || len(calls) != 0 {
-		t.Fatalf("invalid intents persisted %+v %v", calls, err)
-	}
 }

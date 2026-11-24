@@ -26,10 +26,9 @@ var (
 	ErrConflict           = errorcode.New(errorcode.Conflict, "Session profile operation conflicts with durable intent")
 	ErrNotFound           = errorcode.New(errorcode.NotFound, "Session profile record not found")
 	ErrInvalid            = errorcode.New(errorcode.InvalidArgument, "invalid Session profile request")
-	ErrAlreadyClaimed     = errorcode.New(errorcode.Conflict, "Session profile call already claimed or terminal")
+	ErrCallbackRetired    = errorcode.New(errorcode.Unsupported, "Session profile callbacks are retired; configure MCP servers instead")
 	ErrClosed             = errorcode.New(errorcode.Unavailable, "Session profile store closed")
 	ErrUnsupported        = errorcode.New(errorcode.Unsupported, "unsupported Session profile capability")
-	ErrCancelled          = errorcode.New(errorcode.Cancelled, "Session profile call cancelled")
 	ErrConfigurationStale = errorcode.New(errorcode.Conflict, "Session profile configuration revision is stale")
 )
 
@@ -39,11 +38,10 @@ var (
 // The caller must hold exclusive Host ownership before Open and drain producers
 // before Close; SQLite connection count is not a multi-Host writer protocol.
 type Store struct {
-	mu      sync.Mutex
-	db      *sql.DB
-	changed chan struct{}
-	closed  bool
-	now     func() time.Time
+	mu     sync.Mutex
+	db     *sql.DB
+	closed bool
+	now    func() time.Time
 }
 
 // Open performs the bounded old-format import before opening the current Store.
@@ -72,28 +70,27 @@ func Open(path string) (*Store, error) {
 	if err = sessionstate.EnsureSchema(context.Background(), tx); err != nil {
 		return fail(err)
 	}
+	// An upgraded Host cannot recover an old callback executor. Persist only
+	// what the original claim proves, under the original receipt address.
 	if _, err = tx.Exec(`UPDATE client_tool_calls SET state=CASE state WHEN 'pending' THEN 'cancelled' ELSE 'unknown' END WHERE state IN ('pending','claimed')`); err != nil {
 		return fail(err)
 	}
 	if err = tx.Commit(); err != nil {
 		return fail(err)
 	}
-	return &Store{db: db, changed: make(chan struct{}), now: time.Now}, nil
+	return &Store{db: db, now: time.Now}, nil
 }
 
-// Close terminalizes abandoned callback intents without replaying effects.
+// Close releases the Store after the Host drains its producers.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil
 	}
-	_, err := s.db.Exec(`UPDATE client_tool_calls SET state=CASE state WHEN 'pending' THEN 'cancelled' ELSE 'unknown' END WHERE state IN ('pending','claimed')`)
 	s.closed = true
-	s.signal()
-	return errors.Join(err, s.db.Close())
+	return s.db.Close()
 }
-func (s *Store) signal()             { close(s.changed); s.changed = make(chan struct{}) }
 func digestBytes(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 func encode(value any) ([]byte, error) {
 	b, err := json.Marshal(value)

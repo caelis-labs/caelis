@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 	"math"
+
+	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 )
 
 // configuration reads one durable revision. Caller holds s.mu and has verified
@@ -77,7 +77,10 @@ func applyConfigurationPatch(p Profile, patch ConfigurationPatch) (Profile, erro
 		if *patch.Tools == nil {
 			return Profile{}, ErrInvalid
 		}
-		p.Tools = *patch.Tools
+		if len(*patch.Tools) != 0 {
+			return Profile{}, ErrCallbackRetired
+		}
+		p.Tools = nil
 	}
 	if patch.NativeTools != nil {
 		if *patch.NativeTools == nil {
@@ -189,9 +192,6 @@ func (s *Store) UpdateConfiguration(ctx context.Context, scope Scope, session st
 		return Configuration{}, err
 	}
 	if !bytes.Equal(newProfile, oldProfile) {
-		if err = s.validateCatalogVersion(ctx, session, candidate); err != nil {
-			return Configuration{}, err
-		}
 		result.Revision++
 		result.Profile = candidate
 	}
@@ -223,38 +223,6 @@ func (s *Store) UpdateConfiguration(ctx context.Context, scope Scope, session st
 		return Configuration{}, err
 	}
 	return committed, nil
-}
-
-func (s *Store) validateCatalogVersion(ctx context.Context, session string, candidate Profile) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT body FROM session_configurations WHERE session=?`, session)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-	catalog, err := encode(candidate.Tools)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var raw []byte
-		if err = rows.Scan(&raw); err != nil {
-			return err
-		}
-		var previous Configuration
-		if err = json.Unmarshal(raw, &previous); err != nil {
-			return err
-		}
-		if previous.Profile.ToolsVersion == candidate.ToolsVersion {
-			prior, err := encode(previous.Profile.Tools)
-			if err != nil {
-				return err
-			}
-			if (len(previous.Profile.Tools) != 0 || len(candidate.Tools) != 0) && !bytes.Equal(catalog, prior) {
-				return fmt.Errorf("%w: tools_version already names a different catalog", ErrConflict)
-			}
-		}
-	}
-	return rows.Err()
 }
 
 // AdmitRequest fences a request against latest desired revision under the same

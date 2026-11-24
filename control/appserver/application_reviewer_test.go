@@ -50,11 +50,5 @@ func TestApplicationReviewerStateScopedCreationBindingAndCapability(t *testing.T
 	if _, err := service.SessionReviewerState(t.Context(), owner, "owned"); !errors.Is(err, sessionprofile.ErrUnsupported) {
 		t.Fatalf("unbound reviewer state: %v", err)
 	}
-	manual := applicationTestProfile()
-	manual.Tools = []sessionprofile.ToolDefinition{{Name: "SensitiveAction", InputSchema: map[string]any{"type": "object"}, ApprovalPolicy: "required"}}
-	service.config.ValidateProfile = func(context.Context, sessionprofile.Profile) error { return nil }
-	patch := sessionprofile.ConfigurationPatch{Tools: &manual.Tools}
-	if _, err := service.UpdateSessionConfiguration(t.Context(), owner, UpdateSessionConfigurationRequest{WriteBase: WriteBase{OperationID: "unsupported-update", SessionID: "owned"}, ExpectedConfigurationRevision: 1, Patch: patch}); !errors.Is(err, sessionprofile.ErrUnsupported) {
-		t.Fatalf("required callback configuration update on unsupported service: %v", err)
-	}
+
 }

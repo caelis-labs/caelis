@@ -32,15 +32,17 @@ func PrincipalScope(principal string) Scope { return Scope{PrincipalID: principa
 // Profile is a complete execution snapshot. Binding.Profile is the immutable
 // creation snapshot; Configuration.Profile is the revisioned desired snapshot.
 type Profile struct {
-	Version         string           `json:"version"`
-	Instructions    string           `json:"instructions"`
-	Model           string           `json:"model"`
-	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
-	ServiceTier     string           `json:"service_tier,omitempty"`
-	ToolsVersion    string           `json:"tools_version"`
-	Tools           []ToolDefinition `json:"tools,omitempty"`
-	NativeTools     []string         `json:"native_tools,omitempty"`
-	MCPServers      []MCPServer      `json:"mcp_servers,omitempty"`
+	Version         string `json:"version"`
+	Instructions    string `json:"instructions"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ServiceTier     string `json:"service_tier,omitempty"`
+	// ToolsVersion and Tools preserve old profile and operation-receipt identities.
+	// New profiles use an empty catalog; a configuration patch can clear an old one.
+	ToolsVersion string           `json:"tools_version"`
+	Tools        []ToolDefinition `json:"tools,omitempty"`
+	NativeTools  []string         `json:"native_tools,omitempty"`
+	MCPServers   []MCPServer      `json:"mcp_servers,omitempty"`
 	// SkillDirs adds Skill roots and directories of Skills to default discovery.
 	SkillDirs []string `json:"skill_dirs,omitempty"`
 	// SkillRoots carries legacy exact roots for existing profiles and clients.
@@ -295,16 +297,14 @@ type Inheritance struct {
 	WorkspaceMemory bool `json:"workspace_memory"`
 }
 
-// ToolDefinition describes an application-owned callback, not a native tool.
+// ToolDefinition preserves the original definition in a legacy callback catalog.
 type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
-	// ApprovalPolicy controls per-invocation callback dispatch. Omitted or "direct"
-	// dispatches directly; "required" requests canonical approval first.
+	// ApprovalPolicy records the historical dispatch policy.
 	ApprovalPolicy string `json:"approval_policy,omitempty"`
-	// ResultFormat pins result interpretation with the tool catalog. Empty keeps
-	// the baseline opaque JSON contract; content-v1 admits typed content blocks.
+	// ResultFormat records the original result encoding.
 	ResultFormat string         `json:"result_format,omitempty"`
 	OutputSchema map[string]any `json:"output_schema,omitempty"`
 }
@@ -339,7 +339,7 @@ type Source struct {
 	AuthorizedSource string `json:"authorized_source,omitempty"`
 }
 
-// CallContext is native provenance bound by the Runtime, not callback arguments.
+// CallContext records the original Runtime provenance of a historical call.
 type CallContext struct {
 	Scope
 	SessionID             string `json:"session_id"`
@@ -351,8 +351,8 @@ type CallContext struct {
 	Source                Source `json:"source"`
 }
 
-// Call is a durable intent. Claiming is at most once: an unacknowledged claimed
-// effect remains unknown, never automatically reissued on reconnect or restart.
+// Call is a historical receipt. Incomplete effects settle on Host startup as
+// cancelled (unclaimed) or unknown (claimed).
 type Call struct {
 	// ID is the durable callback receipt address, independent of provider CallID reuse.
 	ID string `json:"id"`
@@ -367,9 +367,7 @@ type Call struct {
 type CallResult struct {
 	Outcome string          `json:"outcome"` // succeeded, failed, unknown
 	Content json.RawMessage `json:"content"`
-	// ResultFormat must match the claimed tool's immutable catalog revision.
-	// Content is an ordered ContentBlock array only for content-v1. Baseline
-	// clients retain opaque JSON until they explicitly negotiate that format.
+	// ResultFormat and Content preserve the historical encoding and payload.
 	ResultFormat string `json:"result_format,omitempty"`
 	// StructuredContent preserves absent versus empty objects and decodes JSON
 	// numbers as json.Number so the durable receipt does not round integers.

@@ -82,7 +82,7 @@ The [release interoperability runner](../scripts/control_compatibility/README.md
 builds the current production client and Host, with optional compatible peer refs.
 The peer mode checks both directions
 against isolated Stores, including original mutation receipts, configuration,
-callback effects, resources and SSE recovery after Host replacement. The evidence
+resources, native tool results and SSE recovery after Host replacement. The evidence
 is source-built binary acceptance; its synthetic provider is not a live-account
 or native Bot UI test.
 

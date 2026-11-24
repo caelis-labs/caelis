@@ -2,7 +2,8 @@ package gatewayapp_test
 
 import (
 	"context"
-	"encoding/json"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -37,8 +38,14 @@ func bindRuntimeTeamHTTP(t *testing.T, ctx context.Context, host *applicationHTT
 func TestRuntimeTeamHTTPUpdateKeepsPendingReviewAndExactOnceEffect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: `{"key":"one"}`, decision: `{"option_id":"allow_once"}`, entered: make(chan struct{}), release: make(chan struct{})}
-	host, client, sid := setupReviewerHTTP(t, ctx, t.TempDir(), provider)
+	root := t.TempDir()
+	audit := filepath.Join(root, "mcp-audit")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	ready, release := make(chan struct{}), make(chan struct{})
+	provider := &reviewerHTTPProvider{toolName: "js_exec", args: reviewerMCPArgs, decision: `{"option_id":"allow_once"}`,
+		toolReady: ready, entered: make(chan struct{}), release: release}
+	host, client, sid := setupReviewerHTTP(t, ctx, root, provider)
 	defer host.close(t)
 	connectApplicationChildModel(t, ctx, host, "reviewer-next")
 	original, err := client.SessionProfile(ctx, sid)
@@ -46,45 +53,27 @@ func TestRuntimeTeamHTTPUpdateKeepsPendingReviewAndExactOnceEffect(t *testing.T)
 		t.Fatal(err)
 	}
 	first := promptReviewerHTTP(t, ctx, client, sid, "team-first")
+	waitAtomicApplicationMCPRunning(t, ctx, client, sid, "documents")
+	close(ready)
 	select {
 	case <-provider.entered:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	reviewerHTTPNoCallbacks(t, ctx, client, sid)
 	bindRuntimeTeamHTTP(t, ctx, host, agentbinding.HandleGuardian, "reviewer-next", "hot-guardian")
-	reviewerHTTPNoCallbacks(t, ctx, client, sid)
-	close(provider.release)
-	complete := func(turn string) {
-		t.Helper()
-		calls, err := client.WaitSessionToolCalls(ctx, sid)
-		if err != nil || len(calls) != 1 || calls[0].TurnID != turn {
-			t.Fatalf("exact pending action: %+v, %v", calls, err)
-		}
-		if _, err := client.ClaimSessionToolCall(ctx, sid, calls[0].ID); err != nil {
-			t.Fatal(err)
-		}
-		result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"once"}`)}
-		if err := client.CompleteSessionToolCall(ctx, sid, calls[0].ID, result); err != nil {
-			t.Fatal(err)
-		}
-		if err := client.CompleteSessionToolCall(ctx, sid, calls[0].ID, result); err != nil {
-			t.Fatal(err)
-		}
-		waitApplicationHTTPIdle(t, ctx, client, sid)
-		completed, err := client.SessionToolCalls(ctx, sid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, call := range completed {
-			if call.State != "completed" {
-				t.Fatalf("unexpected repeated action: %+v", call)
-			}
-		}
+	if strings.Contains(atomicAudit(audit), "documents:call:") {
+		t.Fatal("MCP effect occurred before the pending Guardian decision")
 	}
-	complete(first.Target.TurnID)
+	close(release)
+	waitApplicationHTTPIdle(t, ctx, client, sid)
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
+		t.Fatalf("first provider review dispatched %d MCP effects", got)
+	}
 	second := promptReviewerHTTP(t, ctx, client, sid, "team-second")
-	complete(second.Target.TurnID)
+	waitApplicationHTTPIdle(t, ctx, client, sid)
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 2 {
+		t.Fatalf("two approved Turns dispatched %d MCP effects", got)
+	}
 	var models []string
 	for _, req := range provider.snapshot() {
 		if name, ok := req["model"].(string); ok && strings.HasPrefix(name, "reviewer-") {
@@ -98,29 +87,34 @@ func TestRuntimeTeamHTTPUpdateKeepsPendingReviewAndExactOnceEffect(t *testing.T)
 	if len(reviews) != 2 || reviews[0].ApprovalRequestID == reviews[1].ApprovalRequestID {
 		t.Fatalf("review identity/decision changed: %+v", reviews)
 	}
+	if first.Target.TurnID == second.Target.TurnID {
+		t.Fatal("distinct approved Turns shared an identity")
+	}
 	current, err := client.SessionProfile(ctx, sid)
-	if err != nil || current.SessionID != original.SessionID || current.Profile.Reviewer == nil || *current.Profile.Reviewer != *original.Profile.Reviewer {
-		t.Fatalf("upgrade rewrote creation evidence: %+v, %v", current, err)
+	if err != nil || !reflect.DeepEqual(current, original) {
+		t.Fatalf("Team update rewrote creation evidence: %+v, %v", current, err)
 	}
 }
 
 func TestRuntimeTeamNewAutoReviewProfileNeedsNoReviewerOverride(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: `{"key":"one"}`, decision: `{"option_id":"allow_once"}`}
-	host, client, _ := setupReviewerHTTP(t, ctx, t.TempDir(), provider)
+	root := t.TempDir()
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	ready := make(chan struct{})
+	provider := &reviewerHTTPProvider{toolName: "js_exec", args: reviewerMCPArgs, decision: `{"option_id":"allow_once"}`, toolReady: ready}
+	host, client, _ := setupReviewerHTTP(t, ctx, root, provider)
 	defer host.close(t)
 	profile := applicationHTTPProfile()
-	profile.Version = "runtime-team-profile"
 	profile.Permissions.ApprovalMode = "auto-review"
-	profile.Tools[0].ApprovalPolicy = "required"
+	profile.MCPServers = []sessionprofile.MCPServer{reviewerFixtureMCP(root)}
 	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-team-profile"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create: %+v, %v", created, err)
 	}
 	promptReviewerHTTP(t, ctx, client, created.SessionID, "team-no-override")
-	call := backgroundCall(t, ctx, client, created.SessionID)
-	completeBackgroundCall(t, ctx, client, call)
+	waitAtomicApplicationMCPRunning(t, ctx, client, created.SessionID, "documents")
+	close(ready)
 	waitApplicationHTTPIdle(t, ctx, client, created.SessionID)
 	reviews := reviewerHTTPReviewEvents(t, applicationHTTPHistory(t, ctx, client, created.SessionID), "approved")
 	if len(reviews) != 1 {

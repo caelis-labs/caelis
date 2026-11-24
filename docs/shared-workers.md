@@ -30,8 +30,7 @@ All HTTP paths below are relative to `/api/control/v1`. Writes require matching
 Creation may optionally select `model`, `reasoning_effort` and `fast_mode` using
 the Host's configured model catalog. Without a selection the ordinary Host
 default applies. Effort and fast mode require a model. These options affect only
-the new Session. No credentials, callback tools, Bot instructions or memory are
-copied. A model configuration failure after creation retains the Session address
+the new Session. Workers use their own credentials, instructions and tools. A model configuration failure after creation retains the Session address
 with an unknown operation outcome; it must not trigger another creation.
 
 If a response is lost, query the shared operation ID. Recovery uses the original
@@ -105,8 +104,7 @@ Turns without status polling.
 
 The Worker samples normal Host configuration at activation: native tools,
 trusted-workspace instructions, MCP, plugins, environment and the native
-permission/approval policy. Bot-private profile state and callback catalogs are
-not inherited. Any application-provided private memory capability remains owned
+permission/approval policy. Bot-private capabilities are scoped to their configured Session. Any application-provided private memory capability remains owned
 by that application; Core does not provide built-in Memory inheritance. A workspace path grants
 no extra tool privileges; normal workspace trust and approvals still apply.
 

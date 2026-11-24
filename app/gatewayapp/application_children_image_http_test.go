@@ -31,7 +31,9 @@ func TestApplicationProfileNamedModelUsesFrozenImageCapability(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			root := t.TempDir()
-			provider := &applicationHTTPModel{}
+			ready := make(chan struct{})
+			close(ready)
+			provider := &applicationHTTPModel{entered: make(chan struct{}), release: ready}
 			host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
 			defer host.close(t)
 			connectApplicationChildModelWithImage(t, ctx, host, "profile-parent", test.parent)
@@ -72,7 +74,12 @@ func TestApplicationProfileNamedModelUsesFrozenImageCapability(t *testing.T) {
 					t.Fatalf("native image child task admission: %+v %v", result, err)
 				}
 				child, _ := applicationAttachedChild(t, ctx, client, created.SessionID, "vision")
-				completeBackgroundCall(t, ctx, client, backgroundCall(t, ctx, client, child))
+				select {
+				case <-provider.entered:
+				case <-ctx.Done():
+					t.Fatal("named child did not reach its provider")
+				}
+				waitApplicationHTTPIdle(t, ctx, client, child)
 				if !strings.Contains(provider.snapshotFrom(0), "data:image/png;base64,") {
 					t.Fatal("named image-capable model did not receive image")
 				}

@@ -75,6 +75,9 @@ func (b *controlCommandBackend) createProfileSession(ctx context.Context, princi
 	} else if !errors.Is(err, session.ErrSessionNotFound) {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
+	if err := sessionprofile.ValidateNewProfile(profile); err != nil {
+		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+	}
 	// Fail before Session admission when the explicitly pinned model cannot be
 	// resolved. Never replace it with the Host's ordinary default profile.
 	if err := b.composition.validateApplicationProfile(ctx, profile); err != nil {

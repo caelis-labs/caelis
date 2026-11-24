@@ -482,7 +482,7 @@ func stringPointer(value string) *string { return &value }
 
 func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	profile := sessionprofile.Profile{
-		Version: "example-role/1", Instructions: "Use the callback.", Model: "configured-model",
+		Version: "example-role/1", Instructions: "Use the configured capabilities.", Model: "configured-model",
 		ToolsVersion: "example-tools/1", Execution: "tools-only",
 		MCPServers: []sessionprofile.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}},
 		SkillDirs:  []string{"/tmp/selected-skills"}, SkillRoots: []string{"/tmp/selected-skill"},
@@ -492,6 +492,7 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	}
 	scope := sessionprofile.Scope{PrincipalID: "owner"}
 	binding := sessionprofile.Binding{Scope: scope, SessionID: "session-1", Profile: profile, CreationDigest: "sha256:profile"}
+	profile.Tools = nil
 	childBinding := binding
 	childBinding.Child = &sessionprofile.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", Source: sessionprofile.Source{Kind: "authorized_background", OperationID: "original-input", GrantID: "grant", AuthorizedSource: "original-background"}}
 	validateWireValue(t, "SessionBinding", childBinding)
@@ -510,7 +511,7 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"SessionBinding":        binding,
 		"SessionChildRelation":  sessionprofile.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", ParentTaskID: "task", Source: sessionprofile.Source{Kind: "user", OperationID: "original-input"}},
 		"CommandResult":         appserver.CommandResult{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
-		"SessionToolCall":       sessionprofile.Call{ID: "receipt-1", CallContext: sessionprofile.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: sessionprofile.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
+		"SessionToolCall":       sessionprofile.Call{ID: "receipt-1", CallContext: sessionprofile.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: sessionprofile.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "cancelled"},
 		"SessionToolCallResult": sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
 		"SessionConfiguration": sessionprofile.Configuration{
 			SessionID: "session-1", Revision: 7, Profile: profile,

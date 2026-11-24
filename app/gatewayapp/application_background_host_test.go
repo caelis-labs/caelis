@@ -94,26 +94,6 @@ func backgroundGrant(t *testing.T, ctx context.Context, client *httpclient.Clien
 	return grant
 }
 
-func backgroundCall(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string) sessionprofile.Call {
-	t.Helper()
-	calls, err := client.WaitSessionToolCalls(ctx, sessionID)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("WaitApplicationCalls(%s) = %+v %v", sessionID, calls, err)
-	}
-	return calls[0]
-}
-
-func completeBackgroundCall(t *testing.T, ctx context.Context, client *httpclient.Client, call sessionprofile.Call) {
-	t.Helper()
-	if _, err := client.ClaimSessionToolCall(ctx, call.SessionID, call.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.CompleteSessionToolCall(ctx, call.SessionID, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"BACKGROUND_RESULT_SENTINEL"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	waitApplicationHTTPIdle(t, ctx, client, call.SessionID)
-}
-
 func backgroundModelMessages(t *testing.T, raw []byte) []json.RawMessage {
 	t.Helper()
 	var request struct {
@@ -201,26 +181,12 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 		}
 	}
 
-	// B09: a background Turn produces an actual callback and a distinct canonical
+	// B09: a background Turn produces a native tool result and a distinct canonical
 	// source actor. The following model invocation and an actual Host reopen both
 	// rebuild from committed native context, not a projection-only snapshot.
 	backgroundInput := "B09_BACKGROUND_WORK_SENTINEL"
 	receipt := backgroundPrompt(t, ctx, client, workerA, "background-first", backgroundInput, "authorized_background", grantA.ID)
-	call := backgroundCall(t, ctx, client, workerA)
-	if call.Source != (sessionprofile.Source{Kind: "authorized_background", OperationID: "background-first", GrantID: grantA.ID, AuthorizedSource: grantA.Source}) {
-		t.Fatalf("callback source = %+v", call.Source)
-	}
-	observer, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: workerA})
-	if err != nil || !observer.State.Run.Active {
-		t.Fatalf("detached observer precondition: %+v %v", observer.State, err)
-	}
-	if err := observer.Subscription.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if active, err := client.SessionToolCall(ctx, workerA, call.ID); err != nil || active.State != "pending" {
-		t.Fatalf("UI detach stopped background callback: %+v %v", active, err)
-	}
-	completeBackgroundCall(t, ctx, client, call)
+	waitApplicationHTTPIdle(t, ctx, client, workerA)
 	checkBackgroundHistory(t, ctx, client, workerA, grantA, backgroundInput)
 	before := model.snapshotFrom(0)
 	if !strings.Contains(before, backgroundInput) || !strings.Contains(before, "BACKGROUND_RESULT_SENTINEL") {
@@ -244,8 +210,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	}
 	checkBackgroundHistory(t, ctx, client, workerA, grantA, backgroundInput)
 	backgroundPrompt(t, ctx, client, workerA, "background-after-restart", "B09_RESUME_SENTINEL", "authorized_background", grantA.ID)
-	resume := backgroundCall(t, ctx, client, workerA)
-	completeBackgroundCall(t, ctx, client, resume)
+	waitApplicationHTTPIdle(t, ctx, client, workerA)
 	modelContext := model.snapshotFrom(preRestartCount)
 	rebuiltMessages := backgroundModelMessages(t, model.requestAt(preRestartCount))
 	if len(rebuiltMessages) < len(liveMessages) || !reflect.DeepEqual(rebuiltMessages[:len(liveMessages)], liveMessages) {
@@ -290,15 +255,12 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 		t.Fatalf("worker provider barrier never reached: %v", ctx.Err())
 	}
 	backgroundPrompt(t, ctx, client, workerB, "worker-b-parallel", "B11_WORKER_B_SENTINEL", "authorized_background", grantB.ID)
-	workerBCall := backgroundCall(t, ctx, client, workerB)
-	// Revoking a grant stops new admissions, not this already accepted worker
-	// callback (or the unrelated assistant and worker A).
+	// Revocation closes new admissions under this grant.
 	grantB, err = grantResult(client.RevokeSessionBackgroundGrant(ctx, revokeGrantCommand(workerB, grantB.ID)))
 	if err != nil || !grantB.Revoked {
 		t.Fatalf("revoke in-flight worker B = %+v %v", grantB, err)
 	}
 	backgroundPrompt(t, ctx, client, assistant, "assistant-parallel", "B11_ASSISTANT_SENTINEL", "user", "")
-	assistantCall := backgroundCall(t, ctx, client, assistant)
 	if blocked.Target.HandleID == "" || blocked.Target.RunID == "" || blocked.Target.TurnID == "" {
 		t.Fatalf("worker cancel target missing: %+v", blocked)
 	}
@@ -307,15 +269,14 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 		t.Fatalf("Cancel(worker A) = %+v %v", cancelled, err)
 	}
 	close(provider.release)
-	completeBackgroundCall(t, ctx, client, workerBCall)
-	completeBackgroundCall(t, ctx, client, assistantCall)
+	waitApplicationHTTPIdle(t, ctx, client, workerB)
+	waitApplicationHTTPIdle(t, ctx, client, assistant)
 	waitApplicationHTTPIdle(t, ctx, client, workerA)
 	if persisted, err := client.SessionBackgroundGrant(ctx, workerB, grantB.ID); err != nil || persisted != grantB {
 		t.Fatalf("worker B revoked grant lost on worker A cancel: %+v %v", persisted, err)
 	}
 	backgroundPrompt(t, ctx, client, workerA, "worker-a-resume", "B11_WORKER_A_RESUMED_SENTINEL", "authorized_background", grantA2.ID)
-	resumedCall := backgroundCall(t, ctx, client, workerA)
-	completeBackgroundCall(t, ctx, client, resumedCall)
+	waitApplicationHTTPIdle(t, ctx, client, workerA)
 	checkBackgroundHistory(t, ctx, client, workerB, grantB, "B11_WORKER_B_SENTINEL")
 	checkBackgroundHistory(t, ctx, client, workerA, grantA2, "B11_WORKER_A_RESUMED_SENTINEL")
 	if !strings.Contains(model.snapshotFrom(preRestartCount), "B11_ASSISTANT_SENTINEL") {

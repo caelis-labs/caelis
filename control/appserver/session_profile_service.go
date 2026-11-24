@@ -68,17 +68,6 @@ func SessionScope(p Principal) (sessionprofile.Scope, error) {
 	return sessionprofile.PrincipalScope(p.ID), nil
 }
 
-// requiresCallbackApproval identifies callback catalogs that need the
-// negotiated Guardian review capability, including manual approval routing.
-func requiresCallbackApproval(tools []sessionprofile.ToolDefinition) bool {
-	for _, tool := range tools {
-		if tool.ApprovalPolicy == "required" {
-			return true
-		}
-	}
-	return false
-}
-
 func validateInputSource(kind, grantID string) error {
 	switch kind {
 	case "user", "application_summary", "external_material":

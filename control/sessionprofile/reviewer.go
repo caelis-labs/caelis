@@ -2,8 +2,7 @@ package sessionprofile
 
 import "fmt"
 
-// CapabilityGuardianReview negotiates explicit Guardian composition and callback
-// approval policy. It does not grant sandbox or callback execution authority.
+// CapabilityGuardianReview negotiates explicit Guardian composition.
 const CapabilityGuardianReview = "session-guardian-review-v1"
 
 // CapabilityRuntimeAgentTeam guarantees one live Team for ordinary and explicit

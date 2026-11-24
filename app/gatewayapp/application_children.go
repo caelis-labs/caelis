@@ -7,10 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
+	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -475,6 +476,7 @@ func (s *applicationChildSessions) CreateSession(ctx context.Context, req appser
 	id := sessionprofile.SessionID(c.binding.Scope, "child:"+c.binding.SessionID+":"+req.OperationID)
 	relation := &sessionprofile.ChildRelation{RootSessionID: root, ParentSessionID: c.binding.SessionID, ParentTaskID: task, Source: s.source}
 	profile := configuration.Profile
+	profile.Tools = nil
 	profile.Workspace.CWD = c.active.CWD
 	encoded, _ := json.Marshal(struct {
 		Profile   sessionprofile.Profile
@@ -489,6 +491,23 @@ func (s *applicationChildSessions) CreateSession(ctx context.Context, req appser
 		Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: sessionvisibility.SystemManagedAgentApplication, sessionvisibility.MetadataSystemManagedParent: c.binding.SessionID, sessionvisibility.MetadataSystemManagedTask: task, "application_creation_digest": digest}})
 	if err != nil {
 		return sessionCommandResult(active), err
+	}
+	if active.Metadata["application_creation_digest"] != digest {
+		// A recovered child may have been created before callbacks retired.
+		// Reuse only its original binding with the same native relation and
+		// profile, after excluding the retired catalog from the comparison.
+		original, readErr := s.binding(ctx, id)
+		if readErr != nil {
+			return sessionCommandResult(active), readErr
+		}
+		originalProfile := original.Profile
+		originalProfile.Tools = nil
+		if original.CreationDigest != active.Metadata["application_creation_digest"] ||
+			*original.Child != *relation || len(original.Profile.Tools) == 0 ||
+			!reflect.DeepEqual(originalProfile, profile) {
+			return sessionCommandResult(active), appserver.ErrOperationConflict
+		}
+		return sessionCommandResult(active), nil
 	}
 	if err = c.composition.authorities.sessionProfiles.PutBinding(ctx, bound); err != nil {
 		return sessionCommandResult(active), err

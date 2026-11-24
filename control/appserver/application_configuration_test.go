@@ -1,8 +1,9 @@
 package appserver
 
 import (
-	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"testing"
+
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestSessionCreationReceiptReadIgnoresCurrentCatalogValidation(t *testing.T) {
@@ -23,8 +24,8 @@ func TestSessionCreationReceiptReadIgnoresCurrentCatalogValidation(t *testing.T)
 	if _, err := store.Complete(t.Context(), intent, want); err != nil {
 		t.Fatal(err)
 	}
-	if err := sessionprofile.ValidateProfile(profile); err == nil {
-		t.Fatal("requires old callback conflicting with new native catalog")
+	if err := sessionprofile.ValidateNewProfile(profile); err == nil {
+		t.Fatal("requires a retired callback definition")
 	}
 	backend := &applicationBoundaryBackend{}
 	commands := newTestCommandService(t, allowAuthorizer{}, store, backend)

@@ -71,14 +71,11 @@ func (p *revisionProvider) RoundTrip(req *http.Request) (*http.Response, error) 
 			{"type": "response.completed", "response": map[string]any{"model": body["model"], "status": "completed", "output": []any{map[string]any{"id": "message-1", "type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "CONFIGURATION_FINAL_SENTINEL"}}}}}},
 		}
 	} else {
-		arguments := `{"key":"old"}`
-		if body["model"] == "gpt-5.4" {
-			arguments = `{"key":2}`
-		}
+		arguments := `{"code":"return 'CONFIGURATION_' + 'TOOL_SENTINEL';"}`
 		events = []map[string]any{
-			{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"id": "provider-tool-item", "type": "function_call", "call_id": "provider-reused-id", "name": "ApplicationLookup"}},
+			{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"id": "provider-tool-item", "type": "function_call", "call_id": "provider-reused-id", "name": "js_exec"}},
 			{"type": "response.function_call_arguments.delta", "item_id": "provider-tool-item", "output_index": 0, "delta": arguments},
-			{"type": "response.completed", "response": map[string]any{"model": body["model"], "status": "completed", "output": []any{map[string]any{"id": "provider-tool-item", "type": "function_call", "call_id": "provider-reused-id", "name": "ApplicationLookup", "arguments": arguments}}}},
+			{"type": "response.completed", "response": map[string]any{"model": body["model"], "status": "completed", "output": []any{map[string]any{"id": "provider-tool-item", "type": "function_call", "call_id": "provider-reused-id", "name": "js_exec", "arguments": arguments}}}},
 		}
 	}
 	var stream strings.Builder
@@ -134,12 +131,12 @@ func revisionWirePrefix(t *testing.T, body map[string]any) string {
 	return text
 }
 
-func assertOrderedRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string, desktopReady bool) {
+func assertOrderedRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions string) {
 	t.Helper()
-	assertRevisionPrefix(t, body, revisionWirePrefix(t, body), model, effort, tier, instructions, schemaType, desktopReady)
+	assertRevisionPrefix(t, body, revisionWirePrefix(t, body), model, effort, tier, instructions)
 }
 
-func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effort, tier, instructions, schemaType string, desktopReady bool) {
+func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effort, tier, instructions string) {
 	t.Helper()
 	remainder, hasPrefix := strings.CutPrefix(actual, instructions)
 	if body["model"] != model || !hasPrefix || !strings.HasPrefix(remainder, "\n") {
@@ -180,22 +177,16 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effo
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	want := []string{"ApplicationLookup", "ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
+	want := []string{"ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
 	// The first request may race catalog startup. Once ready, the entire
 	// Desktop World pair belongs in the prefix, including on continuation.
-	if builtinComputerUseSupported() && (desktopReady || slices.Contains(names, "dtw__apps")) {
+	if builtinComputerUseSupported() && slices.Contains(names, "dtw__apps") {
 		want = slices.Insert(want, len(want)-1, "dtw__apps", "dtw__exec")
 	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("model-facing tools = %v, want %v", names, want)
 	}
-	tool, _ := tools[0].(map[string]any)
-	parameters, _ := tool["parameters"].(map[string]any)
-	properties, _ := parameters["properties"].(map[string]any)
-	key, _ := properties["key"].(map[string]any)
-	if tool["name"] != "ApplicationLookup" || key["type"] != schemaType {
-		t.Fatalf("callback schema = %#v, want key %s", tools, schemaType)
-	}
+
 }
 
 func connectRevisionHTTPModel(t *testing.T, ctx context.Context, host *applicationHTTPHost, model string) {
@@ -251,29 +242,6 @@ func promptRevisionHTTP(t *testing.T, ctx context.Context, client *httpclient.Cl
 	}
 }
 
-func claimAndCompleteRevisionCall(t *testing.T, ctx context.Context, client *httpclient.Client, session string, revision uint64, version, args string) sessionprofile.Call {
-	t.Helper()
-	calls, err := client.WaitSessionToolCalls(ctx, session)
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("WaitApplicationCalls: %+v %v", calls, err)
-	}
-	call := calls[0]
-	if call.ConfigurationRevision != revision || call.ToolsVersion != version || string(call.Arguments) != args || call.State != "pending" {
-		t.Fatalf("wrong pinned callback %+v, want revision %d version %s args %s", call, revision, version, args)
-	}
-	waitBuiltinDesktopWorldMCP(t, ctx, client, session)
-	if _, err = client.ClaimSessionToolCall(ctx, session, call.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = client.ClaimSessionToolCall(ctx, session, call.ID); err == nil {
-		t.Fatal("repeated claim granted an external effect")
-	}
-	if err = client.CompleteSessionToolCall(ctx, session, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"CONFIGURATION_TOOL_SENTINEL"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	return call
-}
-
 // droppedConfigurationResponse simulates the Host committing a configuration
 // update while its HTTP response is lost. The caller must query its operation.
 type droppedConfigurationResponse struct {
@@ -320,7 +288,6 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	profile.Model = "openai/gpt-5.4-mini"
 	profile.Instructions = "OLD_CONFIGURATION_INSTRUCTIONS"
 	profile.ReasoningEffort = "low"
-	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}, "required": []any{"key"}}
 	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-config"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create = %+v %v", created, err)
@@ -340,35 +307,33 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if err != nil || issued.LastRequest == nil || issued.LastRequest.Revision != 1 || issued.LastRequest.RequestID == "" || issued.LastRequest.TurnID == "" || issued.LastRequest.Model != "gpt-5.4-mini" || issued.LastRequest.ReasoningEffort != "low" || issued.LastRequest.ServiceTier != "" || issued.LastRequest.ToolsVersion != profile.ToolsVersion {
 		t.Fatalf("old request was not admitted before the provider barrier: %+v %v", issued, err)
 	}
-	newDefs := []sessionprofile.ToolDefinition{{Name: "ApplicationLookup", Description: "Look up integer key.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "integer"}}, "required": []any{"key"}}}}
 	newModel := "openai/gpt-5.4"
 	newInstructions := "NEW_CONFIGURATION_INSTRUCTIONS"
 	newEffort := "high"
 	newTier := "priority"
 	newVersion := "lookup-tools/2"
 	update := sessionprofile.UpdateConfigurationRequest{OperationID: "hot-update", ExpectedConfigurationRevision: 1,
-		Patch: sessionprofile.ConfigurationPatch{Model: &newModel, Instructions: &newInstructions, ReasoningEffort: &newEffort, ServiceTier: &newTier, ToolsVersion: &newVersion, Tools: &newDefs}}
+		Patch: sessionprofile.ConfigurationPatch{Model: &newModel, Instructions: &newInstructions, ReasoningEffort: &newEffort, ServiceTier: &newTier, ToolsVersion: &newVersion}}
 	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, update)))
 	if err != nil || updated.Revision != 2 || updated.LastRequest == nil || updated.LastRequest.Revision != 1 {
 		t.Fatalf("hot update did not overlap old request: %+v %v", updated, err)
 	}
 	close(provider.release)
-	oldCall := claimAndCompleteRevisionCall(t, ctx, client, session, 1, profile.ToolsVersion, `{"key":"old"}`)
 	waitApplicationHTTPIdle(t, ctx, client, session)
 	requests := provider.snapshot()
 	if len(requests) != 2 {
-		t.Fatalf("old Turn produced %d model requests, want old callback then new completion", len(requests))
+		t.Fatalf("old Turn produced %d model requests, want the native tool request and its continuation", len(requests))
 	}
-	assertOrderedRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string", false)
-	assertOrderedRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
+	assertOrderedRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions)
+	assertOrderedRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions)
 	if strings.TrimPrefix(revisionWirePrefix(t, requests[0]), profile.Instructions) != strings.TrimPrefix(revisionWirePrefix(t, requests[1]), newInstructions) {
 		t.Fatal("hot reload changed guidance outside the profile instructions")
 	}
 	if inputs, _ := requests[1]["input"].([]any); len(inputs) == 0 || !strings.Contains(fmt.Sprint(inputs), "CONFIGURATION_TOOL_SENTINEL") {
-		t.Fatalf("new request lacks old callback result as model context: %#v", requests[1]["input"])
+		t.Fatalf("new request lacks the native tool result as model context: %#v", requests[1]["input"])
 	}
 	observed, err := client.SessionConfiguration(ctx, session)
-	if err != nil || observed.LastRequest == nil || observed.LastRequest.Revision != 2 || observed.LastRequest.TurnID != oldCall.TurnID || observed.LastRequest.RequestID == issued.LastRequest.RequestID || observed.LastRequest.Model != "gpt-5.4" || observed.LastRequest.ReasoningEffort != "high" || observed.LastRequest.ServiceTier != "priority" || observed.LastRequest.ToolsVersion != newVersion {
+	if err != nil || observed.LastRequest == nil || observed.LastRequest.Revision != 2 || observed.LastRequest.TurnID != issued.LastRequest.TurnID || observed.LastRequest.RequestID == issued.LastRequest.RequestID || observed.LastRequest.Model != "gpt-5.4" || observed.LastRequest.ReasoningEffort != "high" || observed.LastRequest.ServiceTier != "priority" || observed.LastRequest.ToolsVersion != newVersion {
 		t.Fatalf("same-Turn next model request did not pin new revision: %+v %v", observed, err)
 	}
 	// An unchanged patch is a durable operation, but cannot rewrite the model
@@ -381,24 +346,19 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 		t.Fatal("configuration-only update dispatched a model request")
 	}
 	promptRevisionHTTP(t, ctx, client, session, "prompt-after-noop")
-	newCall := claimAndCompleteRevisionCall(t, ctx, client, session, 2, newVersion, `{"key":2}`)
-	if newCall.ID == oldCall.ID || newCall.CallID != oldCall.CallID || newCall.TurnID == oldCall.TurnID {
-		t.Fatalf("same-named callback misrouted across catalog versions: old=%+v new=%+v", oldCall, newCall)
-	}
 	waitApplicationHTTPIdle(t, ctx, client, session)
 	requests = provider.snapshot()
 	if len(requests) != 4 {
 		t.Fatalf("two Turns produced %d requests, want four", len(requests))
 	}
-	assertOrderedRevisionPrefix(t, requests[2], "gpt-5.4", "high", "priority", newInstructions, "integer", false)
-	assertOrderedRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions, "integer", true)
+	assertOrderedRevisionPrefix(t, requests[2], "gpt-5.4", "high", "priority", newInstructions)
+	assertOrderedRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions)
 	history := applicationHTTPHistory(t, ctx, client, session)
 	assertRevisionUserHistory(t, history, 2)
 	for _, bad := range []sessionprofile.UpdateConfigurationRequest{
 		{OperationID: "stale", ExpectedConfigurationRevision: 1},
 		{OperationID: "invalid-model", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{Model: stringPointer("")}},
 		{OperationID: "invalid-tier", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{ServiceTier: stringPointer("unsupported-tier")}},
-		{OperationID: "catalog-reuse", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{ToolsVersion: stringPointer(profile.ToolsVersion)}},
 	} {
 		if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, bad))); err == nil {
 			t.Fatalf("accepted invalid update %+v", bad)
@@ -447,22 +407,16 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 		assertRevisionUserHistory(t, got, 2)
 	}
 	promptRevisionHTTP(t, ctx, client, session, "prompt-after-restart")
-	claimAndCompleteRevisionCall(t, ctx, client, session, 3, newVersion, `{"key":2}`)
 	waitApplicationHTTPIdle(t, ctx, client, session)
 	requests = provider.snapshot()
 	if len(requests) != 6 {
 		t.Fatalf("restarted Turn produced %d model requests, want six", len(requests))
 	}
-	assertOrderedRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer", false)
-	assertOrderedRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions, "integer", true)
+	assertOrderedRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions)
+	assertOrderedRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions)
 	for _, i := range []int{2, 3, 4, 5} {
 		if revisionWirePrefix(t, requests[i]) != revisionWirePrefix(t, requests[1]) {
 			t.Fatalf("guidance changed across no-op/restart at request %d", i)
-		}
-	}
-	for _, i := range []int{3, 5} {
-		if !reflect.DeepEqual(requests[i]["tools"], requests[1]["tools"]) {
-			t.Fatalf("ready tool declarations changed across no-op/restart at request %d", i)
 		}
 	}
 	last, err := client.SessionConfiguration(ctx, session)
@@ -470,7 +424,7 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 		t.Fatalf("defaulted request selectors after restart %+v %v", last, err)
 	}
 	if !strings.Contains(fmt.Sprint(requests[4]["input"]), "CONFIGURATION_TOOL_SENTINEL") {
-		t.Fatal("reopened model request lost persisted callback result")
+		t.Fatal("reopened model request lost persisted native tool result")
 	}
 	assertRevisionUserHistory(t, applicationHTTPHistory(t, ctx, client, session), 3)
 	// Public JSON distinguishes an explicit empty catalog/allowlist from an

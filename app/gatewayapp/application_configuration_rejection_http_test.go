@@ -107,7 +107,6 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 		t.Fatalf("lost rejection was not reconciled: %+v, %v", receipt, err)
 	}
 	close(provider.release)
-	claimAndCompleteRevisionCall(t, ctx, client, created.SessionID, 1, profile.ToolsVersion, `{"key":"old"}`)
 	waitApplicationHTTPIdle(t, ctx, client, created.SessionID)
 	requests := provider.snapshot()
 	if len(requests) != 2 || requests[0]["model"] != "gpt-5.4-mini" || requests[1]["model"] != "gpt-5.4-mini" {
