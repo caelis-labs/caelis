@@ -33,6 +33,7 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
+	productDefaults         productPluginDefaults
 	mcp                     *hostMCP
 	policyRuleCommands      appserver.PolicyRuleCommandService
 	sessionProfiles         *sessionprofile.Store

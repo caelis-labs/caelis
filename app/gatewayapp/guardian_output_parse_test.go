@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -37,7 +38,7 @@ func TestGuardianOutputSpecAllowsCanonicalExplanation(t *testing.T) {
 		if err := resolved.Validate(value); err != nil {
 			t.Fatalf("generation schema rejects canonical explanation: %v", err)
 		}
-		parsed, err := parseGuardianAssessmentForMode(input, output.Mode, options)
+		parsed, err := parseGuardianAssessmentForMode(nil, input, output.Mode, options)
 		if err != nil || parsed.OptionID != "allow_once" || parsed.Outcome != "allow" || parsed.Rationale != "" {
 			t.Fatalf("assessment = %#v, %v; want exact allow with explanation discarded", parsed, err)
 		}
@@ -56,103 +57,87 @@ func TestParseGuardianAssessmentIgnoresExplanatoryFields(t *testing.T) {
 			`{"option_id":"allow_once","outcome":"deny","risk_level":"critical","user_authorization":"low"}`,
 		} {
 			t.Run(string(mode)+"/"+input, func(t *testing.T) {
-				parsed, err := parseGuardianAssessmentForMode(input, mode, options)
+				parsed, err := parseGuardianAssessmentForMode(nil, input, mode, options)
 				if err != nil || parsed.OptionID != "allow_once" || parsed.Outcome != "allow" || parsed.Rationale != "" {
 					t.Fatalf("assessment = %#v, %v; want exact allow with explanation discarded", parsed, err)
 				}
 			})
 		}
-		parsed, err := parseGuardianAssessmentForMode(`{"option_id":"reject_once","rationale":"  outside task scope  ","decision":"allow","extra":true}`, mode, options)
+		parsed, err := parseGuardianAssessmentForMode(nil, `{"option_id":"reject_once","rationale":"  outside task scope  ","decision":"allow","extra":true}`, mode, options)
 		if err != nil || parsed.Outcome != "deny" || parsed.Rationale != "outside task scope" {
 			t.Fatalf("deny assessment = %#v, %v; want original deny with rationale", parsed, err)
 		}
 	}
 }
 
-func TestParseGuardianAssessmentForModeEnvelopePolicy(t *testing.T) {
+func TestGuardianRecoversConsistentDecisions(t *testing.T) {
 	t.Parallel()
-
-	valid := `{"option_id":"allow_once"}`
-	tests := []struct {
-		name    string
-		mode    model.OutputMode
-		input   string
-		wantErr bool
-	}{
-		{name: "schema standalone", mode: model.OutputModeSchema, input: valid},
-		{name: "schema fenced", mode: model.OutputModeSchema, input: "```json\n" + valid + "\n```", wantErr: true},
-		{name: "schema prose", mode: model.OutputModeSchema, input: "Decision follows:\n" + valid, wantErr: true},
-		{name: "json standalone", mode: model.OutputModeJSON, input: valid},
-		{name: "json fenced", mode: model.OutputModeJSON, input: "```json\n" + valid + "\n```", wantErr: true},
-		{name: "text standalone", mode: model.OutputModeText, input: valid},
-		{name: "text json fence", mode: model.OutputModeText, input: "```json\n" + valid + "\n```"},
-		{name: "text bare fence", mode: model.OutputModeText, input: "```\n" + valid + "\n```"},
-		{name: "text prose", mode: model.OutputModeText, input: "Guardian decision:\n" + valid + "\nDone."},
-		{name: "text prose and fence", mode: model.OutputModeText, input: "Guardian decision:\n```json\n" + valid + "\n```\nDone."},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			parsed, err := parseGuardianAssessmentForMode(test.input, test.mode, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}})
-			if test.wantErr {
-				if err == nil {
-					t.Fatalf("parseGuardianAssessmentForMode() = %#v, nil; want error", parsed)
-				}
-				return
+	options := []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_always", Kind: "allow_always"}, {ID: "reject_once", Kind: "reject_once"}}
+	allow := `{"option_id":"allow_once"}`
+	deny := `{"option_id":"reject_once","rationale":"Outside scope"}`
+	for _, mode := range []model.OutputMode{model.OutputModeSchema, model.OutputModeJSON, model.OutputModeText} {
+		for _, input := range []string{
+			allow + "wrote",
+			allow + "wrote" + allow,
+			allow + "\n" + allow,
+			"[decision] " + allow,
+			"Decision:\n```json\n" + allow + "\n```",
+			allow + " true",
+		} {
+			result, err := parseGuardianAssessmentForMode(nil, input, mode, options)
+			if err != nil || result.OptionID != "allow_once" {
+				t.Errorf("%s %q: got %+v, %v", mode, input, result, err)
 			}
-			if err != nil {
-				t.Fatalf("parseGuardianAssessmentForMode() error = %v", err)
+		}
+		result, err := parseGuardianAssessmentForMode(nil, deny+`{"option_id":"reject_once","rationale":"Final reason"}`, mode, options)
+		if err != nil || result.Rationale != "Final reason" {
+			t.Errorf("%s repeated denial: got %+v, %v", mode, result, err)
+		}
+		always := `{"option_id":"allow_always"}`
+		for _, pair := range []struct{ output, want string }{
+			{allow + deny, "reject_once"}, {deny + always + allow, "reject_once"},
+			{allow + always, "allow_once"}, {always + allow, "allow_once"},
+		} {
+			got, err := parseGuardianAssessmentForMode(nil, pair.output, mode, options)
+			if err != nil || got.OptionID != pair.want || (got.OptionID == "reject_once" && got.Rationale != "Outside scope") {
+				t.Fatalf("decision for %q = %+v, %v", pair.output, got, err)
 			}
-			if parsed.OptionID != "allow_once" {
-				t.Fatalf("parsed = %#v, want low-risk allow", parsed)
+		}
+		for _, input := range []string{
+			"No decision", "null", "[]",
+			"[" + allow + "]", "[[], " + allow + "]", `["]",` + allow + "]",
+			`{"wrapper":` + allow + "}",
+			allow + " {", allow + " }", `{"option_id":}` + allow,
+		} {
+			if result, err := parseGuardianAssessmentForMode(nil, input, mode, options); err == nil {
+				t.Errorf("%s %q: accepted %+v", mode, input, result)
 			}
-		})
+		}
 	}
 }
 
-func TestParseGuardianAssessmentForModeRejectsAmbiguousTextBeforeValidation(t *testing.T) {
-	t.Parallel()
-
-	valid := `{"outcome":"deny","risk_level":"high","user_authorization":"low","rationale":"too broad"}`
-	input := `Example: {"outcome":}` + "\nActual: " + valid
-	_, err := parseGuardianAssessmentForMode(input, model.OutputModeText, nil)
-	if err == nil || !strings.Contains(err.Error(), "more than one top-level JSON object") {
-		t.Fatalf("parseGuardianAssessmentForMode() error = %v, want ambiguity before candidate validation", err)
-	}
-}
-
-func TestParseGuardianAssessmentForModeRejectsInvalidTextEnvelopes(t *testing.T) {
-	t.Parallel()
-
-	valid := `{"outcome":"deny","risk_level":"high","user_authorization":"low","rationale":"too broad"}`
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{name: "zero objects", input: "Guardian could not decide.", want: "no JSON object"},
-		{name: "multiple objects", input: valid + "\n" + valid, want: "more than one top-level JSON object"},
-		{name: "unbalanced opening", input: "Decision: " + valid + " {", want: "unbalanced JSON object braces"},
-		{name: "unbalanced closing", input: "Decision: " + valid + " }", want: "unbalanced JSON object braces"},
-		{
-			name:  "unique outer object does not fall back to nested decision",
-			input: `Decision: {"wrapper":{"option_id":"allow_once"}}`,
-			want:  "selected option id is required",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := parseGuardianAssessmentForMode(test.input, model.OutputModeText, nil)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("parseGuardianAssessmentForMode() error = %v, want %q", err, test.want)
-			}
-		})
+func TestGuardianMixedGrantsUseOfferedScope(t *testing.T) {
+	options := []kernel.ApprovalOption{{ID: "a", Kind: "allow_once"}, {ID: "b", Kind: "allow_once"}, {ID: "c", Kind: "allow_always"}}
+	auth := &session.ApprovalAuthorization{Choices: []session.AuthorizationChoice{
+		{OptionID: "a", Persistence: session.AuthorizationOnce},
+		{OptionID: "b", Persistence: session.AuthorizationSession},
+		{OptionID: "c", Persistence: session.AuthorizationPolicy},
+	}}
+	for _, pair := range []struct{ first, second, want string }{
+		{"a", "b", "a"}, {"b", "a", "a"}, {"b", "c", "b"}, {"c", "b", "b"},
+	} {
+		text := `{"option_id":"` + pair.first + `"}{"option_id":"` + pair.second + `"}`
+		got, err := parseGuardianAssessmentForMode(auth, text, model.OutputModeSchema, options)
+		if err != nil || got.OptionID != pair.want {
+			t.Fatalf("decision for %q = %+v, %v", text, got, err)
+		}
 	}
 }
 
 func TestParseGuardianAssessmentForModeEnforcesLocalLimit(t *testing.T) {
 	t.Parallel()
 
-	_, err := parseGuardianAssessmentForMode(strings.Repeat("x", guardianMaxAssessmentBytes+1), model.OutputModeText, nil)
+	_, err := parseGuardianAssessmentForMode(nil, strings.Repeat("x", guardianMaxAssessmentBytes+1), model.OutputModeText, nil)
 	if err == nil || !strings.Contains(err.Error(), "byte limit") {
 		t.Fatalf("parseGuardianAssessmentForMode() error = %v, want local byte limit", err)
 	}
@@ -166,7 +151,7 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 	}
 	valid := `{"option_id":"allow_once"}`
-	parsed, err := parseGuardianAssessmentForMode("Decision:\n```json\n"+valid+"\n```", model.OutputModeText, options)
+	parsed, err := parseGuardianAssessmentForMode(nil, "Decision:\n```json\n"+valid+"\n```", model.OutputModeText, options)
 	if err != nil {
 		t.Fatalf("parseGuardianAssessmentForMode(valid) error = %v", err)
 	}
@@ -176,7 +161,7 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 
 	longRationale := strings.Repeat("material approval reason ", 32)
 	longAssessment := `{"option_id":"reject_once","rationale":"` + longRationale + `"}`
-	parsed, err = parseGuardianAssessmentForMode("Result: "+longAssessment, model.OutputModeText, options)
+	parsed, err = parseGuardianAssessmentForMode(nil, "Result: "+longAssessment, model.OutputModeText, options)
 	if err != nil {
 		t.Fatalf("parseGuardianAssessmentForMode(long rationale) error = %v", err)
 	}
@@ -214,7 +199,7 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 	for _, test := range invalid {
 		t.Run(test.name, func(t *testing.T) {
 			for _, mode := range []model.OutputMode{model.OutputModeText, model.OutputModeJSON, model.OutputModeSchema} {
-				_, err := parseGuardianAssessmentForMode(test.input, mode, options)
+				_, err := parseGuardianAssessmentForMode(nil, test.input, mode, options)
 				if err == nil {
 					t.Fatalf("parseGuardianAssessmentForMode(%s, %s) error = nil, want strict rejection", test.name, mode)
 				}
@@ -234,7 +219,7 @@ func TestGuardianRetainsExactMCPScopeChoice(t *testing.T) {
 		if !tc.approved {
 			decisionJSON = `{"option_id":"` + tc.id + `","rationale":"The current tool call is not authorized."}`
 		}
-		parsed, err := parseGuardianAssessmentForMode(decisionJSON, model.OutputModeSchema, options)
+		parsed, err := parseGuardianAssessmentForMode(nil, decisionJSON, model.OutputModeSchema, options)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +228,7 @@ func TestGuardianRetainsExactMCPScopeChoice(t *testing.T) {
 			t.Fatalf("Guardian choice %s = %#v, %v", tc.id, decision, err)
 		}
 	}
-	if _, err := parseGuardianAssessmentForMode(`{"option_id":"not_offered"}`, model.OutputModeSchema, options); err == nil {
+	if _, err := parseGuardianAssessmentForMode(nil, `{"option_id":"not_offered"}`, model.OutputModeSchema, options); err == nil {
 		t.Fatal("unoffered Guardian choice accepted")
 	}
 }
@@ -251,7 +236,7 @@ func TestGuardianRetainsExactMCPScopeChoice(t *testing.T) {
 func TestParseGuardianAssessmentForModeRejectsUnsupportedMode(t *testing.T) {
 	t.Parallel()
 
-	_, err := parseGuardianAssessmentForMode(`{"outcome":"allow"}`, model.OutputMode("binary"), nil)
+	_, err := parseGuardianAssessmentForMode(nil, `{"outcome":"allow"}`, model.OutputMode("binary"), nil)
 	if err == nil || !strings.Contains(err.Error(), "unsupported output mode") {
 		t.Fatalf("parseGuardianAssessmentForMode() error = %v, want unsupported mode", err)
 	}
@@ -259,19 +244,9 @@ func TestParseGuardianAssessmentForModeRejectsUnsupportedMode(t *testing.T) {
 
 func TestGuardianDenyRequiresSpecificRationale(t *testing.T) {
 	for _, text := range []string{`{"option_id":"reject_once"}`, `{"option_id":"reject_once","rationale":"  "}`, `{"option_id":"reject_once","rationale":null}`, `{"option_id":"reject_once","rationale":true}`} {
-		_, err := parseGuardianAssessmentForMode(text, model.OutputModeSchema, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}})
+		_, err := parseGuardianAssessmentForMode(nil, text, model.OutputModeSchema, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}})
 		if err == nil {
 			t.Fatalf("accepted invalid decision %s", text)
-		}
-	}
-}
-
-func TestGuardianNativeAssessmentRejectsNonObjectAndTrailingValues(t *testing.T) {
-	for _, mode := range []model.OutputMode{model.OutputModeJSON, model.OutputModeSchema} {
-		for _, input := range []string{`null`, `[]`, `"allow_once"`, `{"option_id":"allow_once"} true`, `{"option_id":"allow_once"} trailing`, `{"option_id":"allow_once"} {"option_id":"reject_once"}`} {
-			if _, err := parseGuardianAssessmentForMode(input, mode, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}}); err == nil {
-				t.Fatalf("accepted %s assessment %s", mode, input)
-			}
 		}
 	}
 }

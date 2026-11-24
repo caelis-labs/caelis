@@ -117,7 +117,7 @@ func (r *sessionRuntimeRegistry) retireIdleNativeConfiguration(ctx context.Conte
 // [] has no fallback. Models, Team, native tools and sandbox are untouched.
 func (s *runtimeComposition) nativePluginContributions(configs []PluginConfig) (plugin.Contributions, *sessionprofile.Configuration, error) {
 	if s.activation == nil || s.activation.sessionRef.SessionID == "" || s.authorities.sessionProfiles == nil {
-		contributions, err := resolveGatewayPluginContributions(configs, s.authorities.storeDir, s.workspace.CWD)
+		contributions, err := resolveGatewayPluginContributions(s.authorities.productDefaults, configs, s.authorities.storeDir, s.workspace.CWD)
 		return contributions, nil, err
 	}
 	active, err := s.sessions.Session(context.Background(), s.activation.sessionRef)
@@ -129,7 +129,7 @@ func (s *runtimeComposition) nativePluginContributions(configs []PluginConfig) (
 		return plugin.Contributions{}, nil, err
 	}
 	if configuration.Native.Plugins == nil {
-		contributions, err := resolveGatewayPluginContributions(configs, s.authorities.storeDir, s.workspace.CWD)
+		contributions, err := resolveGatewayPluginContributions(s.authorities.productDefaults, configs, s.authorities.storeDir, s.workspace.CWD)
 		return contributions, &configuration, err
 	}
 	contributions, err := s.resolveAvailableApplicationPlugins(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD), active.UserID)

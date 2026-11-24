@@ -399,6 +399,9 @@ then checks a new prompt completes in the original Session and the old TUI
 renders the replacement Host result without duplicate model requests.
 The candidate must carry a strictly newer release identity for lifecycle
 selection; a locally stamped acceptance build is not a published artifact.
+The runner removes each case Store after shutdown and keeps logs and evidence.
+Use `--keep-stores` to retain the full Stores.
+
 Evidence records all binary hashes and reported versions. No daily Store or
 provider credential is used. Fixture tests additionally cover detached commands,
 concurrent replacement and explicit-stop/instance fences.

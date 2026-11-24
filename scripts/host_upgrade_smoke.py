@@ -1,5 +1,6 @@
 import urllib.error, tempfile
 import pathlib, subprocess, os, json, urllib.request, threading, http.server, time, hashlib, sys
+from smoke_cleanup import handle_termination, stop_upgrade_case
 import argparse
 parser=argparse.ArgumentParser(description='Exercise released legacy/current Hosts with a newer candidate CLI and synthetic work.')
 parser.add_argument('--legacy',required=True,type=pathlib.Path)
@@ -7,7 +8,9 @@ parser.add_argument('--current',required=True,type=pathlib.Path)
 parser.add_argument('--candidate',required=True,type=pathlib.Path)
 parser.add_argument('--output',type=pathlib.Path)
 parser.add_argument('--tui', action='store_true', help='Keep real old TUI processes attached across replacement (Unix PTY)')
+parser.add_argument('--keep-stores', action='store_true', help='Retain full case Stores after shutdown')
 args=parser.parse_args()
+handle_termination()
 root=args.output.resolve() if args.output else pathlib.Path(tempfile.mkdtemp(prefix='caelis-host-upgrade-'))
 if args.output:root.mkdir(mode=0o700,parents=True,exist_ok=False)
 new=args.candidate.resolve();old=args.legacy.resolve();modern=args.current.resolve()
@@ -38,14 +41,16 @@ def case(binary,busy):
   r=subprocess.run([str(p),*args,'--store-dir',str(store),'--format','json'],env=env,cwd=work,capture_output=True,text=True,timeout=45)
   if r.returncode:raise RuntimeError(name+': '+r.stderr)
   return json.loads(r.stdout)
- def api(path,body=None):
+ def request(path,body=None):
   discovery=json.loads((store/'runtime/service/discovery.json').read_text());token=(store/'runtime/service/auth.token').read_text().strip()
   req=urllib.request.Request(discovery['endpoint']+'/api/control/v1'+path,data=json.dumps(body).encode() if body is not None else None,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
   if body and 'operation_id' in body:req.add_header('Idempotency-Key',body['operation_id'])
   if body and 'expected_revision' in body:req.add_header('If-Match',json.dumps(str(body['expected_revision'])))
   try:
-   with urllib.request.urlopen(req,timeout=20) as r:return json.load(r)
+   return urllib.request.urlopen(req,timeout=20)
   except urllib.error.HTTPError as e: raise RuntimeError(path+': '+e.read().decode()) from e
+ def api(path,body=None):
+  with request(path,body) as response:return json.load(response)
  tui=None
  try:
   first=cli(binary,'service','start');info=api('/initialize')
@@ -83,21 +88,34 @@ def case(binary,busy):
    assert api('/operations/held-task')['operation_id']=='held-task'
    assert api('/sessions/'+sid+'/state')['session_id']==sid
    if tui:
-    before=api('/sessions/'+sid+'/state')['run'];after.clear();after_requests.clear()
-    time.sleep(3);tui.send('TUI_AFTER_UPGRADE\r')
-    assert after.wait(20), 'old TUI failed to submit after replacement'
-    deadline=time.monotonic()+20
-    while b'UPGRADE_RECONNECTED_COMPLETE' not in tui.output:
-     assert time.monotonic()<deadline,'old TUI did not render replacement result'
-     time.sleep(.1)
-    # The terminal text event can precede the persisted run terminal state.
-    # Read the authoritative state until completion instead of treating a
-    # rendered token as proof that the run has already settled.
-    state=api('/sessions/'+sid+'/state')['run']
-    while state.get('status')=='running':
-     assert time.monotonic()<deadline,'replacement run did not complete'
-     time.sleep(.1);state=api('/sessions/'+sid+'/state')['run']
-    assert state.get('status')=='completed' and state.get('run_id')!=before.get('run_id'),state
+    before=api('/sessions/'+sid+'/state')
+    after.clear();after_requests.clear()
+    time.sleep(3)
+    # Subscribe before sending: the current Host releases its live run handle
+    # after completion. The terminal event identifies the completed Turn.
+    with request('/sessions/'+sid+'/reconnect?'+urllib.parse.urlencode({'after':before['boundary_cursor']})) as feed:
+     tui.send('TUI_AFTER_UPGRADE\r')
+     assert after.wait(20), 'old TUI failed to submit after replacement'
+     deadline=time.monotonic()+20
+     while b'UPGRADE_RECONNECTED_COMPLETE' not in tui.output:
+      assert time.monotonic()<deadline,'old TUI did not render replacement result'
+      time.sleep(.1)
+     # Older candidates retain the completed run in their state readback.
+     state=api('/sessions/'+sid+'/state')['run']
+     if not (state.get('status')=='completed' and state.get('run_id') and state['run_id']!=before['run'].get('run_id')):
+      for line in feed:
+       assert time.monotonic()<deadline,'replacement run did not complete'
+       if not line.startswith(b'data:'):continue
+       delivery=json.loads(line[5:])
+       events=delivery.get('events',[delivery])
+       terminal=next((e for e in events if e.get('kind')=='caelis/lifecycle' and e.get('session_id')==sid
+                      and e.get('scope','main')=='main' and not e.get('approval_request_id')
+                      and e.get('run_id') and e['run_id']!=before['run'].get('run_id')
+                      and e.get('turn_id') and e.get('lifecycle',{}).get('state') in ('completed','failed','cancelled')),None)
+       if terminal:
+        assert terminal['lifecycle']['state']=='completed',terminal
+        break
+      else:raise AssertionError('replacement session feed closed before completion')
     assert len(after_requests)==1,'old TUI replayed the new request'
     print(name,'persistent old TUI reconnect/render PASS',flush=True)
   else:
@@ -110,8 +128,10 @@ def case(binary,busy):
   print(name,'PASS',flush=True)
  finally:
   release.set()
-  if tui:tui.close()
-  cli(new,'service','stop')
+  def stop_host():
+   if cli(new,'service','stop')['state'] != 'stopped':
+    raise RuntimeError('service stop did not confirm shutdown')
+  stop_upgrade_case(store,tui,stop_host,args.keep_stores)
 try:
  for b in [old,modern]:
   for busy in [False,True]:case(b,busy)

@@ -5,6 +5,9 @@ the current Host and public client, execute controlled work, then restart the
 Host against the same isolated Store. No production Store, credentials or model
 service is used. `--output` selects a new private evidence directory.
 
+The runner removes each case Store after shutdown and keeps logs and evidence.
+Use `--keep-stores` to retain the full Stores.
+
 An optional `--peer-ref` selects a local Git ref implementing the unified Session
 protocol and a compatible Store format. This adds both client/Host directions
 and a stopped-Store current/peer round trip. No pre-unification release is a

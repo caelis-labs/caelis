@@ -250,13 +250,14 @@ func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
 	}
 }
 
-func TestApprovalReviewerAcceptsAllowExplanationWithoutRetry(t *testing.T) {
+func TestApprovalReviewerAcceptsRepeatedAllowWithExplanationWithoutRetry(t *testing.T) {
 	for _, structured := range []bool{true, false} {
 		t.Run(map[bool]string{true: "schema", false: "text"}[structured], func(t *testing.T) {
 			ctx := t.Context()
 			service, active := newApprovalReviewerTestSession(t, ctx)
 			llm := &approvalReviewerFakeModel{disableStructuredOutput: !structured, responses: []string{
-				`{"option_id":"allow_once","rationale":"The requested inspection is authorized.","extra":{"approved":true}}`,
+				`{"option_id":"allow_once"}w
+{"option_id":"allow_once","rationale":"The requested inspection is authorized.","extra":{"approved":true}}`,
 			}}
 			reviewer := newGuardianApprovalApprover(service)
 			t.Cleanup(func() { _ = reviewer.Close() })

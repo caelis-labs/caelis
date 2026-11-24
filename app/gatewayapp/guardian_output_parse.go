@@ -3,15 +3,15 @@ package gatewayapp
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-// Keep text-mode envelope recovery bounded independently of provider
+// Keep assessment recovery bounded independently of provider
 // output-token support. Rationale length is informational and must not overturn
 // an otherwise valid approval decision; the whole assessment retains this cap.
 const guardianMaxAssessmentBytes = 8 * 1024
@@ -22,145 +22,108 @@ type guardianReviewModelOutput struct {
 	Rationale string `json:"rationale"`
 }
 
-// parseGuardianAssessmentForMode separates provider-envelope compatibility
-// from decision validation. Native JSON modes require one standalone object;
-// text mode may wrap one unambiguous object in Markdown or explanatory prose.
-// In every mode the selected object is decoded and validated identically.
-func parseGuardianAssessmentForMode(
-	text string,
-	mode model.OutputMode,
-	options []kernel.ApprovalOption,
-) (guardianReviewModelOutput, error) {
-	candidate, err := guardianAssessmentCandidate(text, mode)
-	if err != nil {
-		return guardianReviewModelOutput{}, err
-	}
-	return decodeGuardianAssessmentCandidate(candidate, options)
-}
-
-func guardianAssessmentCandidate(text string, mode model.OutputMode) (string, error) {
-	if len(text) > guardianMaxAssessmentBytes {
-		return "", fmt.Errorf("approval reviewer assessment exceeds %d-byte limit", guardianMaxAssessmentBytes)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("approval reviewer returned invalid JSON")
-	}
-
+// Providers can wrap or repeat a decision even when asked for schema output.
+// Across valid selections a denial wins, then the shortest offered grant.
+func parseGuardianAssessmentForMode(auth *session.ApprovalAuthorization, text string, mode model.OutputMode, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
 	switch mode {
-	case model.OutputModeText:
-		return guardianTextAssessmentCandidate(text)
-	case "", model.OutputModeJSON, model.OutputModeSchema:
-		return text, nil
+	case "", model.OutputModeText, model.OutputModeJSON, model.OutputModeSchema:
 	default:
-		return "", fmt.Errorf("approval reviewer received unsupported output mode %q", mode)
+		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer received unsupported output mode %q", mode)
 	}
-}
-
-// guardianTextAssessmentCandidate finds all brace-balanced top-level objects
-// before attempting to decode any of them. This ordering is intentional: an
-// invalid example followed by a valid decision is still ambiguous and must not
-// degrade into "first candidate that validates" selection.
-func guardianTextAssessmentCandidate(text string) (string, error) {
-	candidates, err := guardianTopLevelJSONObjectCandidates(text)
-	if err != nil {
-		return "", err
+	if len(text) > guardianMaxAssessmentBytes {
+		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer assessment exceeds %d-byte limit", guardianMaxAssessmentBytes)
 	}
-	switch len(candidates) {
-	case 0:
-		return "", fmt.Errorf("approval reviewer returned no JSON object")
-	case 1:
-		return candidates[0], nil
-	default:
-		return "", fmt.Errorf("approval reviewer returned more than one top-level JSON object")
-	}
-}
-
-func guardianTopLevelJSONObjectCandidates(text string) ([]string, error) {
-	var candidates []string
-	start := -1
-	depth := 0
-	inString := false
-	escaped := false
-
-	for index := 0; index < len(text); index++ {
-		char := text[index]
-		if depth == 0 {
-			switch char {
-			case '{':
-				start = index
-				depth = 1
-			case '}':
-				return nil, fmt.Errorf("approval reviewer returned unbalanced JSON object braces")
-			}
-			continue
+	var decision guardianReviewModelOutput
+	var selectedRank int
+	for {
+		start := strings.IndexAny(text, "{}[")
+		if start < 0 {
+			break
 		}
-
-		if inString {
-			if escaped {
-				escaped = false
+		text = text[start:]
+		if text[0] == '[' {
+			// A prose label such as [decision] may precede the answer. Never
+			// promote an object inside an array to a top-level decision.
+			end := strings.IndexAny(text[1:], "[]{}\"")
+			if end >= 0 && text[1+end] == ']' {
+				text = text[end+2:]
 				continue
 			}
-			switch char {
-			case '\\':
-				escaped = true
-			case '"':
-				inString = false
-			}
-			continue
+			return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer assessment must be a top-level object")
 		}
-
-		switch char {
-		case '"':
-			inString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				candidates = append(candidates, text[start:index+1])
-				start = -1
-			}
+		decoder := json.NewDecoder(strings.NewReader(text))
+		fields, err := decodeGuardianAssessmentObject(decoder)
+		if err != nil {
+			return guardianReviewModelOutput{}, err
 		}
+		parsed, option, err := decodeGuardianAssessmentFields(fields, options)
+		if err != nil {
+			return guardianReviewModelOutput{}, err
+		}
+		rank := guardianDecisionRank(auth, option, parsed.Outcome)
+		if decision.OptionID == "" || rank < selectedRank || parsed.OptionID == decision.OptionID {
+			decision, selectedRank = parsed, rank
+		}
+		text = text[decoder.InputOffset():]
 	}
-
-	if depth != 0 || inString || escaped {
-		return nil, fmt.Errorf("approval reviewer returned unbalanced JSON object braces")
+	if decision.OptionID == "" {
+		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned no JSON object")
 	}
-	return candidates, nil
+	return decision, nil
 }
 
-func decodeGuardianAssessmentCandidate(candidate string, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
-	fields, err := decodeGuardianAssessmentObject(candidate)
-	if err != nil {
-		return guardianReviewModelOutput{}, err
+// Lower ranks take precedence independent of the order of model messages.
+func guardianDecisionRank(auth *session.ApprovalAuthorization, option approval.Option, outcome string) int {
+	if outcome == string(approval.OptionDecisionDeny) {
+		return 0
 	}
+	if duration, ok := auth.Choice(option.ID); ok {
+		switch duration {
+		case session.AuthorizationOnce:
+			return 1
+		case session.AuthorizationSession:
+			return 2
+		case session.AuthorizationPolicy:
+			return 3
+		}
+	}
+	if option.Kind == "allow_once" {
+		return 1
+	}
+	return 3
+}
+
+func decodeGuardianAssessmentFields(fields map[string]json.RawMessage, options []kernel.ApprovalOption) (guardianReviewModelOutput, approval.Option, error) {
 	var parsed guardianReviewModelOutput
 	if raw, present := fields["option_id"]; present {
 		if err := json.Unmarshal(raw, &parsed.OptionID); err != nil {
-			return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned invalid option_id: %w", err)
+			return guardianReviewModelOutput{}, approval.Option{}, fmt.Errorf("approval reviewer returned invalid option_id: %w", err)
 		}
 	}
-	_, decision, err := approval.ResolveStrictOption(options, parsed.OptionID)
+	option, decision, err := approval.ResolveStrictOption(options, parsed.OptionID)
 	if err != nil {
-		return guardianReviewModelOutput{}, err
+		return guardianReviewModelOutput{}, approval.Option{}, err
 	}
 	// Only the original option determines authority. Allow explanations and
 	// extra fields are informational; never decode them into a decision or target.
 	if decision == approval.OptionDecisionDeny {
 		if raw, present := fields["rationale"]; present {
 			if err := json.Unmarshal(raw, &parsed.Rationale); err != nil {
-				return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned invalid rationale: %w", err)
+				return guardianReviewModelOutput{}, approval.Option{}, fmt.Errorf("approval reviewer returned invalid rationale: %w", err)
 			}
 		}
 	}
-	return normalizeGuardianAssessment(parsed, options)
+	parsed.OptionID, parsed.Outcome = option.ID, string(decision)
+	parsed.Rationale = strings.TrimSpace(parsed.Rationale)
+	if decision == approval.OptionDecisionDeny && parsed.Rationale == "" {
+		return guardianReviewModelOutput{}, approval.Option{}, fmt.Errorf("deny requires a specific rationale")
+	}
+	return parsed, option, nil
 }
 
 // Decode exact field names once: struct decoding would also accept case aliases
 // and JSON's last-key-wins behavior would conceal conflicting duplicate keys.
-func decodeGuardianAssessmentObject(candidate string) (map[string]json.RawMessage, error) {
-	decoder := json.NewDecoder(strings.NewReader(candidate))
+func decodeGuardianAssessmentObject(decoder *json.Decoder) (map[string]json.RawMessage, error) {
 	opening, err := decoder.Token()
 	if err != nil {
 		return nil, fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
@@ -199,13 +162,6 @@ func decodeGuardianAssessmentObject(candidate string) (map[string]json.RawMessag
 	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
 		return nil, fmt.Errorf("approval reviewer assessment must end with one JSON object")
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return nil, fmt.Errorf("approval reviewer returned more than one JSON value")
-		}
-		return nil, fmt.Errorf("approval reviewer returned trailing content: %w", err)
-	}
 	return fields, nil
 }
 
@@ -226,20 +182,4 @@ func finalizeGuardianDecision(payload *kernel.ApprovalPayload, parsed guardianRe
 		}
 	}
 	return kernel.ApprovalReviewResult{Approved: approved, Outcome: string(kernel.ApprovalStatusSelected), OptionID: parsed.OptionID, Rationale: parsed.Rationale, DisplayText: display, DecisionSource: "auto-review"}, nil
-}
-
-func normalizeGuardianAssessment(parsed guardianReviewModelOutput, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
-	_, decision, err := approval.ResolveStrictOption(options, parsed.OptionID)
-	if err != nil {
-		return guardianReviewModelOutput{}, err
-	}
-	parsed.Outcome = string(decision)
-	parsed.Rationale = strings.TrimSpace(parsed.Rationale)
-	if decision == approval.OptionDecisionAllow {
-		parsed.Rationale = ""
-	}
-	if decision == approval.OptionDecisionDeny && parsed.Rationale == "" {
-		return guardianReviewModelOutput{}, fmt.Errorf("deny requires a specific rationale")
-	}
-	return parsed, nil
 }

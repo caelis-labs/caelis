@@ -297,7 +297,7 @@ func newStackForToolTestWithoutProfiles(t *testing.T, resolved assembly.Resolved
 func newStackForToolTest(t *testing.T, resolved assembly.ResolvedAssembly) *Stack {
 	t.Helper()
 	workdir := t.TempDir()
-	stack, err := newGatewayAppTestStack(t, Config{
+	stack, err := newIsolatedGatewayAppTestStack(t, Config{
 		AppName: "caelis", UserID: "tool-test", StoreDir: t.TempDir(),
 		WorkspaceKey: workdir, WorkspaceCWD: workdir, ApprovalMode: "auto-review",
 		Assembly: resolved, SkillDirs: []string{t.TempDir()},
@@ -307,9 +307,6 @@ func newStackForToolTest(t *testing.T, resolved assembly.ResolvedAssembly) *Stac
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	// Close before t.TempDir cleanup. Deferred Runtime use-release can otherwise
-	// schedule an idle Session writer that races Linux RemoveAll.
-	t.Cleanup(func() { _ = stack.Close() })
 	return stack
 }
 
