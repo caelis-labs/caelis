@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.86.0](https://github.com/caelis-labs/caelis/compare/v0.85.0...v0.86.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **control:** retire host tool callbacks ([#283](https://github.com/caelis-labs/caelis/issues/283))
+
+### Features
+
+* **control:** retire host tool callbacks ([#283](https://github.com/caelis-labs/caelis/issues/283)) ([0a9b3e4](https://github.com/caelis-labs/caelis/commit/0a9b3e40ed30a0f7a3bee33d18d1de21d9731496))
+
+
+### Bug Fixes
+
+* **mcp:** release serve connections with idle sessions ([#286](https://github.com/caelis-labs/caelis/issues/286)) ([42f4bf2](https://github.com/caelis-labs/caelis/commit/42f4bf28c241f73cddd7a82c2a8c668f68e27d02))
+* **mcp:** share host connections and reap cancelled stdio startups ([#285](https://github.com/caelis-labs/caelis/issues/285)) ([9189bcd](https://github.com/caelis-labs/caelis/commit/9189bcda6dd92051fd6a271a2d04cf47a02cdc8f))
+
 ## [0.85.0](https://github.com/caelis-labs/caelis/compare/v0.84.1...v0.85.0) (2026-11-23)
 
 
