@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.1](https://github.com/caelis-labs/caelis/compare/v0.86.0...v0.86.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* recover Guardian approvals and isolate Gateway test resources ([#288](https://github.com/caelis-labs/caelis/issues/288)) ([f94e9af](https://github.com/caelis-labs/caelis/commit/f94e9af18de61fefcb9bf8b787025ac8c4e418d8))
+
 ## [0.86.0](https://github.com/caelis-labs/caelis/compare/v0.85.0...v0.86.0) (2026-11-24)
 
 
