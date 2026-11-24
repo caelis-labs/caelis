@@ -476,12 +476,16 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				}
 				metadata["system_prompt"] = systemPrompt
 			}
-			return kernelimpl.ToolAugmentation{
-				Tools:                      append(augmentedTools, mcpMgr.PrefixTools()...),
-				DeferredTools:              mcpMgr,
+			augmentation := kernelimpl.ToolAugmentation{
+				Tools:                      augmentedTools,
 				Metadata:                   metadata,
 				ResolveSessionInstructions: sessionSkillInstructions(s.sessions, req.SessionRef, resolveSkills),
-			}, nil
+			}
+			if mcpMgr != nil {
+				augmentation.Tools = append(augmentation.Tools, mcpMgr.PrefixTools()...)
+				augmentation.DeferredTools = mcpMgr
+			}
+			return augmentation, nil
 		},
 	})
 	if err != nil {

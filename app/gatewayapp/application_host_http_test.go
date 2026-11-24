@@ -158,6 +158,7 @@ func startApplicationHTTPHostWithSandbox(t *testing.T, store, workspace string, 
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "owner", StoreDir: store, WorkspaceCWD: workspace,
 		SandboxHostAuthorityDir: filepath.Join(store, "sandbox-authority"),
+		SessionScopedMCP:        true,
 		SkillDirs:               []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: backend},
 		ResolveProviderHTTPClient: func(context.Context, gatewayapp.ModelConfig) (*http.Client, error) {
 			return &http.Client{Transport: provider}, nil

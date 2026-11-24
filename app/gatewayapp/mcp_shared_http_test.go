@@ -151,7 +151,7 @@ func TestServeSharesLatestMCPAcrossNativeAndApplicationSessions(t *testing.T) {
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
 	client := host.host
 	native, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
-		WriteBase: appserver.WriteBase{OperationID: "create-native"}, WorkspaceKey: host.stack.Workspace().Key, CWD: workspace, Model: "custom/gpt-4.1",
+		WriteBase: appserver.WriteBase{OperationID: "create-native"}, WorkspaceKey: host.stack.Workspace().Key, CWD: workspace,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -350,11 +350,31 @@ func TestServeSharesLatestMCPAcrossNativeAndApplicationSessions(t *testing.T) {
 		t.Fatal("private profile dispatched outside its selected connection")
 	}
 	closeSubscriptions()
+	for _, service := range []string{"dtw", "old", "new", "private"} {
+		waitAtomicAuditCount(t, audit, service+":stop:", 1)
+		assertAudit(service+":start", 1)
+		atomicAssertLiveService(t, audit, service, 0)
+	}
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: appB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeFeeds = append(closeFeeds, func() { _ = feed.Subscription.Close() })
+	if err := prompt(appB, "reactivate", "BASIC"); err != nil {
+		t.Fatal(err)
+	}
+	waitApplicationHTTPIdle(t, ctx, client, appB)
+	waitAtomicApplicationMCPRunning(t, ctx, client, appB, "dtw")
+	waitAtomicApplicationMCPRunning(t, ctx, client, appB, "context7")
+	assertAudit("dtw:start", 2)
+	assertAudit("new:start", 2)
+	atomicAssertLiveService(t, audit, "dtw", 1)
+	atomicAssertLiveService(t, audit, "new", 1)
+	closeSubscriptions()
 	host.close(t)
 	host = nil
-	for _, service := range []string{"dtw", "old", "new", "private"} {
-		assertAudit(service+":start", 1)
-		assertAudit(service+":stop", 1)
+	for _, service := range []string{"dtw", "new"} {
+		assertAudit(service+":stop", 2)
 		atomicAssertLiveService(t, audit, service, 0)
 	}
 	t.Logf("stdio process receipts:\n%s", atomicAudit(audit))

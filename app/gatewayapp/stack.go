@@ -57,9 +57,13 @@ type Config struct {
 	// borrows but never closes it; only a live matching authority permits this
 	// Host epoch to replace a durable fence left by a prior Host.
 	HostOwnership *hostownership.Authority
-	ContextWindow int
-	SystemPrompt  string
-	Assembly      assembly.ResolvedAssembly
+	// SessionScopedMCP leaves MCP connections to activated Session Runtimes.
+	// A serving Host's process-default Runtime handles Control operations
+	// without keeping a lease on any MCP service.
+	SessionScopedMCP bool
+	ContextWindow    int
+	SystemPrompt     string
+	Assembly         assembly.ResolvedAssembly
 	// SkillDirs selects the regular roots for the Host. Nil uses product defaults.
 	SkillDirs []string
 	// ModelProfileID selects one Control-owned ModelProfile for this process.
@@ -555,6 +559,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			lookup:    lookup,
 			process: &runtimeProcessState{
 				config:           processConfig,
+				sessionScopedMCP: cfg.SessionScopedMCP,
 				sandboxPersisted: cloneSandboxConfig(doc.Sandbox),
 				sandboxRevision:  doc.ConfigurationRevision,
 			},

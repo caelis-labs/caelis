@@ -69,11 +69,14 @@ func reservedMCPNamespace(spec sdkmcp.ServerSpec) string {
 	return ""
 }
 
-// The process-default Runtime keeps its configured startup selection. It
-// follows replacements of those services while resident Session views opt into
-// newly added services when the Host publishes them.
+// A serving Host routes execution to Session Runtimes. Its process-default
+// composition has no MCP view. Direct embedded callers can still execute with
+// the process-default Runtime and retain its configured startup selection.
 func (s *runtimeComposition) configureNativeMCP(ctx context.Context, configured, plugins []sdkmcp.ServerSpec) (*sdkmcp.Manager, error) {
 	var startupNames map[string]bool
+	if s.process != nil && s.process.sessionScopedMCP {
+		return nil, nil
+	}
 	if s.activation == nil {
 		startupNames = make(map[string]bool, len(configured))
 		for _, spec := range configured {
