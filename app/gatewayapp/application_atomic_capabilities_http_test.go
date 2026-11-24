@@ -992,8 +992,8 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	// load the Skill body only after the model calls the Skill tool.
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-skill", "SKILL")
 	first := provider.requestAt(0)
-	if !strings.Contains(first, "atomic-skill") || !strings.Contains(first, "ApplicationLookup") || !strings.Contains(first, "js_exec") || strings.Contains(first, "tool_search") || !strings.Contains(first, "Skill") || strings.Contains(first, "ATOMIC_SKILL_BODY_731") {
-		t.Fatalf("first model request lacked assembled metadata/tools or inlined Skill body: %s", first)
+	if !strings.Contains(first, "atomic-skill") || strings.Contains(first, "ApplicationLookup") || !strings.Contains(first, "js_exec") || strings.Contains(first, "tool_search") || !strings.Contains(first, "Skill") || strings.Contains(first, "ATOMIC_SKILL_BODY_731") {
+		t.Fatalf("first model request has incorrect Skill metadata, tool declarations or body: %s", first)
 	}
 	requests := provider.snapshot()
 	if !strings.Contains(requests, "atomic-skill") || !strings.Contains(requests, "ATOMIC_SKILL_BODY_731") || strings.Contains(requests, "AMBIENT_LEAK") {
