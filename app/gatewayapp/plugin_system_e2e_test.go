@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -18,12 +20,11 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
 const (
-	pluginE2EHookEnv      = "CAELIS_PLUGIN_SYSTEM_E2E_HOOK"
-	pluginE2EMCPEnv       = "CAELIS_PLUGIN_SYSTEM_E2E_MCP"
 	pluginE2ESkillMarker  = "Use for Caelis plugin system E2E validation."
 	pluginE2EHookMarker   = "CAELIS_PLUGIN_E2E_HOOK_CONTEXT"
 	pluginE2EMCPMarker    = "CAELIS_PLUGIN_E2E_MCP_RESULT"
@@ -40,7 +41,9 @@ func TestPluginSystemE2E(t *testing.T) {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
 	pluginRoot := filepath.Join(tmp, "caelis-e2e-plugin")
-	writePluginSystemE2EPlugin(t, pluginRoot)
+	mcpEndpoint := httptest.NewServer(pluginSystemE2EMCPHandler())
+	t.Cleanup(mcpEndpoint.Close)
+	writePluginSystemE2EPlugin(t, pluginRoot, mcpEndpoint.URL)
 	base := AppConfig{Runtime: RuntimeConfig{ApprovalMode: "manual"}, Plugins: []PluginConfig{{
 		ID:          "caelis-e2e-plugin",
 		Name:        "caelis-e2e-plugin",
@@ -82,35 +85,30 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 	defer stack.Close()
 
-	session, err := startGatewayAppTestSession(context.Background(), stack, "")
+	active, err := startGatewayAppTestSession(context.Background(), stack, "")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	activated, release := activateHeldSessionRuntime(t, stack, session.SessionID)
+	activated, release := activateHeldSessionRuntime(t, stack, active.SessionID)
 	defer release()
-	list, err := activated.instance.pluginReads().List(context.Background())
+	// Runtime activation starts MCP asynchronously. Join the initial catalog
+	// read before asserting the published status; child launch can be I/O bound.
+	select {
+	case <-activated.instance.mcpMgr.Initialized():
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	case <-time.After(mcp.DefaultStartupTimeout + mcp.DefaultToolListTimeout):
+		t.Fatal("MCP initialization exceeded its connection and catalog budgets")
+	}
+	list, err := activated.instance.pluginReads().List(t.Context())
 	if err != nil {
 		t.Fatalf("Plugins().List() error = %v", err)
 	}
-	// Runtime activation starts MCP asynchronously; readiness is the observed
-	// server/tool state, independent of helper-process startup speed.
-	ready, cancelReady := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancelReady()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for !pluginSystemE2EPluginActive(list) {
-		select {
-		case <-ready.Done():
-			t.Fatalf("e2e plugin did not become ready: %+v", list)
-		case <-tick.C:
-			list, err = activated.instance.pluginReads().List(ready)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
+	if !pluginSystemE2EPluginActive(list) {
+		t.Fatalf("e2e plugin did not become ready: %+v", list)
 	}
 
-	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{
+	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, active, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{
 		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.ReviewResult, error) {
 			if request.Payload == nil || request.Payload.ToolName != pluginE2EToolName {
 				t.Fatalf("unexpected E2E approval request: %+v", request.Payload)
@@ -122,23 +120,30 @@ func TestPluginSystemE2E(t *testing.T) {
 		t.Fatalf("headless RunSessionOnce() error = %v", err)
 	}
 	if strings.TrimSpace(result.Output) != pluginE2EFinalMessage {
-		t.Fatalf("RunSessionOnce output = %q, want %q; provider=%s; events=%s", result.Output, pluginE2EFinalMessage, fakeProvider.Summary(), pluginSystemE2EEventSummary(t, stack, session.SessionRef))
+		t.Fatalf("RunSessionOnce output = %q, want %q; provider=%s; events=%s", result.Output, pluginE2EFinalMessage, fakeProvider.Summary(), pluginSystemE2EEventSummary(t, stack, active.SessionRef))
 	}
-	fakeProvider.Assert(t, pluginSystemE2EEventSummary(t, stack, session.SessionRef))
+	fakeProvider.Assert(t, pluginSystemE2EEventSummary(t, stack, active.SessionRef))
+	events, err := stack.composition.sessions.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookEvents := 0
+	for _, event := range events {
+		if event.Meta["source"] != "plugin_hook" {
+			continue
+		}
+		hookEvents++
+		msg, ok := session.ModelMessageOf(event)
+		if !ok || msg.Role != model.RoleUser || !strings.Contains(msg.TextContent(), pluginE2EHookMarker) {
+			t.Fatalf("plugin context did not project to a user message carrying hook output: %+v", event)
+		}
+	}
+	if hookEvents != 1 {
+		t.Fatalf("hook events = %d, want 1", hookEvents)
+	}
 }
 
-func TestPluginSystemE2EHookHelperProcess(t *testing.T) {
-	if os.Getenv(pluginE2EHookEnv) != "1" {
-		return
-	}
-	fmt.Print(pluginE2EHookMarker)
-	os.Exit(0)
-}
-
-func TestPluginSystemE2EMCPServerHelperProcess(t *testing.T) {
-	if os.Getenv(pluginE2EMCPEnv) != "1" {
-		return
-	}
+func pluginSystemE2EMCPHandler() http.Handler {
 	type args struct {
 		Name string `json:"name"`
 	}
@@ -151,20 +156,24 @@ func TestPluginSystemE2EMCPServerHelperProcess(t *testing.T) {
 			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: pluginE2EMCPMarker + ":" + input.Name}},
 		}, nil, nil
 	})
-	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	return mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{Stateless: true})
 }
 
-func writePluginSystemE2EPlugin(t *testing.T, root string) {
+func writePluginSystemE2EPlugin(t *testing.T, root, endpoint string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, ".caelis-plugin"), 0o700); err != nil {
 		t.Fatalf("mkdir plugin metadata: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "skills", "e2e-skill"), 0o700); err != nil {
 		t.Fatalf("mkdir plugin skill: %v", err)
+	}
+	hookCommand, hookArgs := "/bin/echo", []string{pluginE2EHookMarker}
+	if runtime.GOOS == "windows" {
+		hookCommand, hookArgs = "cmd.exe", []string{"/d", "/c", "echo", pluginE2EHookMarker}
+	}
+	args, err := json.Marshal(hookArgs)
+	if err != nil {
+		t.Fatal(err)
 	}
 	manifest := fmt.Sprintf(`{
   "name": "caelis-e2e-plugin",
@@ -174,18 +183,15 @@ func writePluginSystemE2EPlugin(t *testing.T, root string) {
   "hooks": {
     "SessionStart": [{
       "command": %q,
-      "args": ["-test.run=^TestPluginSystemE2EHookHelperProcess$"],
-      "env": {%q: "1"}
+      "args": %s
     }]
   },
   "mcpServers": {
     "demo": {
-      "command": %q,
-      "args": ["-test.run=^TestPluginSystemE2EMCPServerHelperProcess$"],
-      "env": {%q: "1"}
+      "url": %q
     }
   }
-}`, os.Args[0], pluginE2EHookEnv, os.Args[0], pluginE2EMCPEnv)
+}`, hookCommand, args, endpoint)
 	if err := os.WriteFile(filepath.Join(root, ".caelis-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatalf("write plugin manifest: %v", err)
 	}

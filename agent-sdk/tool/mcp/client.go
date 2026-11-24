@@ -113,6 +113,9 @@ func (launch preparedLaunch) start(ctx context.Context, spec ServerSpec) (*Clien
 	startup := &startupTransport{Transport: transport}
 	diagnostics := observeStartup(transport, spec)
 	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, startup, DefaultStartupTimeout)
+	if startup.stopAbort != nil {
+		startup.stopAbort()
+	}
 	reason := diagnostics.reason(err)
 	diagnostics.stopStderr()
 	if err != nil {

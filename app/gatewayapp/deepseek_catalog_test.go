@@ -9,10 +9,10 @@ import (
 )
 
 func TestConfiguredDeepSeekLegacyModelsRemainSelectableAndDeletable(t *testing.T) {
+	stack := newLocalStateTestHost(t)
 	for _, name := range []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			stack, _ := newLocalStateTestStack(t)
 			profile, err := stack.connectTestModel(ModelConfig{
 				Provider: "deepseek", Model: name, Token: "test-key",
 			})
@@ -39,7 +39,7 @@ func TestConfiguredDeepSeekLegacyModelsRemainSelectableAndDeletable(t *testing.T
 			}
 			principal := appserver.Principal{ID: stack.UserID()}
 			used, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
-				WriteBase: appserver.WriteBase{OperationID: "select-legacy", ExpectedRevision: &revision},
+				WriteBase: appserver.WriteBase{OperationID: "select-" + name, ExpectedRevision: &revision},
 				Model:     id,
 			})
 			if err != nil || used.Outcome != appserver.OutcomeCommitted {
@@ -49,7 +49,7 @@ func TestConfiguredDeepSeekLegacyModelsRemainSelectableAndDeletable(t *testing.T
 				t.Fatalf("selected identity changed, want %q", id)
 			}
 			deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
-				WriteBase: appserver.WriteBase{OperationID: "delete-legacy", ExpectedRevision: &used.Revision},
+				WriteBase: appserver.WriteBase{OperationID: "delete-" + name, ExpectedRevision: &used.Revision},
 				Model:     id,
 			})
 			if err != nil || deleted.Outcome != appserver.OutcomeCommitted {

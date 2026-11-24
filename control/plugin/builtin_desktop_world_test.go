@@ -77,16 +77,16 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 	spec := contributions.MCPServerSpecs[0]
-	_, platform, version, err := desktopWorldBundle()
+	bundle, err := desktopWorldBundle()
 	if err != nil {
 		t.Fatal(err)
 	}
 	binary, err := os.ReadFile(spec.Command)
-	if err != nil || fmt.Sprintf("%x", sha256.Sum256(binary)) != platform.BinaryHash {
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(binary)) != bundle.platform.BinaryHash {
 		t.Fatalf("selected executable does not match the official pin: %v", err)
 	}
 	identity, err := exec.CommandContext(ctx, spec.Command, "--version").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(identity)) != "dtw "+version {
+	if err != nil || strings.TrimSpace(string(identity)) != "dtw "+bundle.version {
 		t.Fatalf("selected binary identity = %q, %v", identity, err)
 	}
 	manager, err := mcp.NewManager(ctx, contributions.MCPServerSpecs, nil)

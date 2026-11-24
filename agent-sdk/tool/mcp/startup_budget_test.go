@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -127,5 +130,64 @@ func TestStartupInitializeDeadlineClosesHTTPConnection(t *testing.T) {
 	}
 	if got := startupFailureSummary(&startupError{Stage: "initialize", Err: err}); got != "initialize: deadline exceeded" {
 		t.Fatal(got)
+	}
+}
+
+func TestStdioStartupCancellationReapsUninitializedProcess(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "initialize-received")
+	release := filepath.Join(root, "release-child")
+	pool := NewConnectionPool(t.Context())
+	_, err := pool.NewManager([]ServerSpec{{
+		PluginID: "fixture", Name: "stalled", Transport: TransportStdio, Command: os.Args[0], WorkDir: root,
+		Args: []string{"-test.run=^TestStalledStdioStartupHelper$"},
+		Env:  map[string]string{"CAELIS_STALLED_STDIO_MARKER": marker},
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.WriteFile(release, nil, 0o600)
+		_ = pool.Close()
+	})
+	startDeadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(startDeadline) {
+			t.Fatal("stdio child did not receive initialize")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	done := make(chan error, 1)
+	go func() { done <- pool.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pool cleanup waited on an uninitialized stdio child that ignored stdin EOF")
+	}
+}
+
+func TestStalledStdioStartupHelper(t *testing.T) {
+	marker := os.Getenv("CAELIS_STALLED_STDIO_MARKER")
+	if marker == "" {
+		return
+	}
+	if _, err := bufio.NewReader(os.Stdin).ReadBytes('\n'); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release := filepath.Join(filepath.Dir(marker), "release-child")
+	for {
+		if _, err := os.Stat(release); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

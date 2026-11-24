@@ -82,6 +82,11 @@ func TestExperimentalHTTPIndependentCombinationsAndActivation(t *testing.T) {
 				t.Fatalf("persisted legacy value %s", id)
 			}
 		}
+		// Exercise the real activation once per effective pair. All sixteen
+		// requests still prove wire normalization, persistence and receipt replay.
+		if bits&6 != 0 {
+			continue
+		}
 		created, err := client.CreateSession(t.Context(), appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("create-experimental-%d", bits)}})
 		if err != nil {
 			t.Fatal(err)
