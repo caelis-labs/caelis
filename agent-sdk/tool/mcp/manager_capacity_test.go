@@ -2,13 +2,14 @@ package mcp
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestManagerPublishesAllReadyToolsAcrossServersAndDiscovery(t *testing.T) {
-	mgr := &Manager{warnings: make(map[string][]string)}
+	mgr := &Manager{mu: new(sync.Mutex), warnings: make(map[string][]string)}
 	for serverIndex := range 4 {
 		serverName := fmt.Sprintf("s%02d", serverIndex)
 		listed := make([]*mcpsdk.Tool, 300)
@@ -38,7 +39,7 @@ func TestManagerPublishesAllReadyToolsAcrossServersAndDiscovery(t *testing.T) {
 
 func TestManagerMCPSourceFingerprintChangesWithConnectionAndSchema(t *testing.T) {
 	definition := func(spec ServerSpec, schema map[string]any) string {
-		mgr := &Manager{warnings: map[string][]string{}, servers: []*managedServer{{spec: spec, client: &Client{catalog: &clientCatalog{}}, catalogReady: true, listed: []*mcpsdk.Tool{{Name: "read", InputSchema: schema}}}}}
+		mgr := &Manager{mu: new(sync.Mutex), warnings: map[string][]string{}, servers: []*managedServer{{spec: spec, client: &Client{catalog: &clientCatalog{}}, catalogReady: true, listed: []*mcpsdk.Tool{{Name: "read", InputSchema: schema}}}}}
 		mgr.rebuildToolsLocked()
 		ready := mgr.Tools()
 		if len(ready) != 1 {

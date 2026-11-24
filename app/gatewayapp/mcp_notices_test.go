@@ -72,8 +72,9 @@ func TestMCPBlockedHTTPHandshakeDoesNotBlockRuntimeActivation(t *testing.T) {
 		t.Fatal("blocked handshake unexpectedly completed")
 	default:
 	}
-	if runtime.instance.currentGateway() == nil || len(runtime.instance.mcpMgr.Tools()) != 0 {
-		t.Fatal("Runtime is unavailable or unready MCP tools were published")
+	blocked := runtime.instance.mcpMgr.GetServerInfos(mcpconfig.NamespaceUser)
+	if runtime.instance.currentGateway() == nil || len(blocked) != 1 || blocked[0].Name != "blocked" || blocked[0].Ready || len(blocked[0].Tools) != 0 {
+		t.Fatalf("Runtime is unavailable or the blocked server published tools: %+v", blocked)
 	}
 	if err := runtime.instance.mcpMgr.Close(); err != nil {
 		t.Fatal(err)

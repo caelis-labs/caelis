@@ -95,7 +95,7 @@ func (s *runtimeComposition) applicationCompletionSkills() (skill.Catalog, bool)
 	if err != nil {
 		return skill.Catalog{}, true
 	}
-	contributions, err := s.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(s.authorities.storeDir, binding.SessionID, s.workspace.CWD))
+	contributions, err := s.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(s.authorities.storeDir, binding.SessionID, s.workspace.CWD), binding.PrincipalID)
 	if err != nil {
 		return skill.Catalog{}, true
 	}

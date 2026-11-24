@@ -90,13 +90,20 @@ A failed refresh exposes a status warning and keeps admission blocked until a
 later refresh succeeds, whether triggered by another notification or explicit
 `Manager.RefreshTools`. The authorized
 [Control retry command](experimental-features.md#retry-an-mcp-catalog-read) uses
-that same activation-owned Manager. Unrelated compaction does not inspect or mutate the MCP directory.
+the Session's selected connection. Sessions sharing that connection observe the
+same refresh. Compaction has no role in directory admission.
 
 The MCP client supports legacy standalone SSE and the SDK's
 2026-07-28 subscription path. It suppresses the SDK's separate tool-page TTL cache:
 otherwise a late page could repopulate that cache after notification invalidation.
 The Manager remains the single directory owner. Cursor bytes stay opaque. The
 page-count limit is 4096; there is no new per-server tool-count truncation.
+
+A Host configuration change replaces the selected directory across affected Sessions
+in one publication. During replacement startup, discovery exposes only currently
+ready entries. Retained callables for a superseded connection fail with
+`stale_revision`. An exact search after the replacement is ready refreshes the
+binding. Calls admitted before publication finish on their original connection.
 
 An accepted projected-name owner stays pinned for that Manager activation. Removing
 it does not promote a colliding server or remote name. Candidates rejected from

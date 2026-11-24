@@ -528,6 +528,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
+				mcp:                     newHostMCP(newAppConfigStore(storeDir), doc, runtimeDiagnostics),
 				applicationChildClients: &applicationChildClientFactory{},
 				appName:                 appName,
 				userID:                  userID,
@@ -773,6 +774,7 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 		sessionCloseErr = s.sessionRuntimes.closeRuntimeResources()
 	}
 	workspaceResourceErr := s.composition.closeWorkspaceResources()
+	s.composition.authorities.mcp.close()
 	s.composition.mu.Lock()
 	controlOperations := s.operations
 	s.operations = nil

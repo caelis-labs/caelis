@@ -153,6 +153,7 @@ type atomicCapabilityProvider struct {
 	first    sync.Once
 	started  chan struct{}
 	hold     <-chan struct{}
+	scripts  map[string]string
 }
 
 func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -206,7 +207,13 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 			}
 		}
 	}
-	name, args := "", ""
+	name, args, fixtureScript := "", "", ""
+	for input, script := range p.scripts {
+		if strings.Contains(latestUser, input) {
+			fixtureScript = script
+			break
+		}
+	}
 	switch {
 	case latestTool == "tool_search" && strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "callfail__lookup", `{}`
@@ -217,6 +224,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	case latestTool == "tool_search" && strings.Contains(latestUser, "UTIL"):
 		name, args = "utilities__lookup", `{}`
 	case latestTool != "":
+	case fixtureScript != "":
+		name, args = "js_exec", gatewayapp.CodeModeFixtureArgs(fixtureScript)
 	case strings.Contains(latestUser, "HEALTHY_SKILL"):
 		name, args = "Skill", `{"name":"healthy-skill"}`
 	case strings.Contains(latestUser, "BODY_SKILL"):

@@ -119,7 +119,7 @@ func TestAvailableApplicationPluginsKeepHealthySibling(t *testing.T) {
 	if _, err := stack.composition.resolveApplicationPlugins(profile, paths); errorcode.CodeOf(err) != errorcode.InvalidArgument || !strings.Contains(err.Error(), "parse enabled plugin") || !strings.Contains(err.Error(), "unexpected end of JSON input") {
 		t.Fatalf("explicit configuration lost its actionable error: %v", err)
 	}
-	got, err := stack.composition.resolveAvailableApplicationPlugins(profile, paths)
+	got, err := stack.composition.resolveAvailableApplicationPlugins(profile, paths, stack.composition.authorities.userID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestAvailableApplicationPluginSkillConflictDisablesOnlyItsPackage(t *testin
 		t.Fatal(err)
 	}
 	writeSkill(filepath.Join(changing, "skills", "new-skill"))
-	got, err := stack.composition.resolveAvailableApplicationPlugins(profile, paths)
+	got, err := stack.composition.resolveAvailableApplicationPlugins(profile, paths, stack.composition.authorities.userID)
 	if err != nil {
 		t.Fatal(err)
 	}

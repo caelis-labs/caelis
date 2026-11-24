@@ -36,6 +36,9 @@ func productOverride(configs []Config, paths RuntimePaths) (Contributions, bool,
 	}
 	configured := *selected
 	configured.ID = "desktop-world"
+	if paths.ProductStoreDir != "" {
+		paths.StoreDir = paths.ProductStoreDir
+	}
 	out, err := ResolveContributions([]Config{configured}, paths)
 	if err == nil {
 		err = validateProductPair(out)

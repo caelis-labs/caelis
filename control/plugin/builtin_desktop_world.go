@@ -198,7 +198,7 @@ func desktopWorldRuntimeFile(name string) bool {
 }
 
 // ProductContributions assembles fixed Core capabilities separately from optional
-// user plugins. It uses the ordinary package parser and per-Session MCP paths.
+// user plugins. It uses the ordinary package parser and the product Store for default MCP data.
 // Unsupported platforms retain a diagnostic source without starting a process.
 func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if builtinDesktopWorldTarget == "" {
@@ -215,6 +215,7 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if err != nil {
 		return Contributions{}, fmt.Errorf("builtin desktop-world: %w", err)
 	}
+	paths.StoreDir = cacheDir
 	out, err := ResolveContributions([]Config{{ID: "desktop-world", Root: root, Enabled: true}}, paths)
 	if err == nil {
 		out.Sources[0].Status = "builtin"

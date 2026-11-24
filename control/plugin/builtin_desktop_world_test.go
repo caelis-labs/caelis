@@ -20,7 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
-func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
+func TestProductDesktopWorldPackageAndHostPaths(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		t.Setenv("DISPLAY", ":41")
 		t.Setenv("XAUTHORITY", "/fixture/Xauthority")
@@ -49,8 +49,8 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, b := first.MCPServerSpecs[0], second.MCPServerSpecs[0]
-	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) {
-		t.Fatal("package sharing crossed Session data or approval boundaries")
+	if a.PackageRoot != b.PackageRoot || a.DataDir != b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) {
+		t.Fatal("default package launch differs across Session paths")
 	}
 	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || !slices.Equal(a.Args, []string{"mcp"}) ||
 		!slices.Equal(a.PrefixTools, []string{"apps", "exec"}) {

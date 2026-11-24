@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -14,7 +16,6 @@ type clientCatalog struct {
 	mu         sync.Mutex
 	generation uint64
 	dirty      bool
-	revoked    bool
 	changed    chan struct{}
 }
 
@@ -47,7 +48,10 @@ func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedSer
 	if m.closed {
 		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
 	}
-	if server.revoked {
+	if server.retired && !m.ownsPool {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
+	}
+	if server.retired || m.revoked[server] {
 		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
 	}
 	if server.client.closedError() != nil {
@@ -59,7 +63,7 @@ func (m *Manager) checkServerReadyLocked(ctx context.Context, server *managedSer
 	return nil
 }
 
-func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
+func (m *ConnectionPool) watchCatalog(ctx context.Context, server *managedServer) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -67,7 +71,7 @@ func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
 		case <-server.client.closed:
 			return
 		case <-server.client.catalog.changed:
-			_ = m.refreshCatalog(ctx, server, false)
+			_ = m.refreshCatalog(ctx, server, nil)
 		}
 	}
 }
@@ -81,7 +85,7 @@ func (m *Manager) RefreshTools(ctx context.Context, pluginID, serverName string)
 	m.mu.Lock()
 	var found *managedServer
 	for _, s := range m.servers {
-		if s.spec.PluginID == pluginID && s.spec.Name == serverName && s.client != nil {
+		if s.spec.PluginID == pluginID && s.spec.Name == serverName && s.client != nil && !m.revoked[s] {
 			found = s
 			break
 		}
@@ -93,14 +97,14 @@ func (m *Manager) RefreshTools(ctx context.Context, pluginID, serverName string)
 	}
 	// Ownership is claimed inside refreshCatalog. Invalidating before it would
 	// wake the watcher on behalf of a waiter that may already be cancelled.
-	return m.refreshCatalog(ctx, found, true)
+	return m.pool.refreshCatalog(ctx, found, m)
 }
 
 // refreshCatalog validates one server directory. Ownership is a capacity-one
 // gate so a waiter can abandon the attempt without starting tools/list, and the
-// work timeout only starts once ownership is held. force marks the directory
-// dirty after acquiring ownership: a cancelled manual request has no effect.
-func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, force bool) (refreshErr error) {
+// work timeout starts once ownership is held. Manual requests mark the directory
+// dirty after acquiring ownership and rechecking their Manager selection.
+func (m *ConnectionPool) refreshCatalog(parent context.Context, server *managedServer, requester *Manager) (refreshErr error) {
 	if err := parent.Err(); err != nil {
 		return err
 	}
@@ -126,8 +130,12 @@ func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, 
 	defer cancel()
 	c := server.client.catalog
 	m.mu.Lock()
+	if m.closed || server.retired || (requester != nil && (requester.closed || requester.revoked[server] || !slices.Contains(requester.servers, server))) {
+		m.mu.Unlock()
+		return errors.New("MCP refresh cancelled")
+	}
 	c.mu.Lock()
-	if force {
+	if requester != nil {
 		c.generation++
 		c.dirty = true
 	}
@@ -144,18 +152,14 @@ func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, 
 	for range 3 {
 		c.mu.Lock()
 		generation = c.generation
-		revoked := c.revoked
 		c.mu.Unlock()
-		if revoked {
-			return errors.New("MCP server access revoked")
-		}
 		listed, err := server.client.ListTools(ctx)
 		if err != nil {
 			return err
 		}
 		m.mu.Lock()
 		c.mu.Lock()
-		if m.closed || server.revoked || c.revoked || ctx.Err() != nil {
+		if m.closed || server.retired || ctx.Err() != nil {
 			c.mu.Unlock()
 			m.mu.Unlock()
 			return errors.New("MCP refresh cancelled")
@@ -165,10 +169,13 @@ func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, 
 			m.mu.Unlock()
 			continue
 		}
+		sort.SliceStable(listed, func(i, j int) bool {
+			return listed[i] != nil && (listed[j] == nil || listed[i].Name < listed[j].Name)
+		})
 		server.listed = listed
 		server.catalogReady = true
 		server.err = nil
-		m.rebuildToolsLocked()
+		m.rebuildDirectoriesLocked(server)
 		c.dirty = false
 		c.mu.Unlock()
 		m.mu.Unlock()
@@ -180,7 +187,7 @@ func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, 
 // finishRefresh records one finished attempt. generation identifies the
 // directory revision the attempt actually covered, so an older failure cannot
 // be read as a settled failure of a newer revision.
-func (m *Manager) finishRefresh(server *managedServer, generation uint64, err error) {
+func (m *ConnectionPool) finishRefresh(server *managedServer, generation uint64, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	// Clear the in-flight marker even when the Manager is closing: a stuck
@@ -212,14 +219,10 @@ func (m *Manager) RevokeServer(pluginID, serverName string) error {
 		if server.client == nil {
 			return errors.New("MCP server is unavailable")
 		}
-		c := server.client.catalog
-		if c != nil {
-			c.mu.Lock()
-			c.revoked = true
-			c.generation++
-			c.mu.Unlock()
+		if m.revoked == nil {
+			m.revoked = make(map[*managedServer]bool)
 		}
-		server.revoked = true
+		m.revoked[server] = true
 		m.rebuildToolsLocked()
 		return nil
 	}
@@ -248,18 +251,15 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 			if BindingForDefinition(def).Identity != binding.Identity {
 				continue
 			}
-			if server.revoked {
+			if server.retired || m.revoked[server] {
 				return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
 			}
 			if server.client == nil || server.client.closedError() != nil {
 				return tool.NewError(errorcode.Unavailable, "MCP source is offline")
 			}
 			server.client.catalog.mu.Lock()
-			revoked, dirty := server.client.catalog.revoked, server.client.catalog.dirty
+			dirty := server.client.catalog.dirty
 			server.client.catalog.mu.Unlock()
-			if revoked {
-				return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
-			}
 			if dirty {
 				return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh is required")
 			}

@@ -39,7 +39,8 @@ func refreshAdmissionManager(t *testing.T, handler func(context.Context) error) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	mgr := &Manager{servers: []*managedServer{{spec: spec, client: client}}}
+	pool := NewConnectionPool(t.Context())
+	mgr := &Manager{pool: pool, mu: &pool.mu, servers: []*managedServer{{spec: spec, client: client}}}
 	if err := mgr.RefreshTools(t.Context(), "p", "local"); err != nil {
 		t.Fatal(err)
 	}

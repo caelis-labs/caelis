@@ -379,16 +379,16 @@ func TestCatalogReconcileDrainsBorrowBeforeInitializationReturns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mgr.Close() })
-	parent, stop := context.WithCancel(mgr.ctx)
+	parent, stop := context.WithCancel(mgr.pool.ctx)
 	defer stop()
-	managed := &managedServer{spec: ServerSpec{PluginID: "p", Name: "local", URL: endpoint.URL}, cancel: stop}
+	managed := &managedServer{spec: ServerSpec{PluginID: "p", Name: "local", URL: endpoint.URL}, cancel: stop, members: map[*Manager]bool{mgr: true}}
 	mgr.mu.Lock()
 	mgr.servers = append(mgr.servers, managed)
 	mgr.mu.Unlock()
 	published, finishInit, initDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	startClosing := make(chan struct{})
 	start := func(ctx context.Context, spec ServerSpec) (*Client, error) {
-		client, err := mgr.start(ctx, spec)
+		client, err := startClient(ctx, spec, nil)
 		if err == nil {
 			cancelClient := client.cancel
 			client.cancel = func() {
@@ -400,10 +400,10 @@ func TestCatalogReconcileDrainsBorrowBeforeInitializationReturns(t *testing.T) {
 	}
 	var finishOnce sync.Once
 	defer finishOnce.Do(func() { close(finishInit) })
-	mgr.workers.Go(func() {
+	mgr.pool.workers.Go(func() {
 		defer close(initDone)
-		mgr.initialize(parent, managed, start, func(ctx context.Context, s *managedServer, force bool) error {
-			err := mgr.refreshCatalog(ctx, s, force)
+		mgr.pool.initialize(parent, managed, start, func(ctx context.Context, s *managedServer, requester *Manager) error {
+			err := mgr.pool.refreshCatalog(ctx, s, requester)
 			close(published)
 			<-finishInit
 			return err

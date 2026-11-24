@@ -298,8 +298,10 @@ Supported embedded Desktop World builds declare the selected package's
 
 An explicit Session configuration commit applies MCP changes automatically.
 A configuration write can prepare an observed Session before its first prompt.
-In ordinary Sessions, the Runtime notices Host MCP and overlay file changes
-while resident and applies their connection changes automatically.
+The Host publishes inherited MCP configuration changes to resident ordinary and
+Application Sessions. Explicit profile servers keep precedence by namespace.
+See [MCP lifecycle](mcp-tool-lifecycle.md#directory-refresh-and-revocation) for
+shared connections, directory readiness and binding replacement.
 `POST /sessions/{session_id}/mcp/refresh` refreshes a named connected Server's
 tool directory.
 
