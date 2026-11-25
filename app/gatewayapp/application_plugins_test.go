@@ -150,7 +150,7 @@ func TestApplicationNativePluginPrivateDataDoesNotCrossSessionOrHost(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec := proxied.MCPServerSpecs[0]; spec.DataDir != "" || len(spec.Env) != 0 || spec.Command != "verified-bot-proxy" || spec.PluginID != "desktop-world" {
+	if spec := proxied.MCPServerSpecs[0]; spec.DataDir != "" || spec.DataDirRoot != "" || len(spec.Env) != 0 || spec.Command != "verified-bot-proxy" || spec.PluginID != "desktop-world" {
 		t.Fatalf("proxy inherited native launch environment/data: %+v", spec)
 	}
 }

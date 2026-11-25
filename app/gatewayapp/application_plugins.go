@@ -52,7 +52,8 @@ func applicationPluginContributions(profile sessionprofile.Profile, paths plugin
 				found = true
 				spec.Transport, spec.Command = proxy.Transport, proxy.Command
 				spec.Args, spec.WorkDir = append([]string(nil), proxy.Args...), proxy.WorkDir
-				spec.URL, spec.Headers, spec.Env, spec.DataDir = "", nil, nil, ""
+				spec.URL, spec.Headers, spec.Env = "", nil, nil
+				spec.DataDir, spec.DataDirRoot = "", ""
 				spec.CleanEnvironment = true
 			}
 			if !found {

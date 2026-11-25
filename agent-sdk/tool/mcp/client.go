@@ -82,7 +82,7 @@ func (launch preparedLaunch) start(ctx context.Context, spec ServerSpec) (*Clien
 		return nil, &startupError{Stage: "transport", Err: launch.err}
 	}
 	if transportName == TransportStdio && spec.DataDir != "" {
-		if err := ensurePluginDataDir(spec.DataDir, transport.(*mcpsdk.CommandTransport).Command.Dir); err != nil {
+		if err := ensureDataDir(spec.effectiveDataDirRoot(), spec.DataDir, transport.(*mcpsdk.CommandTransport).Command.Dir); err != nil {
 			return nil, &startupError{Stage: "transport", Err: fmt.Errorf("plugin data directory: %w", err)}
 		}
 	}
@@ -265,71 +265,6 @@ func stdioLaunchIdentity(path string, environment []string) (string, error) {
 	}
 	hash := sha256.Sum256(raw)
 	return hex.EncodeToString(hash[:]), nil
-}
-
-func ensurePluginDataDir(dataDir, workDir string) error {
-	if !filepath.IsAbs(dataDir) {
-		return fmt.Errorf("data directory must be absolute")
-	}
-	storeDir := filepath.Dir(filepath.Dir(filepath.Dir(dataDir)))
-	if err := makePrivateChildDirs(storeDir, filepath.Join("plugins", "data", filepath.Base(dataDir))); err != nil {
-		return err
-	}
-	info, err := os.Lstat(dataDir)
-	if err != nil || !info.IsDir() {
-		return fmt.Errorf("data directory is not a real directory")
-	}
-	realData, err := filepath.EvalSymlinks(dataDir)
-	if err != nil {
-		return err
-	}
-	if !pathInside(dataDir, workDir) {
-		return nil // the plugin root is a valid immutable working directory
-	}
-	rel, _ := filepath.Rel(dataDir, workDir)
-	if err := makePrivateChildDirs(dataDir, rel); err != nil {
-		return err
-	}
-	realWorkDir, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		return err
-	}
-	if !pathInside(realData, realWorkDir) {
-		return fmt.Errorf("working directory escapes plugin data directory")
-	}
-	return nil
-}
-
-func makePrivateChildDirs(root, relative string) error {
-	if !filepath.IsAbs(root) || !pathInside(root, filepath.Join(root, relative)) {
-		return fmt.Errorf("private directory escapes host root")
-	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return err
-	}
-	current := root
-	if relative == "." {
-		return nil
-	}
-	for _, part := range strings.Split(relative, string(filepath.Separator)) {
-		if part == "" || part == "." || part == ".." {
-			return fmt.Errorf("invalid private directory component")
-		}
-		current = filepath.Join(current, part)
-		if err := os.Mkdir(current, 0o700); err != nil && !os.IsExist(err) {
-			return err
-		}
-		info, err := os.Lstat(current)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("private directory is not a real directory: %s", current)
-		}
-	}
-	return nil
-}
-
-func pathInside(root, target string) bool {
-	rel, err := filepath.Rel(root, target)
-	return err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)))
 }
 
 func pluginBaseEnvironment() []string {

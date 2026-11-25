@@ -121,11 +121,11 @@ func resolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 		}
 		for _, spec := range installed.MCPServers {
 			if installed.Kind == ManifestKindAgentPlugin {
-				dataDir, err := agentPluginDataDir(runtimePaths.StoreDir, installed.ID)
+				dataRoot, dataDir, err := agentPluginDataPaths(runtimePaths.StoreDir, installed.ID)
 				if err != nil {
 					return out, fmt.Errorf("plugin %q: %w", installed.ID, err)
 				}
-				spec, err = instantiateAgentPluginMCP(spec, installed.Root, dataDir)
+				spec, err = instantiateAgentPluginMCP(spec, installed.Root, dataRoot, dataDir)
 				if err != nil {
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
