@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/internal/hostownership"
 	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
 
@@ -59,12 +60,17 @@ func InspectDoctorRepairs(ctx context.Context, storeDir string) ([]DoctorRepairP
 	}}, nil
 }
 
-// RepairDoctorIssue performs one recognized compatibility repair. It is an
-// explicit doctor operation and is never called by normal Host startup.
-func RepairDoctorIssue(ctx context.Context, storeDir string, code string) (DoctorRepairReport, error) {
+// RepairDoctorIssue pins exclusive ownership of the Store through planning,
+// repair, and verification. The caller acquires ownership after stopping the Host.
+func RepairDoctorIssue(ctx context.Context, storeDir string, code string, ownership *hostownership.Authority) (DoctorRepairReport, error) {
 	if code != DoctorWorkspaceIdentityConflict {
 		return DoctorRepairReport{}, fmt.Errorf("gatewayapp: doctor does not recognize repair %q", code)
 	}
+	release, ok := ownership.Pin(storeDir)
+	if !ok {
+		return DoctorRepairReport{}, errors.New("gatewayapp: doctor repair requires exclusive Store ownership")
+	}
+	defer release()
 	store := doctorSessionStore(storeDir)
 	pending, err := store.PendingWorkspaceKeyRepairs(ctx)
 	if err != nil {
@@ -98,6 +104,24 @@ func RepairDoctorIssue(ctx context.Context, storeDir string, code string) (Docto
 		return report, errors.New("gatewayapp: durable workspace identity repair did not converge")
 	}
 	return report, nil
+}
+
+// Doctor and the product Host hold the same exclusive ownership guard, so the
+// journal cannot change during the lifetime of a Host's Runtime registry.
+func pendingWorkspaceRepairKeys(ctx context.Context, sessions session.Lifecycle) (map[string]string, error) {
+	store, ok := sessions.(*sessionfile.Store)
+	if !ok {
+		return nil, nil
+	}
+	repairs, err := store.PendingWorkspaceKeyRepairs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: inspect pending workspace repairs: %w", err)
+	}
+	keys := make(map[string]string, len(repairs))
+	for _, repair := range repairs {
+		keys[repair.SessionID] = repair.ReplacementWorkspaceKey
+	}
+	return keys, nil
 }
 
 func doctorSessionStore(storeDir string) *sessionfile.Store {

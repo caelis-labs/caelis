@@ -257,7 +257,7 @@ func (s *runtimeComposition) withExternalACPAgents(resolved assembly.ResolvedAss
 		if isRetiredAntigravityConnection(connection) {
 			continue
 		}
-		if forbiddenExternalAgentID(agent.ID) {
+		if !agentregistry.ExternalAgentNameAllowed(agent.ID) {
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: external Agent %q conflicts with a product command or system Agent", agent.ID)
 		}
 		if _, exists := seen[agent.ID]; exists {
@@ -336,7 +336,7 @@ func pluginAgentContributionToAssembly(pluginID string, in pluginapi.AgentContri
 	if name == "" {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: plugin %q agent name is required", strings.TrimSpace(pluginID))
 	}
-	if forbiddenExternalAgentID(name) {
+	if !agentregistry.ExternalAgentNameAllowed(name) {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: plugin %q agent %q conflicts with a product command or system Agent", strings.TrimSpace(pluginID), name)
 	}
 	command := strings.TrimSpace(in.Command)

@@ -39,6 +39,14 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	storeDir := t.TempDir()
 	workspaceA := t.TempDir()
 	workspaceB := t.TempDir()
+	workspaceBAlias := filepath.Join(t.TempDir(), "workspace-b-alias")
+	if runtime.GOOS == "windows" {
+		if output, err := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", workspaceBAlias, workspaceB).CombinedOutput(); err != nil {
+			t.Fatalf("create workspace junction: %v: %s", err, output)
+		}
+	} else if err := os.Symlink(workspaceB, workspaceBAlias); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(workspaceA, "only-a.txt"), []byte("a"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +172,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 		}
 	}
 	driverB, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
-		WorkspaceKey: "workspace-b", WorkspaceDir: workspaceB, Surface: "cli-tui",
+		WorkspaceKey: "workspace-b", WorkspaceDir: workspaceBAlias, Surface: "cli-tui",
 		Sessions: clientB.Clients.Sessions, Participants: clientB.Clients.Participants,
 		Status: clientB.Clients.Status, Configuration: clientB.Clients.Configuration,
 		Agents: clientB.Clients.Agents, Completion: clientB.Clients.Completion, Plugins: clientB.Clients.Plugins,

@@ -7,9 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
+	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -33,28 +32,29 @@ func (s *Store) readDocument(sessionID string, workspaceKey ...string) (persiste
 	if err != nil {
 		return persistedDocument{}, err
 	}
-	// The root recovery barrier applies every supported WAL before this
-	// read. A verified retired WAL remains the owner's durable write barrier,
-	// including for another process that already cached the document path.
-	if _, err := os.Stat(transactionPath(path)); err == nil {
-		return persistedDocument{}, fmt.Errorf("%w: Session %q has an unsupported committed transaction", session.ErrUnsupportedLegacyFormat, sessionID)
-	} else if !os.IsNotExist(err) {
+	// Any retained WAL is a write barrier, even for processes that cached
+	// the path before the transaction was published.
+	if err := retainedTransactionError(transactionPath(path)); err != nil {
 		return persistedDocument{}, err
 	}
-	return s.readDocumentAt(path)
+	doc, err := s.readDocumentAt(path)
+	if err == nil && doc.Session.SessionID != sessionID {
+		return persistedDocument{}, fmt.Errorf("%w: document %s has a different Session identity", session.ErrUnreadableSession, path)
+	}
+	return doc, err
 }
 
 func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return persistedDocument{}, session.ErrSessionNotFound
+			return persistedDocument{}, fmt.Errorf("%w: missing indexed document %s", session.ErrUnreadableSession, path)
 		}
 		return persistedDocument{}, err
 	}
 	doc, err := decodePersistedDocument(data)
 	if err != nil {
-		return persistedDocument{}, fmt.Errorf("agent-sdk/session/file: decode %s: %w", path, err)
+		return persistedDocument{}, fmt.Errorf("%w: decode %s: %w", session.ErrUnreadableSession, path, err)
 	}
 	doc.Session = session.CloneSession(doc.Session)
 	if doc.State != nil {
@@ -65,40 +65,32 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 }
 
 func decodePersistedDocument(data []byte) (persistedDocument, error) {
-	// Capture the retired inline history shape in the same decode as the
-	// document. The WAL reader needs the Session identity even when its history
-	// cannot be recovered.
-	var wire struct {
-		persistedDocument
-		Events json.RawMessage `json:"events"`
+	var header struct {
+		Kind    string          `json:"kind"`
+		Version int             `json:"version"`
+		Events  json.RawMessage `json:"events"`
 	}
-	err := json.Unmarshal(data, &wire)
-	doc := wire.persistedDocument
-	if doc.Kind == documentKind && ((doc.Version == 0 && err == nil) || (doc.Version == 1 && err != nil)) {
-		return doc, fmt.Errorf("%w: unsupported document version %d or field shape", session.ErrUnsupportedLegacyFormat, doc.Version)
-	}
-	if err != nil {
+	if err := json.Unmarshal(data, &header); err != nil {
 		return persistedDocument{}, err
 	}
-	if doc.Kind != documentKind || (doc.Version != 1 && doc.Version != documentVersion) {
-		return persistedDocument{}, fmt.Errorf("agent-sdk/session/file: unsupported document %q version %d", doc.Kind, doc.Version)
+	if header.Kind == documentKind && (header.Version == 0 || header.Version == 1) {
+		return persistedDocument{}, fmt.Errorf("%w: unsupported document version %d", session.ErrUnsupportedLegacyFormat, header.Version)
 	}
-	if len(wire.Events) != 0 {
+	if header.Kind != documentKind || header.Version != documentVersion {
+		return persistedDocument{}, fmt.Errorf("unsupported document %q version %d", header.Kind, header.Version)
+	}
+	if len(header.Events) != 0 {
 		var events []json.RawMessage
-		if json.Unmarshal(wire.Events, &events) != nil || len(events) != 0 {
-			return doc, fmt.Errorf("%w: session document has legacy embedded events", session.ErrUnsupportedLegacyFormat)
+		if json.Unmarshal(header.Events, &events) != nil || len(events) != 0 {
+			return persistedDocument{}, fmt.Errorf("%w: session document has legacy embedded events", session.ErrUnsupportedLegacyFormat)
 		}
 	}
-	if doc.Version == 1 {
-		// V1 predates creation-bound execution settings, idle compaction and
-		// mandatory sealed ACP placement. Never infer an endpoint on resume.
-		doc.Version = documentVersion
-		doc.Idle = session.IdleCompactionState{}
-		doc.Session.ExecutionConfig = nil
-		doc.Session.SessionRef = session.NormalizeSessionRef(doc.Session.SessionRef)
-		doc.Session.Participants = slices.DeleteFunc(doc.Session.Participants, func(binding session.ParticipantBinding) bool {
-			return binding.Kind == session.ParticipantKindACP && placement.ValidateSealed(binding.Placement) != nil
-		})
+	var doc persistedDocument
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return persistedDocument{}, err
+	}
+	if strings.TrimSpace(doc.Session.SessionID) == "" || strings.TrimSpace(doc.Session.AppName) == "" || strings.TrimSpace(doc.Session.UserID) == "" {
+		return persistedDocument{}, errors.New("missing document Session identity")
 	}
 	return doc, nil
 }
@@ -132,6 +124,27 @@ func (s *Store) writeDocument(ctx context.Context, doc persistedDocument) error 
 }
 
 func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument, injectFault bool, updateIndex bool) error {
+	path, err := s.resolveWritePath(doc.Session)
+	if err != nil {
+		return err
+	}
+	if injectFault && s.writeDocumentFault != nil {
+		if err := s.writeDocumentFault(); err != nil {
+			return err
+		}
+	}
+	if err := s.writeDocumentAt(ctx, path, doc); err != nil {
+		return err
+	}
+	if updateIndex {
+		if err := s.upsertSessionIndex(doc.Session, path); err != nil {
+			return committedDocumentWrite(err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) writeDocumentAt(ctx context.Context, path string, doc persistedDocument) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
@@ -144,15 +157,6 @@ func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument
 	}
 	data = append(data, '\n')
 
-	path, err := s.resolveWritePath(doc.Session)
-	if err != nil {
-		return err
-	}
-	if injectFault && s.writeDocumentFault != nil {
-		if err := s.writeDocumentFault(); err != nil {
-			return err
-		}
-	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -186,11 +190,6 @@ func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument
 	if err := s.durability.SyncDirectory(dir); err != nil {
 		return committedDocumentWrite(err)
 	}
-	s.pathCache[sanitizeSessionID(doc.Session.SessionID)] = path
-	if updateIndex {
-		if err := s.upsertSessionIndex(doc.Session, path); err != nil {
-			return committedDocumentWrite(err)
-		}
-	}
+	s.pathCache[doc.Session.SessionID] = path
 	return nil
 }

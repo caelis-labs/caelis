@@ -66,20 +66,11 @@ func TestEventEnvelopeRejectsUnsupportedActiveSchemas(t *testing.T) {
 	}
 }
 
-func TestJournalOnlyCanonicalToolRecordIsUnsupportedHistory(t *testing.T) {
+func TestEventDecoderRequiresCanonicalToolPayload(t *testing.T) {
 	for _, kind := range []string{"tool_call", "tool_result"} {
 		raw := fmt.Sprintf(`{"schema":2,"type":%q,"journal":{"tool_execution":{"schema":1}}}`, kind)
-		if _, err := session.UnmarshalEventJSON([]byte(raw)); !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-			t.Fatalf("%s: expected unsupported legacy history, got %v", kind, err)
+		if _, err := session.UnmarshalEventJSON([]byte(raw)); !errors.Is(err, session.ErrInvalidEvent) {
+			t.Fatalf("%s: expected missing canonical payload error, got %v", kind, err)
 		}
-		raw = fmt.Sprintf(`{"schema":%d,"type":%q}`, session.EventSchemaVersion, kind)
-		if _, err := session.UnmarshalEventJSON([]byte(raw)); err == nil || errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-			t.Fatalf("%s: expected current validation error, got %v", kind, err)
-		}
-	}
-	// A missing tool must not conceal a separate invalid typed approval.
-	raw := []byte(`{"schema":2,"type":"tool_call","approval":{"schema":1},"journal":{"tool_execution":{}}}`)
-	if _, err := session.UnmarshalEventJSON(raw); !errors.Is(err, session.ErrInvalidEvent) || errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-		t.Fatalf("invalid typed approval classified as retired: %v", err)
 	}
 }

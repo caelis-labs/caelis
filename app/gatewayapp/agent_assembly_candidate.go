@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -56,7 +57,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 	}
 
 	for _, configured := range controlagents.ListAgents(doc.ExternalAgents) {
-		if forbiddenExternalAgentID(configured.ID) {
+		if !agentregistry.ExternalAgentNameAllowed(configured.ID) {
 			return fmt.Errorf("gatewayapp: external Agent %q conflicts with a product command or system Agent", configured.ID)
 		}
 		name := agentAssemblyNameKey(configured.ID)

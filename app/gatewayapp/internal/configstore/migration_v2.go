@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -102,10 +103,7 @@ func migrateV1ToV2(legacy legacyAppConfig) (AppConfig, error) {
 
 func migrateLegacyAppConfig(legacy legacyAppConfig) (legacyMigration, error) {
 	report := MigrationReport{}
-	models, providerProfiles, oldModelProfiles, credentialWrites, err := migrateLegacyProviders(legacy.Models, &report)
-	if err != nil {
-		return legacyMigration{}, err
-	}
+	models, providerProfiles, oldModelProfiles, credentialWrites := migrateLegacyProviders(legacy.Models, &report)
 	externalAgents, acpProfiles, oldACPProfiles := migrateLegacyACP(legacy.AgentRoster, &report)
 
 	profilesByID := make(map[string]modelprofile.ModelProfile, len(providerProfiles)+len(acpProfiles))
@@ -158,10 +156,14 @@ func migrateLegacyAppConfig(legacy legacyAppConfig) (legacyMigration, error) {
 	})
 	hasSafeContent := legacyDocumentHasSafeContent(doc)
 	if !hasSafeContent {
-		return legacyMigration{
-			Document: AppConfig{SchemaVersion: SchemaVersionV2},
-			Report:   report,
-		}, nil
+		doc = AppConfig{SchemaVersion: SchemaVersionV2}
+	}
+	if legacy.malformedSandbox {
+		doc.Sandbox.RequestedType = "auto"
+		doc.Sandbox.NetworkEnabled = boolPtr(false)
+	}
+	if legacy.malformedSandbox || legacy.malformedRuntime {
+		doc.Runtime.ApprovalMode = "manual"
 	}
 	if err := Validate(doc); err != nil {
 		return legacyMigration{}, fmt.Errorf("gatewayapp: validate migrated app config: %w", err)
@@ -169,7 +171,7 @@ func migrateLegacyAppConfig(legacy legacyAppConfig) (legacyMigration, error) {
 	return legacyMigration{
 		Document:         doc,
 		CredentialWrites: credentialWrites,
-		HasSafeContent:   true,
+		HasSafeContent:   hasSafeContent,
 		Report:           report,
 	}, nil
 }
@@ -179,24 +181,27 @@ func migrateLegacyProviders(models legacyPersistedModelConfig, report *Migration
 	[]modelprofile.ModelProfile,
 	map[string]string,
 	[]legacyCredentialWrite,
-	error,
 ) {
 	endpointsByID := map[string]modelconfig.ProviderEndpointConfig{}
 	credentialSources := map[string]credentialstore.Source{}
+	ambiguousCredentials := map[string]bool{}
+	recordCredential := func(ref string, source credentialstore.Source, category, identity string) {
+		if previous, ok := credentialSources[ref]; ok && previous != source {
+			ambiguousCredentials[ref] = true
+			report.addDrop(category, identity, "conflicting_credential_source")
+			return
+		}
+		credentialSources[ref] = source
+	}
 
 	for index, raw := range models.Profiles {
 		endpoint, source, hasSource, ok, err := convertLegacyProviderEndpoint(raw)
-		if err != nil {
-			return PersistedModelConfig{}, nil, nil, nil, err
-		}
-		if !ok {
+		if err != nil || !ok {
 			report.addDrop("provider_endpoint", fmt.Sprintf("models.profiles[%d]", index), "invalid_record")
 			continue
 		}
 		if hasSource {
-			if err := mergeLegacyCredentialSource(credentialSources, endpoint.CredentialRef, source); err != nil {
-				return PersistedModelConfig{}, nil, nil, nil, err
-			}
+			recordCredential(endpoint.CredentialRef, source, "provider_endpoint", fmt.Sprintf("models.profiles[%d]", index))
 		}
 		if previous, exists := endpointsByID[endpoint.ID]; exists {
 			if !reflect.DeepEqual(previous, endpoint) {
@@ -214,17 +219,12 @@ func migrateLegacyProviders(models legacyPersistedModelConfig, report *Migration
 	aliasToCurrentID := map[string]string{}
 	for index, raw := range models.Configs {
 		configured, endpoint, source, hasSource, ok, err := convertLegacyProviderModel(raw)
-		if err != nil {
-			return PersistedModelConfig{}, nil, nil, nil, err
-		}
-		if !ok {
+		if err != nil || !ok {
 			report.addDrop("provider_model", fmt.Sprintf("models.configs[%d]", index), "invalid_record")
 			continue
 		}
 		if hasSource {
-			if err := mergeLegacyCredentialSource(credentialSources, endpoint.CredentialRef, source); err != nil {
-				return PersistedModelConfig{}, nil, nil, nil, err
-			}
+			recordCredential(endpoint.CredentialRef, source, "provider_model", fmt.Sprintf("models.configs[%d]", index))
 		}
 		if previous, exists := endpointsByID[endpoint.ID]; exists {
 			if !legacyEndpointsCompatible(previous, endpoint) {
@@ -267,6 +267,26 @@ func migrateLegacyProviders(models legacyPersistedModelConfig, report *Migration
 		}
 	}
 
+	// All endpoints referencing an ambiguous credential lose that authority,
+	// including records that only carried its reference.
+	for id, endpoint := range endpointsByID {
+		if ambiguousCredentials[endpoint.CredentialRef] {
+			delete(endpointsByID, id)
+		}
+	}
+	for id, configured := range configsByID {
+		if _, ok := endpointsByID[configured.ProviderEndpointID]; !ok {
+			delete(configsByID, id)
+			delete(profilesByID, modelprofile.BuildProviderID(id))
+		}
+	}
+	for alias, id := range aliasToCurrentID {
+		if _, ok := configsByID[id]; !ok {
+			delete(aliasToCurrentID, alias)
+			delete(oldModelProfiles, alias)
+		}
+	}
+
 	currentDefaultID := ""
 	for _, key := range []string{models.DefaultID, models.DefaultAlias} {
 		if key = strings.ToLower(strings.TrimSpace(key)); key != "" {
@@ -301,16 +321,15 @@ func migrateLegacyProviders(models legacyPersistedModelConfig, report *Migration
 	out.Configs = dedupeModelConfigsForSave(out.Configs)
 	out.ProviderEndpoints = dedupeProviderEndpointsForSave(out.ProviderEndpoints)
 
-	refs := make([]string, 0, len(credentialSources))
-	for ref := range credentialSources {
-		refs = append(refs, ref)
+	var writes []legacyCredentialWrite
+	for _, endpoint := range out.ProviderEndpoints {
+		ref := endpoint.CredentialRef
+		if source, ok := credentialSources[ref]; ok {
+			writes = append(writes, legacyCredentialWrite{Ref: ref, Source: source})
+			delete(credentialSources, ref)
+		}
 	}
-	sort.Strings(refs)
-	writes := make([]legacyCredentialWrite, 0, len(refs))
-	for _, ref := range refs {
-		writes = append(writes, legacyCredentialWrite{Ref: ref, Source: credentialSources[ref]})
-	}
-	return out, profiles, oldModelProfiles, writes, nil
+	return out, profiles, oldModelProfiles, writes
 }
 
 func convertLegacyProviderEndpoint(raw legacyProviderEndpoint) (
@@ -428,6 +447,10 @@ func migrateLegacyACP(legacy legacyAgentConfiguration, report *MigrationReport) 
 		connection := controlagents.NormalizeConnection(raw)
 		if err := controlagents.ValidateConnection(connection); err != nil || !controlagents.IsName(connection.ID) {
 			report.addDrop("external_connection", fmt.Sprintf("agent_roster.connections[%d]", index), "invalid_record")
+			continue
+		}
+		if !agentregistry.ExternalAgentNameAllowed(connection.ID) {
+			report.addDrop("external_connection", fmt.Sprintf("agent_roster.connections[%d]", index), "reserved_agent_name")
 			continue
 		}
 		if previous, exists := connectionsByID[connection.ID]; exists {
@@ -699,14 +722,6 @@ func prepareLegacyCredential(provider, endpointID, existingRef, token string) (
 		return "", credentialstore.Source{}, false, fmt.Errorf("gatewayapp: cannot derive an opaque credential reference")
 	}
 	return ref, credentialstore.Source{APIKey: token}, true, nil
-}
-
-func mergeLegacyCredentialSource(byRef map[string]credentialstore.Source, ref string, source credentialstore.Source) error {
-	if previous, ok := byRef[ref]; ok && previous != source {
-		return fmt.Errorf("gatewayapp: migrate provider credentials: conflicting sources for %q", ref)
-	}
-	byRef[ref] = source
-	return nil
 }
 
 func rejectPersistedProviderCredentials(models PersistedModelConfig) error {

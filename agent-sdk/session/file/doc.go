@@ -1,9 +1,11 @@
 // Package file provides a durable file-backed runtime store. Canonical session
 // events are stored in JSONL logs, session/state documents use atomic rename,
 // and compound event/document updates use a fsynced write-ahead transaction
-// record recovered before any later read or write. SQLite indexes Session
-// documents by identity and summary. The optional Task store owns durable
-// Task records in a separate table in the same database.
+// record. Before each operation the Store finishes recoverable transactions.
+// An unreadable transaction stays at its original path and blocks its Session.
+// SQLite indexes Session documents by identity and summary and reserves the
+// physical addresses of unreadable transactions without a document index row.
+// The optional Task store owns durable Task records in the same database.
 //
 // Forward JSONL paging uses bounded in-memory sequence checkpoints, and active
 // append preparation may reuse a bounded decoded-history cache. Both are

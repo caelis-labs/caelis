@@ -320,13 +320,12 @@ the marker. Existing Session history is the source of past messages.
 
 ## Session storage for embedders
 
-The file Store writes document version 2. Version 1 uses the common document
-reader for fields it recognizes. ACP participants require a sealed placement.
-A later Store write saves the resulting document in the current format.
-Retired embedded event histories are unsupported. A committed transaction with
-a verified Session identity and a recognized retired format stays on disk and
-blocks access to that Session. Corrupt or unidentifiable transactions stop
-recovery.
+The file Store reads and writes document version 2. Version 1 and embedded
+event histories are unsupported. ACP participants require a sealed placement.
+A damaged or unsupported Session returns `session.ErrUnreadableSession`.
+Recovery leaves an unreadable WAL at its rollout path and continues with other
+Sessions. The retained WAL blocks access to its own Session. Shared Store I/O,
+locking, and index failures still stop recovery.
 
 A host supplies one `session.Service` to `runtime.Config.Sessions`.
 Each `Runtime.Run` selects an existing Session through `RunRequest.SessionRef`
@@ -602,9 +601,10 @@ Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
 
-Session replay uses the recorded tool target and its bounded model result.
-A historical call batch with conflicting call and result names is omitted from
-model context. Resuming a Session never dispatches a historical call.
+Session replay keeps matched model calls and bounded results. It omits
+historical batches with incompatible call and result identities, including
+retired MCP routing wrappers. Resuming a Session never dispatches a historical
+call.
 
 Code Mode Sessions expose a fixed `js_exec` definition. Its async body can call
 known-schema Session tools using original function or method syntax, such as

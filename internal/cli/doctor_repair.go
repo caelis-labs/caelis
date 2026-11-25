@@ -24,9 +24,14 @@ func runDoctorStartupRepairs(
 		return nil, fmt.Errorf("caelis doctor repair failed [%s]: stop the local Control Host: %w", plans[0].Code, err)
 	}
 
+	ownership, err := acquireProductHostOwnership(config.StoreDir)
+	if err != nil {
+		return nil, fmt.Errorf("caelis doctor repair failed [%s]: %w", plans[0].Code, err)
+	}
+	defer ownership.Close()
 	results := make([]doctorRepairResult, 0, len(plans))
 	for _, plan := range plans {
-		report, err := gatewayapp.RepairDoctorIssue(ctx, config.StoreDir, plan.Code)
+		report, err := gatewayapp.RepairDoctorIssue(ctx, config.StoreDir, plan.Code, ownership)
 		if err != nil {
 			return results, fmt.Errorf("caelis doctor repair failed [%s]: %w", plan.Code, err)
 		}

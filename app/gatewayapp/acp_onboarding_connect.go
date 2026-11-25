@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -60,7 +61,7 @@ func (s *controlCommandBackend) connectPreparedACPAtRevision(
 		if err != nil {
 			return mutation, nil, fmt.Errorf("gatewayapp: %w", err)
 		}
-		next, agent, err := controlagents.UpsertExternalConnection(doc.ExternalAgents, connection, selection.Discovery, externalAgentNameAllowed)
+		next, agent, err := controlagents.UpsertExternalConnection(doc.ExternalAgents, connection, selection.Discovery, agentregistry.ExternalAgentNameAllowed)
 		if err != nil {
 			return mutation, nil, fmt.Errorf("gatewayapp: update external Agent configuration: %w", err)
 		}

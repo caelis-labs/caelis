@@ -11,6 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
@@ -474,6 +475,70 @@ func TestAppConfigStoreIgnoresUnrecognizedLegacyUppercaseModelsKey(t *testing.T)
 	backup, err := os.ReadFile(filepath.Join(root, "config.json.v1.bak"))
 	if err != nil || string(backup) != raw {
 		t.Fatalf("explicit replacement backup = %q, %v; want original bytes", backup, err)
+	}
+}
+
+func TestHostConfiguresModelAfterUnusableLegacyAppConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		raw                  string
+		expectRestrictedSave bool
+	}{
+		{name: "reserved agent", raw: `{
+			"schema_version": 1,
+			"agent_roster": {"connections": [
+				{"id":"guardian","launcher":{"kind":"executable","command":"legacy-agent"}}
+			]}
+		}`},
+		{name: "invalid sandbox and ambiguous credential", expectRestrictedSave: true, raw: `{
+			"schema_version": 1,
+			"sandbox": "unusable",
+			"models": {"configs": [
+				{"provider":"openai","model":"gpt-5","credential_ref":"apikey:test:shared","token":"legacy-first"},
+				{"provider":"openai","model":"gpt-5","credential_ref":"apikey:test:shared","token":"legacy-second"}
+			]}
+		}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			root := t.TempDir()
+			path := filepath.Join(root, "config.json")
+			if err := os.WriteFile(path, []byte(tc.raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stack, err := newGatewayAppTestStack(t, Config{StoreDir: root, WorkspaceCWD: t.TempDir()})
+			if err != nil {
+				t.Fatalf("start Host: %v", err)
+			}
+			if err := stack.WaitApprovalRecovery(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if got := readConfigFileForTest(t, root); got != tc.raw {
+				t.Fatal("Host startup changed the legacy source")
+			}
+			status := stack.ControlStatus()
+			revision, err := status.ConfigurationRevision(ctx)
+			if err != nil || revision != 0 {
+				t.Fatalf("initial revision = %d, %v", revision, err)
+			}
+			result, err := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ConnectModelRequest{
+				WriteBase: appserver.WriteBase{OperationID: "configure-current-model", ExpectedRevision: &revision},
+				Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "configured", BaseURL: "https://provider.invalid/v1", APIKey: "fixture"},
+			})
+			if err != nil || result.Outcome != appserver.OutcomeCommitted {
+				t.Fatalf("ConnectModel = %#v, %v", result, err)
+			}
+			doc, err := LoadAppConfig(root)
+			if err != nil || doc.ConfigurationRevision != 1 || len(doc.Models.Configs) != 1 || doc.Models.Configs[0].Model != "configured" {
+				t.Fatalf("current config revision/models = %d/%d, %v", doc.ConfigurationRevision, len(doc.Models.Configs), err)
+			}
+			if tc.expectRestrictedSave && (doc.Sandbox.RequestedType != "auto" || configstore.SandboxNetworkEnabled(doc.Sandbox) || doc.Runtime.ApprovalMode != "manual") {
+				t.Fatalf("model connection changed legacy recovery restrictions: %#v, %#v", doc.Sandbox, doc.Runtime)
+			}
+			if backup, err := os.ReadFile(path + ".v1.bak"); err != nil || string(backup) != tc.raw {
+				t.Fatalf("current save did not preserve the original config: %v", err)
+			}
+		})
 	}
 }
 

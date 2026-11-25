@@ -77,6 +77,9 @@ func sweepAbandonedApprovals(
 			}
 			event := abandonedApprovalSettlement(approval.Request, requestID)
 			retryAt, err := settleAbandonedApproval(ctx, store, approval, event)
+			if errors.Is(err, session.ErrUnreadableSession) {
+				continue
+			}
 			if err != nil {
 				return result, err
 			}
@@ -92,7 +95,7 @@ func sweepAbandonedApprovals(
 		}
 		for _, summary := range list.Sessions {
 			retryAt, err := sweepSessionApprovals(ctx, store, summary.SessionRef)
-			if errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+			if errors.Is(err, session.ErrUnreadableSession) {
 				continue
 			}
 			if err != nil {
@@ -135,7 +138,7 @@ func sweepPriorHostSessionFences(
 		}
 		for _, summary := range list.Sessions {
 			durable, err := fences.SessionFence(ctx, summary.SessionRef)
-			if errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+			if errors.Is(err, session.ErrUnreadableSession) {
 				continue
 			}
 			if err != nil {
@@ -148,6 +151,9 @@ func sweepPriorHostSessionFences(
 				SessionRef: summary.SessionRef,
 				OwnerID:    ownerID,
 			})
+			if errors.Is(err, session.ErrUnreadableSession) {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -279,7 +285,7 @@ func releaseApprovalRecoveryFence(
 		err := fences.ReleaseSessionFence(releaseCtx, session.SessionFenceReleaseRequest(fence))
 		cancel()
 		diagnostics.observe(ctx, "startup_release", started, err)
-		if session.IsCommitted(err) || err == nil {
+		if session.IsCommitted(err) || err == nil || errors.Is(err, session.ErrUnreadableSession) {
 			return nil
 		}
 

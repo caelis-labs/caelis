@@ -27,7 +27,7 @@ func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval
 			return nil, err
 		}
 		pending, err := s.pendingApprovalsForSession(ctx, ref)
-		if errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		if errors.Is(err, session.ErrUnreadableSession) {
 			continue
 		}
 		if err != nil {
@@ -127,7 +127,6 @@ func (s *Store) SettlePendingApproval(
 	if err != nil {
 		return err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return err
 	}

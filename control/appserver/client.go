@@ -9,13 +9,16 @@ import (
 )
 
 type ClientConfig struct {
-	SessionActivity    SessionActivityReader
-	Commands           CommandClient
-	State              StateReader
-	Feeds              FeedRegistry
-	Authorizer         Authorizer
-	ParticipantHandles ParticipantHandleReader
-	Sessions           interface {
+	// ResolveWorkspaceDirectory resolves live directory filters on the Host. An
+	// unavailable directory can still be queried using its stored CWD.
+	ResolveWorkspaceDirectory func(string) (string, error)
+	SessionActivity           SessionActivityReader
+	Commands                  CommandClient
+	State                     StateReader
+	Feeds                     FeedRegistry
+	Authorizer                Authorizer
+	ParticipantHandles        ParticipantHandleReader
+	Sessions                  interface {
 		ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error)
 	}
 }

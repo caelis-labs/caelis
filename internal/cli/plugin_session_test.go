@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,7 +112,26 @@ func TestCLIPluginFreshSessionAppToolsAndWorker(t *testing.T) {
 	// The optional fixture keeps install/remove snapshot and child-process
 	// lifecycle coverage without claiming the fixed product identity.
 	marker := filepath.Join(workspace, "worker.pid")
-	writeCLIPluginFile(t, root, ".mcp.json", fmt.Sprintf(`{"mcpServers":{"cli-demo":{"command":%q,"args":["-test.run=^TestCLIPluginWorkerProcess$"],"env":{"CAELIS_TEST_PLUGIN_WORKER":"mcp","CAELIS_TEST_PLUGIN_MARKER":%q}}}}`, os.Args[0], marker))
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := json.Marshal(map[string]map[string]any{
+		"mcpServers": {
+			"cli-demo": map[string]any{
+				"command": executable,
+				"args":    []string{"-test.run=^TestCLIPluginWorkerProcess$"},
+				"env": map[string]string{
+					"CAELIS_TEST_PLUGIN_WORKER": "mcp",
+					"CAELIS_TEST_PLUGIN_MARKER": marker,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCLIPluginFile(t, root, ".mcp.json", string(manifest))
 	exerciseCLIPluginSessionLifecycle(t, root)
 	data, err := os.ReadFile(marker)
 	pid, parseErr := strconv.Atoi(string(data))

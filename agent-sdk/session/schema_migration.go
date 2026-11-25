@@ -72,14 +72,6 @@ func UnmarshalEventJSON(raw []byte) (*Event, error) {
 		return nil, err
 	}
 	if err := ValidateDurableCoreEvent(&event); err != nil {
-		// Pre-schema-3 writers could keep the sole tool payload in the retired
-		// journal. Attribute that unsupported history to its owning Session.
-		switch EventValidationDetail(err) {
-		case missingToolCallPayload, missingToolResultPayload:
-			if gjson.GetBytes(raw, "schema").Int() < 3 && gjson.GetBytes(raw, "journal.tool_execution").IsObject() {
-				return nil, fmt.Errorf("%w: %w", ErrUnsupportedLegacyFormat, err)
-			}
-		}
 		return nil, err
 	}
 	return &event, nil

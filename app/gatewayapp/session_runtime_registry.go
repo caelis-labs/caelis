@@ -52,23 +52,24 @@ type sessionRuntime struct {
 // activations. Durable Session rows own workspace identity; observation does
 // not create an entry here.
 type sessionRuntimeRegistry struct {
-	sessionService   session.ManagedService
-	tasks            sessionRuntimeTaskReader
-	lifecycleCtx     context.Context
-	defaultWorkspace session.WorkspaceRef
-	modelRecovery    *sessionModelRecovery
-	assembler        sessionRuntimeAssembler
-	taskCommitted    func(*task.Entry)
+	sessionService          session.ManagedService
+	tasks                   sessionRuntimeTaskReader
+	lifecycleCtx            context.Context
+	defaultWorkspace        session.WorkspaceRef
+	pendingWorkspaceRepairs map[string]string
+	modelRecovery           *sessionModelRecovery
+	assembler               sessionRuntimeAssembler
+	taskCommitted           func(*task.Entry)
 
-	mu           sync.RWMutex
-	activationMu sync.Mutex
-	sessions     map[string]*sessionRuntime
-	observers    map[string]uint64
-	workspaceCWD map[string]string
-	closed       bool
-	building     int
-	buildsIdle   chan struct{}
-	idleReleases sync.WaitGroup
+	mu                sync.RWMutex
+	activationMu      sync.Mutex
+	sessions          map[string]*sessionRuntime
+	observers         map[string]uint64
+	workspaceBindings map[string]workspaceBinding
+	closed            bool
+	building          int
+	buildsIdle        chan struct{}
+	idleReleases      sync.WaitGroup
 }
 
 type sessionRuntimeTaskReader interface {
@@ -106,24 +107,29 @@ func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRun
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	workspaceCWD, err := loadDurableWorkspaceIdentities(ctx, config.Sessions, workspace)
+	pendingRepairs, err := pendingWorkspaceRepairKeys(ctx, config.Sessions)
+	if err != nil {
+		return nil, err
+	}
+	workspaceBindings, err := loadDurableWorkspaceIdentities(ctx, config.Sessions, workspace, pendingRepairs)
 	if err != nil {
 		return nil, err
 	}
 	buildsIdle := make(chan struct{})
 	close(buildsIdle)
 	return &sessionRuntimeRegistry{
-		sessionService:   config.Sessions,
-		tasks:            config.Tasks,
-		lifecycleCtx:     config.LifecycleContext,
-		defaultWorkspace: workspace,
-		modelRecovery:    config.ModelRecovery,
-		assembler:        config.Assembler,
-		taskCommitted:    config.TaskCommitted,
-		sessions:         map[string]*sessionRuntime{},
-		observers:        map[string]uint64{},
-		workspaceCWD:     workspaceCWD,
-		buildsIdle:       buildsIdle,
+		sessionService:          config.Sessions,
+		tasks:                   config.Tasks,
+		lifecycleCtx:            config.LifecycleContext,
+		defaultWorkspace:        workspace,
+		pendingWorkspaceRepairs: pendingRepairs,
+		modelRecovery:           config.ModelRecovery,
+		assembler:               config.Assembler,
+		taskCommitted:           config.TaskCommitted,
+		sessions:                map[string]*sessionRuntime{},
+		observers:               map[string]uint64{},
+		workspaceBindings:       workspaceBindings,
+		buildsIdle:              buildsIdle,
 	}, nil
 }
 
@@ -181,7 +187,7 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 				strings.TrimSpace(existing.UserID) != strings.TrimSpace(principal.ID) {
 				return session.WorkspaceRef{}, appserver.ErrUnauthorized
 			}
-			actual, canonicalErr := canonicalSessionWorkspace(existing)
+			actual, canonicalErr := r.storedSessionWorkspace(existing)
 			if canonicalErr != nil {
 				return session.WorkspaceRef{}, canonicalErr
 			}
@@ -323,15 +329,12 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 	if closed {
 		return nil, active, false, appserver.ErrSessionClosed
 	}
+	workspace, err := r.storedSessionWorkspace(active)
+	if err != nil {
+		return nil, active, false, err
+	}
 	active, err = r.modelRecovery.repairMissingSessionModelSelection(buildCtx, sessions, active)
 	if err != nil {
-		return nil, active, false, err
-	}
-	workspace, err := canonicalSessionWorkspace(active)
-	if err != nil {
-		return nil, active, false, err
-	}
-	if err := r.validateWorkspaceIdentity(workspace); err != nil {
 		return nil, active, false, err
 	}
 	runtime := &sessionRuntime{sessionID: sessionID, workspace: workspace}
@@ -530,11 +533,8 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if err != nil {
 		return nil, session.Session{}, nil, err
 	}
-	workspace, err := canonicalSessionWorkspace(active)
+	workspace, err := r.storedSessionWorkspace(active)
 	if err != nil {
-		return nil, active, nil, err
-	}
-	if err := r.validateWorkspaceIdentity(workspace); err != nil {
 		return nil, active, nil, err
 	}
 	var instance *sessionRuntimeInstance
@@ -1253,26 +1253,18 @@ func (r *sessionRuntimeRegistry) validateWorkspaceIdentity(workspace session.Wor
 }
 
 func (r *sessionRuntimeRegistry) validateWorkspaceIdentityLocked(workspace session.WorkspaceRef) error {
-	existingCWD, known := r.workspaceCWD[workspace.Key]
-	if known && existingCWD == "" {
+	binding, known := r.workspaceBindings[workspace.Key]
+	if !known || binding.accepts(workspace) {
+		return nil
+	}
+	if binding.cwd == "" {
 		return errorcode.New(errorcode.FailedPrecondition, fmt.Sprintf("gatewayapp: workspace key %q has conflicting stored directories; run caelis doctor", workspace.Key))
 	}
-	if known && existingCWD != workspace.CWD {
-		return errorcode.New(
-			errorcode.InvalidArgument,
-			fmt.Sprintf(
-				"gatewayapp: workspace key %q is already bound to %q, not %q",
-				workspace.Key,
-				existingCWD,
-				workspace.CWD,
-			),
-		)
-	}
-	return nil
+	return errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: workspace key %q is already bound to %q, not %q", workspace.Key, binding.cwd, workspace.CWD))
 }
 
 func (r *sessionRuntimeRegistry) recordWorkspaceIdentityLocked(workspace session.WorkspaceRef) {
-	r.workspaceCWD[workspace.Key] = workspace.CWD
+	r.workspaceBindings[workspace.Key] = workspaceBinding{cwd: workspace.CWD, claimed: true}
 }
 
 func validateSessionRuntime(active session.Session, runtime *sessionRuntime) error {

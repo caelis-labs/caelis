@@ -2749,7 +2749,7 @@ func TestControlClientRejectsForeignPreferredSessionBeforeWorkspaceDisclosure(t 
 	}
 	stack.sessionRuntimes.mu.RLock()
 	sessionCount := len(stack.sessionRuntimes.sessions)
-	_, loadedForeignWorkspace := stack.sessionRuntimes.workspaceCWD["workspace-b"]
+	_, loadedForeignWorkspace := stack.sessionRuntimes.workspaceBindings["workspace-b"]
 	stack.sessionRuntimes.mu.RUnlock()
 	if sessionCount != 0 || loadedForeignWorkspace {
 		t.Fatalf("foreign preferred Session changed Runtime registry: sessions=%d foreign_workspace=%t", sessionCount, loadedForeignWorkspace)
@@ -2878,7 +2878,7 @@ func TestSessionRuntimeRegistryCreatesSessionsLazilyConcurrently(t *testing.T) {
 
 	stack.sessionRuntimes.mu.RLock()
 	sessionCount := len(stack.sessionRuntimes.sessions)
-	workspaceCount := len(stack.sessionRuntimes.workspaceCWD)
+	workspaceCount := len(stack.sessionRuntimes.workspaceBindings)
 	stack.sessionRuntimes.mu.RUnlock()
 	if sessionCount != 0 || workspaceCount != 2 {
 		t.Fatalf("Runtime registry counts = sessions:%d workspaces:%d, want 0 and 2", sessionCount, workspaceCount)
@@ -3190,6 +3190,36 @@ func TestHostRebuildsWorkspaceIdentityBeforeReusingExplicitKey(t *testing.T) {
 		t.Fatalf("restarted Host with original workspace identity: %v", err)
 	}
 	defer reopened.Close()
+}
+
+func TestCanonicalWorkspaceCanClaimOnlyHistoricalBindings(t *testing.T) {
+	ctx := t.Context()
+	canonical := newWorkspaceRuntimeTestDir(t, "canonical", "Canonical directory.")
+	other := newWorkspaceRuntimeTestDir(t, "other", "Other directory.")
+	config := Config{StoreDir: t.TempDir(), WorkspaceCWD: t.TempDir()}
+	stack, err := newGatewayAppTestStack(t, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	createWorkspaceRuntimeTestSession(t, client, "explicit-path", "path-alias", canonical, other)
+	if _, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "rebind-live-key"}, CWD: canonical,
+	}); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("reused a key bound by the current writer: %v", err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := newGatewayAppTestStack(t, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client = newWorkspaceRuntimeHTTPClient(t, reopened, "local-user")
+	createWorkspaceRuntimeTestSession(t, client, "canonical-address", "fresh-canonical", canonical, canonical)
+	if _, _, err := reopened.sessionRuntimes.activateSession(ctx, "path-alias"); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("activated historical Session in another directory: %v", err)
+	}
 }
 
 func newWorkspaceRuntimeTestDir(t *testing.T, name, instruction string) string {

@@ -712,11 +712,11 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 	}
 }
 
-func TestResumeRoutedMCPHistoryFromV0841(t *testing.T) {
+func TestResumeSkipsRoutedMCPHistoryFromV0841(t *testing.T) {
 	for _, complete := range []bool{true, false} {
 		t.Run(map[bool]string{true: "completed", false: "interrupted"}[complete], func(t *testing.T) {
 			root := t.TempDir()
-			// Register the file locator, then reopen the exact header and JSONL from v0.84.1.
+			// Register the file locator, then reopen a routed batch in the v0.84.1 wire shape.
 			seed := sessionfile.NewStore(sessionfile.Config{RootDir: root,
 				SessionIDGenerator: func() string { return "routed-mcp" },
 				Clock:              func() time.Time { return time.Unix(1770000000, 0).UTC() },
@@ -771,22 +771,14 @@ func TestResumeRoutedMCPHistoryFromV0841(t *testing.T) {
 			if err = run.Handle.WaitCompletion(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			var calls []model.ToolCall
-			var results []model.ToolResultPart
-			for _, m := range probe.messages {
-				calls = append(calls, m.ToolCalls()...)
-				results = append(results, m.ToolResults()...)
-			}
-			want := model.ToolCall{ID: "read-1", Name: "docs__read", Args: `{"page":2}`}
-			if len(calls) != 1 || calls[0] != want || len(results) != 1 || results[0].Name != want.Name || results[0].ToolUseID != want.ID || len(results[0].Content) != 1 {
-				t.Fatalf("resumed model context: calls=%+v results=%+v", calls, results)
-			}
-			if complete {
-				if results[0].IsError || string(results[0].Content[0].JSONValue()) != `{"title":"Notes"}` {
-					t.Fatalf("stored model result changed: %+v", results[0])
+			for _, message := range probe.messages {
+				if len(message.ToolCalls()) != 0 || len(message.ToolResults()) != 0 {
+					t.Fatalf("retired routed batch reached the model: %+v", message)
 				}
-			} else if !results[0].IsError || !bytes.Contains(results[0].Content[0].JSONValue(), []byte(`"code":"execution_interrupted"`)) {
-				t.Fatalf("missing receipt did not produce an interruption: %+v", results[0])
+			}
+			last := probe.messages[len(probe.messages)-1]
+			if last.Role != model.RoleUser || last.TextContent() != "continue" {
+				t.Fatalf("resumed model input = %+v", last)
 			}
 		})
 	}

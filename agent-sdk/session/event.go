@@ -253,18 +253,15 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	if err := validateCheckpointContract((*Event)(&decoded)); err != nil {
 		return err
 	}
-	// Session reads routed MCP receipts through v0.84.1 using the recorded
-	// target and bounded model content. Remove this name repair when dropping
-	// those receipts from the supported read path.
-	if decoded.Type == EventTypeToolResult && decoded.Tool != nil && decoded.Tool.ID != "" && decoded.Tool.Name != "" && decoded.Message != nil {
-		for _, part := range decoded.Message.Parts {
-			result := part.ToolResult
-			if result == nil || result.Name != "mcp_call" || result.ToolUseID != decoded.Tool.ID || decoded.Tool.Name == result.Name {
-				continue
-			}
+	// Retire the single-result model wrapper written by routed MCP through
+	// v0.84.1. The typed receipt remains readable and replay omits incompatible
+	// batches. Remove this reader when these logs leave the resume window.
+	if decoded.Type == EventTypeToolResult && decoded.Tool != nil && decoded.Tool.ID != "" && decoded.Tool.Name != "" && decoded.Message != nil && len(decoded.Message.Parts) == 1 {
+		result := decoded.Message.Parts[0].ToolResult
+		if result != nil && result.Name == "mcp_call" && result.ToolUseID == decoded.Tool.ID && decoded.Tool.Name != result.Name {
 			route := gjson.GetBytes(data, "tool.model_call")
 			if route.Get("name").String() == result.Name && route.Get("id").String() == result.ToolUseID {
-				result.Name = decoded.Tool.Name
+				decoded.Message = nil
 			}
 		}
 	}

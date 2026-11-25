@@ -19,6 +19,8 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/memorybinding"
+	"github.com/caelis-labs/caelis/internal/hostownership"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -27,7 +29,12 @@ import (
 func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	root, workspace := t.TempDir(), t.TempDir()
+	root := t.TempDir()
+	address, err := workspaceidentity.FromCWD(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := address.CWD
 	requests := make(chan map[string]any, 8)
 	client := &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		var payload map[string]any
@@ -52,7 +59,7 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 		backend = "auto"
 	}
 	cfg := Config{
-		AppName: "caelis", UserID: "retirement-test", StoreDir: root, WorkspaceKey: "workspace", WorkspaceCWD: workspace, SkillDirs: []string{},
+		AppName: "caelis", UserID: "retirement-test", StoreDir: root, WorkspaceKey: address.Key, WorkspaceCWD: workspace, SkillDirs: []string{},
 		Sandbox:                   SandboxConfig{RequestedType: backend},
 		ResolveProviderHTTPClient: func(context.Context, ModelConfig) (*http.Client, error) { return client, nil },
 		Model:                     ModelConfig{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "retirement-test", BaseURL: "http://retirement.test", HTTPClient: client, Token: "fixture-token", AuthType: model.AuthBearerToken, ContextWindowTokens: 128000, MaxOutputTok: 4096},
@@ -153,9 +160,27 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	}
 	before := <-requests
 	assertRetiredMemoryAbsentFromRequest(t, before)
-	unsupported, err := startGatewayAppTestSession(ctx, stack, "retired-inline-history")
-	if err != nil {
-		t.Fatal(err)
+	startFixtureSession := func(id string) session.Session {
+		t.Helper()
+		active, err := startGatewayAppTestSession(ctx, stack, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return active
+	}
+	v1 := startFixtureSession("retired-v1")
+	badLog := startFixtureSession("damaged-log")
+	badWAL := startFixtureSession("damaged-wal")
+	for _, owner := range []session.Session{badLog, active} {
+		appendGatewayAppEvent(t, stack, owner.SessionRef, &session.Event{
+			Type: session.EventTypeCustom, Visibility: session.VisibilityMirror, ApprovalRequestID: "approval-" + owner.SessionID,
+			Protocol: &session.EventProtocol{
+				Method: session.ProtocolMethodRequestPermission,
+				Permission: &session.ProtocolApproval{
+					ToolCall: session.ProtocolToolCall{ID: "approval-call", Name: "Write"},
+				},
+			},
+		})
 	}
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
@@ -163,14 +188,12 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	if err := os.RemoveAll(controlStreamSpoolRoot(root)); err != nil {
 		t.Fatal(err)
 	}
-	// Two SDK Sessions with a conflicting key must not block new or resumable Sessions.
+	// A historical binding conflicts with the current directory's derived key.
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
-	for _, directory := range []string{workspace, t.TempDir()} {
-		if _, err := store.StartSession(ctx, session.StartSessionRequest{
-			AppName: cfg.AppName, UserID: cfg.UserID, Workspace: session.WorkspaceRef{Key: "ambiguous", CWD: directory},
-		}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := store.StartSession(ctx, session.StartSessionRequest{
+		AppName: cfg.AppName, UserID: cfg.UserID, Workspace: session.WorkspaceRef{Key: address.Key, CWD: t.TempDir()},
+	}); err != nil {
+		t.Fatal(err)
 	}
 	// Reopen a mixed-generation store through the normal Host entry point.
 	upgradeDocument := func(id string) string {
@@ -200,16 +223,57 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 			t.Fatal(err)
 		}
 	}
-	replaceFixtureField(upgradeDocument(active.SessionID), "version", "1")
-	replaceFixtureField(upgradeDocument(unsupported.SessionID), "events", `[{"type":"user","id":"embedded"}]`)
+	replaceFixtureField(upgradeDocument(v1.SessionID), "version", "1")
+	walPath := upgradeDocument(badWAL.SessionID) + ".txn.json"
+	logPath := strings.TrimSuffix(upgradeDocument(badLog.SessionID), ".json") + ".events.jsonl"
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserved[logPath] = append([]byte("{broken JSON\n"), log...)
+	preserved[walPath] = []byte(`{"kind":`)
+	for _, path := range []string{logPath, walPath} {
+		if err := os.WriteFile(path, preserved[path], 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	replaceFixtureField(configPath, "sandbox", `{"requested_type":"landlock","helper_path":"retired-helper"}`)
 	cfg.Model = ModelConfig{}
 	if native {
 		cfg.Sandbox = SandboxConfig{}
 	}
-	stack, err = newTestLocalStack(cfg)
-	if err != nil {
-		t.Fatal(err)
+	openHost := func() (*Stack, func()) {
+		t.Helper()
+		authority, err := hostownership.Acquire(ctx, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = authority.Close() })
+		cfg.HostOwnership = authority
+		s, err := newTestLocalStack(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		if err := s.WaitApprovalRecovery(ctx); err != nil {
+			t.Fatalf("Host readiness: %v", err)
+		}
+		if s.composition.authorities.idleGeneration == nil {
+			t.Fatal("Session read errors disabled Host idle compaction")
+		}
+		return s, func() {
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := authority.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	stack, closeHost := openHost()
+	pending, err := store.PendingApprovals(ctx)
+	if err != nil || len(pending) != 1 || pending[0].SessionRef.SessionID != badLog.SessionID {
+		t.Fatalf("approval recovery should settle only the readable Session: %+v, %v", pending, err)
 	}
 	config, err := LoadAppConfig(root)
 	if err != nil || config.Sandbox.RequestedType != "auto" || config.Sandbox.HelperPath != "" {
@@ -227,8 +291,17 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	if err != nil || !strings.Contains(string(freshMessages), "start fresh") || strings.Contains(string(freshMessages), "retained-receipt") {
 		t.Fatalf("fresh model context = %s, %v", freshMessages, err)
 	}
-	if _, err := stack.composition.sessions.Session(ctx, unsupported.SessionRef); !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-		t.Fatalf("inline history error = %v", err)
+	if fresh.CWD != address.CWD || fresh.WorkspaceKey != address.Key {
+		t.Fatalf("fresh Session uses %+v at %q, want %+v", fresh.SessionRef, fresh.CWD, address)
+	}
+	if _, err := stack.composition.sessions.Session(ctx, v1.SessionRef); !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("v1 load error = %v", err)
+	}
+	if _, err := stack.composition.sessions.Session(ctx, badWAL.SessionRef); !errors.Is(err, session.ErrUnreadableSession) {
+		t.Fatalf("damaged WAL load error = %v", err)
+	}
+	if _, err := stack.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: badLog.SessionRef}); !errors.Is(err, session.ErrUnreadableSession) {
+		t.Fatalf("damaged event log error = %v", err)
 	}
 	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, active, active.SessionID, "continue after restart", headless.Options{}); err != nil {
 		t.Fatal(err)
@@ -258,9 +331,20 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	if !reflect.DeepEqual(state["gateway.memory.binding.v1"], pin) {
 		t.Fatalf("retained pin changed: %#v", state)
 	}
-	if err := stack.Close(); err != nil {
+	closeHost()
+	stack, closeHost = openHost()
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, fresh, fresh.SessionID, "continue fresh", headless.Options{}); err != nil {
 		t.Fatal(err)
 	}
+	resumedFresh := <-requests
+	wantFresh := append(freshRequest["messages"].([]any),
+		map[string]any{"role": "assistant", "content": "history preserved"},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "continue fresh"}}},
+	)
+	if !reflect.DeepEqual(resumedFresh["messages"], wantFresh) {
+		t.Fatalf("fresh Session resumed with context %v, want %v", resumedFresh["messages"], wantFresh)
+	}
+	closeHost()
 	select {
 	case <-requests:
 		t.Fatal("unexpected background model request")

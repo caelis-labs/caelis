@@ -164,17 +164,31 @@ func TestDecodeLegacyAppConfigIgnoresUnknownFieldsWithoutDrop(t *testing.T) {
 	}
 }
 
-func TestMigrateV1ToV2RejectsCredentialSourcesAcrossRecords(t *testing.T) {
+func TestMigrateLegacyDropsEveryModelUsingAnAmbiguousCredential(t *testing.T) {
 	legacy := migrationFixture()
 	legacy.Models.Configs[0].CredentialRef = "apikey:test:shared"
 	legacy.Models.Configs[0].Token = "first-secret"
 	conflicting := legacy.Models.Configs[0]
 	conflicting.Token = "second-secret"
-	legacy.Models.Configs = append(legacy.Models.Configs, conflicting)
+	independent := legacyModelConfig{Provider: "openai", Model: "gpt-5", Token: "independent-secret"}
+	legacy.Models.Configs = append(legacy.Models.Configs, conflicting, independent)
 
-	if _, err := migrateV1ToV2(legacy); err == nil || !strings.Contains(err.Error(), "conflicting sources") {
-		t.Fatalf("migrateV1ToV2() error = %v, want cross-record credential source conflict", err)
+	migrated, err := migrateLegacyAppConfig(legacy)
+	if err != nil {
+		t.Fatal(err)
 	}
+	doc := migrated.Document
+	if len(doc.Models.Configs) != 1 || doc.Models.Configs[0].Model != independent.Model ||
+		len(doc.Models.ProviderEndpoints) != 1 || doc.ModelProfiles.DefaultProfileID != "" {
+		t.Fatalf("migration did not isolate ambiguous models: %#v, %#v", doc.Models, doc.ModelProfiles)
+	}
+	if _, ok := agentbinding.Lookup(doc.AgentBindings, agentbinding.HandleGuardian); ok {
+		t.Fatal("binding to the dropped model survived")
+	}
+	if len(migrated.CredentialWrites) != 1 || migrated.CredentialWrites[0].Ref != doc.Models.ProviderEndpoints[0].CredentialRef {
+		t.Fatal("migration must write only the independent credential")
+	}
+	requireMigrationDrop(t, migrated.Report, "provider_model", "models.configs[1]", "conflicting_credential_source")
 }
 
 func TestMigrateV1ToV2ReplacesPlaintextProviderCredentialWithOpaqueReference(t *testing.T) {

@@ -396,19 +396,19 @@ func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 }
 
 func NormalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
-	cfg.ApprovalMode = normalizeApprovalMode(cfg.ApprovalMode)
+	cfg.ApprovalMode, _ = normalizeApprovalMode(cfg.ApprovalMode)
 	cfg.PolicyProfile = policyapi.NormalizeProfileName(cfg.PolicyProfile)
 	return cfg
 }
 
-func normalizeApprovalMode(mode string) string {
+func normalizeApprovalMode(mode string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "manual":
-		return "manual"
-	case "", "auto", "auto-review", "auto_review", "autoreview":
-		return "auto-review"
+		return "manual", true
+	case "", "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
+		return "auto-review", true
 	default:
-		return "auto-review"
+		return "auto-review", false
 	}
 }
 
