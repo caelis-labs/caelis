@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 const resumeCompletionPageLimit = 200
@@ -107,11 +106,7 @@ func (d *assembler) CompleteResume(ctx context.Context, query string, limit int)
 	matched := make([]controlprompt.ResumeCandidate, 0, limit)
 	cursor := ""
 	for {
-		result, err := d.listSessions(ctx, kernel.ListSessionsRequest{
-			AppName: d.deps.Session.AppName, UserID: d.deps.Session.UserID,
-			CWD:    d.deps.Session.Workspace.CWD,
-			Cursor: cursor, Limit: resumeCompletionPageLimit,
-		})
+		result, err := d.listWorkspaceSessions(ctx, cursor, resumeCompletionPageLimit)
 		if err != nil {
 			return nil, err
 		}

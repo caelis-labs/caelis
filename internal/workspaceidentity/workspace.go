@@ -1,5 +1,4 @@
-// Package workspaceidentity owns the process-derived workspace address and
-// the compatibility lookup for addresses already persisted by older clients.
+// Package workspaceidentity derives workspace addresses from working directories.
 package workspaceidentity
 
 import (
@@ -19,11 +18,16 @@ func FromCWD(cwd string) (session.WorkspaceRef, error) {
 	if err != nil {
 		return session.WorkspaceRef{}, err
 	}
-	key := canonical
-	if key == string(filepath.Separator) {
-		key = "workspace:" + key
+	return session.WorkspaceRef{Key: KeyForDirectory(canonical), CWD: canonical}, nil
+}
+
+// KeyForDirectory returns the workspace key for a canonical absolute path.
+// Stored paths can use it even when the directory is no longer on disk.
+func KeyForDirectory(canonical string) string {
+	if canonical == string(filepath.Separator) {
+		return "workspace:" + canonical
 	}
-	return session.WorkspaceRef{Key: key, CWD: canonical}, nil
+	return canonical
 }
 
 // CanonicalDirectory resolves an existing directory to its physical absolute

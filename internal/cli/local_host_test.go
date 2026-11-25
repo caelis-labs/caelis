@@ -152,6 +152,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	}{
 		{clientA, "session-a", "workspace-a", workspaceA},
 		{clientB, "session-b", "workspace-b", workspaceB},
+		{clientB, "session-other-key", "custom-key", workspaceB},
 	} {
 		result, err := one.client.Clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
 			WriteBase:          appserver.WriteBase{OperationID: "create-" + one.sessionID},
@@ -187,8 +188,22 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resumeCandidatesContainSession(resumeB, "session-b") || resumeCandidatesContainSession(resumeB, "session-a") {
+	if len(resumeB) != 1 || !resumeCandidatesContainSession(resumeB, "session-b") {
 		t.Fatalf("workspace B resume candidates = %#v, want session-b only", resumeB)
+	}
+	picker, err := driverB.ListSessions(ctx, 10)
+	if err != nil || len(picker) != 1 || picker[0].SessionID != "session-b" {
+		t.Fatalf("workspace B Session picker = %#v, %v", picker, err)
+	}
+	if _, err := clientB.Clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "mismatched-key"}, PreferredSessionID: "session-other-key",
+		WorkspaceKey: "workspace-b", CWD: workspaceB,
+	}); err == nil {
+		t.Fatal("create reused a Session from another workspace key")
+	}
+	id, err := createOrResumeHeadlessSession(ctx, clientB.Clients.Sessions, session.WorkspaceRef{Key: "workspace-b", CWD: workspaceB}, "session-other-key")
+	if err != nil || id != "session-other-key" {
+		t.Fatalf("resume by ID = %q, %v", id, err)
 	}
 	filesB, err := driverB.CompleteFile(ctx, "only-", 10)
 	if err != nil {
@@ -209,7 +224,7 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 2 {
+	if len(listed.Sessions) != 3 {
 		t.Fatalf("shared Host Sessions = %#v", listed.Sessions)
 	}
 	stateB, err := clientA.Clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: "session-b"})
@@ -250,78 +265,6 @@ func TestMissingManagedHostFallsBackToEmbedded(t *testing.T) {
 	}
 	if err := product.Clients.Validate(); err != nil || product.Clients.Tasks == nil {
 		t.Fatalf("fallback clients = %v, tasks=%T", err, product.Clients.Tasks)
-	}
-}
-
-func TestAutomaticWorkspaceAddressListsAndResumesPersistedLegacyAliases(t *testing.T) {
-	ctx := t.Context()
-	storeDir := t.TempDir()
-	workspace := t.TempDir()
-	canonicalWorkspace, err := filepath.EvalSymlinks(workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacySessions := map[string]string{
-		"legacy-key-a": "legacy-workspace-session-a",
-		"legacy-key-b": "legacy-workspace-session-b",
-	}
-	for legacyKey, sessionID := range legacySessions {
-		legacy, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-			AppName: "caelis", UserID: "local-user", StoreDir: storeDir,
-			WorkspaceKey: legacyKey, WorkspaceCWD: workspace,
-			SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := legacy.Sessions().StartSession(ctx, session.StartSessionRequest{
-			AppName: legacy.AppName(), UserID: legacy.UserID(),
-			Workspace: legacy.Workspace(), PreferredSessionID: sessionID,
-		}); err != nil {
-			_ = legacy.Close()
-			t.Fatal(err)
-		}
-		if err := legacy.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	product, err := openProductClients(ctx, gatewayapp.Config{
-		AppName: "caelis", UserID: "local-user", StoreDir: storeDir,
-		WorkspaceKey: canonicalWorkspace, WorkspaceCWD: canonicalWorkspace,
-		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
-	}, productClientOptions{
-		Mode: productClientModeEmbedded, EmbeddedControlEndpoint: roundTripEmbeddedControlFactory(t),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = product.Close() })
-	if product.Workspace.WorkspaceKey != canonicalWorkspace || product.Workspace.WorkspaceCWD != canonicalWorkspace {
-		t.Fatalf("automatic workspace = %#v, want canonical address %q", product.Workspace, canonicalWorkspace)
-	}
-	listed, err := product.Clients.Sessions.ListSessions(ctx, appserver.ListSessionsRequest{
-		CWD: product.Workspace.WorkspaceCWD,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listed.Sessions) != len(legacySessions) {
-		t.Fatalf("legacy workspace Sessions = %#v", listed.Sessions)
-	}
-	for _, summary := range listed.Sessions {
-		if want := legacySessions[summary.WorkspaceKey]; want != summary.SessionID {
-			t.Fatalf("legacy workspace Session = %#v, want %q", summary, want)
-		}
-		created, err := product.Clients.Sessions.CreateSession(ctx, appserver.CreateSessionRequest{
-			WriteBase:          appserver.WriteBase{OperationID: "resume-" + summary.SessionID},
-			PreferredSessionID: summary.SessionID,
-			WorkspaceKey:       product.Workspace.WorkspaceKey,
-			CWD:                product.Workspace.WorkspaceCWD,
-		})
-		if err != nil || created.SessionID != summary.SessionID {
-			t.Fatalf("resume legacy Session %q = %#v, %v", summary.SessionID, created, err)
-		}
 	}
 }
 
@@ -934,30 +877,6 @@ func TestManagedProductFailureSurfacesPermissionBlocker(t *testing.T) {
 	logPath := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
 	if got := managedStartupCauseFromLog(logPath, 0); got == nil || got.Error() != "sandbox isolation is unavailable" {
 		t.Fatalf("managedStartupCauseFromLog() = %v", got)
-	}
-}
-
-func TestManagedStartupLogPromotesRecognizedIssueCodeWithoutDetails(t *testing.T) {
-	storeDir := t.TempDir()
-	logPath := filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	line := "serve failed [" + string(gatewayapp.StartupIssueWorkspaceIdentityConflict) + "]: key=work cwd=/private/customer\n"
-	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cause := managedStartupCauseFromLog(logPath, 0)
-	if code, ok := gatewayapp.StartupIssueCodeOf(cause); !ok || code != gatewayapp.StartupIssueWorkspaceIdentityConflict {
-		t.Fatalf("promoted startup issue = %v, code=%q ok=%t", cause, code, ok)
-	}
-	productErr := managedProductFailure(storeDir, "start", cause)
-	want := "caelis startup failed [CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT]: stored Session workspace identities conflict; run `caelis doctor` to repair"
-	if productErr.Error() != want {
-		t.Fatalf("product error = %q, want %q", productErr, want)
-	}
-	if strings.Contains(productErr.Error(), "customer") || strings.Contains(productErr.Error(), "key=work") {
-		t.Fatalf("product error exposed private details: %v", productErr)
 	}
 }
 

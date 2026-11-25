@@ -413,9 +413,9 @@ unsupported-format error for that Session.
 
 - The root `protocol/acp/*` and product-host `ports/*` trees are retired and
   guarded against recreation.
-- Sessions written before v0.42 may retain historical workspace-key aliases for
-  the same canonical CWD. Keep this reader until the minimum supported upgrade
-  source is v0.42 or newer.
+- Workspace pickers match the stored key and directory. Resume by Session ID
+  uses the stored address. If a key belongs to multiple directories, that key
+  requires repair with `caelis doctor`. Other workspaces remain available.
 - `UserID` remains a deprecated persistence compatibility field. It is not a
   Runtime partition key and must not enter new SDK contracts.
 - External ACP compatibility readers and their removal conditions are listed in

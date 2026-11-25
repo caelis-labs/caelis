@@ -16,6 +16,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/surfaces/headless"
@@ -161,6 +162,15 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	}
 	if err := os.RemoveAll(controlStreamSpoolRoot(root)); err != nil {
 		t.Fatal(err)
+	}
+	// Two SDK Sessions with a conflicting key must not block new or resumable Sessions.
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	for _, directory := range []string{workspace, t.TempDir()} {
+		if _, err := store.StartSession(ctx, session.StartSessionRequest{
+			AppName: cfg.AppName, UserID: cfg.UserID, Workspace: session.WorkspaceRef{Key: "ambiguous", CWD: directory},
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Reopen a mixed-generation store through the normal Host entry point.
 	upgradeDocument := func(id string) string {

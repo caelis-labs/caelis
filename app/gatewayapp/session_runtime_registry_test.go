@@ -3168,11 +3168,18 @@ func TestHostRebuildsWorkspaceIdentityBeforeReusingExplicitKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := NewLocalStack(Config{
+	moved, err := NewLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceB,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
-	}); err == nil || errorcode.CodeOf(err) != errorcode.FailedPrecondition {
-		t.Fatalf("restarted Host with reused workspace key error = %v, want failed_precondition", err)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startGatewayAppTestSession(ctx, moved, "wrong-directory"); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("reused key in another directory: %v", err)
+	}
+	if err := moved.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	reopened, err := NewLocalStack(Config{

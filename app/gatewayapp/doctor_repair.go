@@ -6,34 +6,31 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
 
 // DoctorRepairPlan describes one recognized local compatibility repair without
 // mutating the Store.
 type DoctorRepairPlan struct {
-	Code                     StartupIssueCode
+	Code                     string
 	ConflictingWorkspaceKeys int
 	AffectedSessions         int
 }
 
 // DoctorRepairReport describes one compatibility repair completed by doctor.
 type DoctorRepairReport struct {
-	Code                     StartupIssueCode
+	Code                     string
 	ConflictingWorkspaceKeys int
 	AffectedSessions         int
 	RepairedSessions         int
 	RepairedTasks            int
 }
 
-type durableWorkspaceIdentity struct {
-	sessionID    string
-	workspaceKey string
-	cwd          string
-}
+// DoctorWorkspaceIdentityConflict identifies the repair for a key shared by different directories.
+const DoctorWorkspaceIdentityConflict = "CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT"
 
 // InspectDoctorRepairs reports recognized compatibility work for a local
 // Store. It also reports an interrupted repair so doctor can resume it.
@@ -45,7 +42,7 @@ func InspectDoctorRepairs(ctx context.Context, storeDir string) ([]DoctorRepairP
 	}
 	if len(pending) > 0 {
 		return []DoctorRepairPlan{{
-			Code: StartupIssueWorkspaceIdentityConflict, AffectedSessions: len(pending),
+			Code: DoctorWorkspaceIdentityConflict, AffectedSessions: len(pending),
 		}}, nil
 	}
 	repairs, conflicts, err := planWorkspaceIdentityRepairs(ctx, store)
@@ -56,7 +53,7 @@ func InspectDoctorRepairs(ctx context.Context, storeDir string) ([]DoctorRepairP
 		return nil, nil
 	}
 	return []DoctorRepairPlan{{
-		Code:                     StartupIssueWorkspaceIdentityConflict,
+		Code:                     DoctorWorkspaceIdentityConflict,
 		ConflictingWorkspaceKeys: conflicts,
 		AffectedSessions:         len(repairs),
 	}}, nil
@@ -64,8 +61,8 @@ func InspectDoctorRepairs(ctx context.Context, storeDir string) ([]DoctorRepairP
 
 // RepairDoctorIssue performs one recognized compatibility repair. It is an
 // explicit doctor operation and is never called by normal Host startup.
-func RepairDoctorIssue(ctx context.Context, storeDir string, code StartupIssueCode) (DoctorRepairReport, error) {
-	if code != StartupIssueWorkspaceIdentityConflict {
+func RepairDoctorIssue(ctx context.Context, storeDir string, code string) (DoctorRepairReport, error) {
+	if code != DoctorWorkspaceIdentityConflict {
 		return DoctorRepairReport{}, fmt.Errorf("gatewayapp: doctor does not recognize repair %q", code)
 	}
 	store := doctorSessionStore(storeDir)
@@ -111,127 +108,45 @@ func planWorkspaceIdentityRepairs(
 	ctx context.Context,
 	store *sessionfile.Store,
 ) ([]sessionfile.WorkspaceKeyRepair, int, error) {
-	identities, err := listDurableWorkspaceIdentities(ctx, store)
+	type member struct{ sessionID, cwd string }
+	groups := make(map[string][]member)
+	err := visitStoredWorkspaces(ctx, store, func(id string, workspace session.WorkspaceRef) {
+		groups[workspace.Key] = append(groups[workspace.Key], member{id, workspace.CWD})
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	byKey := map[string]map[string]bool{}
-	for _, identity := range identities {
-		if byKey[identity.workspaceKey] == nil {
-			byKey[identity.workspaceKey] = map[string]bool{}
-		}
-		byKey[identity.workspaceKey][identity.cwd] = true
-	}
-	marked := map[string]bool{}
-	conflicts := 0
-	for key, cwds := range byKey {
-		if len(cwds) <= 1 {
-			continue
-		}
-		conflicts++
-		for _, identity := range identities {
-			if identity.workspaceKey == key {
-				marked[identity.sessionID] = true
+	var keys []string
+	for key, members := range groups {
+		for _, m := range members[1:] {
+			if m.cwd != members[0].cwd {
+				keys = append(keys, key)
+				break
 			}
 		}
 	}
-
-	// A replacement key may itself be occupied by corrupt legacy data. Expand
-	// the plan until every resulting key has exactly one CWD.
-	for {
-		resulting := map[string]map[string][]durableWorkspaceIdentity{}
-		for _, identity := range identities {
-			key := identity.workspaceKey
-			if marked[identity.sessionID] {
-				key = canonicalStoredWorkspaceKey(identity.cwd)
-			}
-			if resulting[key] == nil {
-				resulting[key] = map[string][]durableWorkspaceIdentity{}
-			}
-			resulting[key][identity.cwd] = append(resulting[key][identity.cwd], identity)
-		}
-		changed := false
-		for key, byCWD := range resulting {
-			if len(byCWD) <= 1 {
+	conflicts := len(keys)
+	var repairs []sessionfile.WorkspaceKeyRepair
+	// Follow occupied replacement keys. Each group is processed once, including
+	// when a chain leads back to a key that is already part of the repair.
+	for len(keys) > 0 {
+		key := keys[0]
+		keys = keys[1:]
+		members := groups[key]
+		delete(groups, key)
+		for _, m := range members {
+			replacement := workspaceidentity.KeyForDirectory(m.cwd)
+			if replacement == key {
 				continue
 			}
-			for _, group := range byCWD {
-				for _, identity := range group {
-					if marked[identity.sessionID] {
-						continue
-					}
-					replacement := canonicalStoredWorkspaceKey(identity.cwd)
-					if replacement == key {
-						return nil, conflicts, fmt.Errorf(
-							"gatewayapp: Session %q has an irreparable durable workspace identity",
-							identity.sessionID,
-						)
-					}
-					marked[identity.sessionID] = true
-					changed = true
-				}
+			repairs = append(repairs, sessionfile.WorkspaceKeyRepair{
+				SessionID: m.sessionID, ExpectedWorkspaceKey: key, ReplacementWorkspaceKey: replacement,
+			})
+			if len(groups[replacement]) > 0 {
+				keys = append(keys, replacement)
 			}
 		}
-		if !changed {
-			break
-		}
-	}
-
-	repairs := make([]sessionfile.WorkspaceKeyRepair, 0, len(marked))
-	for _, identity := range identities {
-		if !marked[identity.sessionID] {
-			continue
-		}
-		replacement := canonicalStoredWorkspaceKey(identity.cwd)
-		if replacement == identity.workspaceKey {
-			continue
-		}
-		repairs = append(repairs, sessionfile.WorkspaceKeyRepair{
-			SessionID:               identity.sessionID,
-			ExpectedWorkspaceKey:    identity.workspaceKey,
-			ReplacementWorkspaceKey: replacement,
-		})
 	}
 	sort.Slice(repairs, func(i, j int) bool { return repairs[i].SessionID < repairs[j].SessionID })
 	return repairs, conflicts, nil
-}
-
-func listDurableWorkspaceIdentities(
-	ctx context.Context,
-	store session.Lifecycle,
-) ([]durableWorkspaceIdentity, error) {
-	var identities []durableWorkspaceIdentity
-	cursor := ""
-	for {
-		listed, err := store.ListSessions(ctx, session.ListSessionsRequest{Cursor: cursor, Limit: 200})
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapp: inspect durable workspace identities: %w", err)
-		}
-		for _, summary := range listed.Sessions {
-			key := strings.TrimSpace(summary.WorkspaceKey)
-			cwd := filepath.Clean(strings.TrimSpace(summary.CWD))
-			if key == "" || cwd == "" || cwd == "." || !filepath.IsAbs(cwd) {
-				return nil, fmt.Errorf("gatewayapp: Session %q has an invalid durable workspace identity", summary.SessionID)
-			}
-			identities = append(identities, durableWorkspaceIdentity{
-				sessionID: strings.TrimSpace(summary.SessionID), workspaceKey: key, cwd: cwd,
-			})
-		}
-		next := strings.TrimSpace(listed.NextCursor)
-		if next == "" {
-			return identities, nil
-		}
-		if next == cursor {
-			return nil, errors.New("gatewayapp: durable Session listing did not advance")
-		}
-		cursor = next
-	}
-}
-
-func canonicalStoredWorkspaceKey(cwd string) string {
-	key := filepath.Clean(strings.TrimSpace(cwd))
-	if key == string(filepath.Separator) {
-		return "workspace:" + key
-	}
-	return key
 }

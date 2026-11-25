@@ -127,43 +127,6 @@ func newSessionRuntimeRegistry(config sessionRuntimeRegistryConfig) (*sessionRun
 	}, nil
 }
 
-func loadDurableWorkspaceIdentities(
-	ctx context.Context,
-	sessions session.Lifecycle,
-	defaultWorkspace session.WorkspaceRef,
-) (map[string]string, error) {
-	identities := map[string]string{defaultWorkspace.Key: defaultWorkspace.CWD}
-	cursor := ""
-	for {
-		listed, err := sessions.ListSessions(ctx, session.ListSessionsRequest{Cursor: cursor, Limit: 200})
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapp: rebuild durable workspace identities: %w", err)
-		}
-		for _, summary := range listed.Sessions {
-			key := strings.TrimSpace(summary.WorkspaceKey)
-			cwd := filepath.Clean(strings.TrimSpace(summary.CWD))
-			if key == "" || cwd == "" || cwd == "." || !filepath.IsAbs(cwd) {
-				return nil, fmt.Errorf("gatewayapp: Session %q has an invalid durable workspace identity", summary.SessionID)
-			}
-			if existing := identities[key]; existing != "" && existing != cwd {
-				return nil, newStartupIssueError(
-					StartupIssueWorkspaceIdentityConflict,
-					fmt.Sprintf("gatewayapp: durable workspace key %q is bound to both %q and %q", key, existing, cwd),
-				)
-			}
-			identities[key] = cwd
-		}
-		next := strings.TrimSpace(listed.NextCursor)
-		if next == "" {
-			return identities, nil
-		}
-		if next == cursor {
-			return nil, errors.New("gatewayapp: durable Session listing did not advance")
-		}
-		cursor = next
-	}
-}
-
 // lockActivation admits one durable create or Runtime activation and
 // serializes workspace identity plus publication of one fixed Session Runtime.
 // It is deliberately independent from Host configuration mutation: assembly
@@ -222,7 +185,7 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 			if canonicalErr != nil {
 				return session.WorkspaceRef{}, canonicalErr
 			}
-			if actual.CWD != workspace.CWD {
+			if actual != workspace {
 				return session.WorkspaceRef{}, errorcode.New(
 					errorcode.InvalidArgument,
 					fmt.Sprintf(
@@ -233,10 +196,6 @@ func (r *sessionRuntimeRegistry) resolveCreateWorkspaceLocked(
 					),
 				)
 			}
-			// Retired CLI workspace-key overrides may have left more than one
-			// durable key for the same canonical directory. Exact Session resume
-			// keeps that historical key while new Sessions use the derived key.
-			workspace = actual
 		case !errors.Is(loadErr, session.ErrSessionNotFound):
 			return session.WorkspaceRef{}, loadErr
 		}
@@ -1294,7 +1253,11 @@ func (r *sessionRuntimeRegistry) validateWorkspaceIdentity(workspace session.Wor
 }
 
 func (r *sessionRuntimeRegistry) validateWorkspaceIdentityLocked(workspace session.WorkspaceRef) error {
-	if existingCWD := r.workspaceCWD[workspace.Key]; existingCWD != "" && existingCWD != workspace.CWD {
+	existingCWD, known := r.workspaceCWD[workspace.Key]
+	if known && existingCWD == "" {
+		return errorcode.New(errorcode.FailedPrecondition, fmt.Sprintf("gatewayapp: workspace key %q has conflicting stored directories; run caelis doctor", workspace.Key))
+	}
+	if known && existingCWD != workspace.CWD {
 		return errorcode.New(
 			errorcode.InvalidArgument,
 			fmt.Sprintf(
@@ -1338,10 +1301,11 @@ func validateSessionRuntime(active session.Session, runtime *sessionRuntime) err
 }
 
 func canonicalSessionWorkspace(active session.Session) (session.WorkspaceRef, error) {
-	return canonicalWorkspaceRef(session.WorkspaceRef{
-		Key: active.WorkspaceKey,
-		CWD: active.CWD,
-	}, session.WorkspaceRef{})
+	workspace, ok := storedWorkspace(active.WorkspaceKey, active.CWD)
+	if !ok {
+		return session.WorkspaceRef{}, errorcode.New(errorcode.FailedPrecondition, fmt.Sprintf("gatewayapp: Session %q has an invalid stored workspace", active.SessionID))
+	}
+	return canonicalWorkspaceRef(workspace, session.WorkspaceRef{})
 }
 
 func sessionRuntimeHostClosingError() error {
@@ -1384,7 +1348,7 @@ func canonicalWorkspaceRef(
 		)
 	}
 	if key == "" {
-		key = filepath.Base(resolved)
+		key = workspaceidentity.KeyForDirectory(resolved)
 	}
 	if key == "" || key == "." || key == string(filepath.Separator) {
 		return session.WorkspaceRef{}, errorcode.New(errorcode.InvalidArgument, "gatewayapp: workspace key is required")

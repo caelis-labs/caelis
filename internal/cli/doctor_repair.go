@@ -31,7 +31,7 @@ func runDoctorStartupRepairs(
 			return results, fmt.Errorf("caelis doctor repair failed [%s]: %w", plan.Code, err)
 		}
 		results = append(results, doctorRepairResult{
-			Code:                     string(report.Code),
+			Code:                     report.Code,
 			Status:                   "repaired",
 			ConflictingWorkspaceKeys: firstNonZero(report.ConflictingWorkspaceKeys, plan.ConflictingWorkspaceKeys),
 			AffectedSessions:         firstNonZero(report.AffectedSessions, plan.AffectedSessions),

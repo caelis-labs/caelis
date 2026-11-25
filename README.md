@@ -159,9 +159,10 @@ user. `-store-dir` changes the data root, not the workspace. Model requests go t
 your selected provider or external agent; local storage does not imply offline
 inference.
 
-Managed local startup failures include a stable `CAELIS_STARTUP_*` code. In
-particular, `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` is repaired by
-`caelis doctor`; normal startup does not rewrite durable Session data.
+Managed local startup failures include a stable `CAELIS_STARTUP_*` code.
+If stored Sessions share a workspace key across different directories, run
+`caelis doctor` to repair the affected Sessions. Other workspaces can continue
+using the Host.
 
 ## Documentation
 

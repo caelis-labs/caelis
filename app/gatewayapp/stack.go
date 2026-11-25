@@ -342,9 +342,8 @@ func newLocalStack(cfg Config, productDefaults productPluginDefaults) (*Stack, e
 	appName := firstNonEmpty(strings.TrimSpace(cfg.AppName), "caelis")
 	userID := firstNonEmpty(strings.TrimSpace(cfg.UserID), "local-user")
 	workspaceCWD := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceCWD), mustGetwd())
-	workspaceKey := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceKey), "workspace")
 	workspace, err := canonicalWorkspaceRef(
-		session.WorkspaceRef{Key: workspaceKey, CWD: workspaceCWD},
+		session.WorkspaceRef{Key: cfg.WorkspaceKey, CWD: workspaceCWD},
 		session.WorkspaceRef{},
 	)
 	if err != nil {

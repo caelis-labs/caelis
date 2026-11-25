@@ -134,8 +134,9 @@ func (a *SessionClientAdapter) ListSessions(ctx context.Context, limit int) ([]c
 	if a == nil || a.sessionClient == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
+	workspace := a.workspaceAddress()
 	result, err := a.sessionClient.ListSessions(ctx, appserver.ListSessionsRequest{
-		CWD: strings.TrimSpace(a.WorkspaceDir()), Limit: normalizeCompletionLimit(limit),
+		WorkspaceKey: workspace.Key, CWD: workspace.CWD, Limit: normalizeCompletionLimit(limit),
 	})
 	if err != nil {
 		return nil, err
