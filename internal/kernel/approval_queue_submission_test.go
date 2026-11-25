@@ -35,7 +35,10 @@ func TestCallerCannotResolveAutoReviewButGuardianCan(t *testing.T) {
 			if !found {
 				t.Fatal("active auto-review target missing")
 			}
-			decision := &ApprovalDecision{RequestID: pending.id, Outcome: "selected", OptionID: "allow_once", Approved: true}
+			decision := &ApprovalDecision{RequestID: pending.id, Outcome: "approved"}
+			if detached {
+				decision.Outcome, decision.OptionID = "selected", "allow_once"
+			}
 			err = gateway.SubmitActiveTurn(context.Background(), SubmitActiveTurnRequest{
 				SessionRef: handle.sessionRef, HandleID: owner.HandleID, RunID: owner.RunID, TurnID: owner.TurnID,
 				Kind: SubmissionKindApproval, Approval: decision,
@@ -54,7 +57,7 @@ func TestCallerCannotResolveAutoReviewButGuardianCan(t *testing.T) {
 			if err := handle.resolvePendingApproval(pending, *decision); err != nil {
 				t.Fatalf("private Guardian resolve: %v", err)
 			}
-			if got := <-pending.decisions; got.RequestID != pending.id || !got.Approved {
+			if got := <-pending.decisions; got.RequestID != pending.id || !got.Approved || got.Outcome != decision.Outcome || got.OptionID != decision.OptionID {
 				t.Fatalf("Guardian decision = %+v", got)
 			}
 		})
