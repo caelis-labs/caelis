@@ -156,7 +156,7 @@ func (a *Agent) executeToolCallAdmitted(
 		eventMeta = toolbinding.MergeEventMeta(eventMeta, toolbinding.TaskResultSourceMeta(true))
 	}
 	event := toolResultEvent(call, result, err, &message, eventMeta)
-	observation.Apply(event.Tool, selectedTool.Definition(), effectErr == nil)
+	event.Tool.Discovery = observation.Discovery && effectErr == nil
 	if err != nil && len(complete.Content) > 0 {
 		event.Tool.Result = &complete
 	}

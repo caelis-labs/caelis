@@ -63,7 +63,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 			def = tool.CloneDefinition(targets[0].definition)
 			source = targets[0].source
 		}
-		observation.Apply(event.Tool, def, effectErr == nil)
+		event.Tool.Discovery = observation.Discovery && effectErr == nil
 		projection := hookrun.FromContext(ctx).Hooks.ToolProjection
 		message, _, viewErr := toolbinding.ProjectResult(ctx, def, call, full, callErr, projection.Preview)
 		processingErr = viewErr

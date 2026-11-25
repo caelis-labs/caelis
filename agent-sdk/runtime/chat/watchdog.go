@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -212,7 +212,7 @@ func (d *generationWatchdog) textLoopError() error {
 		cycle := block[len(block)-period:]
 		matched := true
 		for i := range d.textStreak {
-			if !runesEqual(block[i*period:(i+1)*period], cycle) {
+			if !slices.Equal(block[i*period:(i+1)*period], cycle) {
 				matched = false
 				break
 			}
@@ -330,24 +330,18 @@ func decodeComparableToolArgs(raw string) (map[string]any, bool) {
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.UseNumber()
 	var decoded map[string]any
-	if err := decoder.Decode(&decoded); err != nil || len(decoded) == 0 {
+	if err := decoder.Decode(&decoded); err != nil {
 		return nil, false
 	}
-	keys := make([]string, 0, len(decoded))
 	for key := range decoded {
-		if strings.TrimSpace(key) != "" {
-			keys = append(keys, key)
+		if strings.TrimSpace(key) == "" {
+			delete(decoded, key)
 		}
 	}
-	if len(keys) == 0 {
+	if len(decoded) == 0 {
 		return nil, false
 	}
-	sort.Strings(keys)
-	canonical := make(map[string]any, len(keys))
-	for _, key := range keys {
-		canonical[key] = decoded[key]
-	}
-	return canonical, true
+	return decoded, true
 }
 
 func generationLoopEvent(loopErr *GenerationLoopError) *session.Event {
@@ -379,18 +373,6 @@ func appendRunesCapped(dst, add []rune, maxRunes int) []rune {
 		return append([]rune(nil), dst[len(dst)-maxRunes:]...)
 	}
 	return dst
-}
-
-func runesEqual(a, b []rune) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func collapseSpace(text string) string {
