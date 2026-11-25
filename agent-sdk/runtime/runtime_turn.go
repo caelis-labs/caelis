@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -137,6 +138,7 @@ func (r *Runtime) runAttempt(
 	}
 
 	ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
+	ctx, planResults := toolbinding.WithPlanResults(ctx)
 	var source *requestsource.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled || len(r.hooks.ModelPrepare) > 0 {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)
@@ -269,9 +271,11 @@ func (r *Runtime) runAttempt(
 			source.Append(normalized)
 			observeSequence(normalized)
 			sink.publishEvent(normalized)
-			if planEvent, handled, planErr := r.handlePlanEvent(ctx, ref, turnID, normalized); planErr != nil {
-				return inputPersisted, planErr
-			} else if handled {
+			if update := planResults.Take(normalized); update != nil {
+				planEvent, err := r.commitPlan(ctx, ref, turnID, normalized, *update)
+				if err != nil {
+					return inputPersisted, err
+				}
 				observeSequence(planEvent)
 				sink.publishEvent(planEvent)
 			}

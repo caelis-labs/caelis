@@ -157,16 +157,13 @@ func defaultActorForEvent(event *session.Event) session.ActorRef {
 	}
 }
 
-func (r *Runtime) handlePlanEvent(
+func (r *Runtime) commitPlan(
 	ctx context.Context,
 	ref session.SessionRef,
 	turnID string,
 	event *session.Event,
-) (*session.Event, bool, error) {
-	entries, explanation, ok := planEntriesFromEvent(event)
-	if !ok {
-		return nil, false, nil
-	}
+	update plan.Args,
+) (*session.Event, error) {
 	planEvent := &session.Event{
 		Type:       session.EventTypePlan,
 		Visibility: session.VisibilityCanonical,
@@ -175,29 +172,28 @@ func (r *Runtime) handlePlanEvent(
 			TurnID: strings.TrimSpace(turnID),
 			Source: "tool_result",
 		},
-		PlanPayload: &session.EventPlanPayload{Entries: entriesToPlanPayload(entries)},
-		Text:        strings.TrimSpace(explanation),
+		PlanPayload: &session.EventPlanPayload{Entries: entriesToPlanPayload(update.Entries)},
+		Text:        update.Explanation,
 	}
 	normalized := normalizeEvent(session.Session{}, turnID, planEvent)
 	normalized.Scope.Controller = event.Scope.Controller
-	planIdentity := stableToolFactIdentity(event)
-	if planIdentity == "" {
-		return nil, true, errors.New("agent-sdk/runtime: plan result requires a stable tool identity")
+	if event.IdempotencyKey == "" {
+		return nil, errors.New("agent-sdk/runtime: plan result requires a stable tool identity")
 	}
-	normalized.IdempotencyKey = "plan-state:" + planIdentity
+	normalized.IdempotencyKey = "plan-state:" + event.IdempotencyKey
 	batch, ok := r.sessions.(session.EventBatchStateService)
 	if !ok {
-		return nil, true, fmt.Errorf("agent-sdk/runtime: session service must support atomic plan event/state commit")
+		return nil, fmt.Errorf("agent-sdk/runtime: session service must support atomic plan event/state commit")
 	}
 	planState := map[string]any{
 		"version":     1,
 		"turn_id":     turnID,
-		"entries":     entriesToState(entries),
-		"explanation": explanation,
+		"entries":     entriesToState(update.Entries),
+		"explanation": update.Explanation,
 	}
 	planMutation, err := json.Marshal(planState)
 	if err != nil {
-		return nil, true, fmt.Errorf("agent-sdk/runtime: encode plan state mutation: %w", err)
+		return nil, fmt.Errorf("agent-sdk/runtime: encode plan state mutation: %w", err)
 	}
 	persisted, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
 		SessionRef:     ref,
@@ -214,61 +210,12 @@ func (r *Runtime) handlePlanEvent(
 		},
 	})
 	if err != nil {
-		return nil, true, err
+		return nil, err
 	}
 	if len(persisted) != 1 {
-		return nil, true, fmt.Errorf("agent-sdk/runtime: atomic plan commit returned %d events", len(persisted))
+		return nil, fmt.Errorf("agent-sdk/runtime: atomic plan commit returned %d events", len(persisted))
 	}
-	return persisted[0], true, nil
-}
-
-func stableToolFactIdentity(event *session.Event) string {
-	if event == nil {
-		return ""
-	}
-	if identity := strings.TrimSpace(event.IdempotencyKey); identity != "" {
-		return identity
-	}
-	if event.Tool == nil {
-		return ""
-	}
-	return strings.TrimSpace(event.Tool.ID)
-}
-
-// planEntriesFromEvent consumes the built-in Plan tool's observation.
-// Tool results may be transformed for the model without granting plan authority.
-func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
-	if event == nil || event.Type != session.EventTypeToolResult || event.Tool == nil ||
-		event.Tool.Name != plan.ToolName || event.Tool.Outcome != session.ToolOutcomeSucceeded {
-		return nil, "", false
-	}
-	observed, _ := nestedValue(event.Meta, "caelis", "runtime", "tool").(map[string]any)
-	rawEntries, present := observed["entries"]
-	if observed["updated"] != true || !present {
-		return nil, "", false
-	}
-	data, err := json.Marshal(rawEntries)
-	if err != nil {
-		return nil, "", false
-	}
-	var entries []plan.Entry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, "", false
-	}
-	explanation, _ := observed["explanation"].(string)
-	return entries, strings.TrimSpace(explanation), true
-}
-
-func nestedValue(values map[string]any, path ...string) any {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = mapped[key]
-	}
-	return current
+	return persisted[0], nil
 }
 
 func entriesToPlanPayload(entries []plan.Entry) []session.EventPlanEntry {
@@ -278,8 +225,8 @@ func entriesToPlanPayload(entries []plan.Entry) []session.EventPlanEntry {
 	out := make([]session.EventPlanEntry, 0, len(entries))
 	for _, entry := range entries {
 		out = append(out, session.EventPlanEntry{
-			Content:  strings.TrimSpace(entry.Content),
-			Status:   strings.TrimSpace(string(entry.Status)),
+			Content:  entry.Content,
+			Status:   string(entry.Status),
 			Priority: "medium",
 		})
 	}
@@ -293,8 +240,8 @@ func entriesToState(entries []plan.Entry) []map[string]any {
 	out := make([]map[string]any, 0, len(entries))
 	for _, item := range entries {
 		out = append(out, map[string]any{
-			"content": strings.TrimSpace(item.Content),
-			"status":  strings.TrimSpace(string(item.Status)),
+			"content": item.Content,
+			"status":  string(item.Status),
 		})
 	}
 	return out

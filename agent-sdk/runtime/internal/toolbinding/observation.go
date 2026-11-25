@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
@@ -16,6 +17,7 @@ type Observation struct {
 	ScriptCompletion string
 	TaskEvent        map[string]any
 	BuiltinDisplay   map[string]any
+	PlanUpdate       *plan.Args
 	MessageTo        string
 	Source           *codemode.Source
 }

@@ -6,14 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	t.Parallel()
 
-	planTool := New()
 	raw, _ := json.Marshal(map[string]any{
 		"explanation": "keep focus",
 		"entries": []map[string]any{
@@ -21,9 +19,7 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 			{"content": "Implement fix", "status": "in_progress"},
 		},
 	})
-	var toolMeta map[string]any
-	ctx := toolpresentation.With(t.Context(), func(fields map[string]any) { toolMeta = fields })
-	result, err := planTool.Call(ctx, tool.Call{
+	result, update, err := (Tool{}).CallWithUpdate(tool.Call{
 		ID:    "call-1",
 		Name:  ToolName,
 		Input: raw,
@@ -42,9 +38,8 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	if got := payload["updated"]; got != true {
 		t.Fatalf("updated = %#v, want true", got)
 	}
-	entries, _ := toolMeta["entries"].([]map[string]any)
-	if got, want := len(entries), 2; got != want {
-		t.Fatalf("len(metadata entries) = %d, want %d", got, want)
+	if len(update.Entries) != 2 || update.Entries[1] != (Entry{Content: "Implement fix", Status: StatusInProgress}) || update.Explanation != "keep focus" {
+		t.Fatalf("typed update = %+v", update)
 	}
 }
 

@@ -51,9 +51,10 @@ func (t resultHookTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, c 
 	if errors.As(err, &processing) {
 		// A failed transform may have been redacting the display as well as the reply.
 		*observation = toolbinding.Observation{}
-	} else if observation.BuiltinDisplay != nil && !reflect.DeepEqual(original.Content, r.Content) {
-		// The original display may contain data removed by the Result hook.
+	} else if (observation.BuiltinDisplay != nil || observation.PlanUpdate != nil) && !reflect.DeepEqual(original.Content, r.Content) {
+		// The original observations may contain data removed by the Result hook.
 		observation.BuiltinDisplay = nil
+		observation.PlanUpdate = nil
 	}
 	return r, err
 }

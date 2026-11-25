@@ -162,6 +162,9 @@ func (a *Agent) executeToolCallAdmitted(
 	}
 	event.Tool.ProcessingFailure = hookrun.ProcessingFailure(err)
 	a.applyPreparedFact(event)
+	if err == nil && observation.PlanUpdate != nil {
+		toolbinding.RecordPlanResult(ctx, event.Tool, observation.PlanUpdate)
+	}
 	if err != nil {
 		event.Tool.Error = err.Error()
 		event.Tool.ErrorCode = string(errorcode.CodeOf(err))
