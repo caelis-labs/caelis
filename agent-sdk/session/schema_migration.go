@@ -46,9 +46,14 @@ func MigrateEvent(in Event) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
-	raw, err = MigrateEventJSON(raw)
-	if err != nil {
-		return Event{}, err
+	// A typed current Event cannot produce a retired top-level field. Keep
+	// its JSON round trip, which normalizes open payloads and validates the
+	// typed decoder's contracts.
+	if in.Schema != EventSchemaVersion {
+		raw, err = migrateEventJSON(raw, false)
+		if err != nil {
+			return Event{}, err
+		}
 	}
 	var out Event
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -63,7 +68,7 @@ func MigrateEvent(in Event) (Event, error) {
 // UnmarshalEventJSON reads one durable event written by a supported Session
 // schema. It upgrades the record before decoding and checks its durable fields.
 func UnmarshalEventJSON(raw []byte) (*Event, error) {
-	migrated, err := MigrateEventJSON(raw)
+	migrated, err := migrateEventJSON(raw, false)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +85,10 @@ func UnmarshalEventJSON(raw []byte) (*Event, error) {
 // MigrateEventJSON upgrades the event envelope, preserves unknown JSON fields,
 // and returns a buffer independent of the input.
 func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
+	return migrateEventJSON(raw, true)
+}
+
+func migrateEventJSON(raw json.RawMessage, copyCurrent bool) (json.RawMessage, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, err
@@ -94,7 +103,10 @@ func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 		}
 	}
 	if source == EventSchemaVersion {
-		return bytes.Clone(raw), nil
+		if copyCurrent {
+			raw = bytes.Clone(raw)
+		}
+		return raw, nil
 	}
 	if source < 2 {
 		if err := rejectLegacyEventMedia(raw, object); err != nil {

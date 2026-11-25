@@ -2,6 +2,7 @@ package file
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -11,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -156,23 +156,24 @@ func (s *Store) readEventMetadata(ctx context.Context, documentPath string) (*ev
 		}
 		reader := bufio.NewReaderSize(io.LimitReader(file, info.Size()-index.Size), eventLogReadBufferSize)
 		line := index.Tail.LineNo
+		var overflow []byte
 		for {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			raw, readErr := reader.ReadString('\n')
+			raw, readErr := readEventLogLine(reader, &overflow)
 			if readErr != nil && !errors.Is(readErr, io.EOF) {
 				return nil, readErr
 			}
-			if !strings.HasSuffix(raw, "\n") {
+			if !bytes.HasSuffix(raw, []byte("\n")) {
 				break
 			}
 			line++
 			if s.eventMetadataLineRead != nil {
 				s.eventMetadataLineRead(path, line, next.Size)
 			}
-			if strings.TrimSpace(raw) != "" {
-				record, err := eventMetadataFromJSON([]byte(raw), path, line)
+			if len(bytes.TrimSpace(raw)) != 0 {
+				record, err := eventMetadataFromJSON(raw, path, line)
 				if err != nil {
 					return nil, err
 				}
@@ -318,7 +319,7 @@ func (s *Store) metadataEventPageCheckpoint(ctx context.Context, file *os.File, 
 	if _, err := file.ReadAt(raw, record.Offset); err != nil {
 		return eventPageCheckpoint{}, err
 	}
-	return newEventPageCheckpoint(record.Seq, record.Offset, record.Offset+int64(record.Length), record.Line, string(raw)), nil
+	return newEventPageCheckpoint(record.Seq, record.Offset, record.Offset+int64(record.Length), record.Line, raw), nil
 }
 
 func eventMetadataRecordBytes(record eventMetadataRecord) int64 {

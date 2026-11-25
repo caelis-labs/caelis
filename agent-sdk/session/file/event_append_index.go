@@ -2,6 +2,7 @@ package file
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -274,18 +275,19 @@ func (s *Store) readEventAppendIndexLocked(
 	}
 
 	snapshotSize := info.Size()
-	reader := bufio.NewReader(io.LimitReader(file, snapshotSize-index.offset))
+	reader := bufio.NewReaderSize(io.LimitReader(file, snapshotSize-index.offset), eventLogReadBufferSize)
+	var overflow []byte
 	for {
 		if err := ctx.Err(); err != nil {
 			s.removeEventAppendIndex(path)
 			return nil, err
 		}
 		lineStart := index.offset
-		line, readErr := reader.ReadString('\n')
+		line, readErr := readEventLogLine(reader, &overflow)
 		if len(line) == 0 && errors.Is(readErr, io.EOF) {
 			break
 		}
-		if errors.Is(readErr, io.EOF) && !strings.HasSuffix(line, "\n") {
+		if errors.Is(readErr, io.EOF) && !bytes.HasSuffix(line, []byte("\n")) {
 			// The snapshot may catch an in-flight or crash-truncated append. Retain
 			// only its complete prefix; the locked catch-up will observe the final
 			// record or the append path will truncate it.
@@ -300,9 +302,9 @@ func (s *Store) readEventAppendIndexLocked(
 			s.removeEventAppendIndex(path)
 			return nil, readErr
 		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			event, err := decodeEventLogRecord([]byte(trimmed), path, nextLineNo)
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) != 0 {
+			event, err := decodeEventLogRecord(trimmed, path, nextLineNo)
 			if err != nil {
 				s.removeEventAppendIndex(path)
 				return nil, err
@@ -493,7 +495,7 @@ func readIndexedEvent(file *os.File, record eventAppendRecord) (*session.Event, 
 	if n != len(data) {
 		return nil, io.ErrUnexpectedEOF
 	}
-	event, err := decodeEventLogRecord([]byte(strings.TrimSpace(string(data))), file.Name(), 0)
+	event, err := decodeEventLogRecord(bytes.TrimSpace(data), file.Name(), 0)
 	if err != nil {
 		return nil, err
 	}

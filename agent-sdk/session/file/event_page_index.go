@@ -179,13 +179,13 @@ func (s *Store) recordEventPageCheckpoint(path string, checkpoint eventPageCheck
 	}
 }
 
-func newEventPageCheckpoint(seq uint64, lineStart int64, offset int64, lineNo int, raw string) eventPageCheckpoint {
+func newEventPageCheckpoint(seq uint64, lineStart int64, offset int64, lineNo int, raw []byte) eventPageCheckpoint {
 	return eventPageCheckpoint{
 		Seq:         seq,
 		Offset:      offset,
 		LineNo:      lineNo,
 		AnchorStart: lineStart,
-		AnchorHash:  sha256.Sum256([]byte(raw)),
+		AnchorHash:  sha256.Sum256(raw),
 	}
 }
 
