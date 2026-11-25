@@ -26,7 +26,7 @@ func catalogTool(server *mcpsdk.Server, name, description string, calls *atomic.
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: description}}}, nil
 	})
 }
-func catalogManager(t *testing.T, server *mcpsdk.Server) *Manager {
+func catalogManager(t testing.TB, server *mcpsdk.Server) *Manager {
 	t.Helper()
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	t.Cleanup(endpoint.Close)
