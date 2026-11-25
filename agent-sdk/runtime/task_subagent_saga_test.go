@@ -244,7 +244,7 @@ func (s *revisionBumpBeforeParticipantSessionService) PutParticipantWithEvent(
 	var bumpErr error
 	s.once.Do(func() {
 		_, bumpErr = s.UpdateState(ctx, session.UpdateStateRequest{
-			SessionRef: req.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+			SessionRef: req.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeParticipant),
 			Update: func(state map[string]any) (map[string]any, error) {
 				if state == nil {
 					state = map[string]any{}

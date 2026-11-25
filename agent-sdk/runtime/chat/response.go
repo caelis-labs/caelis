@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/google/uuid"
 )
@@ -287,9 +288,9 @@ func modelToolCallEvents(
 	}
 	for i, call := range calls {
 		rawInput := mustObject(call.Args)
-		meta := toolMeta(call.Name)
+		meta := toolbinding.ToolMeta(call.Name)
 		if i == 0 {
-			meta = mergeEventMeta(baseMeta, meta)
+			meta = toolbinding.MergeEventMeta(baseMeta, meta)
 		}
 		event := &session.Event{
 			Type:       session.EventTypeToolCall,

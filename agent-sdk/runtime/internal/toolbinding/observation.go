@@ -5,7 +5,7 @@ import (
 	"maps"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
@@ -16,6 +16,7 @@ type Observation struct {
 	ScriptCompletion string
 	TaskEvent        map[string]any
 	BuiltinDisplay   map[string]any
+	PlanUpdate       *plan.Args
 	MessageTo        string
 	Source           *codemode.Source
 }
@@ -34,11 +35,6 @@ func Observed(ctx context.Context) *Observation {
 		return o
 	}
 	return new(Observation)
-}
-
-// Apply records the declared result layout and admitted discovery on the Session fact.
-func (o *Observation) Apply(fact *session.EventTool, def tool.Definition, success bool) {
-	fact.Discovery = o.Discovery && success
 }
 
 // EventMeta builds the presentation data attached to the Session event.

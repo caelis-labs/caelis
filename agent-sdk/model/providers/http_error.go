@@ -41,10 +41,22 @@ func statusError(resp *http.Response) error {
 		message = fmt.Sprintf("model: http status %d body=%s", resp.StatusCode, diagnostic)
 	}
 	base := newProviderHTTPError(resp.StatusCode, body, resp.Header, errorcode.New(httpErrorCode(resp.StatusCode), message))
-	if looksLikeContextOverflow(body, resp.StatusCode) {
-		return &model.ContextOverflowError{Cause: base}
+	return classifyProviderRequestError(base, body, resp.StatusCode, true)
+}
+
+// In-band errors can arrive after provider tools start. Only expose a
+// recoverable overflow when repeating generation is safe for that request.
+func classifyProviderRequestError(err error, detail string, status int, allowOverflowRecovery bool) error {
+	switch status {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+		if looksLikeImageInputError(detail) {
+			return &imageInputError{cause: err}
+		}
 	}
-	return classifyImageInputError(base, body, resp.StatusCode)
+	if allowOverflowRecovery && looksLikeContextOverflow(detail, status) {
+		return &model.ContextOverflowError{Cause: err}
+	}
+	return err
 }
 
 func httpErrorCode(status int) errorcode.Code {
@@ -151,16 +163,6 @@ func (e *imageInputError) Unwrap() error           { return e.cause }
 func (*imageInputError) Retryable() bool           { return false }
 func (*imageInputError) ErrorCode() errorcode.Code { return errorcode.InvalidArgument }
 
-func classifyImageInputError(err error, body string, status int) error {
-	if status != http.StatusBadRequest && status != http.StatusRequestEntityTooLarge && status != http.StatusUnprocessableEntity {
-		return err
-	}
-	if looksLikeImageInputError(body) {
-		return &imageInputError{cause: err}
-	}
-	return err
-}
-
 // HTTP bodies and Responses SSE envelopes use the same permanent image codes
 // and messages, including gateways that supply only an underscore-delimited code.
 func looksLikeImageInputError(detail string) bool {
@@ -184,7 +186,11 @@ func looksLikeContextOverflow(body string, statusCode int) bool {
 	if strings.TrimSpace(body) == "" {
 		return false
 	}
-	lower := strings.ToLower(body)
+	lower := strings.ReplaceAll(strings.ToLower(body), "_", " ")
+	// Gemini reports the measured input and maximum as separate counts.
+	if strings.Contains(lower, "input token count") && strings.Contains(lower, "exceeds the maximum number of tokens") {
+		return true
+	}
 	for _, kw := range contextOverflowKeywords {
 		if strings.Contains(lower, kw) {
 			return true

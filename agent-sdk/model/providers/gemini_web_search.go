@@ -89,38 +89,47 @@ func geminiGroundingResults(out *genai.GenerateContentResponse) []model.WebSearc
 	return results
 }
 
-func geminiGroundingCitationsForPart(out *genai.GenerateContentResponse, partIndex int, text string) []model.Citation {
-	if out == nil || len(out.Candidates) == 0 || out.Candidates[0] == nil || out.Candidates[0].GroundingMetadata == nil {
+func geminiGroundingMetadata(out *genai.GenerateContentResponse) *genai.GroundingMetadata {
+	if out == nil || len(out.Candidates) == 0 || out.Candidates[0] == nil {
 		return nil
 	}
-	metadata := out.Candidates[0].GroundingMetadata
+	return out.Candidates[0].GroundingMetadata
+}
+
+func geminiGroundingCitationsForPart(metadata *genai.GroundingMetadata, partIndex int, text string) []model.Citation {
+	if metadata == nil {
+		return nil
+	}
 	citations := make([]model.Citation, 0, len(metadata.GroundingSupports))
 	for _, support := range metadata.GroundingSupports {
-		if support == nil || support.Segment == nil || int(support.Segment.PartIndex) != partIndex {
-			continue
+		if support != nil && support.Segment != nil && int(support.Segment.PartIndex) == partIndex {
+			citations = append(citations, geminiGroundingCitation(support, metadata.GroundingChunks))
 		}
-		sources := make([]model.CitationSource, 0, len(support.GroundingChunkIndices))
-		for _, rawIndex := range support.GroundingChunkIndices {
-			index := int(rawIndex)
-			if index < 0 || index >= len(metadata.GroundingChunks) {
-				continue
-			}
-			chunk := metadata.GroundingChunks[index]
-			if chunk == nil || chunk.Web == nil || strings.TrimSpace(chunk.Web.URI) == "" {
-				continue
-			}
-			sources = append(sources, model.CitationSource{
-				RefID:  fmt.Sprintf("grounding-%d", index),
-				Title:  strings.TrimSpace(chunk.Web.Title),
-				URL:    strings.TrimSpace(chunk.Web.URI),
-				Source: strings.TrimSpace(chunk.Web.Domain),
-			})
-		}
-		citations = append(citations, model.Citation{
-			StartIndex: int(support.Segment.StartIndex),
-			EndIndex:   int(support.Segment.EndIndex),
-			Sources:    sources,
-		})
 	}
 	return model.NormalizeCitations(text, citations)
+}
+
+func geminiGroundingCitation(support *genai.GroundingSupport, chunks []*genai.GroundingChunk) model.Citation {
+	sources := make([]model.CitationSource, 0, len(support.GroundingChunkIndices))
+	for _, rawIndex := range support.GroundingChunkIndices {
+		index := int(rawIndex)
+		if index < 0 || index >= len(chunks) {
+			continue
+		}
+		chunk := chunks[index]
+		if chunk == nil || chunk.Web == nil || strings.TrimSpace(chunk.Web.URI) == "" {
+			continue
+		}
+		sources = append(sources, model.CitationSource{
+			RefID:  fmt.Sprintf("grounding-%d", index),
+			Title:  strings.TrimSpace(chunk.Web.Title),
+			URL:    strings.TrimSpace(chunk.Web.URI),
+			Source: strings.TrimSpace(chunk.Web.Domain),
+		})
+	}
+	return model.Citation{
+		StartIndex: int(support.Segment.StartIndex),
+		EndIndex:   int(support.Segment.EndIndex),
+		Sources:    sources,
+	}
 }

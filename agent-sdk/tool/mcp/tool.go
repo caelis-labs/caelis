@@ -66,8 +66,9 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		return result, tool.NewError(errorcode.UnknownOutcome, "MCP server returned no tool execution receipt")
 	}
 	blocks, contentErr := mcpContentBlocks(resp.Content)
+	// The SDK decodes an explicit null as json.RawMessage("null") and leaves an omitted field nil.
 	if resp.StructuredContent != nil {
-		structured, err := structuredContentBlock(resp.StructuredContent)
+		structured, err := structuredContentBlock(resp.StructuredContent, t.client.protocolVersion() < mcpProtocolVersion20260728)
 		if err != nil {
 			contentErr = errors.Join(contentErr, err)
 		} else {
@@ -80,16 +81,15 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 			})
 			blocks = append(blocks, structured)
 			if t.def.OutputSchema != nil && !resp.IsError {
-				if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: t.def.OutputSchema}, structured.Value); err != nil {
+				if err := tool.ValidateOutput(t.def.OutputSchema, structured.Value); err != nil {
 					contentErr = errors.Join(contentErr, fmt.Errorf("structuredContent does not match outputSchema: %w", err))
 				}
 			}
 		}
-	}
-	result := tool.Result{Content: blocks}
-	if _, ok := result.Structured(); t.def.OutputSchema != nil && !ok && !resp.IsError {
+	} else if t.def.OutputSchema != nil && !resp.IsError {
 		contentErr = errors.Join(contentErr, errors.New("outputSchema requires structuredContent"))
 	}
+	result := tool.Result{Content: blocks}
 	var contentMessage string
 	if contentErr != nil {
 		contentMessage = "MCP content not delivered: " + contentErr.Error()

@@ -17,6 +17,9 @@ func normalizeResourceLimits(cfg Config) (Config, error) {
 	if cfg.ResourceLimits == nil {
 		return cfg, nil
 	}
+	if cfg.ResourceLimits.ReadPaths != nil {
+		return Config{}, fmt.Errorf("sandbox: mandatory read limits require Seatbelt or Bubblewrap")
+	}
 	roots := pathutil.Dedupe(cfg.ResourceLimits.WritePaths)
 	if len(roots) == 0 {
 		return Config{}, fmt.Errorf("sandbox: Windows resource limits require a writable directory")

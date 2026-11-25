@@ -64,6 +64,10 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	if err := sandbox.ValidateConfig(cfg); err != nil {
 		return nil, err
 	}
+	cfg, err := normalizeResourceLimits(cfg)
+	if err != nil {
+		return nil, err
+	}
 	hostUserSID, err := win32.CurrentProcessUserSID()
 	if err != nil {
 		return nil, fmt.Errorf("impl/sandbox/windows: resolve current Host user SID: %w", err)
@@ -91,11 +95,6 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	}
 	if cfg.BaseEnv == nil {
 		cfg.BaseEnv = os.Environ()
-	}
-	var err error
-	cfg, err = normalizeResourceLimits(cfg)
-	if err != nil {
-		return nil, err
 	}
 	stateRoot, err := resolveStateRoot(cfg.StateDir)
 	if err != nil {

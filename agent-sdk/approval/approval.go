@@ -430,36 +430,44 @@ func FinalizeReviewResult(payload *Payload, result ReviewResult) ReviewResult {
 	return result
 }
 
-// ResolveReviewResult applies the shared approval decision precedence. A valid
-// selected option is authoritative; when no valid option is selected, the
-// review falls back to the approved/outcome decision and existing option
-// matching.
+// ResolveReviewResult settles a review by canonical option kind. A valid
+// selected option takes precedence over the outcome. An outcome-only approval
+// requires a matching offered option when the request has an option contract.
 func ResolveReviewResult(payload *Payload, result ReviewResult) ReviewResult {
-	options := []Option(nil)
+	var options []Option
 	if payload != nil {
 		options = payload.Options
 	}
-	optionID := strings.TrimSpace(result.OptionID)
-	if optionID != "" {
-		if option, ok := lookupOptionByID(options, optionID); ok {
-			result.OptionID = strings.TrimSpace(option.ID)
-			result.Approved = optionMatchesDecision(option, true)
+	outcome := strings.ToLower(strings.TrimSpace(result.Outcome))
+	if outcome == "cancelled" {
+		result.Outcome = outcome
+		result.OptionID = ""
+		result.Approved = false
+		return result
+	}
+	if result.OptionID != "" {
+		if option, decision, err := ResolveStrictOption(options, result.OptionID); err == nil {
+			result.OptionID = option.ID
+			result.Approved = decision == OptionDecisionAllow
 			result.Outcome = string(StatusSelected)
 			return result
 		}
 	}
-	result.Approved = approvedFromReviewOutcome(result)
-	result.OptionID = optionIDForDecision(options, result.Approved)
-	if result.OptionID != "" {
-		result.Outcome = string(StatusSelected)
-		return result
+	approved := outcome == "allow" || outcome == string(StatusApproved) || outcome == "" && result.Approved
+	decision := OptionDecisionDeny
+	if approved {
+		decision = OptionDecisionAllow
 	}
-	if strings.TrimSpace(result.Outcome) == "" {
-		if result.Approved {
-			result.Outcome = string(StatusApproved)
-		} else {
-			result.Outcome = string(StatusRejected)
-		}
+	optionID, matched, err := StrictOptionIDForDecision(options, decision)
+	result.Approved = approved && err == nil && (matched || len(options) == 0)
+	result.OptionID = optionID
+	switch {
+	case matched:
+		result.Outcome = string(StatusSelected)
+	case result.Approved:
+		result.Outcome = string(StatusApproved)
+	default:
+		result.Outcome = string(StatusRejected)
 	}
 	return result
 }
@@ -526,48 +534,6 @@ func ReviewErrorOutcome(err error) (ReviewStatus, string, bool) {
 		return ReviewStatusFailed, "automatic approval review cancelled", true
 	default:
 		return ReviewStatusFailed, "automatic approval review failed: " + err.Error(), true
-	}
-}
-
-func optionIDForDecision(options []Option, approved bool) string {
-	for _, option := range options {
-		if optionMatchesDecision(option, approved) {
-			return strings.TrimSpace(option.ID)
-		}
-	}
-	return ""
-}
-
-func optionMatchesDecision(option Option, approved bool) bool {
-	value := strings.ToLower(strings.TrimSpace(strings.Join([]string{option.Kind, option.ID, option.Name}, " ")))
-	if approved {
-		return strings.HasPrefix(value, "allow") || strings.Contains(value, " allow")
-	}
-	return strings.HasPrefix(value, "reject") || strings.Contains(value, " reject") ||
-		strings.HasPrefix(value, "deny") || strings.Contains(value, " deny")
-}
-
-func lookupOptionByID(options []Option, optionID string) (Option, bool) {
-	optionID = strings.TrimSpace(optionID)
-	if optionID == "" {
-		return Option{}, false
-	}
-	for _, option := range options {
-		if strings.TrimSpace(option.ID) == optionID {
-			return option, true
-		}
-	}
-	return Option{}, false
-}
-
-func approvedFromReviewOutcome(result ReviewResult) bool {
-	switch strings.ToLower(strings.TrimSpace(result.Outcome)) {
-	case "allow", "approved":
-		return true
-	case "deny", "denied", "reject", "rejected":
-		return false
-	default:
-		return result.Approved
 	}
 }
 

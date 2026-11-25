@@ -336,9 +336,9 @@ func assertFenceGuardedMutations(
 	}
 	controlMessage := model.NewTextMessage(model.RoleUser, "control append")
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
-		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
-	}); err != nil {
-		t.Fatalf("control AppendEvent error = %v", err)
+		SessionRef: ref, MutationGuard: session.ControlMutationGuard("test"), Event: &session.Event{ID: "rejected-test-purpose", Type: session.EventTypeUser, Message: &controlMessage},
+	}); !errors.Is(err, session.ErrFenceConflict) {
+		t.Fatalf("retired test purpose AppendEvent error = %v, want ErrFenceConflict", err)
 	}
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
@@ -447,10 +447,19 @@ func assertFenceGuardedMutations(
 	}
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef:    ref,
-		MutationGuard: session.ControlMutationGuard("future_unknown"),
-		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+		MutationGuard: session.ControlMutationGuard("test"),
+		Event:         &session.Event{ID: "rejected-test-purpose", Type: session.EventTypeUser, Message: &controlMessage},
 	}); !errors.Is(err, session.ErrFenceConflict) {
-		t.Fatalf("unknown control purpose AppendEvent error = %v, want ErrFenceConflict", err)
+		t.Fatalf("quiescent test purpose AppendEvent error = %v, want ErrFenceConflict", err)
+	}
+	loaded, err := service.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range loaded.Events {
+		if event.ID == "rejected-test-purpose" {
+			t.Fatalf("rejected event was committed: %#v", event)
+		}
 	}
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef:    ref,

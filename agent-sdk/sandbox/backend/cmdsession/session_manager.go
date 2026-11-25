@@ -22,6 +22,7 @@ type SessionManager struct {
 	mu          sync.RWMutex
 	maxSessions int
 	closed      bool
+	stopCleanup chan struct{}
 }
 
 // SessionManagerConfig configures the session manager.
@@ -51,8 +52,8 @@ func NewSessionManager(cfg SessionManagerConfig) *SessionManager {
 		maxSessions: cfg.MaxSessions,
 	}
 
-	// Start periodic cleanup
 	if cfg.CleanupInterval > 0 {
+		sm.stopCleanup = make(chan struct{})
 		go sm.cleanupLoop(cfg.CleanupInterval, cfg.MaxSessionAge)
 	}
 
@@ -63,7 +64,13 @@ func (sm *SessionManager) cleanupLoop(interval, maxAge time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-sm.stopCleanup:
+			return
+		case <-ticker.C:
+		}
+
 		sm.mu.Lock()
 		if sm.closed {
 			sm.mu.Unlock()
@@ -213,7 +220,7 @@ func (sm *SessionManager) GetResult(id string) (sandbox.CommandResult, error) {
 	return session.GetResult()
 }
 
-// Close terminates all sessions and closes the manager.
+// Close stops periodic cleanup and terminates all sessions.
 func (sm *SessionManager) Close() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -222,6 +229,9 @@ func (sm *SessionManager) Close() error {
 		return nil
 	}
 	sm.closed = true
+	if sm.stopCleanup != nil {
+		close(sm.stopCleanup)
+	}
 
 	var firstErr error
 	for id, session := range sm.sessions {

@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 )
 
 func TestSeatbeltWritableRootsSkipMissingRootWithoutCreatingIt(t *testing.T) {
@@ -155,7 +154,7 @@ func TestStartAsyncWorkspaceWriteDeniesHomeWrite(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runner.Close() })
 
-	sessionID, err := runner.StartAsync(context.Background(), runnerruntime.Request{
+	sessionID, err := runner.StartAsync(context.Background(), sandbox.CommandRequest{
 		Command: `printf denied > ` + shellQuote(target),
 		Dir:     workspace,
 		Constraints: sandbox.Constraints{
@@ -207,7 +206,7 @@ func TestWaitSessionTimeoutDoesNotConsumeExitForLaterResultWait(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runner.Close() })
 
-	sessionID, err := runner.StartAsync(context.Background(), runnerruntime.Request{
+	sessionID, err := runner.StartAsync(context.Background(), sandbox.CommandRequest{
 		Command: "printf ok",
 		Dir:     dir,
 		Timeout: 5 * time.Second,

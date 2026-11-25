@@ -914,7 +914,7 @@ func TestSessionStartHookRunsOnceAndPersistsEmptyStdout(t *testing.T) {
 	}
 
 	// Now delete the state key to force the fallback event scanning logic
-	_, err = sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: sess.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(st map[string]any) (map[string]any, error) {
+	_, err = sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: sess.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Update: func(st map[string]any) (map[string]any, error) {
 		delete(st, stateKey)
 		return st, nil
 	}})

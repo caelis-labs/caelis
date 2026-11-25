@@ -4,8 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
@@ -60,7 +59,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 		return text
 	}
 	toolName := strings.TrimSpace(input.ToolName)
-	if toolName == tasktool.ToolName && commandTaskTargetKind(projection.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
+	if toolName == names.Task && commandTaskTargetKind(projection.ToolTaskTargetKind(nil, input.RawOutput, input.Meta)) {
 		if TerminalTaskStillRunning(input.RawOutput, input.Meta) || !ToolStatusFinal(input.Status, input.Error) {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["latest_output"]), rawDisplayString(input.RawOutput["output_preview"]))
 		}
@@ -75,7 +74,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	if !HasTerminalPanelMeta(input.Meta) {
 		return ""
 	}
-	if toolName == spawn.ToolName {
+	if toolName == names.StartThread {
 		if input.Error || strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["stderr"]), rawDisplayString(input.RawOutput["error"]))
 		}
@@ -101,7 +100,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 // compatibility fallback for older stored events.
 func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 	toolName := strings.TrimSpace(input.ToolName)
-	if (toolName != spawn.ToolName && toolName != tasktool.ToolName) || !ToolStatusFinal(input.Status, input.Error) {
+	if (toolName != names.StartThread && toolName != names.Task) || !ToolStatusFinal(input.Status, input.Error) {
 		return ""
 	}
 	targetKind := strings.ToLower(firstRawNonEmpty(
@@ -109,7 +108,7 @@ func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 		projection.ToolTaskTargetKind(nil, input.RawOutput, input.Meta),
 	))
 	state := rawDisplayString(input.RawOutput["state"])
-	if toolName == spawn.ToolName || !commandTaskTargetKind(targetKind) {
+	if toolName == names.StartThread || !commandTaskTargetKind(targetKind) {
 		if text := projection.SubagentTaskFinalText(state, input.RawOutput); text != "" {
 			return text
 		}
@@ -120,7 +119,7 @@ func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 	}
 	taskMeta := RuntimeTaskMeta(input.Meta)
 	state = firstRawNonEmpty(rawDisplayString(taskMeta["state"]), state)
-	if toolName == spawn.ToolName || !commandTaskTargetKind(targetKind) {
+	if toolName == names.StartThread || !commandTaskTargetKind(targetKind) {
 		return projection.SubagentTaskFinalText(state, taskMeta)
 	}
 	if TerminalRawOutputHasText(taskMeta) {

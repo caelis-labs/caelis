@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -226,13 +226,10 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	if err != nil {
 		if strings.TrimSpace(snapshot.Ref.TaskID) != "" {
 			payload := taskToolPayload(snapshot)
-			if diag, ok := commanddiag.Best(commanddiag.Input{
-				ToolName: shell.RunCommandToolName, Command: command,
-				Error: strings.TrimSpace(err.Error()), ExitCode: 1,
-			}); ok {
-				if hint := strings.TrimSpace(diag.Hint); hint != "" {
-					payload["system_hint"] = hint
-				}
+			if hint := commanddiag.Hint(commanddiag.Input{
+				Command: command, Error: strings.TrimSpace(err.Error()), ExitCode: 1,
+			}); hint != "" {
+				payload["system_hint"] = hint
 			}
 			result, _ := taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
 			if approved && !isCommandToolError(err) {
@@ -298,22 +295,19 @@ func commandStartDiagnosticToolResult(name, command string, err error) (tool.Res
 	if err == nil {
 		return tool.Result{}, false
 	}
-	diag, ok := commanddiag.Best(commanddiag.Input{
-		ToolName: shell.RunCommandToolName,
+	hint := commanddiag.Hint(commanddiag.Input{
 		Command:  command,
 		Error:    strings.TrimSpace(err.Error()),
 		ExitCode: 1,
 	})
-	if !ok {
+	if hint == "" {
 		return tool.Result{}, false
 	}
 	payload := map[string]any{
-		"state":     "failed",
-		"error":     strings.TrimSpace(err.Error()),
-		"tool_name": strings.TrimSpace(name),
-	}
-	if hint := strings.TrimSpace(diag.Hint); hint != "" {
-		payload["system_hint"] = hint
+		"state":       "failed",
+		"error":       strings.TrimSpace(err.Error()),
+		"tool_name":   strings.TrimSpace(name),
+		"system_hint": hint,
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
@@ -514,7 +508,7 @@ func newSubagentApprovalRequester(
 	if requester == nil && runtime != nil {
 		requester = runtime.childApprovalRequester
 	}
-	if requester == nil && (runtime == nil || presets.NormalizeModeName(mode) != presets.ModeDangerFullAccess) {
+	if requester == nil && (runtime == nil || policy.NormalizeModeName(mode) != policy.ProfileDangerFullAccess) {
 		return nil
 	}
 	return subagentApprovalRequester{
@@ -1019,7 +1013,7 @@ func commonTaskBatchKind(items []taskBatchControlItem) (taskapi.Kind, bool) {
 func (t runtimeTaskTool) resolveJobHandle(ctx context.Context, handle string) (taskControlIdentity, error) {
 	identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
 	if err == nil && identity.kind == taskapi.KindSubagent {
-		return taskControlIdentity{}, errorcode.New(errorcode.Unsupported, "participant handles require ReadThread or WaitThread; use SendMessage for input")
+		return taskControlIdentity{}, errorcode.New(errorcode.Unsupported, "Task requires a job handle. This handle belongs to a participant.")
 	}
 	return identity, err
 }

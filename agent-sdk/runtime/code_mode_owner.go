@@ -10,25 +10,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// Keep the complete ordinary wrapper chain inside the existing Run continuation
-// owner. Foreground cancellation does not end the producer; executeKernelTurn
-// joins this owner before Runner completion and fence release.
-func ownCodeModeProducers(ctx context.Context, concrete, wrapped []tool.Tool) []tool.Tool {
-	index := 0
-	for _, one := range concrete {
-		if one == nil {
-			continue
-		}
-		if _, ok := one.(runtimeCodeModeTool); ok {
-			wrapped[index] = codeModeProducerTool{base: wrapped[index], scope: taskScopeFromContext(ctx), owner: ctx}
-		}
-		index++
-	}
-	return wrapped
-}
-
 type codeModeProducerErrorKey struct{}
 
+// codeModeProducerTool retains the complete wrapper chain under the Run's
+// continuation owner. executeKernelTurn joins it before releasing the fence.
 type codeModeProducerTool struct {
 	base  tool.Tool
 	scope *taskContinuationScope
@@ -89,16 +74,6 @@ func (t codeModeProducerTool) RuntimeCall(_ toolbinding.Token, ctx context.Conte
 		go func() { <-done; t.scope.complete(id, work, errors.Join(producerError(), completionError())) }()
 	}
 	return result, callErr
-}
-
-// The policy owner receives source-read semantics from the concrete Runtime
-// binding before dispatch, never from a display name or
-// model/remote metadata.
-func codeModeReadPathArgument(one tool.Tool) string {
-	if _, ok := one.(runtimeCodeModeTool); ok {
-		return "file"
-	}
-	return ""
 }
 
 func (t codeModeProducerTool) RuntimeTaskResultSource(toolbinding.Token) bool {

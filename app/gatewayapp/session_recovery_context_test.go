@@ -123,7 +123,7 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	}
 	// Deliberately preserve even an old unsupported pin: it no longer grants authority.
 	pin := map[string]any{"version": float64(1), "consistency_token": "retained-token", "view_ref": "old-view"}
-	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}

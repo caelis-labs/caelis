@@ -9,10 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func messagesFromContext(ctx agent.Context) []model.Message {
-	messages, _ := messagesFromContextChecked(ctx)
-	return messages
-}
 func messagesFromContextChecked(ctx agent.Context) ([]model.Message, error) {
 	if ctx == nil {
 		return nil, nil

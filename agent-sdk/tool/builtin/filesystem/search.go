@@ -16,10 +16,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const SearchToolName = "Grep"
+const SearchToolName = names.Grep
 
 const (
 	binaryDetectionBytes = 8 * 1024
@@ -73,7 +74,7 @@ func (t *SearchTool) Definition() tool.Definition {
 }
 
 func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

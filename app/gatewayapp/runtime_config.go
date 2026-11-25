@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -97,11 +97,7 @@ func policyMode(raw string) string {
 }
 
 func policyProfile(raw string) string {
-	normalized := presets.NormalizeModeName(raw)
-	if strings.TrimSpace(normalized) == "" {
-		return presets.ModeDefault
-	}
-	return normalized
+	return policy.NormalizeModeName(raw)
 }
 
 func firstNonEmpty(values ...string) string {

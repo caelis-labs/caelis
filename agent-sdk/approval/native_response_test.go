@@ -41,8 +41,31 @@ func TestNativeResponseUsesExactOfferedKindWithoutDisplayAuthority(t *testing.T)
 	if _, err := ResolveNativeResponse(permission, Response{Outcome: "approved", Approved: true}); err == nil {
 		t.Fatal("outcome-only decision manufactured an unavailable grant")
 	}
-	legacy := Response{Outcome: "approved", Approved: true}
-	if got, err := ResolveNativeResponse(nil, legacy); err != nil || got != legacy {
-		t.Fatalf("legacy optionless response = %+v, %v", got, err)
+}
+
+func TestNativeResponseWithoutOptionsStillValidatesOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		response        Response
+		valid, approved bool
+	}{
+		{"boolean", Response{Approved: true}, true, true},
+		{"approved", Response{Outcome: "approved"}, true, true},
+		{"rejected", Response{Outcome: "rejected", Approved: true}, true, false},
+		{"cancelled", Response{Outcome: "cancelled", Approved: true}, true, false},
+		{"unsupported", Response{Outcome: "unknown", Approved: true}, false, false},
+		{"invented_option", Response{Outcome: "approved", OptionID: "invented", Approved: true}, false, false},
+		{"legacy_selected_allow", Response{Outcome: "selected", OptionID: "deny", Approved: true}, true, true},
+		{"legacy_selected_deny", Response{Outcome: "selected", OptionID: "allow"}, true, false},
+		{"missing_selection", Response{Outcome: "selected", Approved: true}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, permission := range []*session.ProtocolApproval{nil, {}} {
+				got, err := ResolveNativeResponse(permission, tc.response)
+				if (err == nil) != tc.valid || err == nil && (got.Approved != tc.approved || got.Outcome != tc.response.Outcome || got.OptionID != tc.response.OptionID) {
+					t.Fatalf("optionless response = %+v, %v", got, err)
+				}
+			}
+		})
 	}
 }

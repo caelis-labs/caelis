@@ -80,8 +80,8 @@ func TestAgentPluginDTWShapeUsesOneMCPAndPersistentPrivateData(t *testing.T) {
 		spec.Env["PLUGIN_ROOT"] != realRoot || spec.Env["PLUGIN_DATA"] != spec.DataDir || !spec.CleanEnvironment {
 		t.Fatalf("DTW standard MCP spec = %+v", spec)
 	}
-	if !strings.HasPrefix(spec.DataDir, filepath.Join(store, "plugins", "data")+string(filepath.Separator)) {
-		t.Fatalf("PLUGIN_DATA escaped host store: %q", spec.DataDir)
+	if spec.DataDirRoot != store || !strings.HasPrefix(spec.DataDir, filepath.Join(store, "plugins", "data")+string(filepath.Separator)) {
+		t.Fatalf("PLUGIN_DATA escaped host store: %q under %q", spec.DataDir, spec.DataDirRoot)
 	}
 	if _, err := os.Stat(spec.DataDir); !os.IsNotExist(err) {
 		t.Fatalf("read-only discovery created PLUGIN_DATA: %v", err)

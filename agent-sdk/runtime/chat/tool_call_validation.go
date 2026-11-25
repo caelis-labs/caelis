@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -103,7 +104,7 @@ func invalidToolCallWarningEvents(message model.Message, err error, includeNarra
 		out = append(out, session.MarkUIOnly(&session.Event{
 			Type: session.EventTypeToolCall,
 			Tool: toolEventPayload(call, "pending", mustObject(call.Args)),
-			Meta: toolMeta(call.Name),
+			Meta: toolbinding.ToolMeta(call.Name),
 		}))
 		result := tool.Result{
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{

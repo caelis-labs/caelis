@@ -4,16 +4,14 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
 	t.Parallel()
 
-	if id, ok := projectedDisplayTerminalID("call-1", shell.RunCommandToolName); !ok || id != "call-1" {
+	if id, ok := projectedDisplayTerminalID("call-1", names.RunCommand); !ok || id != "call-1" {
 		t.Fatalf("projectedDisplayTerminalID(RunCommand) = %q, %v", id, ok)
 	}
 	if _, ok := projectedDisplayTerminalID("call-1", "RUN_COMMAND"); ok {
@@ -25,10 +23,10 @@ func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
 	if got := projectedToolKind("SEARCH"); got != projectedToolKindOther {
 		t.Fatalf("projectedToolKind(SEARCH) = %q, want generic other", got)
 	}
-	if got := projectedToolKind(tasktool.ToolName); got != projectedToolKindOther {
+	if got := projectedToolKind(names.Task); got != projectedToolKindOther {
 		t.Fatalf("projectedToolKind(Task) = %q, want control-plane other", got)
 	}
-	if got := projectedToolTitle(spawn.ToolName, map[string]any{"agent": "self", "prompt": "inspect"}, eventstream.ToolStatusPending); got != "StartThread self: inspect" {
+	if got := projectedToolTitle(names.StartThread, map[string]any{"agent": "self", "prompt": "inspect"}, eventstream.ToolStatusPending); got != "StartThread self: inspect" {
 		t.Fatalf("projectedToolTitle(Spawn) = %q", got)
 	}
 }
@@ -90,8 +88,8 @@ func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
 func TestProtocolToolNameForUpdatePreservesExactName(t *testing.T) {
 	t.Parallel()
 
-	update := &session.ProtocolUpdate{ToolCallID: "call-1", Kind: shell.RunCommandToolName}
-	if got := protocolToolNameForUpdate(&session.Event{}, update); got != shell.RunCommandToolName {
-		t.Fatalf("protocolToolNameForUpdate() = %q, want %q", got, shell.RunCommandToolName)
+	update := &session.ProtocolUpdate{ToolCallID: "call-1", Kind: names.RunCommand}
+	if got := protocolToolNameForUpdate(&session.Event{}, update); got != names.RunCommand {
+		t.Fatalf("protocolToolNameForUpdate() = %q, want %q", got, names.RunCommand)
 	}
 }

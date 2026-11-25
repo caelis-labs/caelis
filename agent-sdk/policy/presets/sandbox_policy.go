@@ -15,7 +15,7 @@ func EffectiveSandboxPolicy(
 	options policy.ModeOptions,
 ) sandbox.PolicySnapshot {
 	constraints := workspaceWriteConstraints(options)
-	if NormalizeModeName(profile) == ModeDangerFullAccess || sandbox.DescriptorImpliesHostExecution(descriptor) {
+	if policy.NormalizeModeName(profile) == policy.ProfileDangerFullAccess || sandbox.DescriptorImpliesHostExecution(descriptor) {
 		constraints = hostExecutionConstraints()
 	}
 	effective := backendpolicy.Default(cfg, constraints)

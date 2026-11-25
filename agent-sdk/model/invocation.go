@@ -64,8 +64,6 @@ func WithInvocationObserver(ctx context.Context, observer func(Invocation)) cont
 
 type invocationAdmissionKey struct{}
 
-type toolAvailabilityKey struct{}
-
 // WithInvocationAdmission installs an embedding-owned gate before each actual
 // provider attempt, including retries. Rejection creates no invocation receipt.
 // A gate error stops request recovery; it is not a provider transport failure.
@@ -146,10 +144,6 @@ func GenerateWithRequestTransform(ctx context.Context, llm LLM, req *Request, tr
 // cache expires after five minutes. Unprocessable images become text notices.
 // Canonical messages and remote media references remain unchanged.
 func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent, error] {
-	if available, ok := ctx.Value(toolAvailabilityKey{}).(func() bool); ok && req != nil && !available() {
-		req = CloneRequest(req)
-		req.DisableTools = true
-	}
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
 	}

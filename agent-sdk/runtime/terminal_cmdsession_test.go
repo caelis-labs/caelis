@@ -16,7 +16,7 @@ import (
 )
 
 // gatedCmdsessionRunner runs real cmdsession sessions through the production
-// runner translation while stalling output delivery until the test releases
+// runner runtime while stalling output delivery until the test releases
 // it, so "output has not completed" becomes a controllable state instead of a
 // race.
 type gatedCmdsessionRunner struct {
@@ -45,7 +45,7 @@ func (r *gatedCmdsessionRunner) close() {
 	_ = r.manager.Close()
 }
 
-func (r *gatedCmdsessionRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
+func (r *gatedCmdsessionRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	sessionID, err := r.StartAsync(ctx, req)
 	if err != nil {
 		return sandbox.CommandResult{}, err
@@ -53,7 +53,7 @@ func (r *gatedCmdsessionRunner) Run(ctx context.Context, req runnerruntime.Reque
 	return r.WaitSession(ctx, sessionID, 0)
 }
 
-func (r *gatedCmdsessionRunner) StartAsync(_ context.Context, req runnerruntime.Request) (string, error) {
+func (r *gatedCmdsessionRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) (string, error) {
 	forward := runnerruntime.UTF8OutputForwarder(req.OnOutput)
 	session, err := r.manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:     req.Command,

@@ -8,10 +8,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const SearchToolName = "WebSearch"
+const SearchToolName = names.WebSearch
 
 type SearchTool struct{}
 
@@ -59,7 +60,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 
 // CallWithBackend binds provider search for only this invocation.
 func (t *SearchTool) CallWithBackend(ctx context.Context, call tool.Call, backend SearchBackend) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

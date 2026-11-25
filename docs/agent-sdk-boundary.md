@@ -170,9 +170,10 @@ restart contract is documented in [Execution Configuration](execution-configurat
 
 The assembled Tool set is the execution-admission boundary. Product policy may
 further restrict an admitted invocation, but tool names do not form a second
-allowlist. A StartThread-created collaborator receives only `ListThreads` and `SendMessage`
-from the collaboration tool set. Creation and work observation remain with the
-controller, keeping Agent collaboration one level deep.
+allowlist. Control derives collaboration instructions from the tools it installs.
+A product StartThread collaborator receives `ListThreads`, `SendMessage`, and
+`ReadMessages` when Control collaboration is available. Creation and work
+observation remain with the controller, keeping Agent collaboration one level deep.
 
 Harness Chat executes eligible calls in one native model batch concurrently
 when the active model declares parallel tool calls. Batches containing an
@@ -635,7 +636,9 @@ that the entire model request prefix is unchanged.
 The host installs Policy through `runtime.Config.Hooks.ToolPolicy`. Without a
 registry or requested profile, Runtime dispatches the host's tools directly
 after argument preparation. A named profile requires a matching registered
-mode. With Policy installed, direct calls and Code Mode targets share its
+mode. The Host explicitly registers `danger-full-access` when it authorizes
+that mode. Agent metadata selects among the Host’s registered modes. With
+Policy installed, direct calls and Code Mode targets share its
 Allow/Deny/Ask decision on the effective arguments. An approval resumes the same guarded dispatch, including its final revocation check. A synthetic reply consumes the same admission. The Caelis Gateway explicitly installs its product
 policy. MCP discovery and server annotations only describe available tools.
 

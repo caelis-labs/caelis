@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -27,7 +28,7 @@ func TestRecordedToolReplySurvivesDifferentOutputBudget(t *testing.T) {
 	call := model.ToolCall{ID: "call-1", Name: "read_record", Args: `{"key":"row-7"}`}
 	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
 	result := textToolResult(strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2))
-	reply := toolResultMessageFromCanonical(call, result, nil)
+	reply := toolbinding.ResultMessage(call, result, nil)
 	events := append(modelToolCallEvents(assistant, nil, "", nil), toolResultEvent(call, result, nil, &reply))
 	for _, event := range events {
 		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {

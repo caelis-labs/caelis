@@ -29,24 +29,24 @@ func TestWithCollaborationPromptSliceAppendsControlInstruction(t *testing.T) {
 	got := runner.withCollaborationPromptSlice(&childRun{
 		spawn:            tasksubagent.SpawnContext{Handle: "@orbit", Role: session.ParticipantRoleSidecar},
 		supportsSteering: false,
-	}, prompt)
+	}, prompt, true)
 	if len(got) != 2 {
 		t.Fatalf("len(prompt) = %d, want Control slice plus task", len(got))
 	}
 	raw := string(got[0]) + string(got[1])
 	assertCollaborationSlice(t, raw, collaboration.PromptSlice{
-		Handle: "orbit", Role: "sidecar",
+		Handle: "orbit", Role: "sidecar", Tools: collaboration.Definitions(false),
 	}, "review the diff")
 	steering := runner.withCollaborationPromptSlice(&childRun{
 		spawn:            tasksubagent.SpawnContext{Handle: "orbit", Role: session.ParticipantRoleDelegated},
 		supportsSteering: true,
-	}, prompt)
-	if !strings.Contains(string(steering[1]), collaboration.CollaboratorInstructions()) {
-		t.Fatalf("steering-capable slice omitted reporting guidance: %s", steering[1])
-	}
+	}, prompt, false)
+	assertCollaborationSlice(t, string(steering[1]), collaboration.PromptSlice{
+		Handle: "orbit", Role: "delegated",
+	}, "")
 }
 
-func TestACPChildPromptInjectsIdentityAndReportingWithoutSteering(t *testing.T) {
+func TestACPChildPromptInjectsIdentityWithoutUninstalledTools(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -181,9 +181,6 @@ func TestACPChildSteeringOmitsCollaborationSlice(t *testing.T) {
 	assertCollaborationSlice(t, promptRaw, collaboration.PromptSlice{
 		Handle: "orbit", Role: "delegated",
 	}, "first")
-	if !strings.Contains(promptRaw, collaboration.CollaboratorInstructions()) {
-		t.Fatalf("steering-capable initial prompt omitted reporting guidance: %s", promptRaw)
-	}
 	if strings.Contains(steeringRaw, "caelis_collaboration") || strings.Contains(steeringRaw, "ReceiveMessages") || strings.Contains(steeringRaw, collaboration.DiscoveryInstruction()) {
 		t.Fatalf("steering mixed Control slice into a peer message: %s", steeringRaw)
 	}
@@ -249,11 +246,13 @@ func assertCollaborationSlice(t *testing.T, raw string, slice collaboration.Prom
 	if !strings.Contains(raw, "caelis_collaboration") || !strings.Contains(raw, identity) {
 		t.Fatalf("ACP prompt missing Control identity slice %q: %s", identity, raw)
 	}
-	if !strings.Contains(raw, "caelis-collaboration") {
-		t.Fatalf("ACP prompt missing stable discovery key: %s", raw)
+	for _, name := range []string{"caelis-collaboration", "SendMessage", "ReadMessages"} {
+		if present := strings.Contains(raw, name); present != (len(slice.Tools) > 0) {
+			t.Fatalf("ACP prompt mentions %q = %t for tools %v: %s", name, present, slice.Tools, raw)
+		}
 	}
-	if !strings.Contains(raw, collaboration.CollaboratorInstructions()) {
-		t.Fatalf("ACP prompt omitted reporting guidance: %s", raw)
+	if !strings.Contains(raw, "return your result and end the turn") {
+		t.Fatalf("ACP prompt omitted turn completion guidance: %s", raw)
 	}
 	if strings.Contains(raw, "CAELIS_COLLABORATION_TOKEN") || strings.Contains(raw, "Bearer") {
 		t.Fatalf("ACP prompt leaked secret: %s", raw)

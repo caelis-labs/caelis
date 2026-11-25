@@ -75,7 +75,7 @@ func (t dispatchTool) invoke(ctx context.Context, call tool.Call, attachment too
 			return synthetic, err
 		}
 		result, err := toolbinding.Call(callCtx, t.base, tool.CloneCall(call), toolbinding.Dispatch{Model: attachment.Model})
-		if around && observation.BuiltinDisplay != nil {
+		if around && (observation.BuiltinDisplay != nil || observation.PlanUpdate != nil) {
 			original, _ = tool.CloneResult(result, nil)
 		}
 		if admission != nil && callCtx.Err() != nil && err != nil {
@@ -83,8 +83,9 @@ func (t dispatchTool) invoke(ctx context.Context, call tool.Call, attachment too
 		}
 		return result, err
 	})
-	if around && observation.BuiltinDisplay != nil && !reflect.DeepEqual(original.Content, result.Content) {
+	if around && (observation.BuiltinDisplay != nil || observation.PlanUpdate != nil) && !reflect.DeepEqual(original.Content, result.Content) {
 		observation.BuiltinDisplay = nil
+		observation.PlanUpdate = nil
 	}
 	return result, err
 }

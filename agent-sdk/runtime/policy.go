@@ -8,7 +8,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -32,6 +31,7 @@ type policyAdmission struct {
 	options       policy.ModeOptions
 	sandboxPolicy sandbox.PolicySnapshot
 	tool          tool.Tool
+	readPath      string
 	approval      approvalContext
 }
 
@@ -46,11 +46,8 @@ func (m rejectedPolicyMode) DecideTool(context.Context, policy.ToolContext) (pol
 	return policy.Decision{}, m.err
 }
 
-// bindToolDispatch installs policy at the last stage before guarded dispatch.
-func (r *Runtime) bindToolDispatch(active session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, approval approvalContext) []tool.Tool {
-	if len(spec.Tools) == 0 {
-		return spec.Tools
-	}
+// toolDispatchBinder captures one policy snapshot for the tools in a binding pass.
+func (r *Runtime) toolDispatchBinder(active session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, approval approvalContext) func(tool.Tool, string) dispatchTool {
 	name := r.policyMode(spec)
 	var admission policyAdmission
 	if name != "" {
@@ -61,20 +58,16 @@ func (r *Runtime) bindToolDispatch(active session.Session, ref session.SessionRe
 		admission.sandboxPolicy = sandbox.ClonePolicySnapshot(r.sandboxPolicy)
 		admission.approval = approval
 	}
-	out := make([]tool.Tool, 0, len(spec.Tools))
-	for _, target := range spec.Tools {
-		if target == nil {
-			continue
-		}
+	return func(target tool.Tool, readPath string) dispatchTool {
 		bound := dispatchTool{base: target, sessions: r.sessions, sessionRef: ref, writes: &r.sessionWrites}
 		if name != "" {
 			entry := admission
 			entry.tool = target
+			entry.readPath = readPath
 			bound.before = entry.beforeTool
 		}
-		out = append(out, bound)
+		return bound
 	}
-	return out
 }
 
 func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, policy.Mode) {
@@ -86,7 +79,7 @@ func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, p
 }
 
 func (r *Runtime) lookupPolicyMode(ctx context.Context, modeName string) (string, policy.Mode, error) {
-	normalized := presets.NormalizeModeName(modeName)
+	normalized := policy.NormalizeModeName(modeName)
 	if r == nil || r.hooks.ToolPolicy == nil {
 		return normalized, nil, &policy.ProfileError{
 			Profile: normalized,
@@ -130,7 +123,7 @@ func (t policyAdmission) beforeTool(ctx context.Context, call tool.Call, dispatc
 		SandboxPolicy:    t.sandboxPolicy,
 		Mode:             t.mode,
 		Options:          t.options,
-		ReadPathArgument: codeModeReadPathArgument(t.tool),
+		ReadPathArgument: t.readPath,
 	}
 	if t.approval.runtime != nil {
 		input.Authorizations = func(ctx context.Context) (session.AuthorizationEvidence, error) {

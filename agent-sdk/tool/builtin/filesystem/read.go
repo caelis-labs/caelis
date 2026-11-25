@@ -13,10 +13,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const ReadToolName = "Read"
+const ReadToolName = names.Read
 
 const (
 	maxReadLineBytes     = 8 * 1024 * 1024
@@ -83,7 +84,7 @@ func (t *ReadTool) Definition() tool.Definition {
 }
 
 func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	cfg := normalizedReadConfig(t.cfg)

@@ -18,8 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
@@ -594,9 +593,9 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 	if parentTool == "" {
 		switch entry.Kind {
 		case task.KindSubagent:
-			parentTool = spawn.ToolName
+			parentTool = names.StartThread
 		case task.KindCommand:
-			parentTool = shell.RunCommandToolName
+			parentTool = names.RunCommand
 		}
 	}
 	descriptor := TaskDescriptor{

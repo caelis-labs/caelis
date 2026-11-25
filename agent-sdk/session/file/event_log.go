@@ -15,9 +15,25 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-// Long tool results commonly exceed bufio's 4 KiB default. Each Store read
-// holds only one bounded buffer, independent of total Session history size.
+// Long tool results commonly exceed bufio's 4 KiB default. A scan holds this
+// read buffer plus scratch space for its largest record.
 const eventLogReadBufferSize = 64 << 10
+
+// readEventLogLine borrows the reader buffer for ordinary records and reuses
+// scratch space for larger records. The returned bytes are valid until the
+// next read.
+func readEventLogLine(reader *bufio.Reader, overflow *[]byte) ([]byte, error) {
+	line, err := reader.ReadSlice('\n')
+	if !errors.Is(err, bufio.ErrBufferFull) {
+		return line, err
+	}
+	*overflow = append((*overflow)[:0], line...)
+	for errors.Is(err, bufio.ErrBufferFull) {
+		line, err = reader.ReadSlice('\n')
+		*overflow = append(*overflow, line...)
+	}
+	return *overflow, err
+}
 
 func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocument) ([]*session.Event, error) {
 	path, err := s.resolveWritePath(doc.Session)
@@ -149,12 +165,13 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 	lineNo := checkpoint.LineNo
 	offset := checkpoint.Offset
 	lastConsumed := checkpoint
+	var overflow []byte
 	for {
 		if err := ctx.Err(); err != nil {
 			return session.EventPage{}, err
 		}
 		lineStart := offset
-		line, readErr := reader.ReadString('\n')
+		line, readErr := readEventLogLine(reader, &overflow)
 		if errors.Is(readErr, io.EOF) {
 			break
 		}
@@ -166,12 +183,12 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 		if len(line) > 0 && s.eventPageLineRead != nil {
 			s.eventPageLineRead(path, lineNo, lineStart)
 		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) != 0 {
 			var header struct {
 				Seq uint64 `json:"seq"`
 			}
-			if err := json.Unmarshal([]byte(trimmed), &header); err != nil {
+			if err := json.Unmarshal(trimmed, &header); err != nil {
 				return session.EventPage{}, fmt.Errorf("%w: decode event log %s line %d header: %w", session.ErrUnreadableSession, path, lineNo, err)
 			}
 			// A finite read owns only its durable cut. In particular, history
@@ -188,7 +205,7 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 				lastConsumed = lineCheckpoint
 				continue
 			}
-			event, err := decodeEventLogRecord([]byte(trimmed), path, lineNo)
+			event, err := decodeEventLogRecord(trimmed, path, lineNo)
 			if err != nil {
 				return session.EventPage{}, err
 			}

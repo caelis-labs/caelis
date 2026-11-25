@@ -30,7 +30,7 @@ func seedOrphanPlan(t *testing.T, files *sessionfile.Store, active session.Sessi
 			t.Fatal(err)
 		}
 	}
-	_, err := files.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(s map[string]any) (map[string]any, error) { s["plan"] = value; return s, nil }})
+	_, err := files.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(s map[string]any) (map[string]any, error) { s["plan"] = value; return s, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

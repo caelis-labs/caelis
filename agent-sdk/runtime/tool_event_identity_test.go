@@ -315,10 +315,14 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 			return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"value":"ok"}`)}}}, nil
 		},
 	}
-	firstWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-1", "turn-1", sequence)
-	secondWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-1", "turn-1", sequence)
-	if len(firstWrap) != 1 || len(secondWrap) != 1 {
-		t.Fatalf("wrapped tools = %d/%d, want 1 each", len(firstWrap), len(secondWrap))
+	other := tool.NamedTool{Def: tool.Definition{Name: "OTHER"}}
+	firstWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{nil, base, nil, other}}, nil, "run-1", "turn-1", sequence)
+	secondWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{nil, base}}, nil, "run-1", "turn-1", sequence)
+	if len(firstWrap) != 2 || len(secondWrap) != 1 {
+		t.Fatalf("wrapped tools = %d/%d, want 2 and 1", len(firstWrap), len(secondWrap))
+	}
+	if first, second := firstWrap[0].Definition().Name, firstWrap[1].Definition().Name; first != "ECHO" || second != "OTHER" {
+		t.Fatalf("tool registration order = %s, %s, want ECHO, OTHER", first, second)
 	}
 	if _, err := firstWrap[0].Call(context.Background(), tool.Call{ID: "ollama-call-0", Name: "ECHO", Input: []byte(`{}`)}); err != nil {
 		t.Fatal(err)

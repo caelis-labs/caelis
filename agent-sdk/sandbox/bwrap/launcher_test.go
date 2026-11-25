@@ -14,7 +14,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 )
 
 func TestBwrapLauncherKeepsCommandEnvironmentAfterBoundary(t *testing.T) {
@@ -31,7 +30,7 @@ func TestBwrapLauncherKeepsCommandEnvironmentAfterBoundary(t *testing.T) {
 		},
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
-	request := runnerruntime.Request{Dir: workspace, Command: "echo ok", EnvOverrides: map[string]string{"LD_PRELOAD": "/evil", "EMPTY": ""}}
+	request := sandbox.CommandRequest{Dir: workspace, Command: "echo ok", Env: map[string]string{"LD_PRELOAD": "/evil", "EMPTY": ""}}
 	if _, err := runner.Run(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestBwrapLauncherClosesPayloadOnStartFailure(t *testing.T) {
 		},
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
-	req := runnerruntime.Request{Dir: workspace, Command: "echo ok"}
+	req := sandbox.CommandRequest{Dir: workspace, Command: "echo ok"}
 	if _, err := runner.Run(context.Background(), req); err == nil {
 		t.Fatal("Run unexpectedly started")
 	}

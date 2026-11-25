@@ -3,12 +3,12 @@ package toolpolicy
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -182,11 +182,10 @@ func TestPolicyConsentNeverWaivesDenyOrNewCallRestriction(t *testing.T) {
 		return session.AuthorizationEvidence{Consents: []session.AuthorizationScope{first.Authorization.Scope}}, nil
 	}
 	for _, action := range []policy.Action{policy.ActionDeny, policy.ActionAskApproval} {
-		base := policy.NamedMode{ID: presets.ModeWorkspaceWrite, Decide: func(ctx context.Context, in policy.ToolContext) (policy.Decision, error) {
-			if action == policy.ActionDeny {
-				return policy.Decision{Action: action}, nil
-			}
-			return presets.MCPApprovalDecision(in, sandbox.Constraints{})
+		base := policy.NamedMode{ID: policy.ProfileWorkspaceWrite, Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+			return policy.Decision{Action: action, Reason: "fixture has a per-call restriction", Approval: &session.ProtocolApproval{
+				Options: []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}},
+			}}, nil
 		}}
 		mode := Mode{Base: base, Authority: "owner"}
 		d, e := mode.DecideTool(t.Context(), input)
@@ -210,8 +209,24 @@ func TestOrdinaryMCPAlwaysIsAnExactCurrentPolicyRule(t *testing.T) {
 	var rules []Rule
 	mode := Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner", Rules: func(context.Context) ([]Rule, func(), error) { return rules, func() {}, nil }}
 	d, err := mode.DecideTool(t.Context(), input)
-	if err != nil || d.Action != policy.ActionAskApproval || len(d.Approval.Options) != 4 {
+	if err != nil || d.Action != policy.ActionAskApproval || d.Approval == nil {
 		t.Fatalf("ordinary source: %+v %v", d, err)
+	}
+	wantOptions := []session.ProtocolApprovalOption{
+		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
+		{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
+		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
+		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
+	}
+	if !slices.Equal(d.Approval.Options, wantOptions) {
+		t.Fatalf("MCP approval options = %+v, want %+v", d.Approval.Options, wantOptions)
+	}
+	subject := session.ApprovalSubjectOf(d.Approval)
+	if d.Approval.ToolCall.Title != "MCP configured/dtw/read" || subject.Kind != "app_access" ||
+		len(subject.Targets) != 2 || subject.Targets[0].Text != "configured/dtw/read" || subject.Targets[1].Text != "/workspace" ||
+		subject.Scope.Text != "this ready MCP tool, workspace and configuration" || len(subject.Grants) != len(wantOptions) ||
+		subject.Grants[1].Scope.Text != "this session" || subject.Grants[2].Scope.Text != "this workspace and configuration (persistent)" {
+		t.Fatalf("MCP approval evidence = %+v, tool call = %+v", subject, d.Approval.ToolCall)
 	}
 	// A rule persisted before this migration must still match byte-for-byte.
 	scope := session.AuthorizationScope{

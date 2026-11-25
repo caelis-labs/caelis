@@ -79,9 +79,11 @@ func TestManagerParentDeadlineStillBoundsBothStages(t *testing.T) {
 
 func TestManagerFirstCatalogListTimeoutHasIndependentPhase(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		const connectionDelay = 20 * time.Second
 		failures := make(chan ServerFailure, 1)
 		began := time.Now()
 		mgr, err := newManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "list"}}, func(ctx context.Context, spec ServerSpec) (*Client, error) {
+			time.Sleep(connectionDelay)
 			return asyncTestClient(ctx, spec, make(chan struct{}))
 		}, func(f ServerFailure) { failures <- f })
 		if err != nil {
@@ -89,15 +91,21 @@ func TestManagerFirstCatalogListTimeoutHasIndependentPhase(t *testing.T) {
 		}
 		defer mgr.Close()
 		<-mgr.Initialized()
-		failure := <-failures
-		if got := time.Since(began); got != DefaultToolListTimeout {
-			t.Fatal(got)
+		if elapsed := time.Since(began); elapsed != connectionDelay+DefaultToolListTimeout {
+			t.Fatalf("connection plus listing took %s", elapsed)
 		}
-		if !errors.Is(failure.Err, context.DeadlineExceeded) || failure.Summary() != "tools/list: deadline exceeded" {
-			t.Fatal(failure.Summary())
+		synctest.Wait()
+		select {
+		case failure := <-failures:
+			stage, ok := errors.AsType[*startupError](failure.Err)
+			if !ok || stage.Stage != "tools/list" || !errors.Is(failure.Err, context.DeadlineExceeded) || failure.Summary() != "tools/list: deadline exceeded" {
+				t.Fatalf("listing failure = %v (%s)", failure.Err, failure.Summary())
+			}
+		default:
+			t.Fatal("missing timeout notification")
 		}
 		infos := mgr.GetServerInfos("p")
-		if len(mgr.Tools()) != 0 || len(infos) != 1 || !strings.Contains(infos[0].Warning, "tools/list: deadline exceeded") {
+		if len(mgr.Tools()) != 0 || len(infos) != 1 || len(infos[0].Tools) != 0 || !strings.Contains(infos[0].Warning, "tools/list: deadline exceeded") {
 			t.Fatalf("status=%#v", infos)
 		}
 	})

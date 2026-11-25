@@ -37,7 +37,7 @@ func TestHostOwnsToolPolicy(t *testing.T) {
 	}{
 		{name: "unconfigured", wantExecutions: 1},
 		{name: "workspace policy", registry: workspacePolicyRegistry(t), wantApprovals: 1},
-		{name: "requested profile missing", profile: presets.ModeWorkspaceWrite},
+		{name: "requested profile missing", profile: policy.ProfileWorkspaceWrite},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active := newTestSessionService(t, "optional-policy")
@@ -77,7 +77,7 @@ func TestHostOwnsToolPolicy(t *testing.T) {
 
 func TestDefaultPolicyModeRequiresRegistry(t *testing.T) {
 	store, _ := newTestSessionService(t, "missing-registry")
-	if _, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, DefaultPolicyMode: presets.ModeWorkspaceWrite}); err == nil {
+	if _, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, DefaultPolicyMode: policy.ProfileWorkspaceWrite}); err == nil {
 		t.Fatal("accepted a default policy mode without a registry")
 	}
 }
@@ -109,7 +109,7 @@ func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
 					observed := &commandApprovalCaptureTool{}
 					requests := 0
 					wrapped := policyAdmission{
-						tool: observed, policy: presets.WorkspaceWriteMode(), mode: presets.ModeWorkspaceWrite,
+						tool: observed, policy: presets.WorkspaceWriteMode(), mode: policy.ProfileWorkspaceWrite,
 						options: policy.ModeOptions{WorkspaceRoot: "/workspace", WritableRoots: []string{"/workspace"}},
 						approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, request approval.Request) (approval.Response, error) {
 							requests++
@@ -181,12 +181,12 @@ func TestModeOptionsFromSessionUsesExplicitWritableRootMetadataOnly(t *testing.T
 func TestDangerFullAccessDefaultCannotBeOverriddenByAgentMetadata(t *testing.T) {
 	t.Parallel()
 
-	runtime := &Runtime{defaultPolicyMode: presets.ModeDangerFullAccess}
+	runtime := &Runtime{defaultPolicyMode: policy.ProfileDangerFullAccess}
 	got := runtime.policyMode(agent.AgentSpec{Metadata: map[string]any{
-		policy.MetadataPolicyProfile: presets.ModeWorkspaceWrite,
+		policy.MetadataPolicyProfile: policy.ProfileWorkspaceWrite,
 	}})
-	if got != presets.ModeDangerFullAccess {
-		t.Fatalf("policyMode() = %q, want process-owned %q", got, presets.ModeDangerFullAccess)
+	if got != policy.ProfileDangerFullAccess {
+		t.Fatalf("policyMode() = %q, want process-owned %q", got, policy.ProfileDangerFullAccess)
 	}
 }
 

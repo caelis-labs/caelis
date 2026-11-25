@@ -13,10 +13,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const GlobToolName = "Glob"
+const GlobToolName = names.Glob
 
 const globResultLimit = 100
 
@@ -50,7 +51,7 @@ func (t *GlobTool) Definition() tool.Definition {
 }
 
 func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

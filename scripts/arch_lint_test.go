@@ -132,6 +132,46 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			want:       "production code must not depend on retired protocol/acp/eventstream; use control/appserver/eventstream",
 		},
 		{
+			name:       "Control projection rejects built-in implementation",
+			rel:        "control/appserver/projection/tool_presentation.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/filesystem",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "Task stream projection rejects built-in implementation",
+			rel:        "control/appserver/taskstream/projection.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/task",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "Task stream descriptor rejects built-in implementation",
+			rel:        "control/taskstream/service.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/spawn",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "transcript rejects built-in implementation",
+			rel:        "surfaces/internal/transcript/tool_presentation.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/web",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "TUI rejects built-in assembly",
+			rel:        "surfaces/tui/app/tool_presentation.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "TUI accepts canonical built-in names",
+			rel:        "surfaces/tui/app/tool_presentation.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/names",
+		},
+		{
+			name:       "TUI test can exercise a concrete built-in tool",
+			rel:        "surfaces/tui/app/native_approval_title_test.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/shell",
+		},
+		{
 			name:       "Surface accepts Control client event stream",
 			rel:        "surfaces/headless/headless.go",
 			importPath: modulePath + "/control/appserver/eventstream",

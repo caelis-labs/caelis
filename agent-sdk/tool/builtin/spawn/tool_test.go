@@ -58,11 +58,15 @@ func TestDefinitionDescribesBoundedCollaboration(t *testing.T) {
 	desc := def.Description
 	for _, want := range []string{
 		"collaborating Agent",
-		"returned handle",
-		"ReadThread or WaitThread",
+		"return its handle",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("SPAWN description missing %q:\n%s", want, desc)
+		}
+	}
+	for _, unavailable := range []string{"ReadThread", "WaitThread", "SendMessage"} {
+		if strings.Contains(desc, unavailable) {
+			t.Fatalf("Spawn description mentions a separately installed tool %q: %s", unavailable, desc)
 		}
 	}
 }

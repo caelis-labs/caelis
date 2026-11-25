@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
-const ToolName = "Plan"
+const ToolName = names.Plan
 
 type Status string
 
@@ -69,23 +69,26 @@ func (Tool) Definition() tool.Definition {
 	}
 }
 
-func (Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+func (t Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+	result, _, err := t.CallWithUpdate(call)
+	return result, err
+}
+
+// CallWithUpdate returns the normalized plan alongside its model-visible acknowledgment.
+func (Tool) CallWithUpdate(call tool.Call) (tool.Result, Args, error) {
 	args, err := decodeArgs(call.Input)
 	if err != nil {
-		return tool.Result{}, err
+		return tool.Result{}, Args{}, err
 	}
-	entries, err := normalizeEntries(args.Entries)
+	args.Entries, err = normalizeEntries(args.Entries)
 	if err != nil {
-		return tool.Result{}, err
+		return tool.Result{}, Args{}, err
 	}
-	payload := map[string]any{
-		"updated": true,
+	args.Explanation = strings.TrimSpace(args.Explanation)
+	result := tool.Result{
+		Content: []tool.ContentBlock{tool.StructuredContent{Value: json.RawMessage(`{"updated":true}`)}},
 	}
-	toolpresentation.Plan(ctx, entriesToAny(entries), strings.TrimSpace(args.Explanation))
-	raw, _ := json.Marshal(payload)
-	return tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}},
-	}, nil
+	return result, args, nil
 }
 
 func decodeArgs(raw json.RawMessage) (Args, error) {
@@ -201,15 +204,4 @@ func normalizeStatus(value Status) Status {
 	default:
 		return ""
 	}
-}
-
-func entriesToAny(entries []Entry) []map[string]any {
-	out := make([]map[string]any, 0, len(entries))
-	for _, item := range entries {
-		out = append(out, map[string]any{
-			"content": item.Content,
-			"status":  string(item.Status),
-		})
-	}
-	return out
 }

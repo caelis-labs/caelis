@@ -1252,7 +1252,7 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 
 				errs <- err
 			default:
-				_, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+				_, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 					state[fmt.Sprintf("worker_%02d", i)] = true
 					return state, nil
 				}})
@@ -1303,7 +1303,7 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		state["mode"] = "default"
 		return state, nil
 	}}); err != nil {
@@ -1930,7 +1930,7 @@ func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
-	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		state["mode"] = "manual"
 		return state, nil
 	}}); err != nil {

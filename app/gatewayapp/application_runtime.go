@@ -130,11 +130,11 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	estimateTools, err := resolver.tools(ctx, configuration.Profile.NativeTools, estimateCapabilities)
+	estimateTools, guidance, err := resolver.tools(ctx, configuration.Profile.NativeTools, estimateCapabilities)
 	if err != nil {
 		return nil, err
 	}
-	compaction.EstimatedPromptPrefixTokens = estimateModelPromptPrefixTokens(map[string]any{"system_prompt": configuration.Profile.Instructions}, estimateTools)
+	compaction.EstimatedPromptPrefixTokens = estimateModelPromptPrefixTokens(map[string]any{"system_prompt": configuration.Profile.Instructions}, estimateTools) + estimatePromptTextTokens(guidance)
 	var sandboxPolicy sandbox.PolicySnapshot
 	if execRuntime != nil {
 		writable, _, err := applicationWorkspaceAccess(binding.Profile.Workspace.Access, workspace.CWD)
@@ -246,12 +246,12 @@ type applicationTurnResolver struct {
 	capabilitiesClosed bool
 }
 
-func (r *applicationTurnResolver) tools(ctx context.Context, nativeTools []string, capabilities *applicationCapabilities) ([]tool.Tool, error) {
+func (r *applicationTurnResolver) tools(ctx context.Context, nativeTools []string, capabilities *applicationCapabilities) ([]tool.Tool, string, error) {
 	var tools []tool.Tool
 	if r.binding.Profile.Execution == "workspace-write" {
 		native, err := newApplicationNativeTools(r.execution, r.composition.authorities.sessionProfiles, r.binding, r.composition.workspace.CWD, nativeTools)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		tools = append(tools, native...)
 	}
@@ -273,15 +273,17 @@ func (r *applicationTurnResolver) tools(ctx context.Context, nativeTools []strin
 	tools = append(tools,
 		applicationLeasedTool{Tool: skilltool.New(skilltool.Config{ResolveCatalog: r.liveSkillCatalog}), store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope},
 	)
-	children, err := r.composition.applicationChildren.tools(ctx)
+	children := r.composition.applicationChildren
+	collaborationTools, err := children.tools(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	tools = append(tools, children...)
+	guidance := r.composition.collaborationInstructions(ctx, children.active, collaborationTools)
+	tools = append(tools, collaborationTools...)
 	if mcpSource, ok := capabilities.source.(applicationMCPSource); ok {
 		tools = append(tools, mcpSource.PrefixTools()...)
 	}
-	return tools, nil
+	return tools, guidance, nil
 }
 
 func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel.TurnIntent) (kernel.ResolvedTurn, error) {
@@ -335,13 +337,16 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context) (agen
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
-	tools, err := r.tools(ctx, configuration.Profile.NativeTools, capabilities)
+	tools, guidance, err := r.tools(ctx, configuration.Profile.NativeTools, capabilities)
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
 	var instructions []model.Part
 	if configuration.Profile.Instructions != "" {
-		instructions = []model.Part{model.NewTextPart(configuration.Profile.Instructions)}
+		instructions = append(instructions, model.NewTextPart(configuration.Profile.Instructions))
+	}
+	if guidance != "" {
+		instructions = append(instructions, model.NewTextPart(guidance))
 	}
 	return agent.ModelRequestSnapshot{
 		Revision: strconv.FormatUint(configuration.Revision, 10), Model: resolved.Model, Tools: tools, DeferredTools: capabilities.source,
@@ -373,7 +378,7 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 	var native policy.Mode
 	if mode != "application-tools-only" {
 		native = presets.WorkspaceWriteMode()
-		if mode == presets.ModeDangerFullAccess {
+		if mode == policy.ProfileDangerFullAccess {
 			native = presets.DangerFullAccessMode()
 		}
 	}

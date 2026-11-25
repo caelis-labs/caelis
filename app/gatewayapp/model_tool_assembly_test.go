@@ -63,6 +63,14 @@ func TestProductAgentFinalModelRequestIncludesCanonicalTaskCommunicationTools(t 
 	}
 	spawnFunction := finalToolFunction(t, functions, spawn.ToolName)
 	spawnParameters := finalToolParameters(spawnFunction)
+	provider.mu.Lock()
+	messages := provider.messages
+	provider.mu.Unlock()
+	for _, instruction := range []string{"Create a collaborator with StartThread", "use ReadThread with the participant handle", "Use WaitThread", "Use SendMessage with a participant handle"} {
+		if !strings.Contains(messages, instruction) {
+			t.Fatalf("model instructions missing %q: %s", instruction, messages)
+		}
+	}
 	spawnProperties, _ := spawnParameters["properties"].(map[string]any)
 	agentProperty, _ := spawnProperties["agent"].(map[string]any)
 	agents := stringSliceFromFinalToolValue(agentProperty["enum"])
@@ -88,6 +96,7 @@ type finalToolAssemblyProvider struct {
 	mu        sync.Mutex
 	calls     int
 	functions []map[string]any
+	messages  string
 }
 
 func newFinalToolAssemblyProvider(t *testing.T) *finalToolAssemblyProvider {
@@ -108,8 +117,10 @@ func (p *finalToolAssemblyProvider) handle(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	messages, _ := json.Marshal(payload["messages"])
 	p.mu.Lock()
 	p.calls++
+	p.messages = string(messages)
 	for _, raw := range anySliceFromFinalToolValue(payload["tools"]) {
 		entry, _ := raw.(map[string]any)
 		function, _ := entry["function"].(map[string]any)

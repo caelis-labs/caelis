@@ -20,8 +20,7 @@
 //   - Runtime-declared source-read arguments share Read's sensitive-path and
 //     explicit read-grant rules. Display names and remote metadata do not
 //     establish these implementation semantics.
-//   - MCP calls require approval regardless of their effect annotation. Runtime
-//     enforces this boundary for every policy profile before remote execution.
+//   - Embedding policies define any source consent required for MCP calls.
 //   - Hard deny is reserved for machine-level catastrophic operations
 //     (system/home root recursive deletes and device wipes).
 //   - Built-in filesystem writes share the sandbox filesystem's default scratch

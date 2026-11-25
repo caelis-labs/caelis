@@ -3,14 +3,107 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
+
+func TestOllamaStreamWaitsForReadOnTimeoutAndCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		timeout  time.Duration
+		first    string
+		wantErr  error
+		outcome  string
+		wantText string
+	}{
+		{name: "first event timeout", timeout: time.Second, wantErr: errStreamFirstEventTimeout, outcome: "failed"},
+		{name: "cancellation after first event", timeout: -1, first: `{"message":{"content":"first"}}`, wantErr: context.Canceled, outcome: "cancelled", wantText: "first"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				body := &ollamaDelayedBody{first: tc.first, reading: make(chan struct{}), closed: make(chan struct{}), release: make(chan struct{})}
+				client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
+				})}
+				llm := newOllama(Config{Model: "fixture", BaseURL: "http://ollama.invalid", HTTPClient: client, StreamFirstEventTimeout: tc.timeout}, "")
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				var receipts []model.Invocation
+				ctx = model.WithInvocationObserver(ctx, func(in model.Invocation) { receipts = append(receipts, in) })
+				done := make(chan struct{})
+				var failure error
+				var text strings.Builder
+				go func() {
+					defer close(done)
+					for event, err := range model.Generate(ctx, llm, &model.Request{Stream: true}) {
+						if err != nil {
+							failure = err
+						} else if event.PartDelta != nil {
+							text.WriteString(event.PartDelta.TextDelta)
+						} else {
+							t.Errorf("unexpected final event: %+v", event)
+						}
+					}
+				}()
+				<-body.reading
+				if errors.Is(tc.wantErr, context.Canceled) {
+					cancel()
+				}
+				<-body.closed
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Error("generation returned while the body read was still in progress")
+				default:
+				}
+				if len(receipts) != 0 {
+					t.Errorf("premature receipts: %+v", receipts)
+				}
+				close(body.release)
+				<-done
+				if !errors.Is(failure, tc.wantErr) || text.String() != tc.wantText || body.closeCount != 1 {
+					t.Fatalf("error=%v text=%q closes=%d, want %v/%q/1", failure, text.String(), body.closeCount, tc.wantErr, tc.wantText)
+				}
+				if len(receipts) != 1 || receipts[0].Outcome != tc.outcome || receipts[0].Usage.IsReported() {
+					t.Fatalf("unexpected receipts after body read exited: %+v", receipts)
+				}
+			})
+		})
+	}
+}
+
+type ollamaDelayedBody struct {
+	first                    string
+	reading, closed, release chan struct{}
+	closeCount               int
+}
+
+func (b *ollamaDelayedBody) Read(buf []byte) (int, error) {
+	if b.first != "" {
+		n := copy(buf, b.first)
+		b.first = b.first[n:]
+		return n, nil
+	}
+	close(b.reading)
+	<-b.closed
+	<-b.release
+	return copy(buf, `{"message":{"content":"late"},"done":true,"eval_count":10}`), errors.New("read interrupted")
+}
+
+func (b *ollamaDelayedBody) Close() error {
+	b.closeCount++
+	if b.closeCount == 1 {
+		close(b.closed)
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Ollama provider helpers

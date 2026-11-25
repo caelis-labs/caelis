@@ -48,10 +48,30 @@ func TestExplicitReadCeilingNative(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(work, "input.txt"), []byte("synthetic-input"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := sandbox.Config{CWD: work, ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{work, "/bin", "/usr/bin", "/usr/lib", "/System/Library", "/System/Cryptexes", "/System/Volumes/Preboot/Cryptexes", "/dev/null"}, WritePaths: []string{work, "/dev/null"}, Network: sandbox.NetworkDisabled}}
-	profile, err := buildSeatbeltProfile(policy.Default(cfg, sandbox.Constraints{Permission: sandbox.PermissionFullAccess, Network: sandbox.NetworkEnabled}), work)
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
+	}
+	cfg := sandbox.Config{
+		CWD: work, RequestedBackend: sandbox.BackendSeatbelt,
+		ResourceLimits: &sandbox.ResourceLimits{
+			ReadPaths:  []string{work, executable, "/bin", "/usr/bin", "/usr/lib", "/System/Library", "/System/Cryptexes", "/System/Volumes/Preboot/Cryptexes", "/dev/null"},
+			WritePaths: []string{work, "/dev/null"},
+			Network:    sandbox.NetworkDisabled,
+		},
+	}
+	rt, err := sandbox.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	constraints := sandbox.Constraints{Route: sandbox.RouteHost, Permission: sandbox.PermissionFullAccess, Network: sandbox.NetworkEnabled}
+	fsys := rt.(sandbox.FileSystemProvider).FileSystemFor(constraints)
+	if entries, err := fsys.ReadDir(work); err != nil || len(entries) != 1 || entries[0].Name() != "input.txt" {
+		t.Fatalf("allowed ReadDir = %v, %v", entries, err)
+	}
+	if _, err := fsys.ReadDir(root); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("denied ReadDir = %v", err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
@@ -62,15 +82,12 @@ if /bin/ls /Library/Preferences > directory.txt 2>/dev/null; then exit 43; fi
 if /bin/echo escape > "$DENIED" 2>/dev/null; then exit 44; fi
 printf 'ceiling-ok'
 `
-	cmd := exec.CommandContext(ctx, "/usr/bin/sandbox-exec", "-p", profile, "/bin/sh", "-c", script)
-	cmd.Dir = work
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + work, "TMPDIR=" + work, "DENIED=" + outside}
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("strict native execution failed: %v: %s", err, output)
-	}
-	if !strings.Contains(string(output), "ceiling-ok") {
-		t.Fatalf("shell never proved completion: %s", output)
+	result, err := rt.Run(ctx, sandbox.CommandRequest{
+		Command: script, Dir: work, Constraints: constraints,
+		Env: map[string]string{"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "DENIED": outside},
+	})
+	if err != nil || result.ExitCode != 0 || result.Backend != sandbox.BackendSeatbelt || result.Route != sandbox.RouteSandbox || result.Stdout != "ceiling-ok" {
+		t.Fatalf("strict native execution failed: %v: %+v", err, result)
 	}
 	got, err := os.ReadFile(filepath.Join(work, "output.txt"))
 	if err != nil || string(got) != "synthetic-input" {

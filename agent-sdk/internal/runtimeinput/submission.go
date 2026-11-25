@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 )
@@ -39,12 +39,16 @@ func NewEvent(kind agent.SubmissionKind, input agent.AgentCommunicationInput, me
 			Content:       session.ProtocolTextContent(text),
 		}}
 	case agent.SubmissionKindAgentCommunication:
-		prepared, err := agentcommunication.AppendSender(message, event.Actor)
-		if err != nil {
-			return nil, err
+		if err := session.ValidateAgentCommunicationActor(event.Actor); err != nil {
+			return nil, fmt.Errorf("agentcommunication: %w", err)
+		}
+		footer := session.AgentCommunicationPromptFooter(event.Actor)
+		if n := len(message.Parts); n > 0 && message.Parts[n-1].Text != nil {
+			message.Parts[n-1].Text.Text += footer
+		} else {
+			message.Parts = append(message.Parts, model.NewTextPart(footer))
 		}
 		event.Type = session.EventTypeContext
-		event.Message = &prepared
 		event.MessageID = strings.TrimSpace(input.MessageID)
 		protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: text})
 		event.Protocol = &protocol

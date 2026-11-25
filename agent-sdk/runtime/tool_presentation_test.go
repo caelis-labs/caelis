@@ -39,6 +39,11 @@ func TestRuntimePlanPointerPublishesPlan(t *testing.T) {
 		return nil
 	}}
 	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&plan.Tool{}}}, nil, nil)
+	modelResult := driver.requests[1].Messages[len(driver.requests[1].Messages)-1].ToolResults()
+	if len(modelResult) != 1 || len(modelResult[0].Content) != 1 || modelResult[0].Content[0].JSON == nil ||
+		string(modelResult[0].Content[0].JSON.Value) != `{"updated":true}` {
+		t.Fatalf("model-visible Plan result = %+v", modelResult)
+	}
 	var updates []*session.Event
 	for _, event := range events {
 		if event.PlanPayload != nil {
@@ -54,6 +59,50 @@ func TestRuntimePlanPointerPublishesPlan(t *testing.T) {
 	}
 	if len(updates[1].PlanPayload.Entries) != 0 || updates[1].Text != "Clear the list" {
 		t.Fatalf("plan clear = %+v, text = %q", updates[1].PlanPayload, updates[1].Text)
+	}
+}
+
+func TestRuntimeIgnoresPlanPresentationWithoutBuiltinDispatch(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	core, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planDisplay := map[string]any{
+		"updated": true,
+		"entries": []map[string]any{{"content": "Presentational only", "status": "in_progress"}},
+	}
+	result := &session.Event{
+		Type: session.EventTypeToolResult,
+		Tool: &session.EventTool{ID: "custom-plan", Name: plan.ToolName, Status: "completed", Outcome: session.ToolOutcomeSucceeded},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": planDisplay}}},
+	}
+	run, err := core.Run(t.Context(), agent.RunRequest{
+		SessionRef: active.SessionRef,
+		Input:      "show a custom tool result",
+		Agent:      seqAgent{events: []*session.Event{result}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawResult bool
+	for _, event := range loaded.Events {
+		if event.Type == session.EventTypePlan {
+			t.Fatalf("presentation created a durable Plan event: %+v", event)
+		}
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == result.Tool.ID {
+			sawResult = true
+		}
+	}
+	if !sawResult {
+		t.Fatal("custom Plan-named tool result was not committed")
 	}
 }
 
@@ -223,4 +272,16 @@ func mutationDisplayHooks(mode string) hook.Set {
 			return message, nil
 		}}},
 	}
+}
+
+func nestedValue(values map[string]any, path ...string) any {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	return current
 }

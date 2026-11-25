@@ -18,24 +18,36 @@ func ResolveNativeResponse(permission *session.ProtocolApproval, response Respon
 		response.Approved = false
 		return response, nil
 	}
-	if permission == nil || len(permission.Options) == 0 {
-		// Older SDK approvals and persisted tokens may have no option contract.
-		// Their outcome/boolean contract is retained, without inventing choices.
-		return response, nil
-	}
-	options := make([]Option, 0, len(permission.Options))
-	for _, option := range permission.Options {
-		options = append(options, Option{ID: option.ID, Name: option.Name, Kind: option.Kind})
-	}
-	if err := ValidateStrictOptions(options); err != nil {
-		return Response{}, err
-	}
 	switch response.Outcome {
-	case "", "approved", "rejected", "selected":
+	case "approved":
+		response.Approved = true
+	case "rejected":
+		response.Approved = false
+	case "", "selected":
 	default:
 		return Response{}, fmt.Errorf("approval: unsupported decision outcome %q", response.Outcome)
 	}
+	var options []Option
+	if permission != nil {
+		options = make([]Option, 0, len(permission.Options))
+		for _, option := range permission.Options {
+			options = append(options, Option{ID: option.ID, Name: option.Name, Kind: option.Kind})
+		}
+	}
+	if len(options) == 0 {
+		// Older SDK callers and durable records may carry a selection ID without
+		// a catalog. Preserve its identity and use the explicit decision above.
+		selected := response.Outcome == "selected"
+		hasOptionID := response.OptionID != ""
+		if selected != hasOptionID {
+			return Response{}, fmt.Errorf("approval: optionless selection requires both selected outcome and an option id")
+		}
+		return response, nil
+	}
 	if response.Outcome == "selected" || response.OptionID != "" {
+		if err := ValidateStrictOptions(options); err != nil {
+			return Response{}, err
+		}
 		for _, option := range options {
 			if option.ID != response.OptionID {
 				continue
@@ -53,19 +65,14 @@ func ResolveNativeResponse(permission *session.ProtocolApproval, response Respon
 		}
 		return Response{}, fmt.Errorf("approval: selected option was not offered")
 	}
-	// Keep legacy outcome-only decisions usable for existing SDK callers. An
-	// approval still needs an originally offered allow choice; denial does not
-	// manufacture a grant or an option.
-	switch response.Outcome {
-	case "approved":
-		response.Approved = true
-	case "rejected":
-		response.Approved = false
+	// An outcome-only approval needs an offered allow choice. Outcome-only
+	// denial remains valid with any well-formed set of options.
+	_, allowOffered, err := StrictOptionIDForDecision(options, OptionDecisionAllow)
+	if err != nil {
+		return Response{}, err
 	}
-	if response.Approved {
-		if _, exists, err := StrictOptionIDForDecision(options, OptionDecisionAllow); err != nil || !exists {
-			return Response{}, fmt.Errorf("approval: no allow option was offered")
-		}
+	if response.Approved && !allowOffered {
+		return Response{}, fmt.Errorf("approval: no allow option was offered")
 	}
 	return response, nil
 }

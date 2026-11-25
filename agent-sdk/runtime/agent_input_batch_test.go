@@ -15,7 +15,7 @@ import (
 func TestAgentInputBatchValidatesEverySenderBeforeSingleChildDispatch(t *testing.T) {
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	source := session.ParticipantBinding{ID: "sibling", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated, SessionID: "sibling-session", DelegationID: "sibling-task", AttachmentGeneration: "generation-a", AgentName: "sibling"}
-	if _, err := r.participantBindings.PutParticipant(t.Context(), session.PutParticipantRequest{SessionRef: task.sessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Binding: source}); err != nil {
+	if _, err := r.participantBindings.PutParticipant(t.Context(), session.PutParticipantRequest{SessionRef: task.sessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeParticipant), Binding: source}); err != nil {
 		t.Fatal(err)
 	}
 	entries := []agent.AgentInputBatchEntry{

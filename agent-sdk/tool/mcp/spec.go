@@ -27,9 +27,13 @@ type ServerSpec struct {
 	WorkDir         string
 	URL             string
 	Headers         map[string]string
-	// DataDir is an optional client-owned persistent directory to create before
-	// launching a stdio plugin. It is never derived from the model workspace.
+	// DataDir is an optional absolute, client-owned persistent directory to
+	// create before launching a stdio server.
 	DataDir string
+	// DataDirRoot is the trusted absolute ancestor for creating DataDir.
+	// The embedding owner supplies this anchor for new layouts. A zero value
+	// retains the three-parent anchor used by existing standalone SDK specs.
+	DataDirRoot string `json:"-"`
 	// CleanEnvironment keeps plugin subprocesses from inheriting host-private
 	// credentials while preserving only platform process essentials.
 	CleanEnvironment bool

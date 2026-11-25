@@ -550,6 +550,14 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return ""
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
+	if !strings.HasSuffix(rel, "_test.go") &&
+		startsWithAny(rel,
+			"control/appserver/projection/", "control/appserver/taskstream/", "control/taskstream/",
+			"surfaces/internal/transcript/", "surfaces/tui/app/") &&
+		(target == "agent-sdk/tool/builtin" || strings.HasPrefix(target, "agent-sdk/tool/builtin/")) &&
+		target != "agent-sdk/tool/builtin/names" {
+		return "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names"
+	}
 	if strings.HasPrefix(rel, "surfaces/acp/") &&
 		(target == "internal/kernel" || strings.HasPrefix(target, "internal/kernel/") ||
 			target == "agent-sdk/runtime" || strings.HasPrefix(target, "agent-sdk/runtime/")) {

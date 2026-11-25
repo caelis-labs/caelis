@@ -167,9 +167,12 @@ option ID; the original option kind determines allow or deny, and the legacy
 `approved` boolean cannot change that meaning. `cancelled` selects no option
 and grants nothing. Invalid selections leave the same request pending. Legacy
 outcome-only approval and denial remain supported; approvals with an option
-contract still require an originally offered allow choice. Older SDK requests
-and journals without an option contract retain their outcome/boolean semantics.
-Main, child, HTTP and recovered approvals use the same validator.
+contract still require an originally offered allow choice. SDK requests and
+journals without options accept `approved`, `rejected`, `cancelled`, or a
+boolean with an omitted outcome. For compatibility with existing SDK callers
+and journals without options, `selected` carries an opaque response ID and the
+explicit boolean determines approval. Main, child, HTTP and recovered
+approvals use the same validator.
 
 The approval owner maintains separate canonical review evidence and a display
 snapshot. Execution and Guardian retain the exact original action, constraints
@@ -531,6 +534,9 @@ but never execution, permission, persistence, or Task authority.
 Native projections retain the tool-name metadata alongside standard `name` for
 older clients; remove that compatibility writer when all supported consumers
 read the standard field.
+
+The SDK's `tool/builtin/names` package supplies the exact shipped names for
+these presentation profiles. Each presentation owner defines its own mapping.
 
 Provider-specific metadata is normalized at the Host-private ingress under an
 exact maintained profile. Unknown, malformed, or mutability-inconsistent values

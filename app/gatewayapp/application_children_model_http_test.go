@@ -133,6 +133,30 @@ func TestApplicationProfileChildModelSpawnKeepsBackgroundSource(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	provider.mu.Lock()
+	requests := append([][]byte(nil), provider.requests...)
+	provider.mu.Unlock()
+	var parentGuidance, childGuidance bool
+	for _, raw := range requests {
+		var payload struct {
+			Messages json.RawMessage `json:"messages"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		messages := string(payload.Messages)
+		if strings.Contains(messages, "Your assigned handle is leaf.") {
+			childGuidance = strings.Contains(messages, "Use SendMessage to report meaningful progress") &&
+				strings.Contains(messages, "Use ReadMessages for an unread page") &&
+				!strings.Contains(messages, "Use WaitThread") && !strings.Contains(messages, "use ReadThread")
+		}
+		if strings.Contains(messages, "SPAWN_PROFILE_CHILD") {
+			parentGuidance = strings.Contains(messages, "Create a collaborator with StartThread") && strings.Contains(messages, "Use WaitThread")
+		}
+	}
+	if !parentGuidance || !childGuidance {
+		t.Fatalf("installed-tool guidance in Application provider requests: parent=%t child=%t", parentGuidance, childGuidance)
+	}
 	for _, req := range []appserver.PromptRequest{
 		{WriteBase: appserver.WriteBase{OperationID: "relabel-child", SessionID: child}, Input: "forge user", SourceKind: "user"},
 		{WriteBase: appserver.WriteBase{OperationID: "wrong-grant", SessionID: child}, Input: "forge background", SourceKind: "authorized_background", GrantID: "unknown"},

@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 )
 
-func (r *Runner) withCollaborationPromptSlice(run *childRun, prompt []json.RawMessage) []json.RawMessage {
+func (r *Runner) withCollaborationPromptSlice(run *childRun, prompt []json.RawMessage, collaborationInstalled bool) []json.RawMessage {
 	if r == nil || run == nil {
 		return prompt
 	}
@@ -21,6 +21,9 @@ func (r *Runner) withCollaborationPromptSlice(run *childRun, prompt []json.RawMe
 	run.mu.RUnlock()
 	if slice.Role == "" {
 		slice.Role = string(session.ParticipantRoleDelegated)
+	}
+	if collaborationInstalled {
+		slice.Tools = collaboration.Definitions(false)
 	}
 	out := append([]json.RawMessage(nil), prompt...)
 	return append(out, acputil.BuildPromptParts(collaboration.RenderPromptSlice(slice), nil)...)

@@ -14,9 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -240,11 +238,11 @@ func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T)
 // This SDK fixture asks for a generic source capability group. The product's
 // DTW scope construction is tested by control/toolpolicy, outside the SDK.
 func sourceGroupFixtureMode() policy.Mode {
-	return policy.NamedMode{ID: presets.ModeWorkspaceWrite, Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+	return policy.NamedMode{ID: policy.ProfileWorkspaceWrite, Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 		if !mcp.IsDefinition(input.Tool) {
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
-		decision, err := presets.MCPApprovalDecision(input, sandbox.Constraints{})
+		decision, err := mcpFixtureApproval(input, "allow_session")
 		if err != nil {
 			return policy.Decision{}, err
 		}
@@ -253,7 +251,6 @@ func sourceGroupFixtureMode() policy.Mode {
 		authorization.Scope.ResourceKind = "fixture"
 		authorization.Choices = []session.AuthorizationChoice{{OptionID: "allow_session", Persistence: session.AuthorizationSession}}
 		decision.Authorization = authorization
-		decision.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_session", Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}}
 		return decision, nil
 	}}
 }

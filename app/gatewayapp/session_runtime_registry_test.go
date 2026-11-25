@@ -960,7 +960,7 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 
 	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {
@@ -1015,7 +1015,7 @@ func TestDormantSessionModelRecoveryClearsSelectionImmediatelyWhenCatalogIsEmpty
 	modelID := stack.composition.lookup.DefaultID()
 	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {
@@ -1067,7 +1067,7 @@ func TestDormantSessionModelRecoveryClearsUnsupportedFastMode(t *testing.T) {
 	modelID := stack.composition.lookup.DefaultID()
 	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {
@@ -1107,7 +1107,7 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 	modelID := stack.composition.lookup.DefaultID()
 	_, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {
@@ -1130,7 +1130,7 @@ func TestDormantSessionModelRecoveryReturnsLastRevisionConflict(t *testing.T) {
 	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:       current.SessionRef,
 		ExpectedRevision: &current.Revision,
-		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {
@@ -1174,7 +1174,7 @@ func TestClosedSessionReconnectDoesNotRepairDeletedModelReference(t *testing.T) 
 	modelID := stack.composition.lookup.DefaultID()
 	updated, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    active.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {

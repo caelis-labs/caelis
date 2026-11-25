@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -132,18 +133,19 @@ func (s *runtimeComposition) estimatedPromptPrefixTokens(ctx context.Context, re
 		base = 0
 	}
 
-	agents := s.delegationAgentsForSpawn()
-	if len(agents) == 0 {
+	active, err := s.sessions.Session(ctx, ref)
+	if err != nil {
 		return base
 	}
-
-	extra := 0
-	baseSystemPrompt := stringFromMap(runtimeCfg.BaseMetadata, "system_prompt")
-	withCollaboration := systemPromptWithCollaborationGuidance(baseSystemPrompt)
-	if delta := estimatePromptTextTokens(withCollaboration) - estimatePromptTextTokens(baseSystemPrompt); delta > 0 {
-		extra += delta
+	tools := s.collaborationTools(active)
+	if !sessionvisibility.IsSpawnedSubagentSession(active) {
+		tools = append(tools, spawnTools(s.delegationAgentsForSpawn())...)
 	}
-	extra += estimateToolPromptTokens(spawnTools(agents))
+	baseSystemPrompt := stringFromMap(runtimeCfg.BaseMetadata, "system_prompt")
+	guidance := s.collaborationInstructions(ctx, active, tools)
+	withCollaboration := systemPromptWithCollaborationGuidance(baseSystemPrompt, guidance)
+	extra := max(estimatePromptTextTokens(withCollaboration)-estimatePromptTextTokens(baseSystemPrompt), 0)
+	extra += estimateToolPromptTokens(tools)
 	return base + extra
 }
 

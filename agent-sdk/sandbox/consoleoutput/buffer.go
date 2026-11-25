@@ -110,19 +110,23 @@ func (b *RawCappedBuffer) String() string {
 }
 
 // AppendCappedBytes appends src while retaining only the last max bytes.
+// Like append, it may reuse dst's backing array. A nonpositive max is unlimited.
 func AppendCappedBytes(dst []byte, src []byte, max int) []byte {
 	if max <= 0 {
 		return append(dst, src...)
 	}
 	if len(src) >= max {
-		return append([]byte(nil), src[len(src)-max:]...)
+		return append(dst[:0], src[len(src)-max:]...)
 	}
-	keep := max - len(src)
-	if len(dst) > keep {
-		dst = dst[len(dst)-keep:]
+	if len(dst) > max {
+		dst = dst[len(dst)-max:]
 	}
-	out := append([]byte(nil), dst...)
-	return append(out, src...)
+	dst = append(dst, src...)
+	if len(dst) > max {
+		copy(dst, dst[len(dst)-max:])
+		dst = dst[:max]
+	}
+	return dst
 }
 
 // CappedOutputSince returns retained bytes after marker and the new absolute

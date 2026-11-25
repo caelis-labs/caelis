@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const ToolName = "SendMessage"
+const ToolName = names.SendMessage
 
 var allowedArgs = []string{"to", "message"}
 

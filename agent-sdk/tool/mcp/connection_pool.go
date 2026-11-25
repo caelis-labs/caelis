@@ -168,6 +168,7 @@ func (p *ConnectionPool) attachLocked(manager *Manager, spec ServerSpec) *manage
 }
 
 func connectionKey(spec ServerSpec, launch preparedLaunch) [sha256.Size]byte {
+	dataDirRoot := spec.DataDirRoot
 	// Invalid launches keep their original spec so independent failures stay
 	// independent. For a valid launch compare the exact values sent to exec
 	// or the HTTP transport, plus provenance and any private data root.
@@ -180,8 +181,12 @@ func connectionKey(spec ServerSpec, launch preparedLaunch) [sha256.Size]byte {
 		case *mcpsdk.CommandTransport:
 			spec.Args, spec.WorkDir = transport.Command.Args, transport.Command.Dir
 			spec.URL, spec.Headers = "", nil
+			dataDirRoot = ""
+			if spec.DataDir != "" {
+				dataDirRoot = spec.effectiveDataDirRoot()
+			}
 		default:
-			spec.DataDir = ""
+			spec.DataDir, dataDirRoot = "", ""
 			if len(spec.Headers) == 0 {
 				spec.Headers = nil
 			}
@@ -192,7 +197,8 @@ func connectionKey(spec ServerSpec, launch preparedLaunch) [sha256.Size]byte {
 		Server         ServerSpec
 		Scope          string
 		LaunchIdentity string
-	}{spec, spec.ConnectionScope, launch.identity})
+		DataDirRoot    string `json:",omitempty"`
+	}{spec, spec.ConnectionScope, launch.identity, dataDirRoot})
 	return sha256.Sum256(raw)
 }
 

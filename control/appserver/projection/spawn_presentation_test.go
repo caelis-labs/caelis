@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 func TestSpawnFullDisplayArgsUsesAgentAndPrompt(t *testing.T) {
@@ -60,7 +60,7 @@ func TestStartThreadPermissionPreservesStoredTitleAndBackfillsLegacyTitle(t *tes
 					Permission: &session.ProtocolApproval{
 						Context: fixture.context,
 						ToolCall: session.ProtocolToolCall{
-							ID: "call-1", Name: spawn.ToolName, Title: fixture.title, Status: "pending",
+							ID: "call-1", Name: names.StartThread, Title: fixture.title, Status: "pending",
 							RawInput: map[string]any{"text": `{"agent":"self","task_id":"orbit","prompt":"inspect the transcript"} pending`},
 						},
 						Options: []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}},

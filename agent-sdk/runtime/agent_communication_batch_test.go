@@ -9,7 +9,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -51,8 +50,8 @@ func TestRuntimeRunPersistsOrderedAgentCommunicationBatchInOneTurn(t *testing.T)
 	}
 
 	wantUser := []model.Message{
-		mustPrefixedAgentMessage(t, orbit, "status from orbit"),
-		mustPrefixedAgentMessage(t, zenith, "status from zenith"),
+		model.NewTextMessage(model.RoleUser, "status from orbit\n\nFrom: orbit"),
+		model.NewTextMessage(model.RoleUser, "status from zenith\n\nFrom: zenith"),
 	}
 	if got := userMessages(probe.messages); !reflect.DeepEqual(got, wantUser) {
 		t.Fatalf("runtime-produced model context = %#v, want %#v", got, wantUser)
@@ -108,15 +107,6 @@ func TestRuntimeRunPersistsOrderedAgentCommunicationBatchInOneTurn(t *testing.T)
 	if !reflect.DeepEqual(got, wantUser) {
 		t.Fatalf("rebuilt model context = %#v, want runtime-produced %#v", got, wantUser)
 	}
-}
-
-func mustPrefixedAgentMessage(t *testing.T, actor session.ActorRef, text string) model.Message {
-	t.Helper()
-	prepared, err := agentcommunication.AppendSender(model.NewTextMessage(model.RoleUser, text), actor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return prepared
 }
 
 func userMessages(messages []model.Message) []model.Message {

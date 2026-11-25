@@ -23,7 +23,7 @@ func TestDefaultProfilesRejectSpoofedDTW(t *testing.T) {
 	for _, kind := range []string{"ordinary", "application-tools-only", "application-workspace-write", "application-full-access"} {
 		t.Run(kind, func(t *testing.T) {
 			var base policy.Registry = ordinary
-			mode := presets.ModeWorkspaceWrite
+			mode := policy.ProfileWorkspaceWrite
 			if kind != "ordinary" {
 				profile := sessionprofile.Profile{Execution: "tools-only"}
 				if kind != "application-tools-only" {

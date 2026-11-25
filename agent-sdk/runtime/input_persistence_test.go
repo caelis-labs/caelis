@@ -272,7 +272,10 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 					rebuilt = append(rebuilt, message)
 					rebuiltParts = append(rebuiltParts, model.ContentPartsFromParts(message.Parts)...)
 				}
-				want := []model.Message{mustPrefixedAgentMessage(t, inputs[0].Source, inputs[0].Input), mustPrefixedAgentMessage(t, inputs[1].Source, inputs[1].Input)}
+				want := []model.Message{
+					model.NewTextMessage(model.RoleUser, "first input\n\nFrom: first"),
+					model.NewTextMessage(model.RoleUser, "second input\n\nFrom: second"),
+				}
 				if !reflect.DeepEqual(rebuilt, want) {
 					t.Fatalf("rebuilt context = %#v, want %#v", rebuilt, want)
 				}

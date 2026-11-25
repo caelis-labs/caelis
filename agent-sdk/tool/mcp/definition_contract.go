@@ -94,33 +94,39 @@ func normalizeMCPInputSchema(schema any) (map[string]any, error) {
 	if schema == nil {
 		return map[string]any{"type": "object"}, nil
 	}
+	return normalizeMCPSchema(schema, "input schema", true)
+}
+
+func normalizeMCPSchema(schema any, label string, objectOnly bool) (map[string]any, error) {
 	raw, err := json.Marshal(schema)
 	if err != nil {
-		return nil, fmt.Errorf("input schema is not JSON-serializable: %w", err)
+		return nil, fmt.Errorf("%s is not JSON-serializable: %w", label, err)
 	}
 	if len(raw) > maxMCPSchemaBytes {
-		return nil, fmt.Errorf("input schema is %d bytes; maximum is %d", len(raw), maxMCPSchemaBytes)
+		return nil, fmt.Errorf("%s is %d bytes; maximum is %d", label, len(raw), maxMCPSchemaBytes)
 	}
 	var cloned map[string]any
 	if err := json.Unmarshal(raw, &cloned); err != nil || cloned == nil {
-		return nil, fmt.Errorf("input schema must be a JSON object")
+		return nil, fmt.Errorf("%s must be a JSON object", label)
 	}
-	if rawType, exists := cloned["type"]; !exists {
-		cloned["type"] = "object"
-	} else {
-		schemaType, ok := rawType.(string)
-		if !ok {
-			return nil, fmt.Errorf("input schema top-level type must be the string %q", "object")
-		}
-		if schemaType != "object" {
-			return nil, fmt.Errorf("input schema top-level type %q is not object", schemaType)
+	if objectOnly {
+		if rawType, exists := cloned["type"]; !exists {
+			cloned["type"] = "object"
+		} else {
+			schemaType, ok := rawType.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s top-level type must be the string %q", label, "object")
+			}
+			if schemaType != "object" {
+				return nil, fmt.Errorf("%s top-level type %q is not object", label, schemaType)
+			}
 		}
 	}
 	if normalizedRaw, err := json.Marshal(cloned); err != nil || len(normalizedRaw) > maxMCPSchemaBytes {
-		return nil, fmt.Errorf("normalized input schema exceeds %d bytes", maxMCPSchemaBytes)
+		return nil, fmt.Errorf("normalized %s exceeds %d bytes", label, maxMCPSchemaBytes)
 	}
 	propertyCount := 0
-	if err := validateMCPSchemaNode(cloned, 1, &propertyCount, "input schema"); err != nil {
+	if err := validateMCPSchemaNode(cloned, 1, &propertyCount, label); err != nil {
 		return nil, err
 	}
 	return cloned, nil

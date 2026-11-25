@@ -52,7 +52,7 @@ func TestInitialPromptAbortDrainsIngressBeforeJoiningClient(t *testing.T) {
 	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
 	finished := make(chan struct{})
 	go func() {
-		runner.dispatchInitialPrompt(callerCtx, producerCtx, slot, run, dispatchDone, "unconfirmed initial prompt")
+		runner.dispatchInitialPrompt(callerCtx, producerCtx, slot, run, dispatchDone, "unconfirmed initial prompt", false)
 		close(finished)
 	}()
 	select {

@@ -2,6 +2,7 @@ package file
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -193,12 +194,13 @@ func (s *Store) readEventLogTailContext(
 	}
 	reader := bufio.NewReaderSize(file, eventLogReadBufferSize)
 	events := make([]*session.Event, 0)
+	var overflow []byte
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, offset, lineNo, lastCheckpoint, err
 		}
 		lineStart := offset
-		line, readErr := reader.ReadString('\n')
+		line, readErr := readEventLogLine(reader, &overflow)
 		if errors.Is(readErr, io.EOF) {
 			break
 		}
@@ -210,9 +212,9 @@ func (s *Store) readEventLogTailContext(
 		if s.eventLogLineRead != nil {
 			s.eventLogLineRead(path, lineNo, lineStart)
 		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			event, err := decodeEventLogRecord([]byte(trimmed), path, lineNo)
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) != 0 {
+			event, err := decodeEventLogRecord(trimmed, path, lineNo)
 			if err != nil {
 				return nil, offset, lineNo, lastCheckpoint, err
 			}

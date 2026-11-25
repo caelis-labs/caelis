@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 const maxPrivateCitationMarkerBytes = 4096
@@ -94,7 +94,7 @@ func resolveWebSearchRefs(history []model.Message, refs []string) []model.Citati
 		results := history[messageIndex].ToolResults()
 		for resultIndex := len(results) - 1; resultIndex >= 0; resultIndex-- {
 			result := results[resultIndex]
-			if result.Name != web.SearchToolName {
+			if result.Name != names.WebSearch {
 				continue
 			}
 			for contentIndex := len(result.Content) - 1; contentIndex >= 0; contentIndex-- {

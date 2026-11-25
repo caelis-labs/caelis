@@ -3,7 +3,6 @@ package session
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -39,15 +38,7 @@ func EventToolProjection(event *Event) *EventTool {
 	if event == nil || event.Tool == nil {
 		return nil
 	}
-	out := *event.Tool
-	out.Name = strings.TrimSpace(out.Name)
-	out.Kind = strings.TrimSpace(out.Kind)
-	out.Title = strings.TrimSpace(out.Title)
-	out.Status = strings.TrimSpace(out.Status)
-	out.Input = jsonvalue.CloneMap(event.Tool.Input)
-	out.Output = jsonvalue.CloneMap(event.Tool.Output)
-	out.Content = cloneEventToolContent(event.Tool.Content)
-	out.Locations = cloneEventToolLocations(event.Tool.Locations)
+	out := CloneEventTool(*event.Tool)
 	return &out
 }
 
@@ -109,41 +100,6 @@ func cloneEventPlanPayload(in EventPlanPayload) EventPlanPayload {
 				Priority: strings.TrimSpace(item.Priority),
 			})
 		}
-	}
-	return out
-}
-
-func cloneEventToolContent(in []EventToolContent) []EventToolContent {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]EventToolContent, 0, len(in))
-	for _, item := range in {
-		cp := item
-		cp.Changes = CloneProtocolDiffChanges(item.Changes)
-		cp.Patch = CloneProtocolDiffPatch(item.Patch)
-		cp.Meta = CloneState(item.Meta)
-		if item.OldText != nil {
-			value := *item.OldText
-			cp.OldText = &value
-		}
-		out = append(out, cp)
-	}
-	return out
-}
-
-func cloneEventToolLocations(in []EventToolLocation) []EventToolLocation {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]EventToolLocation, 0, len(in))
-	for _, item := range in {
-		cp := item
-		if item.Line != nil {
-			value := *item.Line
-			cp.Line = &value
-		}
-		out = append(out, cp)
 	}
 	return out
 }

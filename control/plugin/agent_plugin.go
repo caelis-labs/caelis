@@ -313,21 +313,21 @@ func validateAgentPluginHeaders(headers map[string]string) error {
 	return nil
 }
 
-// agentPluginDataDir gives a configured plugin one persistent client-owned
-// state directory across package updates without trusting its ID as a path.
-func agentPluginDataDir(storeDir, pluginID string) (string, error) {
+// agentPluginDataPaths gives a configured plugin a persistent state directory
+// across package updates and identifies the trusted root for its creation.
+func agentPluginDataPaths(storeDir, pluginID string) (root, dataDir string, err error) {
 	if strings.TrimSpace(storeDir) == "" || strings.TrimSpace(pluginID) == "" {
-		return "", fmt.Errorf("agent plugins MCP needs a host store and plugin identity")
+		return "", "", fmt.Errorf("agent plugins MCP needs a host store and plugin identity")
 	}
-	root, err := filepath.Abs(storeDir)
+	root, err = filepath.Abs(storeDir)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	digest := sha256.Sum256([]byte(strings.ToLower(pluginID)))
-	return filepath.Join(root, "plugins", "data", hex.EncodeToString(digest[:16])), nil
+	return root, filepath.Join(root, "plugins", "data", hex.EncodeToString(digest[:16])), nil
 }
 
-func instantiateAgentPluginMCP(spec MCPServerSpec, root, dataDir string) (MCPServerSpec, error) {
+func instantiateAgentPluginMCP(spec MCPServerSpec, root, dataRoot, dataDir string) (MCPServerSpec, error) {
 	if spec.Transport != mcp.TransportStdio {
 		return spec, nil
 	}
@@ -380,7 +380,7 @@ func instantiateAgentPluginMCP(spec MCPServerSpec, root, dataDir string) (MCPSer
 	env["PLUGIN_ROOT"] = root
 	env["PLUGIN_DATA"] = dataDir
 	spec.Env = env
-	spec.DataDir = dataDir
+	spec.DataDir, spec.DataDirRoot = dataDir, dataRoot
 	return spec, nil
 }
 

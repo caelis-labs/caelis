@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
 )
@@ -11,7 +12,7 @@ import (
 // UTF8OutputForwarder converts raw async pipe chunks into valid UTF-8 text
 // without splitting a rune across callbacks. Stdout and stderr keep independent
 // decoder state, while the raw cmdsession ring remains byte-exact.
-func UTF8OutputForwarder(fn func(OutputChunk)) func(cmdsession.AsyncOutputChunk) {
+func UTF8OutputForwarder(fn func(sandbox.OutputChunk)) func(cmdsession.AsyncOutputChunk) {
 	if fn == nil {
 		return nil
 	}
@@ -36,7 +37,7 @@ func UTF8OutputForwarder(fn func(OutputChunk)) func(cmdsession.AsyncOutputChunk)
 			if chunk.Final {
 				cursor = chunk.Cursor
 			}
-			fn(OutputChunk{Stream: stream, Text: text, Cursor: cursor})
+			fn(sandbox.OutputChunk{Stream: stream, Text: text, Cursor: cursor})
 		}
 	}
 }

@@ -11,6 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -190,16 +191,14 @@ func TestRuntimeExplicitSDKSendMessageSurvivesWorkspaceWritePolicy(t *testing.T)
 		CWD:        "/workspace",
 		Controller: session.ControllerBinding{ControllerID: "child-controller"},
 	}
-	runtime := &Runtime{hooks: hook.Set{ToolPolicy: registry}, defaultPolicyMode: presets.ModeWorkspaceWrite}
+	runtime := &Runtime{hooks: hook.Set{ToolPolicy: registry}, defaultPolicyMode: policy.ProfileWorkspaceWrite}
 	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{Tools: []tool.Tool{sendmessage.New()}}, runtimeToolContext{inputSender: sender})
-	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
-		ctx: context.Background(),
-	})
+	wrapped := runtime.wrapTurnTools(t.Context(), activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, nil, "run-1", "turn-1", nil)
 	if len(wrapped) != 1 {
 		t.Fatalf("wrapped tools = %d, want only SendMessage", len(wrapped))
 	}
 	raw, _ := json.Marshal(map[string]any{"to": "parent", "message": "status update"})
-	result, err := wrapped[0].Call(context.Background(), tool.Call{ID: "message-policy-1", Name: "SendMessage", Input: raw})
+	result, err := wrapped[0].Call(t.Context(), tool.Call{ID: "message-policy-1", Name: "SendMessage", Input: raw})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +308,7 @@ func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T
 		t.Fatal(err)
 	}
 	currentSession, err = runtime.sessions.BindController(context.Background(), session.BindControllerRequest{
-		SessionRef: currentSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		SessionRef: currentSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "main"},
 	})
 	if err != nil {
@@ -548,7 +547,7 @@ func TestTaskRejectsParticipantHandlesForEveryAction(t *testing.T) {
 			args["input"] = "hello"
 		}
 		raw, _ := json.Marshal(args)
-		if _, err := target.Call(t.Context(), tool.Call{ID: action, Input: raw}); err == nil || !strings.Contains(err.Error(), "ReadThread") {
+		if _, err := target.Call(t.Context(), tool.Call{ID: action, Input: raw}); err == nil || !strings.Contains(err.Error(), "handle belongs to a participant") {
 			t.Fatalf("%s: %v", action, err)
 		}
 	}

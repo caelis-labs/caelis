@@ -92,30 +92,37 @@ func TestLegacyApprovalModeNamesResolveToCanonicalWorkspaceWritePolicy(t *testin
 		if _, ok, err := registry.Lookup(t.Context(), name); err != nil || ok {
 			t.Fatalf("legacy mode %q has a registry entry: %t, %v", name, ok, err)
 		}
-		mode, ok, err := registry.Lookup(t.Context(), NormalizeModeName(name))
-		if err != nil || !ok || mode.Name() != ModeWorkspaceWrite {
+		mode, ok, err := registry.Lookup(t.Context(), policy.NormalizeModeName(name))
+		if err != nil || !ok || mode.Name() != policy.ProfileWorkspaceWrite {
 			t.Fatalf("legacy mode %q did not resolve to workspace-write: %v, %t, %v", name, mode, ok, err)
 		}
 	}
 }
 
-func TestDefaultRegistryDoesNotExposeDangerFullAccessMode(t *testing.T) {
+func TestDefaultRegistryRequiresExplicitDangerFullAccessRegistration(t *testing.T) {
 	t.Parallel()
 
 	registry, err := NewRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
-	mode, ok, err := registry.Lookup(context.Background(), ModeDangerFullAccess)
+	mode, ok, err := registry.Lookup(context.Background(), policy.ProfileDangerFullAccess)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok || mode != nil {
-		t.Fatalf("Lookup(%q) = %#v/%v, want unavailable without explicit registration", ModeDangerFullAccess, mode, ok)
+		t.Fatalf("Lookup(%q) = %#v/%v, want unavailable without explicit registration", policy.ProfileDangerFullAccess, mode, ok)
+	}
+	if err := registry.Register(DangerFullAccessMode()); err != nil {
+		t.Fatal(err)
+	}
+	mode, ok, err = registry.Lookup(t.Context(), policy.ProfileDangerFullAccess)
+	if err != nil || !ok || mode == nil || mode.Name() != policy.ProfileDangerFullAccess {
+		t.Fatalf("Lookup(%q) = %#v/%v/%v after registration", policy.ProfileDangerFullAccess, mode, ok, err)
 	}
 }
 
-func TestWorkspaceWriteMCPGateIsRuntimeOwned(t *testing.T) {
+func TestWorkspaceWriteLeavesMCPSourceConsentToEmbeddingPolicy(t *testing.T) {
 	input := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", Metadata: map[string]any{
 		mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "fixture",
 		mcp.MetadataServer: "docs", mcp.MetadataTool: "read",
@@ -126,16 +133,6 @@ func TestWorkspaceWriteMCPGateIsRuntimeOwned(t *testing.T) {
 	}
 	if decision.Action != policy.ActionAllow {
 		t.Fatalf("preset policy decision = %#v", decision)
-	}
-	gate, err := MCPApprovalDecision(input, decision.Constraints)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gate.Action != policy.ActionAskApproval || gate.Approval == nil || len(gate.Approval.Options) != 4 {
-		t.Fatalf("Runtime MCP gate = %#v", gate)
-	}
-	if gate.Approval.Options[1].ID != "allow_session" || gate.Approval.Options[1].Kind != "allow_once" || gate.Approval.Options[2].Kind != "allow_always" || gate.Approval.Options[3].ID != "cancel" {
-		t.Fatalf("MCP options = %#v", gate.Approval.Options)
 	}
 }
 
@@ -751,7 +748,7 @@ func TestEffectiveSandboxPolicyUsesBackendAndPolicyFacts(t *testing.T) {
 	workspace := testWorkspaceRoot()
 	networkEnabled := false
 	descriptor := sandboxCommandDescriptor()
-	snapshot := EffectiveSandboxPolicy(ModeWorkspaceWrite, sandbox.Config{
+	snapshot := EffectiveSandboxPolicy(policy.ProfileWorkspaceWrite, sandbox.Config{
 		CWD: workspace,
 	}, descriptor, policy.ModeOptions{
 		WorkspaceRoot:  workspace,
@@ -772,7 +769,7 @@ func TestEffectiveSandboxPolicyUsesBackendAndPolicyFacts(t *testing.T) {
 		t.Fatalf("snapshot read-only subpaths = %#v, want default .git", snapshot.ReadOnlySubpaths)
 	}
 
-	hostSnapshot := EffectiveSandboxPolicy(ModeWorkspaceWrite, sandbox.Config{CWD: workspace}, sandbox.Descriptor{
+	hostSnapshot := EffectiveSandboxPolicy(policy.ProfileWorkspaceWrite, sandbox.Config{CWD: workspace}, sandbox.Descriptor{
 		Backend:   sandbox.BackendHost,
 		Isolation: sandbox.IsolationHost,
 		DefaultConstraints: sandbox.Constraints{
@@ -794,7 +791,7 @@ func TestEffectiveSandboxPolicyRetainsSemanticGitProtectionWithWriteOverride(t *
 
 	workspace := testWorkspaceRoot()
 	gitRoot := filepath.Join(workspace, ".git")
-	snapshot := EffectiveSandboxPolicy(ModeWorkspaceWrite, sandbox.Config{
+	snapshot := EffectiveSandboxPolicy(policy.ProfileWorkspaceWrite, sandbox.Config{
 		CWD:           workspace,
 		WritableRoots: []string{gitRoot},
 	}, sandboxCommandDescriptor(), policy.ModeOptions{

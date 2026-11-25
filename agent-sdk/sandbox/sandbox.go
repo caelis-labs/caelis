@@ -15,6 +15,8 @@ import (
 type FileSystem interface {
 	Getwd() (string, error)
 	UserHomeDir() (string, error)
+	// Open returns a regular file for reading. Use ReadDir, Glob, or WalkDir
+	// to enumerate directories under the selected filesystem policy.
 	Open(path string) (*os.File, error)
 	ReadDir(path string) ([]os.DirEntry, error)
 	Stat(path string) (os.FileInfo, error)
@@ -150,12 +152,14 @@ type Descriptor struct {
 // Windows enforces directory write limits but keeps its online-only network
 // behavior; NetworkDisabled does not disable network access on Windows.
 type ResourceLimits struct {
-	// ReadPaths is a mandatory read ceiling on Seatbelt and Bubblewrap. An
-	// explicitly empty list grants no ordinary file reads. Seatbelt also permits
-	// a read-only descriptor for the root directory itself for loader bootstrap,
-	// not reads of its descendants. A Seatbelt filesystem ceiling does not
-	// isolate same-user process environments; it is insufficient when that
-	// credential boundary is required. Other backends reject explicit read ceilings.
+	// ReadPaths limits command and file API reads to these absolute non-root
+	// paths on Seatbelt and Bubblewrap. An empty list grants no ordinary file
+	// reads. Command construction requires the backend's bootstrap executable
+	// and its dependencies to be readable. Bubblewrap requires each writable
+	// bind to be covered because its writable binds also permit reads.
+	// Seatbelt permits a root directory descriptor for loader bootstrap.
+	// Same-user process environments remain outside the Seatbelt filesystem
+	// ceiling. Other backends reject explicit read ceilings.
 	ReadPaths  []string
 	WritePaths []string
 	Network    Network

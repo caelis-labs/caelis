@@ -154,31 +154,6 @@ func TestManagerCloseDrainsLateSuccessfulConnection(t *testing.T) {
 	})
 }
 
-func TestManagerListingTimeoutStartsAfterConnection(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		failures := make(chan ServerFailure, 1)
-		began := time.Now()
-		mgr, err := newManager(t.Context(), []ServerSpec{{PluginID: "p", Name: "slow-list"}}, func(ctx context.Context, spec ServerSpec) (*Client, error) {
-			time.Sleep(20 * time.Second)
-			return asyncTestClient(ctx, spec, make(chan struct{}))
-		}, func(failure ServerFailure) { failures <- failure })
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer mgr.Close()
-		<-mgr.Initialized()
-		if elapsed := time.Since(began); elapsed != 20*time.Second+DefaultToolListTimeout {
-			t.Fatalf("connection plus listing took %s", elapsed)
-		}
-		if failure := <-failures; !errors.Is(failure.Err, context.DeadlineExceeded) {
-			t.Fatalf("failure=%v", failure.Err)
-		}
-		if len(mgr.Tools()) != 0 {
-			t.Fatal("incomplete tool list was published")
-		}
-	})
-}
-
 func TestManagerCollisionPriorityDoesNotFollowConnectionOrder(t *testing.T) {
 	for _, fails := range []bool{false, true} {
 		t.Run(map[bool]string{false: "preferred_ready", true: "preferred_failed"}[fails], func(t *testing.T) {

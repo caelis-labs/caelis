@@ -100,8 +100,9 @@ func TestRunCommandCallRejectsUnsupportedArgsAndSandboxPermissions(t *testing.T)
 		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	tests := []struct {
-		name string
-		args map[string]any
+		name              string
+		args              map[string]any
+		wantErrorContains string
 	}{
 		{
 			name: "legacy sandbox permission",
@@ -109,6 +110,15 @@ func TestRunCommandCallRejectsUnsupportedArgsAndSandboxPermissions(t *testing.T)
 				"command":             "go test ./...",
 				"sandbox_permissions": "with_additional_permissions",
 			},
+			wantErrorContains: "must be use_default or require_escalated",
+		},
+		{
+			name: "unrecognized sandbox permission",
+			args: map[string]any{
+				"command":             "go test ./...",
+				"sandbox_permissions": "unknown",
+			},
+			wantErrorContains: "must be use_default or require_escalated",
 		},
 		{
 			name: "additional permissions",
@@ -160,6 +170,9 @@ func TestRunCommandCallRejectsUnsupportedArgsAndSandboxPermissions(t *testing.T)
 			_, err = runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 			if err == nil {
 				t.Fatal("Call() error = nil, want validation failure")
+			}
+			if !strings.Contains(err.Error(), tt.wantErrorContains) {
+				t.Fatalf("Call() error = %v, want %q", err, tt.wantErrorContains)
 			}
 		})
 	}
@@ -514,37 +527,6 @@ fatal: Could not read from remote repository.`
 	}
 }
 
-func TestRunCommandCallDoesNotHintNativeOpenSSHPublicKeyFailure(t *testing.T) {
-	t.Parallel()
-
-	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
-		Stderr:   "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n",
-		ExitCode: 128,
-		Route:    sandbox.RouteSandbox,
-		Backend:  sandbox.BackendWindows,
-	}, err: fmt.Errorf("exit status 128")}
-	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
-	if err != nil {
-		t.Fatalf("NewRunCommand() error = %v", err)
-	}
-	raw, err := json.Marshal(map[string]any{"command": "git ls-remote ssh://git@github.com/openai/openai-python.git HEAD"})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
-	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool result", err)
-	}
-	var payload map[string]any
-	structured, _ := result.Structured()
-	if err := json.Unmarshal(structured, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(result) error = %v", err)
-	}
-	if _, ok := payload["system_hint"]; ok {
-		t.Fatalf("system_hint = %#v, want absent for ordinary SSH auth failure", payload["system_hint"])
-	}
-}
-
 func TestRunCommandCallAddsHostExecutionApprovalHint(t *testing.T) {
 	t.Parallel()
 
@@ -575,74 +557,6 @@ func TestRunCommandCallAddsHostExecutionApprovalHint(t *testing.T) {
 	}
 	if _, ok := payload["hint_code"]; ok {
 		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
-	}
-}
-
-func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
-	t.Parallel()
-
-	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
-		Stderr:   "fatal: Unable to create '/workspace/.git/index.lock': Read-only file system\n",
-		ExitCode: 128,
-		Route:    sandbox.RouteSandbox,
-		Backend:  sandbox.BackendBwrap,
-	}, err: fmt.Errorf("exit status 128")}
-	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
-	if err != nil {
-		t.Fatalf("NewRunCommand() error = %v", err)
-	}
-	raw, err := json.Marshal(map[string]any{"command": "git add ."})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
-	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool result", err)
-	}
-	var payload map[string]any
-	structured, _ := result.Structured()
-	if err := json.Unmarshal(structured, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(result) error = %v", err)
-	}
-	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "Git index write is blocked") || !strings.Contains(got, "THIS SAME command once") {
-		t.Fatalf("system_hint = %q, want once-only Git index sandbox guidance", got)
-	}
-}
-
-func TestRunCommandCallAddsWindowsSChannelNoCredentialsHint(t *testing.T) {
-	t.Parallel()
-
-	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
-		Stderr:   "curl: (35) schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS (0x8009030E) - 安全包中没有可用的凭证\n",
-		ExitCode: 35,
-		Route:    sandbox.RouteSandbox,
-		Backend:  sandbox.BackendWindows,
-	}, err: fmt.Errorf("exit status 35")}
-	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
-	if err != nil {
-		t.Fatalf("NewRunCommand() error = %v", err)
-	}
-	raw, err := json.Marshal(map[string]any{"command": "curl.exe -I https://example.com/"})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
-	if err != nil {
-		t.Fatalf("Call() error = %v, want structured tool result", err)
-	}
-	var payload map[string]any
-	structured, _ := result.Structured()
-	if err := json.Unmarshal(structured, &payload); err != nil {
-		t.Fatalf("json.Unmarshal(result) error = %v", err)
-	}
-	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "SChannel TLS can fail") {
-		t.Fatalf("system_hint = %q, want SChannel guidance", got)
-	}
-	if _, ok := payload["hint_code"]; ok {
-		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
-	}
-	if text, _ := payload["result"].(string); !strings.Contains(text, "SEC_E_NO_CREDENTIALS") {
-		t.Fatalf("result = %q, want original SChannel diagnostic", text)
 	}
 }
 

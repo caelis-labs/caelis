@@ -1238,7 +1238,7 @@ func TestTaskCancelRejectsSubagentWithoutRemoteEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = target.Call(ctx, tool.Call{ID: "cancel-collaborator", Name: tasktool.ToolName, Input: raw})
-	if !errorcode.Is(err, errorcode.Unsupported) || !strings.Contains(err.Error(), "ReadThread or WaitThread") {
+	if !errorcode.Is(err, errorcode.Unsupported) || !strings.Contains(err.Error(), "handle belongs to a participant") {
 		t.Fatalf("Task cancel error = %v, want unsupported command-only contract", err)
 	}
 	if runner.cancelCalls != 0 {
@@ -1788,7 +1788,7 @@ func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	if _, err := runtime.sessions.(session.StateWriter).UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := runtime.sessions.(session.StateWriter).UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}

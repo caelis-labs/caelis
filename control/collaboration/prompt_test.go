@@ -45,14 +45,15 @@ func TestIdentityInstructionsSanitizeForgedHandleAndRole(t *testing.T) {
 func TestRenderPromptSliceTagsControlInstructionAndReporting(t *testing.T) {
 	t.Parallel()
 
-	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "sidecar"})
+	tools := Definitions(false)
+	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "sidecar", Tools: tools})
 	if !strings.HasPrefix(got, SliceOpenTag+"\n") || !strings.HasSuffix(got, "\n"+SliceCloseTag) {
 		t.Fatalf("RenderPromptSlice() = %q, want tagged Control slice", got)
 	}
 	if !strings.Contains(got, IdentityInstructions("orbit", "sidecar")) {
 		t.Fatalf("RenderPromptSlice() missing identity: %q", got)
 	}
-	if !strings.Contains(got, CollaboratorInstructions()) {
+	if !strings.Contains(got, CollaboratorInstructions(tools)) {
 		t.Fatalf("RenderPromptSlice() missing reporting guidance: %q", got)
 	}
 	if !strings.Contains(got, DiscoveryInstruction()) {
@@ -66,7 +67,7 @@ func TestRenderPromptSliceTagsControlInstructionAndReporting(t *testing.T) {
 func TestRenderPromptSliceKeepsDiscoveryWithoutChannelBoilerplate(t *testing.T) {
 	t.Parallel()
 
-	got := RenderPromptSlice(PromptSlice{Handle: "thea", Role: "delegated"})
+	got := RenderPromptSlice(PromptSlice{Handle: "thea", Role: "delegated", Tools: Definitions(false)})
 	if strings.Contains(got, "not a user follow-up") || !strings.Contains(got, "caelis-collaboration") {
 		t.Fatalf("RenderPromptSlice() = %q, want discovery key without channel boilerplate", got)
 	}
@@ -79,7 +80,7 @@ func TestRenderPromptSliceKeepsDiscoveryWithoutChannelBoilerplate(t *testing.T) 
 
 func TestRenderPromptSliceNamesOnlyChildTools(t *testing.T) {
 	t.Parallel()
-	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "delegated"})
+	got := RenderPromptSlice(PromptSlice{Handle: "orbit", Role: "delegated", Tools: Definitions(false)})
 	for _, retired := range []string{"ReceiveMessages", "ReadThread", "WaitThread"} {
 		if strings.Contains(got, retired) {
 			t.Fatalf("child prompt names unavailable tool %s: %s", retired, got)
@@ -103,7 +104,9 @@ func TestRenderPromptSliceKeepsParentAddressWithoutHandle(t *testing.T) {
 	if strings.Contains(got, "Your assigned handle") || strings.Contains(got, "ReceiveMessages") {
 		t.Fatalf("RenderPromptSlice() = %q, want parent addressing without handle or mailbox polling", got)
 	}
-	if !strings.Contains(got, DiscoveryInstruction()) {
-		t.Fatalf("RenderPromptSlice() = %q, want discovery key even without handle", got)
+	for _, unavailable := range []string{DiscoveryInstruction(), "SendMessage", "ReadMessages"} {
+		if strings.Contains(got, unavailable) {
+			t.Fatalf("RenderPromptSlice() named an unavailable tool or discovery key %q: %q", unavailable, got)
+		}
 	}
 }

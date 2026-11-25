@@ -30,7 +30,6 @@ const (
 	ControlMutationPurposeParticipant   ControlMutationPurpose = "participant"
 	ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
 	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
-	ControlMutationPurposeTest          ControlMutationPurpose = "test"
 	// ControlMutationPurposeSubagentCompletion owns the asynchronous terminal
 	// Task and side-participant commit after the spawning Turn may have ended.
 	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
@@ -207,8 +206,7 @@ func controlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool 
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeSubagentActivity,
-		ControlMutationPurposeSubagentCancellation,
-		ControlMutationPurposeTest:
+		ControlMutationPurposeSubagentCancellation:
 		return true
 	default:
 		return false
@@ -223,7 +221,6 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeLifecycle,
 		ControlMutationPurposeConfiguration,
-		ControlMutationPurposeTest,
 		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeSubagentActivity,
 		ControlMutationPurposeSubagentCancellation:

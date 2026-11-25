@@ -540,7 +540,7 @@ func TestSessionFastModePersistsAcrossRestartIntoResolvedModelRequest(t *testing
 	}
 	legacy, err = first.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:    legacy.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update: func(state map[string]any) (map[string]any, error) {
 			next := session.CloneState(state)
 			if next == nil {
@@ -977,7 +977,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}

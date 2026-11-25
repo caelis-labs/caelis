@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 )
 
 type waitResultTestRunner struct {
+	request           sandbox.CommandRequest
 	session           *cmdsession.AsyncSession
 	result            sandbox.CommandResult
 	err               error
@@ -24,11 +26,13 @@ type waitResultTestRunner struct {
 	observation       *cmdsession.OutputObservation
 }
 
-func (r *waitResultTestRunner) Run(context.Context, Request) (sandbox.CommandResult, error) {
+func (r *waitResultTestRunner) Run(_ context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	r.request = req
 	return r.result, r.err
 }
 
-func (r *waitResultTestRunner) StartAsync(context.Context, Request) (string, error) {
+func (r *waitResultTestRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) (string, error) {
+	r.request = req
 	return r.session.ID, nil
 }
 
@@ -155,6 +159,53 @@ func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 	}
 	if strings.TrimSpace(result.Stdout) != "ok" {
 		t.Fatalf("Result().Stdout = %q, want ok", result.Stdout)
+	}
+}
+
+func TestRuntimeIsolatesRunnerCommandRequest(t *testing.T) {
+	for _, method := range []string{"Run", "Start"} {
+		t.Run(method, func(t *testing.T) {
+			cwd := t.TempDir()
+			runner := &waitResultTestRunner{session: &cmdsession.AsyncSession{ID: "test"}}
+			rt := New(Config{CWD: cwd, Backend: sandbox.BackendBwrap, Runner: runner})
+			var output sandbox.OutputChunk
+			req := sandbox.CommandRequest{
+				Command:  " printf ok ",
+				Dir:      "workspace",
+				Env:      map[string]string{"TEST_VALUE": "original"},
+				UnsetEnv: []string{"TEST_UNSET"},
+				Stdin:    []byte("input"),
+				Constraints: sandbox.Constraints{
+					PathRules: []sandbox.PathRule{{Path: " fixture "}},
+				},
+				OnOutput: func(chunk sandbox.OutputChunk) { output = chunk },
+			}
+			var err error
+			if method == "Run" {
+				_, err = rt.Run(t.Context(), req)
+			} else {
+				_, err = rt.Start(t.Context(), req)
+			}
+			if err != nil {
+				t.Fatalf("%s() error = %v", method, err)
+			}
+			req.Env["TEST_VALUE"] = "changed"
+			req.UnsetEnv[0] = "CHANGED"
+			req.Stdin[0] = 'I'
+			req.Constraints.PathRules[0].Path = "changed"
+			got := runner.request
+			if got.Command != "printf ok" || got.Dir != filepath.Join(cwd, "workspace") {
+				t.Fatalf("runner command = %q in %q", got.Command, got.Dir)
+			}
+			if got.Env["TEST_VALUE"] != "original" || got.UnsetEnv[0] != "TEST_UNSET" || string(got.Stdin) != "input" || got.Constraints.PathRules[0].Path != "fixture" {
+				t.Fatalf("runner received changed caller data: %+v", got)
+			}
+			wantOutput := sandbox.OutputChunk{Stream: "stdout", Text: "ok", Cursor: 2}
+			got.OnOutput(wantOutput)
+			if output != wantOutput {
+				t.Fatalf("output callback = %+v, want %+v", output, wantOutput)
+			}
+		})
 	}
 }
 

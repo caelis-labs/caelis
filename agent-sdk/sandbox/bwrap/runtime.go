@@ -19,6 +19,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
@@ -128,6 +129,18 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	if _, err := b.stat(shell); err != nil {
 		return fmt.Errorf("bwrap sandbox unavailable: shell %q not found: %w", shell, err)
 	}
+	effectivePolicy := policy.Default(b.cfg, sandbox.Constraints{})
+	// Validate the configured mounts separately from the fixed backend probe.
+	// The probe only exercises Bubblewrap startup with a trusted no-op.
+	if effectivePolicy.ResourceLimits != nil && effectivePolicy.ResourceLimits.ReadPaths != nil {
+		workDir, err := procutil.ResolveHostWorkDir(b.cfg.CWD)
+		if err != nil {
+			return fmt.Errorf("bwrap sandbox probe failed: %w", err)
+		}
+		if _, err := buildBwrapArgs(effectivePolicy, workDir); err != nil {
+			return fmt.Errorf("bwrap sandbox probe failed: %w", err)
+		}
+	}
 	probeArgs := []string{
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
@@ -137,7 +150,7 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 		"--unshare-user",
 		"--unshare-pid",
 	}
-	if !policy.Default(b.cfg, sandbox.Constraints{}).NetworkAccess {
+	if !effectivePolicy.NetworkAccess {
 		probeArgs = append(probeArgs, "--unshare-net")
 	}
 	probeArgs = append(probeArgs, "--", bwrapProbeExecutable)
@@ -174,7 +187,7 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	return nil
 }
 
-func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
+func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	runCtx := ctx
 	cancel := func() {}
 	if req.Timeout > 0 {
@@ -192,7 +205,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
 	}
 	shell, args := sandbox.ShellArgs(b.cfg.Execution, req.Command)
-	bwrapArgs = appendBwrapEnvironment(bwrapArgs, b.env.Build(req.UnsetEnv, req.EnvOverrides))
+	bwrapArgs = appendBwrapEnvironment(bwrapArgs, b.env.Build(req.UnsetEnv, req.Env))
 	cmd, payload, err := b.commandWithArgs(runCtx, bwrapArgs, shell, args)
 	if err != nil {
 		return sandbox.CommandResult{}, err
@@ -249,7 +262,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 	return result, fmt.Errorf("tool: bwrap sandbox command failed: %w; %s", waitErr, commandOutputSummary(result))
 }
 
-func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (string, error) {
+func (b *bwrapRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) (string, error) {
 	manager, err := b.asyncSessionManager()
 	if err != nil {
 		return "", err
@@ -268,7 +281,7 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (
 	session, err := manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:         req.Command,
 		Dir:             req.Dir,
-		Env:             b.env.Build(req.UnsetEnv, req.EnvOverrides),
+		Env:             b.env.Build(req.UnsetEnv, req.Env),
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
@@ -375,18 +388,19 @@ func (b *bwrapRunner) asyncSessionManager() (*cmdsession.SessionManager, error) 
 }
 
 func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
+	readRoots, err := p.ReadCeiling()
+	if err != nil {
+		return nil, err
+	}
 	args := []string{"--new-session", "--die-with-parent", "--unshare-user", "--unshare-pid"}
 	if !p.NetworkAccess {
 		args = append(args, "--unshare-net")
 	}
-	if p.ResourceLimits == nil || p.ResourceLimits.ReadPaths == nil {
+	if readRoots == nil {
 		args = append(args, "--ro-bind", "/", "/")
 	} else {
-		for _, root := range p.ResourceLimits.ReadPaths {
-			if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
-				return nil, fmt.Errorf("bwrap: read ceiling requires absolute non-root paths")
-			}
-			args = append(args, "--ro-bind", root, root)
+		for _, root := range readRoots {
+			args = append(args, "--ro-bind", root.Physical, root.Path)
 		}
 	}
 	args = append(args, "--dev", "/dev", "--proc", "/proc")
@@ -396,7 +410,28 @@ func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 			return nil, err
 		}
 		for _, root := range writableRoots {
-			args = append(args, "--bind", root, root)
+			source := root
+			if readRoots != nil {
+				if !filepath.IsAbs(root) {
+					return nil, fmt.Errorf("bwrap: writable bind must be inside mandatory read ceiling")
+				}
+				root = filepath.Clean(root)
+				source, err = fsboundary.ResolveExistingPath(root)
+				if err != nil {
+					return nil, fmt.Errorf("bwrap: resolve writable bind: %w", err)
+				}
+				allowed := false
+				for _, readRoot := range readRoots {
+					if fsboundary.PathIsUnder(source, readRoot.Physical) {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return nil, fmt.Errorf("bwrap: writable bind must be inside mandatory read ceiling")
+				}
+			}
+			args = append(args, "--bind", source, root)
 		}
 	}
 	readOnlyPaths, err := policy.ReadOnlyPaths(p, workDir)
@@ -529,12 +564,12 @@ func commandOutputSummary(result sandbox.CommandResult) string {
 	}
 }
 
-func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
+func emitOutput(fn func(sandbox.OutputChunk)) func(string, string) {
 	if fn == nil {
 		return nil
 	}
 	return func(stream string, text string) {
-		fn(runnerruntime.OutputChunk{Stream: stream, Text: text})
+		fn(sandbox.OutputChunk{Stream: stream, Text: text})
 	}
 }
 

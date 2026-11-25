@@ -20,6 +20,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
@@ -69,8 +70,18 @@ func New(cfg Config) (sandbox.Runtime, error) {
 			return nil, fmt.Errorf("seatbelt helper executable: %w", err)
 		}
 	}
-	if cfg.ResourceLimits != nil && cfg.ResourceLimits.ReadPaths != nil && !helperAllowedByReadCeiling(helperPath, cfg.ResourceLimits.ReadPaths) {
-		return nil, fmt.Errorf("seatbelt helper %q must be inside mandatory read ceiling", helperPath)
+	readRoots, err := policy.Default(cfg, sandbox.Constraints{}).ReadCeiling()
+	if err != nil {
+		return nil, err
+	}
+	if readRoots != nil {
+		helperPath, err = fsboundary.ResolveExistingPath(helperPath)
+		if err != nil {
+			return nil, fmt.Errorf("seatbelt: resolve helper executable: %w", err)
+		}
+		if !filepath.IsAbs(helperPath) || !helperAllowedByReadCeiling(helperPath, readRoots) {
+			return nil, fmt.Errorf("seatbelt helper %q must be inside mandatory read ceiling", helperPath)
+		}
 	}
 	runner := &seatbeltRunner{
 		execCommand:    exec.CommandContext,
@@ -177,7 +188,7 @@ func (s *seatbeltRunner) probe(ctx context.Context) error {
 	return nil
 }
 
-func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
+func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	runCtx := ctx
 	cancel := func() {}
 	if req.Timeout > 0 {
@@ -196,7 +207,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 	}
 
 	shell, shellArgs := sandbox.ShellArgs(s.cfg.Execution, req.Command)
-	cmd, payload, err := s.seatbeltCommand(runCtx, profile, shell, shellArgs, s.env.Build(req.UnsetEnv, req.EnvOverrides))
+	cmd, payload, err := s.seatbeltCommand(runCtx, profile, shell, shellArgs, s.env.Build(req.UnsetEnv, req.Env))
 	if err != nil {
 		return sandbox.CommandResult{}, err
 	}
@@ -255,7 +266,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 	return result, fmt.Errorf("tool: seatbelt sandbox command failed: %w; %s", waitErr, commandOutputSummary(result))
 }
 
-func (s *seatbeltRunner) StartAsync(_ context.Context, req runnerruntime.Request) (string, error) {
+func (s *seatbeltRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) (string, error) {
 	manager, err := s.asyncSessionManager()
 	if err != nil {
 		return "", err
@@ -274,7 +285,7 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req runnerruntime.Request
 	session, err := manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:         req.Command,
 		Dir:             req.Dir,
-		Env:             s.env.Build(req.UnsetEnv, req.EnvOverrides),
+		Env:             s.env.Build(req.UnsetEnv, req.Env),
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
@@ -380,10 +391,14 @@ func (s *seatbeltRunner) asyncSessionManager() (*cmdsession.SessionManager, erro
 }
 
 func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
+	readRoots, err := p.ReadCeiling()
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
 	b.WriteString("(version 1)\n")
 	b.WriteString("(deny default)\n")
-	restrictedReads := p.ResourceLimits != nil && p.ResourceLimits.ReadPaths != nil
+	restrictedReads := readRoots != nil
 	if !restrictedReads {
 		// system.sb and the development compatibility sections grant ambient
 		// filesystem and local-network access. Explicit read ceilings must not
@@ -406,11 +421,8 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	if !restrictedReads {
 		b.WriteString("(allow file-read*)\n")
 	} else {
-		for _, root := range p.ResourceLimits.ReadPaths {
-			if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
-				return "", fmt.Errorf("seatbelt: read ceiling requires absolute non-root paths")
-			}
-			fmt.Fprintf(&b, "(allow file-read* file-map-executable (subpath %s))\n", sbplString(root))
+		for _, root := range readRoots {
+			fmt.Fprintf(&b, "(allow file-read* file-map-executable (subpath %s))\n", sbplString(root.Physical))
 		}
 	}
 	if restrictedReads {
@@ -548,12 +560,12 @@ func commandOutputSummary(result sandbox.CommandResult) string {
 	}
 }
 
-func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
+func emitOutput(fn func(sandbox.OutputChunk)) func(string, string) {
 	if fn == nil {
 		return nil
 	}
 	return func(stream string, text string) {
-		fn(runnerruntime.OutputChunk{Stream: stream, Text: text})
+		fn(sandbox.OutputChunk{Stream: stream, Text: text})
 	}
 }
 
@@ -580,10 +592,9 @@ func (s *seatbeltRunner) seatbeltCommand(ctx context.Context, profile, shell str
 	return cmd, file, nil
 }
 
-func helperAllowedByReadCeiling(path string, roots []string) bool {
+func helperAllowedByReadCeiling(path string, roots []policy.ReadRoot) bool {
 	for _, root := range roots {
-		rel, err := filepath.Rel(root, path)
-		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if fsboundary.PathIsUnder(path, root.Physical) {
 			return true
 		}
 	}

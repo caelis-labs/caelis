@@ -375,7 +375,8 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	slot.beginInitialActivity(activityID, run)
 	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
 	dispatchDone := slot.beginPromptDispatch(cancelDispatch)
-	r.dispatchInitialPrompt(dispatchCtx, childCtx, slot, run, dispatchDone, strings.TrimSpace(req.Prompt))
+	collaborationInstalled := cfg.MCPGrant != nil && len(cfg.MCPServers) > 0
+	r.dispatchInitialPrompt(dispatchCtx, childCtx, slot, run, dispatchDone, strings.TrimSpace(req.Prompt), collaborationInstalled)
 	cancelDispatch()
 	return anchor, r.waitRun(ctx, run, 0), nil
 }
@@ -387,13 +388,14 @@ func (r *Runner) dispatchInitialPrompt(
 	run *childRun,
 	dispatchDone chan struct{},
 	promptText string,
+	collaborationInstalled bool,
 ) {
 	input := agent.ChildInputRequest{Source: session.ParentCommunicationActor(), Input: promptText, ContentParts: run.spawn.ContentParts}
 	if run.spawn.Role == session.ParticipantRoleSidecar {
 		input.Source = session.ActorRef{Kind: session.ActorKindUser, ID: "user", Name: "user"}
 		input.UserInput = true
 	}
-	prompt := r.withCollaborationPromptSlice(run, buildAgentCommunicationPrompt(input))
+	prompt := r.withCollaborationPromptSlice(run, buildAgentCommunicationPrompt(input), collaborationInstalled)
 	responseCtx, cancelResponse := context.WithCancel(producerCtx)
 	prepared, err := run.client.PreparePromptParts(run.anchor.SessionID, prompt, nil)
 	fence := r.newPromptAuthRetryFence(run.spawn.SessionRef, slot, dispatchDone, cancelResponse)

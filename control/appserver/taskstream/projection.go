@@ -9,9 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
@@ -90,7 +88,7 @@ func commandTaskStreamFrameEvents(req taskFrameProjectionRequest, frame controlt
 }
 
 func delegatedParentStream(req taskFrameProjectionRequest) bool {
-	return req.ToolName == spawn.ToolName || req.ToolName == tasktool.ToolName
+	return req.ToolName == names.StartThread || req.ToolName == names.Task
 }
 
 func streamFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Frame) eventstream.Envelope {
@@ -198,7 +196,7 @@ func withCommandDisplayTerminal(update eventstream.ToolCallUpdate, toolCallID st
 }
 
 func commandDisplayTerminalID(toolCallID string, toolName string) (string, bool) {
-	if toolName != shell.RunCommandToolName {
+	if toolName != names.RunCommand {
 		return "", false
 	}
 	terminalID := strings.TrimSpace(toolCallID)

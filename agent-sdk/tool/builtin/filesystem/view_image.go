@@ -10,11 +10,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
 const (
-	ViewImageToolName = "ViewImage"
+	ViewImageToolName = names.ViewImage
 	maxViewImageBytes = int64(20_000_000)
 )
 
@@ -52,7 +53,7 @@ func (t *ViewImageTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 
 // CallWithImageInput checks the receiving model's image capability before any file access.
 func (t *ViewImageTool) CallWithImageInput(ctx context.Context, call tool.Call, imageInput bool) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

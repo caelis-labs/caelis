@@ -15,6 +15,24 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 )
 
+func TestWindowsRejectsExplicitReadCeiling(t *testing.T) {
+	root := t.TempDir()
+	for _, paths := range [][]string{{}, {root}} {
+		cfg := sandbox.Config{CWD: root, RequestedBackend: sandbox.BackendWindows,
+			ResourceLimits: &sandbox.ResourceLimits{ReadPaths: paths, WritePaths: []string{root}},
+		}
+		for _, create := range []func(sandbox.Config) (sandbox.Runtime, error){New, sandbox.New} {
+			rt, err := create(cfg)
+			if rt != nil {
+				_ = rt.Close()
+			}
+			if err == nil || !strings.Contains(err.Error(), "mandatory read limits") {
+				t.Fatalf("ReadPaths = %v, runtime = %v, error = %v", paths, rt, err)
+			}
+		}
+	}
+}
+
 func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

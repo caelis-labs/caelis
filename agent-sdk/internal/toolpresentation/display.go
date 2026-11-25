@@ -54,11 +54,6 @@ func Grep(ctx context.Context, path, pattern, include, message string, stats Sea
 	publish(ctx, fields)
 }
 
-// Plan records the entries displayed to the user.
-func Plan(ctx context.Context, entries []map[string]any, explanation string) {
-	publish(ctx, map[string]any{"updated": true, "entries": entries, "explanation": explanation})
-}
-
 // Skill records the activated skill and its directory.
 func Skill(ctx context.Context, name, path, root string) {
 	publish(ctx, map[string]any{"name": name, "path": path, "root": root})

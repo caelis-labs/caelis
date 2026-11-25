@@ -8,10 +8,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const FetchToolName = "WebFetch"
+const FetchToolName = names.WebFetch
 
 const (
 	defaultFetchTimeout     = 30 * time.Second
@@ -70,7 +71,7 @@ func (t *FetchTool) Definition() tool.Definition {
 }
 
 func (t *FetchTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

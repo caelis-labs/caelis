@@ -1,6 +1,7 @@
 package consoleoutput
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -65,7 +66,7 @@ func TestRawCappedBufferPreservesBytes(t *testing.T) {
 func TestCappedOutputSinceUsesAbsoluteCursor(t *testing.T) {
 	t.Parallel()
 
-	buf := AppendCappedBytes(nil, []byte("abc"), 4)
+	buf := AppendCappedBytes(make([]byte, 0, 8), []byte("abc"), 4)
 	buf = AppendCappedBytes(buf, []byte("def"), 4)
 	got, cursor := CappedOutputSince(buf, 6, 3)
 	if string(got) != "def" || cursor != 6 {
@@ -73,6 +74,43 @@ func TestCappedOutputSinceUsesAbsoluteCursor(t *testing.T) {
 	}
 	got, cursor = CappedOutputSince(buf, 6, 0)
 	if string(got) != "cdef" || cursor != 6 {
-		t.Fatalf("CappedOutputSince(before cap) = %q/%d, want capped buffer", got, cursor)
+		t.Fatalf("CappedOutputSince(before cap) = %q/%d, want cdef/6", got, cursor)
+	}
+	buf = AppendCappedBytes(buf, []byte("ghijk"), 4)
+	next, cursor := CappedOutputSince(buf, 11, cursor)
+	if string(next) != "hijk" || cursor != 11 || string(got) != "cdef" {
+		t.Fatalf("retained output = %q/%d, previous read = %q, want hijk/11 and cdef", next, cursor, got)
+	}
+}
+
+func BenchmarkAppendCappedBytes(b *testing.B) {
+	for _, capacity := range []int{64 << 10, 1 << 20} {
+		for _, chunkSize := range []int{64, 4 << 10, 32 << 10} {
+			b.Run(fmt.Sprintf("cap=%d/chunk=%d", capacity, chunkSize), func(b *testing.B) {
+				chunk := make([]byte, chunkSize)
+				buf := AppendCappedBytes(nil, make([]byte, capacity), capacity)
+				buf = AppendCappedBytes(buf, chunk, capacity)
+				b.SetBytes(int64(chunkSize))
+				b.ReportAllocs()
+				for b.Loop() {
+					buf = AppendCappedBytes(buf, chunk, capacity)
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkCappedOutputSince(b *testing.B) {
+	const capacity = 1 << 20
+	const total = 2 * capacity
+	buf := make([]byte, capacity)
+	for _, readSize := range []int{4 << 10, capacity} {
+		b.Run(fmt.Sprintf("read=%d", readSize), func(b *testing.B) {
+			b.SetBytes(int64(readSize))
+			b.ReportAllocs()
+			for b.Loop() {
+				_, _ = CappedOutputSince(buf, total, int64(total-readSize))
+			}
+		})
 	}
 }

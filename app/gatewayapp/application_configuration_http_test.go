@@ -15,11 +15,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
@@ -142,6 +144,25 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effo
 	if body["model"] != model || !hasPrefix || !strings.HasPrefix(remainder, "\n") {
 		t.Fatalf("wrong model/profile-instructions prefix: %#v", body)
 	}
+	tools, _ := body["tools"].([]any)
+	var names []string
+	var definitions []tool.Definition
+	for _, declaration := range tools {
+		definition, _ := declaration.(map[string]any)
+		name, _ := definition["name"].(string)
+		names = append(names, name)
+		definitions = append(definitions, tool.Definition{Name: name})
+	}
+	slices.Sort(names)
+	want := []string{"ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("model-facing tools = %v, want %v", names, want)
+	}
+	guidance := collaboration.ControllerInstructions(definitions)
+	remainder, hasCollaboration := strings.CutPrefix(remainder, "\n"+guidance+"\n")
+	if guidance == "" || !hasCollaboration || strings.Count(actual, guidance) != 1 {
+		t.Fatalf("expected one collaboration block for the offered tools: %q", actual)
+	}
 	before, after, hasGuidance := strings.Cut(remainder, codemode.Guidance)
 	isSkillSection := func(text string) bool {
 		text = strings.TrimSpace(text)
@@ -159,19 +180,6 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effo
 			t.Fatalf("service_tier = %#v, want %s", body["service_tier"], tier)
 		}
 	}
-	tools, _ := body["tools"].([]any)
-	var names []string
-	for _, declaration := range tools {
-		definition, _ := declaration.(map[string]any)
-		name, _ := definition["name"].(string)
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	want := []string{"ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
-	if !slices.Equal(names, want) {
-		t.Fatalf("model-facing tools = %v, want %v", names, want)
-	}
-
 }
 
 func connectRevisionHTTPModel(t *testing.T, ctx context.Context, host *applicationHTTPHost, model string) {

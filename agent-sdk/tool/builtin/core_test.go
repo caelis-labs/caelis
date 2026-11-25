@@ -95,10 +95,8 @@ func TestCoreToolsExposeCanonicalNames(t *testing.T) {
 		got = append(got, configured.Definition().Name)
 	}
 	want := []string{
-		filesystem.ReadToolName, filesystem.ViewImageToolName, filesystem.WriteToolName,
-		filesystem.PatchToolName, filesystem.GlobToolName, filesystem.SearchToolName,
-		shell.RunCommandToolName, task.ToolName, plan.ToolName, skilltool.ToolName,
-		web.SearchToolName, web.FetchToolName, "js_exec",
+		"Read", "ViewImage", "Write", "Patch", "Glob", "Grep",
+		"RunCommand", "Task", "Plan", "Skill", "WebSearch", "WebFetch", "js_exec",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("core tool names = %#v, want %#v", got, want)

@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 )
 
@@ -29,6 +30,12 @@ func Call(ctx context.Context, candidate tool.Tool, call tool.Call, dispatch Dis
 	// Only SDK-internal publishers can populate this observation. It carries
 	// display fields independently of the bound tool's concrete type.
 	o := Observed(ctx)
+	switch builtin := candidate.(type) {
+	case plan.Tool:
+		return callPlan(builtin, call, o)
+	case *plan.Tool:
+		return callPlan(*builtin, call, o)
+	}
 	ctx = toolpresentation.With(ctx, func(details map[string]any) { o.BuiltinDisplay = details })
 	if dispatch.Model != nil {
 		switch native := candidate.(type) {
@@ -39,6 +46,14 @@ func Call(ctx context.Context, candidate tool.Tool, call tool.Call, dispatch Dis
 		}
 	}
 	return candidate.Call(ctx, call)
+}
+
+func callPlan(builtin plan.Tool, call tool.Call, observation *Observation) (tool.Result, error) {
+	result, update, err := builtin.CallWithUpdate(call)
+	if err == nil {
+		observation.PlanUpdate = &update
+	}
+	return result, err
 }
 
 func searchBackend(llm model.LLM) web.SearchBackend {

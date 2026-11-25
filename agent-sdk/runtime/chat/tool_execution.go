@@ -44,9 +44,9 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 ) (model.Message, *session.Event, error) {
 	progressCh := make(chan toolbinding.Progress, 16)
 	doneCh := make(chan toolExecutionResult, 1)
-	progressTaskResultMeta := runtimeTaskResultSourceMeta(false)
+	progressTaskResultMeta := toolbinding.TaskResultSourceMeta(false)
 	if selectedTool, ok := a.lookupRunTool(call.Name, visibility); ok && toolbinding.IsTaskResultSource(selectedTool) {
-		progressTaskResultMeta = runtimeTaskResultSourceMeta(true)
+		progressTaskResultMeta = toolbinding.TaskResultSourceMeta(true)
 	}
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -118,7 +118,7 @@ func (a *Agent) executeToolCallAdmitted(
 			Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(rawOutput)}},
 		}
 		canonical, truncationMeta := hookrun.FromContext(ctx).Hooks.ToolProjection.Project(ctx, result)
-		message := toolResultMessageFromCanonical(call, canonical, bindingErr)
+		message := toolbinding.ResultMessage(call, canonical, bindingErr)
 		event := toolResultEvent(call, result, bindingErr, &message, truncationMeta)
 		a.applyPreparedFact(event)
 		return message, event, nil
@@ -146,22 +146,25 @@ func (a *Agent) executeToolCallAdmitted(
 		}
 	}
 	effectErr := hookrun.EffectError(err)
-	message, truncationMeta, viewErr := ProjectToolResult(ctx, selectedTool.Definition(), invocation, result, err, hookrun.FromContext(ctx).Hooks.ToolProjection.Project)
+	message, truncationMeta, viewErr := toolbinding.ProjectResult(ctx, selectedTool.Definition(), invocation, result, err, hookrun.FromContext(ctx).Hooks.ToolProjection.Project)
 	if viewErr != nil {
 		err = &hookrun.ProcessingError{Cause: viewErr, EffectError: effectErr}
 		observation.BuiltinDisplay = nil
 	}
-	eventMeta := mergeEventMeta(observation.EventMeta(), truncationMeta)
+	eventMeta := toolbinding.MergeEventMeta(observation.EventMeta(), truncationMeta)
 	if toolbinding.IsTaskResultSource(selectedTool) {
-		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))
+		eventMeta = toolbinding.MergeEventMeta(eventMeta, toolbinding.TaskResultSourceMeta(true))
 	}
 	event := toolResultEvent(call, result, err, &message, eventMeta)
-	observation.Apply(event.Tool, selectedTool.Definition(), effectErr == nil)
+	event.Tool.Discovery = observation.Discovery && effectErr == nil
 	if err != nil && len(complete.Content) > 0 {
 		event.Tool.Result = &complete
 	}
 	event.Tool.ProcessingFailure = hookrun.ProcessingFailure(err)
 	a.applyPreparedFact(event)
+	if err == nil && observation.PlanUpdate != nil {
+		toolbinding.RecordPlanResult(ctx, event.Tool, observation.PlanUpdate)
+	}
 	if err != nil {
 		event.Tool.Error = err.Error()
 		event.Tool.ErrorCode = string(errorcode.CodeOf(err))
@@ -178,14 +181,6 @@ func (a *Agent) executeToolCallAdmitted(
 		return message, event, err
 	}
 	return message, event, nil
-}
-
-func runtimeTaskResultSourceMeta(trusted bool) map[string]any {
-	return map[string]any{
-		"caelis": map[string]any{"runtime": map[string]any{
-			toolbinding.MetadataSection: map[string]any{toolbinding.MetadataTaskResult: trusted},
-		}},
-	}
 }
 
 func modelVisibleToolErrorResult(err error) tool.Result {

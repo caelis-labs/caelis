@@ -11,34 +11,15 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 const (
-	ModeWorkspaceWrite = policy.ProfileWorkspaceWrite
-	// ModeDangerFullAccess is an explicitly registered escape policy for hosts
-	// that cannot provide a supported sandbox. It is intentionally omitted from
-	// NewRegistry so ordinary policy configuration cannot enable it.
-	ModeDangerFullAccess = "danger-full-access"
-
-	// ModeDefault is the built-in fallback policy for omitted, legacy, or
-	// otherwise unresolved local policy configuration.
-	ModeDefault = ModeWorkspaceWrite
-
 	riskClassMachine        = "machine"
 	riskClassVCSDestructive = "vcs_destructive"
 	riskClassPathEscape     = "path_escape"
 	riskClassHostExec       = "host_exec"
 	riskClassRemoteScript   = "remote_script"
 )
-
-func NormalizeModeName(mode string) string {
-	normalized := policy.NormalizeProfileName(mode)
-	if strings.TrimSpace(normalized) == "" {
-		return ModeDefault
-	}
-	return normalized
-}
 
 // NewRegistry registers the default workspace-write policy under its canonical name.
 func NewRegistry() (*policy.MemoryRegistry, error) {
@@ -50,7 +31,7 @@ func NewRegistry() (*policy.MemoryRegistry, error) {
 // apply command-specific restrictions in their policy.
 func WorkspaceWriteMode() policy.Mode {
 	return policy.NamedMode{
-		ID: ModeWorkspaceWrite,
+		ID: policy.ProfileWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := workspaceWriteConstraints(input.Options)
 			if input.ReadPathArgument != "" {
@@ -78,36 +59,13 @@ func WorkspaceWriteMode() policy.Mode {
 	}
 }
 
-// MCPApprovalDecision requests one of the four executable MCP scopes. ACP
-// carries Session under allow_once kind and Cancel under reject_once kind;
-// the stable option IDs preserve the distinct choices through every Surface.
-func MCPApprovalDecision(input policy.ToolContext, constraints sandbox.Constraints) (policy.Decision, error) {
-	// ACP uses "other"; the MCP identity lives in trusted definition metadata.
-	decision, err := askApproval("MCP tool call requires approval", constraints, input, "other", "")
-	if err != nil {
-		return policy.Decision{}, err
-	}
-	plugin, _ := input.Tool.Metadata[mcp.MetadataPluginID].(string)
-	server, _ := input.Tool.Metadata[mcp.MetadataServer].(string)
-	remote, _ := input.Tool.Metadata[mcp.MetadataTool].(string)
-	decision.Approval.ToolCall.Title = "MCP " + strings.TrimSpace(plugin+"/"+server+"/"+remote)
-	decision.Approval.Options = []session.ProtocolApprovalOption{
-		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
-		{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
-		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
-		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
-	}
-	decision.Approval.Subject = mcpApprovalSubject(input)
-	return decision, nil
-}
-
 // DangerFullAccessMode allows assembled tools on the Host without this preset's
 // approval or command filtering. An embedding may add source requirements inside its final Policy. Callers
 // must register this exceptional mode explicitly; it is not a substitute for
 // sandbox isolation.
 func DangerFullAccessMode() policy.Mode {
 	return policy.NamedMode{
-		ID: ModeDangerFullAccess,
+		ID: policy.ProfileDangerFullAccess,
 		Decide: func(_ context.Context, _ policy.ToolContext) (policy.Decision, error) {
 			return allow(hostExecutionConstraints()), nil
 		},

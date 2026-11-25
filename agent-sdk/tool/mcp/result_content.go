@@ -121,10 +121,13 @@ func mcpEmbeddedTextBlock(content *mcpsdk.EmbeddedResource) (tool.Resource, erro
 	return tool.Resource{URI: r.URI, MIMEType: r.MIMEType, Text: &text}, nil
 }
 
-func structuredContentBlock(value any) (tool.StructuredContent, error) {
+func structuredContentBlock(value any, objectOnly bool) (tool.StructuredContent, error) {
 	raw, err := json.Marshal(value)
 	if err != nil || len(raw) > maxMCPStructuredBytes {
 		return tool.StructuredContent{}, fmt.Errorf("invalid or oversized structuredContent")
+	}
+	if objectOnly && raw[0] != '{' {
+		return tool.StructuredContent{}, fmt.Errorf("structuredContent must be a JSON object")
 	}
 	return tool.StructuredContent{Value: raw}, nil
 }

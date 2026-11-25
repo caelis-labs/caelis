@@ -2,9 +2,11 @@ package policyfs
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -18,8 +20,6 @@ type policyFileSystem struct {
 }
 
 // New constrains file-tool filesystem access using the active sandbox policy.
-// Writes are enforced while reads remain broad except for explicit hidden
-// paths.
 func New(base sandbox.FileSystem, policyFn func() policy.Policy) sandbox.FileSystem {
 	if base == nil || policyFn == nil {
 		return base
@@ -30,45 +30,133 @@ func New(base sandbox.FileSystem, policyFn func() policy.Policy) sandbox.FileSys
 func (f *policyFileSystem) Getwd() (string, error)       { return f.base.Getwd() }
 func (f *policyFileSystem) UserHomeDir() (string, error) { return f.base.UserHomeDir() }
 func (f *policyFileSystem) Open(path string) (*os.File, error) {
-	if err := f.checkReadPath(path); err != nil {
+	p, err := f.readPolicy()
+	if err != nil {
 		return nil, err
 	}
-	return f.base.Open(path)
+	if p.ceiling != nil {
+		_, target, err := f.resolveReadPath(path, p)
+		if err != nil {
+			return nil, err
+		}
+		return openPhysicalFile(target)
+	}
+	path, err = f.checkReadPath(path, p)
+	if err != nil {
+		return nil, err
+	}
+	file, err := f.base.Open(path)
+	if err != nil || !p.restricted() {
+		return file, err
+	}
+	// A raw directory handle would allow enumeration without the policy.
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: not a regular file", fs.ErrInvalid)
+	}
+	return file, nil
 }
 
 func (f *policyFileSystem) ReadDir(path string) ([]os.DirEntry, error) {
-	if err := f.checkReadPath(path); err != nil {
+	p, err := f.readPolicy()
+	if err != nil {
 		return nil, err
 	}
-	return f.base.ReadDir(path)
+	return f.readDir(path, p)
 }
 
 func (f *policyFileSystem) Stat(path string) (os.FileInfo, error) {
-	if err := f.checkReadPath(path); err != nil {
+	p, err := f.readPolicy()
+	if err != nil {
 		return nil, err
 	}
-	return f.base.Stat(path)
+	return f.stat(path, p)
+}
+
+func (f *policyFileSystem) stat(path string, p readPolicy) (os.FileInfo, error) {
+	path, target, err := f.resolveReadPath(path, p)
+	if err != nil {
+		return nil, err
+	}
+	if p.ceiling == nil {
+		return f.base.Stat(path)
+	}
+	parent, name, err := openPhysicalParent(target)
+	if err != nil {
+		return nil, err
+	}
+	defer parent.Close()
+	return physicalInfo(parent, name)
 }
 
 func (f *policyFileSystem) ReadFile(path string) ([]byte, error) {
-	if err := f.checkReadPath(path); err != nil {
+	p, err := f.readPolicy()
+	if err != nil {
 		return nil, err
 	}
-	return f.base.ReadFile(path)
+	path, target, err := f.resolveReadPath(path, p)
+	if err != nil {
+		return nil, err
+	}
+	if p.ceiling == nil {
+		return f.base.ReadFile(path)
+	}
+	file, err := openPhysicalFile(target)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
 }
 
 func (f *policyFileSystem) Glob(pattern string) ([]string, error) {
-	if err := f.checkReadPath(globReadRoot(pattern, f.base)); err != nil {
+	p, err := f.readPolicy()
+	if err != nil {
 		return nil, err
 	}
-	return f.base.Glob(pattern)
+	if !p.restricted() {
+		return f.base.Glob(pattern)
+	}
+	if _, err := filepath.Match(pattern, ""); err != nil {
+		return nil, err
+	}
+	matches, err := f.glob(pattern, p, 0)
+	slices.Sort(matches)
+	return matches, err
 }
 
 func (f *policyFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
-	if err := f.checkReadPath(root); err != nil {
+	p, err := f.readPolicy()
+	if err != nil {
 		return err
 	}
-	return f.base.WalkDir(root, fn)
+	path, err := f.checkReadPath(root, p)
+	if err != nil {
+		return err
+	}
+	if p.ceiling != nil {
+		walk := ceilingWalk{fsys: f, policy: p, dir: path}
+		return fs.WalkDir(walk, ".", func(name string, entry fs.DirEntry, err error) error {
+			return fn(walk.path(name), entry, err)
+		})
+	}
+	if !p.restricted() {
+		return f.base.WalkDir(path, fn)
+	}
+	return f.base.WalkDir(path, func(name string, entry fs.DirEntry, walkErr error) error {
+		if _, err := f.checkReadPath(name, p); err != nil {
+			if entry != nil && entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		return fn(name, entry, walkErr)
+	})
 }
 
 func (f *policyFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
@@ -130,67 +218,154 @@ func (f *policyFileSystem) checkWritePath(path string) error {
 	return permissionError("write", targetPath, "path is outside writable sandbox roots")
 }
 
-func (f *policyFileSystem) checkReadPath(path string) error {
+type readPolicy struct {
+	ceiling []policy.ReadRoot
+	hidden  []string
+}
+
+func (p readPolicy) restricted() bool {
+	return p.ceiling != nil || len(p.hidden) > 0
+}
+
+func (f *policyFileSystem) readPolicy() (readPolicy, error) {
 	p := f.policy()
-	switch p.Type {
-	case policy.TypeDangerFull, policy.TypeExternal:
-		return nil
+	roots, err := p.ReadCeiling()
+	if err != nil {
+		return readPolicy{}, permissionError("read", "", "invalid read ceiling")
 	}
-	targetPath := fsboundary.ResolveAbsPath(path, f.base)
-	if targetPath == "" {
-		return nil
+	result := readPolicy{ceiling: roots}
+	if p.Type != policy.TypeDangerFull && p.Type != policy.TypeExternal {
+		result.hidden = p.HiddenRoots
 	}
-	if fsboundary.IsWithinRoots(targetPath, p.HiddenRoots, f.base) {
-		return permissionError("read", targetPath, "path is hidden by sandbox policy")
+	return result, nil
+}
+
+func (f *policyFileSystem) checkReadPath(path string, p readPolicy) (string, error) {
+	path, _, err := f.resolveReadPath(path, p)
+	return path, err
+}
+
+func (f *policyFileSystem) resolveReadPath(path string, p readPolicy) (logical, physical string, err error) {
+	if !p.restricted() {
+		return path, path, nil
 	}
-	return nil
+	if path == "" {
+		return "", "", permissionError("read", path, "missing path")
+	}
+	if !filepath.IsAbs(path) {
+		wd, err := f.base.Getwd()
+		if err != nil || !filepath.IsAbs(wd) || filepath.VolumeName(path) != "" || os.IsPathSeparator(path[0]) {
+			return "", "", permissionError("read", path, "cannot resolve path against sandbox working directory")
+		}
+		path = filepath.Join(wd, path)
+	}
+	path = filepath.Clean(path)
+	target := path
+	if p.ceiling != nil {
+		target, err = fsboundary.ResolvePath(path)
+		if err != nil {
+			return "", "", permissionError("read", path, "cannot resolve path against read ceiling")
+		}
+		allowed := false
+		for _, root := range p.ceiling {
+			if fsboundary.PathIsUnder(target, root.Physical) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "", "", permissionError("read", path, "outside explicit read ceiling")
+		}
+	}
+	if p.ceiling == nil && len(p.hidden) > 0 && fsboundary.IsWithinRoots(path, p.hidden, f.base) {
+		return "", "", permissionError("read", path, "path is hidden by sandbox policy")
+	}
+	if p.ceiling != nil {
+		for _, root := range p.hidden {
+			root = fsboundary.ResolveAbsRoot(root, f.base)
+			if fsboundary.PathIsUnder(path, root) || fsboundary.PathIsUnder(target, fsboundary.ResolvePathWithSymlinks(root)) {
+				return "", "", permissionError("read", path, "path is hidden by sandbox policy")
+			}
+		}
+	}
+	return path, target, nil
+}
+
+func (f *policyFileSystem) readDir(path string, p readPolicy) ([]os.DirEntry, error) {
+	path, target, err := f.resolveReadPath(path, p)
+	if err != nil {
+		return nil, err
+	}
+	if p.ceiling != nil {
+		return f.readPhysicalDir(path, target, p)
+	}
+	entries, err := f.base.ReadDir(path)
+	if len(entries) == 0 || !p.restricted() {
+		return entries, err
+	}
+	visible := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if _, err := f.checkReadPath(filepath.Join(path, entry.Name()), p); err == nil {
+			visible = append(visible, entry)
+		}
+	}
+	return visible, err
 }
 
 func permissionError(_ string, _ string, _ string) error {
 	return fmt.Errorf("%w: %s", os.ErrPermission, sandbox.SandboxPermissionDeniedMessage)
 }
 
-func globReadRoot(pattern string, fsys sandbox.FileSystem) string {
-	trimmed := strings.TrimSpace(pattern)
-	if trimmed == "" {
-		return ""
+// glob expands each wildcard component through the same policy as ReadDir so
+// a disallowed directory cannot be enumerated by a later component.
+func (f *policyFileSystem) glob(pattern string, p readPolicy, depth int) ([]string, error) {
+	// Match filepath.Glob's recursion limit for untrusted patterns.
+	if depth >= 10000 {
+		return nil, filepath.ErrBadPattern
 	}
-	if !filepath.IsAbs(trimmed) {
-		wd, err := fsys.Getwd()
+	if !globHasMeta(pattern) {
+		if _, err := f.checkReadPath(pattern, p); err != nil {
+			return nil, err
+		}
+		// As in filepath.Glob, an inaccessible entry is omitted.
+		if _, err := f.stat(pattern, p); err == nil {
+			return []string{pattern}, nil
+		}
+		return nil, nil
+	}
+	dir, file := filepath.Split(pattern)
+	if dir == "" {
+		dir = "."
+	}
+	dirs := []string{dir}
+	if globHasMeta(dir) {
+		var err error
+		parent := strings.TrimRightFunc(dir, func(r rune) bool {
+			return r <= 127 && os.IsPathSeparator(byte(r))
+		})
+		dirs, err = f.glob(parent, p, depth+1)
 		if err != nil {
-			return trimmed
+			return nil, err
 		}
-		trimmed = filepath.Join(wd, trimmed)
+	} else if _, err := f.checkReadPath(dir, p); err != nil {
+		return nil, err
 	}
-	trimmed = filepath.Clean(trimmed)
-	if !strings.ContainsAny(filepath.ToSlash(trimmed), "*?[") {
-		return trimmed
-	}
-	volume := filepath.VolumeName(trimmed)
-	rest := strings.TrimPrefix(trimmed, volume)
-	rest = strings.TrimPrefix(rest, string(filepath.Separator))
-	segments := strings.FieldsFunc(rest, func(r rune) bool { return r == filepath.Separator })
-	metaIndex := len(segments)
-	for i, segment := range segments {
-		if strings.ContainsAny(segment, "*?[") {
-			metaIndex = i
-			break
+	var matches []string
+	for _, dir := range dirs {
+		entries, _ := f.readDir(dir, p)
+		for _, entry := range entries {
+			if matched, _ := filepath.Match(file, entry.Name()); matched {
+				matches = append(matches, filepath.Join(dir, entry.Name()))
+			}
 		}
 	}
-	root := volume
-	if filepath.IsAbs(trimmed) {
-		if root == "" {
-			root = string(filepath.Separator)
-		} else if !strings.HasSuffix(root, string(filepath.Separator)) {
-			root += string(filepath.Separator)
-		}
+	return matches, nil
+}
+
+func globHasMeta(path string) bool {
+	magic := "*?["
+	if filepath.Separator != '\\' {
+		magic += `\`
 	}
-	if metaIndex > 0 {
-		parts := append([]string{root}, segments[:metaIndex]...)
-		root = filepath.Join(parts...)
-	}
-	if root == "" {
-		root = "."
-	}
-	return filepath.Clean(root)
+	return strings.ContainsAny(path[len(filepath.VolumeName(path)):], magic)
 }

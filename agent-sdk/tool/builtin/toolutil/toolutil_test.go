@@ -1,9 +1,7 @@
 package toolutil
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -84,18 +82,4 @@ func TestJSONResult(t *testing.T) {
 		t.Fatalf("payload[ok] = %v, want true", payload["ok"])
 	}
 
-}
-
-func TestWithContextCancel(t *testing.T) {
-	t.Parallel()
-
-	if err := WithContextCancel(context.Background()); err != nil {
-		t.Fatalf("WithContextCancel(background) = %v, want nil", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := WithContextCancel(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("WithContextCancel(canceled) = %v, want context.Canceled", err)
-	}
 }

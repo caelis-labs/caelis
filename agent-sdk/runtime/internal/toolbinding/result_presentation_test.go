@@ -1,4 +1,4 @@
-package chat
+package toolbinding
 
 import (
 	"testing"

@@ -2795,7 +2795,7 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 			SystemPrompt: "Use tools when necessary.",
 		},
 		Hooks:             hook.Set{ToolPolicy: registry},
-		DefaultPolicyMode: presets.ModeDangerFullAccess,
+		DefaultPolicyMode: policy.ProfileDangerFullAccess,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2819,7 +2819,7 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 			Model: &writePathRuntimeModel{path: target, content: "yolo\n"},
 			Tools: []tool.Tool{writeTool},
 			Metadata: map[string]any{
-				policy.MetadataPolicyProfile: presets.ModeWorkspaceWrite,
+				policy.MetadataPolicyProfile: policy.ProfileWorkspaceWrite,
 			},
 		},
 	})
@@ -2922,13 +2922,8 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 			return tool.Result{}, nil
 		},
 	}
-	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
-		Tools: []tool.Tool{targetTool},
-	}, approvalContext{ctx: context.Background()})
-	if got := len(wrapped); got != 1 {
-		t.Fatalf("len(wrapped) = %d, want 1", got)
-	}
-	result, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
+	bind := runtime.toolDispatchBinder(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{}, approvalContext{ctx: t.Context()})
+	result, err := bind(targetTool, "").Call(t.Context(), tool.Call{ID: "call-1", Name: "ECHO"})
 	if !tool.HasFailedReply(err) {
 		t.Fatalf("wrapped tool Call() error = %v", err)
 	}
@@ -2960,7 +2955,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	}
 	runtime := &Runtime{
 		hooks:             hook.Set{ToolPolicy: registry},
-		defaultPolicyMode: presets.ModeWorkspaceWrite,
+		defaultPolicyMode: policy.ProfileWorkspaceWrite,
 	}
 	targetTool := tool.NamedTool{
 		Def: tool.Definition{Name: "Write"},
@@ -2969,14 +2964,10 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 			return tool.Result{}, nil
 		},
 	}
-	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+	bind := runtime.toolDispatchBinder(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
 		Metadata: map[string]any{policy.MetadataPolicyProfile: "unknown-policy"},
-		Tools:    []tool.Tool{targetTool},
-	}, approvalContext{ctx: context.Background()})
-	if got := len(wrapped); got != 1 {
-		t.Fatalf("len(wrapped) = %d, want 1", got)
-	}
-	_, err = wrapped[0].Call(context.Background(), tool.Call{
+	}, approvalContext{ctx: t.Context()})
+	_, err = bind(targetTool, "").Call(t.Context(), tool.Call{
 		ID:    "call-1",
 		Name:  "Write",
 		Input: []byte(`{"path":` + jsonStringForTest(policyOutsidePathForRuntimeTest()) + `}`),
@@ -3021,10 +3012,8 @@ func TestRuntimePolicyRegistryErrorAndEmptyDecisionFailClosed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			runtime := &Runtime{hooks: hook.Set{ToolPolicy: tt.registry}, defaultPolicyMode: "empty"}
-			wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
-				Tools: []tool.Tool{targetTool},
-			}, approvalContext{ctx: context.Background()})
-			_, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
+			bind := runtime.toolDispatchBinder(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{}, approvalContext{ctx: t.Context()})
+			_, err := bind(targetTool, "").Call(t.Context(), tool.Call{ID: "call-1", Name: "ECHO"})
 			switch tt.wantType.(type) {
 			case *policy.ProfileError:
 				var target *policy.ProfileError
