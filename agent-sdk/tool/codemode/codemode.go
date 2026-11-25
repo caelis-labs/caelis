@@ -237,7 +237,7 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
 const description = `Set code, file or reset:true. Top-level await works. Use return to select output (omitted: null). Reuse declared tool schemas. For example, return (await Read(args)).data.content. Use tools.call(name,args) as a fallback.
-Use block-local let/const for temporaries. Top-level bindings usually persist but may clear. Use let for reassignment. Redeclare only var/functions.
+Top-level names persist in the active environment. Later scripts can read, assign or redeclare them. Within one script, JavaScript scope and const rules still apply.
 
 Success returns a Body. result.data is explicit structured output, checked against any output schema. Missing data is undefined. JSON null stays null. result.text joins only text blocks with newlines. Return the original Body to preserve raw JSON, or select fields and original result.media references. Copies cannot attach media. Numbers may round. Omit undefined and stringify BigInt.
 

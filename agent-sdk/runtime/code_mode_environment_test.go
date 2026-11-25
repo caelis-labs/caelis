@@ -62,6 +62,16 @@ func TestCodeModeEnvironmentAcrossRunsResetAndRelease(t *testing.T) {
 	if out := execute(active.SessionRef, `retained+=2;return retained;`, false); !strings.Contains(out, "42") {
 		t.Fatal(out)
 	}
+	for _, step := range []struct{ code, want string }{
+		{`const cmds=["build"];const previous=()=>cmds;return cmds;`, `["build"]`},
+		{`cmds=[];return cmds;`, `[]`},
+		{`const cmds=["test"];return [cmds,previous()];`, `[["test"],["build"]]`},
+		{`return cmds;`, `["test"]`},
+	} {
+		if out := execute(active.SessionRef, step.code, false); !strings.Contains(out, step.want) {
+			t.Fatalf("%s: got %s, want %s", step.code, out, step.want)
+		}
+	}
 	other, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "fixture", UserID: "fixture", Workspace: session.WorkspaceRef{Key: "fixture", CWD: root}})
 	if err != nil {
 		t.Fatal(err)
@@ -71,8 +81,8 @@ func TestCodeModeEnvironmentAcrossRunsResetAndRelease(t *testing.T) {
 	}
 	before := execute(active.SessionRef, `return runtime.state();`, false)
 	execute(active.SessionRef, "", true)
-	after := execute(active.SessionRef, `return {state:runtime.state(),value:typeof retained};`, false)
-	if !strings.Contains(after, "undefined") || generationOf(t, before) != generationOf(t, firstState) || generationOf(t, before) == generationOf(t, after) {
+	after := execute(active.SessionRef, `return {state:runtime.state(),values:[typeof retained,typeof cmds,typeof previous]};`, false)
+	if !strings.Contains(after, `["undefined","undefined","undefined"]`) || generationOf(t, before) != generationOf(t, firstState) || generationOf(t, before) == generationOf(t, after) {
 		t.Fatalf("reset did not replace environment: %s %s", before, after)
 	}
 	execute(active.SessionRef, `let resumed=1;return resumed;`, false)
