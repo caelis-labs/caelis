@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -70,9 +71,6 @@ type EventTool struct {
 	Error     string           `json:"error,omitempty"`
 	ErrorCode string           `json:"error_code,omitempty"`
 	Parent    *EventParentTool `json:"parent,omitempty"`
-	// LegacyModelCall preserves the model envelope of routed MCP history through
-	// v0.84.1. Remove when those Sessions leave the supported resume window.
-	LegacyModelCall *model.ToolCall `json:"model_call,omitempty"`
 	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
 	ProposedCall *model.ToolCall `json:"proposed_call,omitempty"`
 	ID           string          `json:"id,omitempty"`
@@ -105,9 +103,6 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 	}{toolAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
-	}
-	if call := decoded.LegacyModelCall; call != nil && (call.Name != "mcp_call" || call.ID == "" || call.ID != decoded.ID || call.Args == "") {
-		return coreEventValidationError("invalid historical MCP envelope")
 	}
 	if len(fields.Input) > 0 && string(fields.Input) != "null" {
 		decoder := json.NewDecoder(bytes.NewReader(fields.Input))
@@ -257,6 +252,21 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 	if err := validateCheckpointContract((*Event)(&decoded)); err != nil {
 		return err
+	}
+	// Session reads routed MCP receipts through v0.84.1 using the recorded
+	// target and bounded model content. Remove this name repair when dropping
+	// those receipts from the supported read path.
+	if decoded.Type == EventTypeToolResult && decoded.Tool != nil && decoded.Tool.ID != "" && decoded.Tool.Name != "" && decoded.Message != nil {
+		for _, part := range decoded.Message.Parts {
+			result := part.ToolResult
+			if result == nil || result.Name != "mcp_call" || result.ToolUseID != decoded.Tool.ID || decoded.Tool.Name == result.Name {
+				continue
+			}
+			route := gjson.GetBytes(data, "tool.model_call")
+			if route.Get("name").String() == result.Name && route.Get("id").String() == result.ToolUseID {
+				result.Name = decoded.Tool.Name
+			}
+		}
 	}
 	*e = Event(decoded)
 	return nil

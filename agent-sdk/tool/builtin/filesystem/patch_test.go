@@ -301,47 +301,25 @@ func TestPatchToolMatchErrorsDoNotIncludeTargetPath(t *testing.T) {
 	}
 }
 
-func TestPatchToolIgnoresLegacyExpectedReplacementCount(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "symbols.txt")
-	if err := os.WriteFile(path, []byte("x + x\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	patchTool := newTestPatchTool(t, dir)
-
-	runPatch(t, patchTool, map[string]any{
-		"path": "symbols.txt",
-		"edits": []map[string]any{
-			{
-				"old":                   "x",
-				"new":                   "y",
-				"replace_all":           true,
-				"expected_replacements": "retired",
-			},
-		},
-	})
-	if got, want := readTestFile(t, path), "y + y\n"; got != want {
-		t.Fatalf("patched content = %q, want %q", got, want)
-	}
-}
-
-func TestPatchToolIgnoresLegacyRevision(t *testing.T) {
+func TestPatchRejectsRetiredArgumentsBeforeWriting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "notes.txt")
 	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+		t.Fatal(err)
 	}
-	patchTool := newTestPatchTool(t, dir)
-
-	runPatch(t, patchTool, map[string]any{
-		"path":        "notes.txt",
-		"if_revision": map[string]any{"retired": true},
-		"edits": []map[string]any{
-			{"old": "old", "new": "new"},
-		},
-	})
-	if got, want := readTestFile(t, path), "new\n"; got != want {
-		t.Fatalf("patched content = %q, want %q", got, want)
+	patch := newTestPatchTool(t, dir)
+	for _, key := range []string{"if_revision", "expected_replacements"} {
+		edit := map[string]any{"old": "old", "new": "new"}
+		args := map[string]any{"path": "notes.txt", "edits": []map[string]any{edit}}
+		if key == "if_revision" {
+			args[key] = "sha256:stale"
+		} else {
+			edit[key] = 1
+		}
+		requireToolErrorCode(t, callPatch(patch, args), tool.ErrorCodeInvalidInput)
+		if got := readTestFile(t, path); got != "old\n" {
+			t.Fatalf("%s changed the file to %q", key, got)
+		}
 	}
 }
 

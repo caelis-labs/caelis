@@ -62,7 +62,7 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := tool.RejectUnknownArgs(args, "path", "edits", retiredPatchIfRevisionArg); err != nil {
+	if err := tool.RejectUnknownArgs(args, "path", "edits"); err != nil {
 		return tool.Result{}, err
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)

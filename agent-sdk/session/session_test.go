@@ -1282,11 +1282,14 @@ func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T
 	}
 }
 
-func TestDecodeMalformedRoutedToolHistory(t *testing.T) {
-	var event Event
-	err := json.Unmarshal([]byte(`{"type":"tool_call","tool":{"id":"1","name":"docs__read","model_call":{"id":"1","name":"mcp_call","arguments":"{}"}}}`), &event)
-	if !errors.Is(err, ErrInvalidEvent) {
-		t.Fatalf("malformed model envelope: got %v, want ErrInvalidEvent", err)
+func TestObsoleteModelCallDoesNotOverrideToolFact(t *testing.T) {
+	event, err := UnmarshalEventJSON([]byte(`{"schema":4,"type":"tool_call","tool":{"id":"1","name":"docs__read","input":{"page":2},"model_call":"obsolete"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(event)
+	if err != nil || strings.Contains(string(raw), `"model_call"`) || event.Tool.Name != "docs__read" || event.Tool.Input["page"] != json.Number("2") {
+		t.Fatalf("decoded tool = %+v, wire = %s, %v", event.Tool, raw, err)
 	}
 }
 

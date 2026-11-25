@@ -490,21 +490,6 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		turnSeq = max(taskTurnSeqFromSpec(entry.Metadata), 1)
 	}
 	result := session.CloneState(entry.Result)
-	// SDK Task recovery reads first-activity result mirrors written through
-	// v0.79.1. Remove this fallback once the minimum supported upgrade source
-	// is newer than v0.79.1; current writers use Entry.Result only.
-	if turnSeq == 1 {
-		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
-			if result == nil {
-				result = map[string]any{}
-			}
-			for key, value := range session.CloneState(stored) {
-				if _, exists := result[key]; !exists {
-					result[key] = value
-				}
-			}
-		}
-	}
 	// Durable Task records may predate FailureDiagnostic. Rehydrate lifecycle
 	// state but never trust a legacy free-form Result["error"] as a
 	// Runtime-produced diagnostic.

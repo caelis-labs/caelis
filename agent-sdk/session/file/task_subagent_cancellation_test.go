@@ -9,7 +9,7 @@ import (
 )
 
 func TestTaskStoreSubagentCancellationPreservesIdentityAndGeneration(t *testing.T) {
-	for _, mutation := range []string{"", "identity", "generation", "activity", "spec", "cursor", "missing_journal", "foreign_session", "stale_revision", "reopen"} {
+	for _, mutation := range []string{"", "identity", "generation", "activity", "spec", "retired_result", "cursor", "missing_journal", "foreign_session", "stale_revision", "reopen"} {
 		t.Run(mutation, func(t *testing.T) {
 			store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
 			current, err := store.Put(t.Context(), task.PutRequest{Entry: &task.Entry{
@@ -38,6 +38,8 @@ func TestTaskStoreSubagentCancellationPreservesIdentityAndGeneration(t *testing.
 				next.Metadata["child_activity_id"] = "other-activity"
 			case "spec":
 				next.Spec["prompt"] = "replacement"
+			case "retired_result":
+				next.Spec["spawn_result"] = map[string]any{"result": "replacement"}
 			case "cursor":
 				next.EventCursor++
 			case "missing_journal":

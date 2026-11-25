@@ -238,7 +238,7 @@ func TestCancelSessionSubagentsRecoversRehydratedOrphans(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			legacy.Spec = map[string]any{"agent": "helper", "agent_id": "agent-" + started.Ref.TaskID, "delegation_id": started.Ref.TaskID, "session_id": started.Ref.SessionID, "turn_seq": int64(1), "retained": "legacy spec"}
+			legacy.Spec = map[string]any{"agent": "helper", "agent_id": "agent-" + started.Ref.TaskID, "delegation_id": started.Ref.TaskID, "session_id": started.Ref.SessionID, "turn_seq": int64(1), "retained": "legacy spec", "spawn_result": map[string]any{"result": "obsolete"}}
 			legacy.Metadata = map[string]any{"retained": "legacy metadata"}
 			if _, err := original.tasks.store.(taskapi.CASStore).Put(t.Context(), taskapi.PutRequest{Entry: legacy, ExpectedRevision: legacy.Revision}); err != nil {
 				t.Fatal(err)

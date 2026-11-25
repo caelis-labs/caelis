@@ -123,12 +123,8 @@ func toolCallMessageFromEventRun(events []*session.Event, start int) (model.Mess
 	if start < 0 || start >= len(events) {
 		return model.Message{}, start + 1, false
 	}
-	if first := events[start]; first != nil {
-		firstMessage, ok := session.ModelMessageOf(first)
-		firstCalls := firstMessage.ToolCalls()
-		if !ok || len(firstCalls) == 0 {
-			goto collectToolRun
-		}
+	firstMessage, _ := session.ModelMessageOf(events[start])
+	if firstCalls := firstMessage.ToolCalls(); len(firstCalls) > 0 {
 		known := map[string]struct{}{}
 		for _, call := range firstCalls {
 			if id := strings.TrimSpace(call.ID); id != "" {
@@ -150,9 +146,8 @@ func toolCallMessageFromEventRun(events []*session.Event, start int) (model.Mess
 			}
 			next++
 		}
-		return model.CloneMessage(firstMessage), next, true
+		return firstMessage, next, true
 	}
-collectToolRun:
 	calls := make([]model.ToolCall, 0, 1)
 	text := ""
 	next := start
@@ -186,17 +181,13 @@ collectToolRun:
 }
 
 func toolCallFromEventTool(event *session.Event) (model.ToolCall, bool) {
-	toolPayload := session.EventToolProjection(event)
-	if toolPayload == nil {
+	if event == nil || event.Tool == nil {
 		return model.ToolCall{}, false
 	}
-	if call := toolPayload.LegacyModelCall; call != nil {
-		return *call, true
-	}
 	call := model.ToolCall{
-		ID:   strings.TrimSpace(toolPayload.ID),
+		ID:   strings.TrimSpace(event.Tool.ID),
 		Name: session.CanonicalToolName(event, nil),
-		Args: string(mustJSON(toolPayload.Input)),
+		Args: string(mustJSON(event.Tool.Input)),
 	}
 	if call.ID == "" || call.Name == "" {
 		return model.ToolCall{}, false
@@ -209,68 +200,43 @@ func normalizeToolCallHistory(messages []model.Message) []model.Message {
 		return nil
 	}
 	out := make([]model.Message, 0, len(messages))
-	for i := 0; i < len(messages); i++ {
-		calls := messages[i].ToolCalls()
+	for i := 0; i < len(messages); {
+		start := i
+		message := messages[i]
+		i++
+		calls := message.ToolCalls()
 		if len(calls) == 0 {
-			if len(messages[i].ToolResults()) > 0 {
-				continue
+			if len(message.ToolResults()) == 0 {
+				out = append(out, message)
 			}
-			out = append(out, messages[i])
-			continue
-		}
-		required := map[string]struct{}{}
-		for _, call := range calls {
-			if id := strings.TrimSpace(call.ID); id != "" {
-				required[id] = struct{}{}
-			}
-		}
-		if len(required) == 0 {
 			continue
 		}
 		if !toolCallsHaveValidArgs(calls) {
-			next := i + 1
-			for next < len(messages) && len(messages[next].ToolResults()) > 0 {
-				next++
-			}
-			i = next - 1
 			continue
 		}
-		run := []model.Message{messages[i]}
-		next := i + 1
-		valid := true
-		for len(required) > 0 {
-			if next >= len(messages) {
-				valid = false
-				break
-			}
-			results := messages[next].ToolResults()
+		required := make(map[string]string, len(calls))
+		for _, call := range calls {
+			required[strings.TrimSpace(call.ID)] = call.Name
+		}
+		valid := len(required) == len(calls)
+		for i < len(messages) && len(required) > 0 {
+			results := messages[i].ToolResults()
 			if len(results) == 0 {
-				valid = false
 				break
 			}
-			matched := false
 			for _, result := range results {
-				if id := strings.TrimSpace(result.ToolUseID); id != "" {
-					if _, ok := required[id]; ok {
-						delete(required, id)
-						matched = true
-					}
+				id := strings.TrimSpace(result.ToolUseID)
+				name, ok := required[id]
+				if !ok || result.Name != "" && result.Name != name {
+					valid = false
 				}
+				delete(required, id)
 			}
-			if !matched {
-				valid = false
-				break
-			}
-			run = append(run, messages[next])
-			next++
+			i++
 		}
-		if valid {
-			out = append(out, run...)
+		if valid && len(required) == 0 {
+			out = append(out, messages[start:i]...)
 		}
-		for next < len(messages) && len(messages[next].ToolResults()) > 0 {
-			next++
-		}
-		i = next - 1
 	}
 	return out
 }
@@ -280,9 +246,6 @@ func messageFromInvocationEvent(event *session.Event) (model.Message, bool) {
 		return model.Message{}, false
 	}
 	if event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "" {
-		if message, ok := session.ModelMessageOf(event); ok {
-			return message, true
-		}
 		return messageFromDurableEvent(event)
 	}
 	text := strings.TrimSpace(session.EventText(event))
@@ -299,9 +262,6 @@ func messageFromInvocationEvent(event *session.Event) (model.Message, bool) {
 		}
 		return model.NewTextMessage(model.RoleAssistant, fmt.Sprintf("Assistant(%s): %s", label, text)), true
 	default:
-		if message, ok := session.ModelMessageOf(event); ok {
-			return message, true
-		}
 		return messageFromDurableEvent(event)
 	}
 }
@@ -327,27 +287,17 @@ func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 			return model.NewTextMessage(model.RoleAssistant, text), true
 		}
 	case session.EventTypeToolCall:
-		toolPayload := session.EventToolProjection(event)
-		if toolPayload == nil {
-			return model.Message{}, false
-		}
 		call, ok := toolCallFromEventTool(event)
 		if !ok {
 			return model.Message{}, false
 		}
-		if call.ID == "" || call.Name == "" {
-			return model.Message{}, false
-		}
 		return model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, ""), true
 	case session.EventTypeToolResult:
-		toolPayload := session.EventToolProjection(event)
+		toolPayload := event.Tool
 		if toolPayload == nil {
 			return model.Message{}, false
 		}
 		name := session.CanonicalToolName(event, nil)
-		if call := toolPayload.LegacyModelCall; call != nil {
-			name = call.Name
-		}
 		if toolPayload.ID == "" || name == "" {
 			return model.Message{}, false
 		}

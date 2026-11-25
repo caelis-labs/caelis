@@ -42,8 +42,7 @@ func validateSubagentCancellation(current, next *taskapi.Entry) error {
 	after.UpdatedAt = before.UpdatedAt
 	for _, entry := range []*taskapi.Entry{before, after} {
 		entry.CreatedAt = entry.CreatedAt.UTC()
-		// Rewriting an older Task may drop its legacy result mirror.
-		for _, key := range []string{"cancel_phase", "cancel_turn_seq", "spawn_result"} {
+		for _, key := range []string{"cancel_phase", "cancel_turn_seq"} {
 			delete(entry.Spec, key)
 		}
 		for _, key := range []string{"cancel_phase", "cancel_turn_seq", "state", "running", "interrupted_reason"} {
