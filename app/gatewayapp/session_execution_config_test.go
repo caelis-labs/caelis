@@ -18,7 +18,7 @@ func TestOrdinarySessionExecutionConfigPersistsAndActivates(t *testing.T) {
 	t.Setenv("CAELIS_TEST_SESSION_AMBIENT", "ambient")
 	t.Setenv("CAELIS_CONTROL_TOKEN", "private")
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})

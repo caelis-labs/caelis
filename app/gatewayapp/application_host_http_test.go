@@ -24,7 +24,9 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
+	"github.com/caelis-labs/caelis/internal/testenv/plugintest"
 )
 
 // applicationHTTPModel is an in-process provider transport, not a Control HTTP
@@ -155,7 +157,12 @@ func startApplicationHTTPHost(t *testing.T, store, workspace string, provider ht
 
 func startApplicationHTTPHostWithSandbox(t *testing.T, store, workspace string, provider http.RoundTripper, backend string) *applicationHTTPHost {
 	t.Helper()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	return startApplicationHTTPHostWithPackage(t, store, workspace, provider, backend, plugintest.EmptyPackage)
+}
+
+func startApplicationHTTPHostWithPackage(t *testing.T, store, workspace string, provider http.RoundTripper, backend string, load plugin.BuiltinPackage) *applicationHTTPHost {
+	t.Helper()
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{BuiltinPackage: load,
 		AppName: "caelis-test", UserID: "owner", StoreDir: store, WorkspaceCWD: workspace,
 		SandboxHostAuthorityDir: filepath.Join(store, "sandbox-authority"),
 		SessionScopedMCP:        true,

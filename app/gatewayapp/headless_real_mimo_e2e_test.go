@@ -73,7 +73,7 @@ func TestHeadlessRealMimoTerminalBenchStyleParallel(t *testing.T) {
 		}
 	}
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:           e2eStore,
 		WorkspaceKey:       specs[0].workspaceKey,
 		WorkspaceCWD:       specs[0].cwd,

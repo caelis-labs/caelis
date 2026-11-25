@@ -51,7 +51,7 @@ func (m *environmentLifecycleModel) Generate(_ context.Context, request *model.R
 // real Goja process. Observers and existing work references govern its lifetime.
 func TestCodeModeEnvironmentFollowsHostSessionLifetime(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "script-lifetime", "Script lifetime rule.")
-	stack, err := NewLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "script-lifetime", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
+	stack, err := newTestLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "script-lifetime", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 )
 
 func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
@@ -22,7 +23,7 @@ func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
 	if err := os.MkdirAll(workspaceB, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
 		WorkspaceKey: "workspace-a", WorkspaceCWD: workspaceA,
 		Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},

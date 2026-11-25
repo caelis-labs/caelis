@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aymanbagabas/go-udiff/lcs"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
@@ -13,302 +14,116 @@ const (
 	mutationDiffMaxLines     = 800
 )
 
-// MutationDiffHunk is a unified diff hunk produced by BuildMutationDiffHunks.
-type MutationDiffHunk = toolpresentation.DiffHunk
-
-type mutationDiffRow struct {
-	kind    byte
-	oldLine int
-	newLine int
-	text    string
+type lineDiff struct {
+	before, after []string
+	edits         []lcs.Diff
 }
 
-func mutationDiffResultMeta(before, after string) ([]MutationDiffHunk, bool) {
-	return BuildMutationDiffHunks(before, after, mutationDiffContextLines, mutationDiffMaxHunks, mutationDiffMaxLines)
+func compareLines(before, after string) lineDiff {
+	if before == after {
+		return lineDiff{}
+	}
+	oldLines, newLines := splitDiffLines(before), splitDiffLines(after)
+	return lineDiff{before: oldLines, after: newLines, edits: lcs.DiffLines(oldLines, newLines)}
 }
 
-func mutationDisplay(plan fileMutationPlan, stats LineDiffStats) toolpresentation.FileChange {
-	hunks, truncated := mutationDiffResultMeta(plan.before, plan.after)
-	return toolpresentation.FileChange{Created: plan.created, PreviousEmpty: plan.before == "", AddedLines: stats.Added, RemovedLines: stats.Removed, Revision: textRevision(plan.after), Hunk: plan.hunk, Hunks: hunks, Truncated: truncated}
+func splitDiffLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	return strings.Split(strings.TrimSuffix(normalized, "\n"), "\n")
 }
 
-// BuildMutationDiffHunks computes a bounded unified diff for the two texts.
-func BuildMutationDiffHunks(before, after string, contextLines, maxHunks, maxLines int) ([]MutationDiffHunk, bool) {
-	oldLines := splitDiffLines(before)
-	newLines := splitDiffLines(after)
-	if linesEqual(oldLines, newLines) {
-		return nil, false
+func (plan fileMutationPlan) describeChange() toolpresentation.FileChange {
+	diff := compareLines(plan.before, plan.after)
+	change := toolpresentation.FileChange{
+		Created: plan.created, PreviousEmpty: plan.before == "",
+		Revision: textRevision(plan.after), Hunk: plan.hunk,
 	}
-	if contextLines < 0 {
-		contextLines = 0
+	for _, edit := range diff.edits {
+		change.RemovedLines += edit.End - edit.Start
+		change.AddedLines += edit.ReplEnd - edit.ReplStart
 	}
-	if maxHunks <= 0 {
-		maxHunks = mutationDiffMaxHunks
-	}
-	if maxLines <= 0 {
-		maxLines = mutationDiffMaxLines
-	}
-	// The bounded Myers matcher searches by edit distance, not file area. Sparse
-	// edits in a large file must retain their unchanged middle lines.
-	edits := lcs.DiffLines(oldLines, newLines)
-	if len(edits) == 1 {
-		edit := edits[0]
-		if edit.End-edit.Start+edit.ReplEnd-edit.ReplStart > maxLines-1 {
-			prefix, suffix := commonMutationLineAffixCounts(oldLines, newLines)
-			return buildLargeMutationDiffHunk(oldLines, newLines, prefix, suffix, contextLines, maxLines)
-		}
-	}
-	rows := buildMutationDiffRows(oldLines, newLines, edits)
-	return buildMutationDiffHunksFromRows(rows, contextLines, maxHunks, maxLines)
+	change.Hunks, change.Truncated = diff.hunks(mutationDiffContextLines, mutationDiffMaxHunks, mutationDiffMaxLines)
+	return change
 }
 
-func buildMutationDiffRows(oldLines, newLines []string, edits []lcs.Diff) []mutationDiffRow {
-	rows := make([]mutationDiffRow, 0, len(oldLines)+len(newLines))
-	oldIdx, newIdx := 0, 0
-	appendContext := func(end int) {
-		for oldIdx < end {
-			rows = append(rows, mutationDiffRow{kind: ' ', oldLine: oldIdx + 1, newLine: newIdx + 1, text: oldLines[oldIdx]})
-			oldIdx++
-			newIdx++
+// Adjacent edits share a hunk when their context overlaps or touches. Only
+// lines that fit the display budget are copied, even for widely spaced edits.
+func (d lineDiff) hunks(contextLines, maxHunks, maxLines int) ([]toolpresentation.DiffHunk, bool) {
+	var hunks []toolpresentation.DiffHunk
+	for edits := d.edits; len(edits) > 0; {
+		if len(hunks) == maxHunks || maxLines <= 1 {
+			return hunks, true
 		}
-	}
-	for _, edit := range edits {
-		appendContext(edit.Start)
-		rows = appendMutationChangedRows(rows, oldLines, newLines, edit.Start, edit.End, edit.ReplStart, edit.ReplEnd)
-		oldIdx, newIdx = edit.End, edit.ReplEnd
-	}
-	appendContext(len(oldLines))
-	return rows
-}
-
-func appendMutationChangedRows(rows []mutationDiffRow, oldLines, newLines []string, oldStart, oldEnd, newStart, newEnd int) []mutationDiffRow {
-	for idx := oldStart; idx < oldEnd; idx++ {
-		rows = append(rows, mutationDiffRow{kind: '-', oldLine: idx + 1, text: oldLines[idx]})
-	}
-	for idx := newStart; idx < newEnd; idx++ {
-		rows = append(rows, mutationDiffRow{kind: '+', newLine: idx + 1, text: newLines[idx]})
-	}
-	return rows
-}
-
-func buildMutationDiffHunksFromRows(rows []mutationDiffRow, contextLines, maxHunks, maxLines int) ([]MutationDiffHunk, bool) {
-	var ranges [][2]int
-	for idx, row := range rows {
-		if row.kind == ' ' {
-			continue
+		end := 1
+		for end < len(edits) && edits[end].Start-edits[end-1].End <= 2*contextLines {
+			end++
 		}
-		start := maxInt(0, idx-contextLines)
-		end := minInt(len(rows)-1, idx+contextLines)
-		if len(ranges) > 0 && start <= ranges[len(ranges)-1][1]+1 {
-			if end > ranges[len(ranges)-1][1] {
-				ranges[len(ranges)-1][1] = end
-			}
-			continue
-		}
-		ranges = append(ranges, [2]int{start, end})
-	}
-	if len(ranges) == 0 {
-		return nil, false
-	}
-
-	hunks := make([]MutationDiffHunk, 0, minInt(len(ranges), maxHunks))
-	truncated := false
-	lineBudget := maxLines
-	for _, one := range ranges {
-		if len(hunks) >= maxHunks {
-			truncated = true
-			break
-		}
-		availableLines := lineBudget - 1
-		if availableLines <= 0 {
-			truncated = true
-			break
-		}
-		hunk, hunkTruncated := buildMutationDiffHunk(rows[one[0]:one[1]+1], availableLines)
-		cost := len(hunk.Lines) + 1
-		if len(hunk.Lines) == 0 {
-			truncated = true
-			break
-		}
+		hunk, truncated := d.hunk(edits[:end], contextLines, maxLines-1)
 		hunks = append(hunks, hunk)
-		lineBudget -= cost
-		if hunkTruncated {
-			truncated = true
-			break
+		if truncated {
+			return hunks, true
 		}
+		maxLines -= len(hunk.Lines) + 1
+		edits = edits[end:]
 	}
-	return hunks, truncated
+	return hunks, false
 }
 
-func buildMutationDiffHunk(rows []mutationDiffRow, maxLines int) (MutationDiffHunk, bool) {
-	hunk := MutationDiffHunk{}
+func (d lineDiff) hunk(edits []lcs.Diff, contextLines, budget int) (toolpresentation.DiffHunk, bool) {
+	first, last := edits[0], edits[len(edits)-1]
+	leading := min(contextLines, first.Start)
+	trailing := min(contextLines, len(d.before)-last.End)
+	oldStart, newStart := first.Start-leading, first.ReplStart-leading
+	h := toolpresentation.DiffHunk{
+		OldLines: last.End + trailing - oldStart,
+		NewLines: last.ReplEnd + trailing - newStart,
+	}
+	if h.OldLines > 0 {
+		h.OldStart = oldStart + 1
+	}
+	if h.NewLines > 0 {
+		h.NewStart = newStart + 1
+	}
+	h.Header = buildDiffHunkHeader(h.OldStart, h.OldLines, h.NewStart, h.NewLines)
+
+	removed, added := first.End-first.Start, first.ReplEnd-first.ReplStart
 	truncated := false
-	for idx, row := range rows {
-		if row.oldLine > 0 && hunk.OldStart == 0 {
-			hunk.OldStart = row.oldLine
+	appendLines := func(prefix string, lines []string) {
+		n := min(len(lines), budget-len(h.Lines))
+		for _, line := range lines[:n] {
+			h.Lines = append(h.Lines, prefix+line)
 		}
-		if row.newLine > 0 && hunk.NewStart == 0 {
-			hunk.NewStart = row.newLine
+		truncated = truncated || n < len(lines)
+	}
+	if len(d.edits) == 1 && removed+added > budget {
+		// For one large replacement reserve space for both sides and the context.
+		leading = min(leading, budget)
+		trailing = min(trailing, budget-leading)
+		if leading+trailing == budget {
+			leading, trailing = 0, 0
 		}
-		switch row.kind {
-		case '+':
-			hunk.NewLines++
-		case '-':
-			hunk.OldLines++
-		default:
-			hunk.OldLines++
-			hunk.NewLines++
-		}
-		if idx < maxLines {
-			hunk.Lines = append(hunk.Lines, string(row.kind)+row.text)
-		} else {
-			truncated = true
-		}
+		changed := budget - leading - trailing
+		showRemoved := min(removed, max(1, changed/2))
+		showAdded := min(added, changed-showRemoved)
+		showRemoved = min(removed, changed-showAdded)
+		appendLines(" ", d.before[oldStart:oldStart+leading])
+		appendLines("-", d.before[first.Start:first.Start+showRemoved])
+		appendLines("+", d.after[first.ReplStart:first.ReplStart+showAdded])
+		appendLines(" ", d.before[last.End:last.End+trailing])
+		return h, true
 	}
-	hunk.Header = buildDiffHunkHeader(hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
-	return hunk, truncated
-}
-
-func buildLargeMutationDiffHunk(oldLines, newLines []string, prefix, suffix, contextLines, maxLines int) ([]MutationDiffHunk, bool) {
-	oldCoreEnd := len(oldLines) - suffix
-	newCoreEnd := len(newLines) - suffix
-	oldStart := maxInt(0, prefix-contextLines)
-	newStart := maxInt(0, prefix-contextLines)
-	oldEnd := minInt(len(oldLines), oldCoreEnd+contextLines)
-	newEnd := minInt(len(newLines), newCoreEnd+contextLines)
-	oldCount := maxInt(0, oldEnd-oldStart)
-	newCount := maxInt(0, newEnd-newStart)
-
-	hunk := MutationDiffHunk{
-		OldStart: hunkStartLine(oldStart, oldCount),
-		OldLines: oldCount,
-		NewStart: hunkStartLine(newStart, newCount),
-		NewLines: newCount,
+	cursor := oldStart
+	for _, edit := range edits {
+		appendLines(" ", d.before[cursor:edit.Start])
+		appendLines("-", d.before[edit.Start:edit.End])
+		appendLines("+", d.after[edit.ReplStart:edit.ReplEnd])
+		cursor = edit.End
 	}
-	hunk.Header = buildDiffHunkHeader(hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
-	lineBudget := maxLines - 1
-	if lineBudget <= 0 {
-		return nil, true
-	}
-	truncated := appendLargeMutationDiffLines(&hunk, oldLines, newLines, oldStart, prefix, oldCoreEnd, newCoreEnd, oldEnd, newEnd, lineBudget)
-	if len(hunk.Lines) == 0 {
-		return nil, true
-	}
-	return []MutationDiffHunk{hunk}, truncated
-}
-
-func appendLargeMutationDiffLines(hunk *MutationDiffHunk, oldLines, newLines []string, oldStart, prefix, oldCoreEnd, newCoreEnd, oldEnd, newEnd, lineBudget int) bool {
-	prefixContext := maxInt(0, prefix-oldStart)
-	suffixContext := maxInt(0, minInt(oldEnd-oldCoreEnd, newEnd-newCoreEnd))
-	removed := maxInt(0, oldCoreEnd-prefix)
-	added := maxInt(0, newCoreEnd-prefix)
-	total := prefixContext + removed + added + suffixContext
-	if total <= lineBudget {
-		appendDiffContextLines(hunk, oldLines, oldStart, prefix)
-		appendDiffChangedLines(hunk, "-", oldLines, prefix, oldCoreEnd)
-		appendDiffChangedLines(hunk, "+", newLines, prefix, newCoreEnd)
-		appendDiffContextLines(hunk, oldLines, oldCoreEnd, oldEnd)
-		return false
-	}
-
-	truncated := true
-	prefixBudget := minInt(prefixContext, lineBudget)
-	suffixBudget := 0
-	if remaining := lineBudget - prefixBudget; remaining > 0 {
-		suffixBudget = minInt(suffixContext, remaining)
-	}
-	changedBudget := lineBudget - prefixBudget - suffixBudget
-	if changedBudget <= 0 && removed+added > 0 {
-		shift := minInt(prefixBudget+suffixBudget, removed+added)
-		changedBudget += shift
-		if suffixBudget >= shift {
-			suffixBudget -= shift
-		} else {
-			shift -= suffixBudget
-			suffixBudget = 0
-			prefixBudget = maxInt(0, prefixBudget-shift)
-		}
-	}
-	removedBudget, addedBudget := splitChangedDiffBudget(removed, added, changedBudget)
-
-	appendDiffContextLines(hunk, oldLines, oldStart, oldStart+prefixBudget)
-	appendDiffChangedLines(hunk, "-", oldLines, prefix, prefix+removedBudget)
-	appendDiffChangedLines(hunk, "+", newLines, prefix, prefix+addedBudget)
-	appendDiffContextLines(hunk, oldLines, oldCoreEnd, oldCoreEnd+suffixBudget)
-	return truncated
-}
-
-func splitChangedDiffBudget(removed, added, budget int) (int, int) {
-	if budget <= 0 {
-		return 0, 0
-	}
-	if removed <= 0 {
-		return 0, minInt(added, budget)
-	}
-	if added <= 0 {
-		return minInt(removed, budget), 0
-	}
-	if budget == 1 {
-		return 1, 0
-	}
-	removedBudget := minInt(removed, maxInt(1, budget/2))
-	addedBudget := minInt(added, maxInt(1, budget-removedBudget))
-	if unused := budget - removedBudget - addedBudget; unused > 0 {
-		if removedBudget < removed {
-			extra := minInt(unused, removed-removedBudget)
-			removedBudget += extra
-			unused -= extra
-		}
-		if unused > 0 && addedBudget < added {
-			addedBudget += minInt(unused, added-addedBudget)
-		}
-	}
-	return removedBudget, addedBudget
-}
-
-func appendDiffContextLines(hunk *MutationDiffHunk, lines []string, start, end int) {
-	for idx := start; idx < end && idx < len(lines); idx++ {
-		hunk.Lines = append(hunk.Lines, " "+lines[idx])
-	}
-}
-
-func appendDiffChangedLines(hunk *MutationDiffHunk, prefix string, lines []string, start, end int) {
-	for idx := start; idx < end && idx < len(lines); idx++ {
-		hunk.Lines = append(hunk.Lines, prefix+lines[idx])
-	}
-}
-
-func hunkStartLine(startIndex, lineCount int) int {
-	if lineCount <= 0 {
-		return 0
-	}
-	return startIndex + 1
-}
-
-func commonMutationLineAffixCounts(oldLines, newLines []string) (int, int) {
-	prefix := 0
-	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
-		prefix++
-	}
-	suffix := 0
-	for prefix+suffix < len(oldLines) &&
-		prefix+suffix < len(newLines) &&
-		oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
-		suffix++
-	}
-	return prefix, suffix
-}
-
-func linesEqual(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for idx := range left {
-		if left[idx] != right[idx] {
-			return false
-		}
-	}
-	return true
+	appendLines(" ", d.before[cursor:cursor+trailing])
+	return h, truncated
 }
 
 func buildPatchHunk(lineStart, oldLines, newLines int) string {
@@ -323,18 +138,4 @@ func buildDiffHunkHeader(oldStart, oldLines, newStart, newLines int) string {
 		newStart = 1
 	}
 	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", oldStart, oldLines, newStart, newLines)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

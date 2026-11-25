@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 // This disposable index stores provenance and byte locations, never transcript
 // payloads. It is built only for a requested Session, catches up incrementally,
 // and survives Host restart. The canonical log and its WAL remain authoritative.
-const eventMetadataIndexVersion = 2
+const eventMetadataIndexVersion = 3
 const maxEventMetadataIndexBytes = 32 << 20
 const eventMetadataCheckpointStride = 200
 
@@ -176,7 +177,7 @@ func (s *Store) readEventMetadata(ctx context.Context, documentPath string) (*ev
 					return nil, err
 				}
 				if record.Seq <= next.Tail.Seq {
-					return nil, errors.New("agent-sdk/session/file: non-increasing metadata sequence")
+					return nil, fmt.Errorf("%w: non-increasing event sequence in %s line %d", session.ErrUnreadableSession, path, line)
 				}
 				record.Offset, record.Length, record.Line = next.Size, len(raw), line
 				if next.keep(record) {
@@ -278,7 +279,7 @@ func eventMetadataFromJSON(raw []byte, path string, line int) (eventMetadataReco
 		Approval    *session.ApprovalRecord   `json:"approval"`
 	}
 	if err := json.Unmarshal(raw, &header); err != nil {
-		return eventMetadataRecord{}, err
+		return eventMetadataRecord{}, fmt.Errorf("%w: decode event log %s line %d: %w", session.ErrUnreadableSession, path, line, err)
 	}
 	event := &session.Event{Schema: header.Schema, Seq: header.Seq, Type: header.Type, Visibility: header.Visibility, Scope: header.Scope, ChildOrigin: header.ChildOrigin}
 	event.Approval = header.Approval

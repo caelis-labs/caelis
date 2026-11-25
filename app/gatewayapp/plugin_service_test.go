@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	pluginapi "github.com/caelis-labs/caelis/control/plugin"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // helpers shared across plugin service tests
@@ -43,7 +48,7 @@ func buildPluginStack(t *testing.T, storeDir, workspaceDir string) *Stack {
 		SkillDirs:    []string{t.TempDir()},
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
-	stack, err := NewLocalStack(cfg)
+	stack, err := newTestLocalStack(cfg)
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
@@ -704,24 +709,20 @@ func TestPluginServiceValidationFailureDoesNotEnterConfigWriter(t *testing.T) {
 	}
 }
 
-func TestGatewayMCPServerHelperProcess(t *testing.T) {
-	if os.Getenv("CAELIS_GATEWAY_MCP_HELPER") != "1" {
-		return
+func pluginServiceMCPHandler() http.Handler {
+	type args struct {
+		Name string `json:"name"`
 	}
-	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
-	mcpsdk.AddTool[any, any](server, &mcpsdk.Tool{
-		Name:        "ping",
-		Description: "Pings",
-	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, _ any) (*mcpsdk.CallToolResult, any, error) {
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "caelis-plugin-e2e", Version: "1.0.0"}, nil)
+	mcpsdk.AddTool[args, any](server, &mcpsdk.Tool{
+		Name:        "read_e2e_fixture",
+		Description: "Reads the plugin E2E fixture.",
+	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input args) (*mcpsdk.CallToolResult, any, error) {
 		return &mcpsdk.CallToolResult{
-			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "pong"}},
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "receipt:" + input.Name}},
 		}, nil, nil
 	})
-	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	return mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{Stateless: true})
 }
 
 func TestPluginServiceMCPServers(t *testing.T) {
@@ -731,25 +732,16 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	_ = os.MkdirAll(storeDir, 0o700)
 	_ = os.MkdirAll(workspaceDir, 0o700)
 
-	manifestJSON := fmt.Sprintf(`{
-		"name": "mcp-plugin",
-		"version": "1.0.0",
-		"mcpServers": {
-			"myserver": {
-				"command": %q,
-				"args": ["-test.run=^TestGatewayMCPServerHelperProcess$"],
-				"env": {
-					"CAELIS_GATEWAY_MCP_HELPER": "1"
-				}
-			}
-		}
-	}`, os.Args[0])
+	endpoint := httptest.NewServer(pluginServiceMCPHandler())
+	t.Cleanup(endpoint.Close)
+	manifestJSON := fmt.Sprintf(`{"name":"mcp-plugin","version":"1.0.0","mcpServers":{"myserver":{"url":%q}}}`, endpoint.URL)
 
 	pluginDir := filepath.Join(tmp, "myplugin")
 	buildMinimalPluginDir(t, pluginDir, manifestJSON)
 
 	stack := buildPluginStack(t, storeDir, workspaceDir)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
 
 	info, err := stack.plugins().AddPath(ctx, pluginDir)
 	if err != nil {
@@ -771,13 +763,26 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	}
 
 	activated := activateFutureAssemblyRuntime(t, stack, "plugin-mcp-enabled")
-	<-activated.mcpMgr.Initialized()
+	select {
+	case <-activated.mcpMgr.Initialized():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 	detail, err := activated.pluginReads().Inspect(ctx, "myplugin")
 	if err != nil {
 		t.Fatalf("Inspect() failed: %v", err)
 	}
 	if len(detail.MCPServers) != 1 || detail.MCPServers[0].Status != "running" {
 		t.Errorf("expected running MCP server in inspect, got: %+v", detail.MCPServers)
+	}
+	const name = "myserver__read_e2e_fixture"
+	item, ok, err := activated.mcpMgr.Lookup(ctx, name)
+	if err != nil || !ok {
+		t.Fatalf("lookup %s = %t, %v", name, ok, err)
+	}
+	result, err := item.Call(ctx, tool.Call{ID: "read-fixture", Name: name, Input: []byte(`{"name":"sample"}`)})
+	if err != nil || len(result.Content) != 1 || result.Content[0] != tool.Text("receipt:sample") {
+		t.Fatalf("plugin MCP receipt = %+v, %v", result, err)
 	}
 	if err := stack.plugins().Remove(ctx, "myplugin"); err != nil {
 		t.Fatalf("Remove() failed: %v", err)
@@ -792,6 +797,9 @@ func TestPluginServiceMCPServers(t *testing.T) {
 	future := activateFutureAssemblyRuntime(t, stack, "plugin-mcp-removed")
 	if _, err := future.pluginReads().Inspect(ctx, "myplugin"); err == nil {
 		t.Fatal("future Runtime Inspect() error = nil after Host removal")
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, "builtin-plugins")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("optional plugin lifecycle touched the built-in package cache: %v", err)
 	}
 }
 
@@ -814,7 +822,7 @@ func TestPluginServiceAgentContributions(t *testing.T) {
 				"name": "plugin-helper",
 				"description": "Plugin helper agent",
 				"command": %q,
-				"args": ["-test.run=^TestGatewayMCPServerHelperProcess$"],
+				"args": ["-test.run=^$"],
 				"env": {"PLUGIN_AGENT_TEST": "1"}
 			}
 		]
@@ -880,7 +888,7 @@ func TestPluginServiceRejectsAgentCollisionBeforeCAS(t *testing.T) {
 	}`, os.Args[0])
 	buildMinimalPluginDir(t, pluginDir, manifestJSON)
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,

@@ -39,9 +39,8 @@ type persistedWorkspaceKeyRepair struct {
 	Repairs []WorkspaceKeyRepair `json:"repairs"`
 }
 
-// PendingWorkspaceKeyRepairs returns a durable repair plan left by an
-// interrupted doctor run. Callers use this only to decide whether offline
-// repair must resume; normal Session reads never consult the marker.
+// PendingWorkspaceKeyRepairs returns the durable plan of an interrupted repair.
+// The Session and Task workspace keys for those IDs may differ until repair resumes.
 func (s *Store) PendingWorkspaceKeyRepairs(ctx context.Context) ([]WorkspaceKeyRepair, error) {
 	if s == nil {
 		return nil, errors.New("agent-sdk/session/file: store is not initialized")
@@ -187,7 +186,7 @@ func (s *Store) repairSessionWorkspaceKey(ctx context.Context, repair WorkspaceK
 	if err := s.writeRecoverableDocumentTransaction(ctx, doc, nil, nil); err != nil {
 		return false, fmt.Errorf("agent-sdk/session/file: repair Session %q workspace key: %w", repair.SessionID, err)
 	}
-	delete(s.pathCache, sanitizeSessionID(repair.SessionID))
+	delete(s.pathCache, repair.SessionID)
 	return true, nil
 }
 

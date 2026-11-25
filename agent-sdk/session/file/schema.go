@@ -9,14 +9,13 @@ import (
 )
 
 const (
-	documentKind                          = "caelis.sdk.session"
-	documentVersion                       = 2
-	indexVersion                          = 5
-	indexFilename                         = ".sessions.index.sqlite"
-	lockFilename                          = ".sessions.lock"
-	transactionRecoveryMarkerFilename     = ".sessions.transactions.pending"
-	generatedTitleMigrationMarkerFilename = ".sessions.generated-title-unicode-v1"
-	workspaceKeyRepairMarkerFilename      = ".sessions.workspace-key-repair-v1.json"
+	documentKind                      = "caelis.sdk.session"
+	documentVersion                   = 2
+	indexVersion                      = 5
+	indexFilename                     = ".sessions.index.sqlite"
+	lockFilename                      = ".sessions.lock"
+	transactionRecoveryMarkerFilename = ".sessions.transactions.pending"
+	workspaceKeyRepairMarkerFilename  = ".sessions.workspace-key-repair-v1.json"
 )
 
 var storeRootLocks sync.Map
@@ -40,8 +39,6 @@ type Config struct {
 // Store is the file-backed implementation of session.Service.
 type Store struct {
 	mu                    contextMutex
-	legacyMigrationMu     sync.Mutex
-	legacyMigration       MigrationReport
 	rootDir               string
 	sessionIDGenerator    func() string
 	eventIDGenerator      func() string

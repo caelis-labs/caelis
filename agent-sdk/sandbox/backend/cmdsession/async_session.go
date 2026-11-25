@@ -483,14 +483,6 @@ func (s *AsyncSession) Status() SessionStatus {
 	if exited {
 		state = s.state.Load().(SessionState)
 	}
-	stdout, stderr := "", ""
-	if s.stdoutBuffer != nil {
-		stdout = string(s.stdoutBuffer.ReadAll())
-	}
-	if s.stderrBuffer != nil {
-		stderr = string(s.stderrBuffer.ReadAll())
-	}
-
 	status := SessionStatus{
 		ID:                   s.ID,
 		Command:              s.Command,
@@ -517,10 +509,6 @@ func (s *AsyncSession) Status() SessionStatus {
 	if exitErr != nil && state == SessionStateError {
 		status.Error = exitErr.Error()
 	}
-
-	// Check if there's unread output
-	_ = stdout
-	_ = stderr
 
 	return status
 }

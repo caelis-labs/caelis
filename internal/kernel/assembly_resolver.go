@@ -36,11 +36,6 @@ const (
 	StateUsageAccounting = "gateway.usage.v1"
 )
 
-var unsupportedLegacyStateKeys = []string{
-	"gateway.current_session_mode",
-	"gateway.current_sandbox_mode",
-}
-
 type ModelResolution struct {
 	Model model.LLM
 	// ProfileID is the Control-owned selectable identity that produced Model.
@@ -161,9 +156,6 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	if key := unsupportedLegacyStateKey(state); key != "" {
-		return ResolvedTurn{}, fmt.Errorf("gateway: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
-	}
 	snap := r.snapshot()
 	if snap.modelLookup == nil {
 		return ResolvedTurn{}, fmt.Errorf("gateway: model lookup is required")
@@ -196,9 +188,6 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	state, err := r.snapshotState(ctx, intent.SessionRef)
 	if err != nil {
 		return ResolvedTurn{}, err
-	}
-	if key := unsupportedLegacyStateKey(state); key != "" {
-		return ResolvedTurn{}, fmt.Errorf("gateway: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
 	}
 	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, ModelResolution{})
 	if err != nil {
@@ -479,21 +468,6 @@ func CurrentPolicyProfile(state map[string]any) string {
 	}
 	value, _ := state[StateCurrentPolicyProfile].(string)
 	return policyapi.NormalizeProfileName(value)
-}
-
-// UnsupportedLegacyStateKey returns the first old session-state key that should
-// no longer be interpreted as runtime configuration.
-func UnsupportedLegacyStateKey(state map[string]any) string {
-	for _, key := range unsupportedLegacyStateKeys {
-		if value, _ := state[key].(string); strings.TrimSpace(value) != "" {
-			return key
-		}
-	}
-	return ""
-}
-
-func unsupportedLegacyStateKey(state map[string]any) string {
-	return UnsupportedLegacyStateKey(state)
 }
 
 func applyAssemblySelections(metadata map[string]any, resolved assembly.ResolvedAssembly, requestedMode string, state map[string]any) error {

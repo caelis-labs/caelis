@@ -2,9 +2,7 @@ package kernel
 
 import (
 	"context"
-	"errors"
 	"iter"
-	"strings"
 	"sync"
 	"testing"
 
@@ -296,33 +294,30 @@ func TestAssemblyResolverToolAugmenterReceivesNoneForProviderWithoutReasoningSel
 	}
 }
 
-func TestAssemblyResolverRejectsLegacySessionState(t *testing.T) {
-	t.Parallel()
-
+func TestAssemblyResolverIgnoresRetiredSessionModes(t *testing.T) {
 	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
 		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
-			return map[string]any{"gateway.current_session_mode": "manual"}, nil
+			return map[string]any{
+				"gateway.current_session_mode": "manual", "gateway.current_sandbox_mode": "full-access",
+				StateCurrentPolicyProfile: "read-only",
+			}, nil
 		}),
 		ModelLookup: modelLookupFunc(func(context.Context, string, int) (ModelResolution, error) {
-			t.Fatal("ResolveModel should not be called for legacy session state")
-			return ModelResolution{}, nil
+			return ModelResolution{Model: fakeLLM{name: "selected"}}, nil
 		}),
 	})
 	if err != nil {
-		t.Fatalf("NewAssemblyResolver() error = %v", err)
+		t.Fatal(err)
 	}
-
-	_, err = resolver.ResolveTurn(context.Background(), TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}})
-	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-		t.Fatalf("ResolveTurn() error = %v, want ErrUnsupportedLegacyFormat", err)
-	}
-	if err == nil || !strings.Contains(err.Error(), "gateway.current_session_mode") {
-		t.Fatalf("ResolveTurn() error = %v, want legacy key detail", err)
-	}
-
-	_, err = resolver.ResolveControllerTurn(context.Background(), TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}})
-	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-		t.Fatalf("ResolveControllerTurn() error = %v, want ErrUnsupportedLegacyFormat", err)
+	intent := TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}}
+	for _, resolve := range []func(context.Context, TurnIntent) (ResolvedTurn, error){resolver.ResolveTurn, resolver.ResolveControllerTurn} {
+		turn, err := resolve(t.Context(), intent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := turn.RunRequest.AgentSpec.Metadata[policyapi.MetadataPolicyProfile]; got != "read-only" {
+			t.Fatalf("policy profile = %v, want read-only", got)
+		}
 	}
 }
 

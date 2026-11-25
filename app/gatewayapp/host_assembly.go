@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
 
 // hostControlAssembly holds the focused late-binding points produced while
@@ -99,10 +100,11 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	}
 	controlClient, err := appserver.NewClient(appserver.ClientConfig{
 		Commands: controlCommands, State: controlState, Feeds: stack.composition.authorities.controlFeeds,
-		Authorizer:         sessionAuthorizer,
-		ParticipantHandles: participantHandles,
-		Sessions:           stack.composition.sessions,
-		SessionActivity:    runtimeStateReader,
+		Authorizer:                sessionAuthorizer,
+		ParticipantHandles:        participantHandles,
+		Sessions:                  stack.composition.sessions,
+		SessionActivity:           runtimeStateReader,
+		ResolveWorkspaceDirectory: workspaceidentity.CanonicalDirectory,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err

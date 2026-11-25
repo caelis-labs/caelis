@@ -2,6 +2,7 @@ package cmdsession
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 )
 
@@ -28,5 +29,29 @@ func TestAsyncSessionReadOutputSignalsDescriptorFinal(t *testing.T) {
 	}
 	if callbacks[1].Cursor != callbacks[0].Cursor {
 		t.Fatalf("final callback cursor = %d, want %d", callbacks[1].Cursor, callbacks[0].Cursor)
+	}
+}
+
+func TestRingBufferReadsRetainedTailDuringWrites(t *testing.T) {
+	const capacity = 8
+	rb := NewRingBuffer(capacity)
+	data := bytes.Repeat([]byte("x"), capacity)
+	_, _ = rb.Write(data)
+	var group sync.WaitGroup
+	group.Go(func() {
+		for range 1000 {
+			_, _ = rb.Write(data)
+		}
+	})
+	for range 1000 {
+		tail, cursor := rb.ReadNewSince(0)
+		if !bytes.Equal(tail, data) || cursor%capacity != 0 {
+			t.Fatalf("read tail %q at cursor %d", tail, cursor)
+		}
+	}
+	group.Wait()
+	tail, cursor := rb.ReadNewSince(0)
+	if !bytes.Equal(tail, data) || cursor != 1001*capacity {
+		t.Fatalf("final tail %q at %d", tail, cursor)
 	}
 }

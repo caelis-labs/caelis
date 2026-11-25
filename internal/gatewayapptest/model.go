@@ -16,7 +16,17 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/testenv/plugintest"
 )
+
+// NewStack creates a Host without loading the bundled desktop executable.
+// Tests can supply a fixed package when their contract requires one.
+func NewStack(cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
+	if cfg.BuiltinPackage == nil {
+		cfg.BuiltinPackage = plugintest.EmptyPackage
+	}
+	return gatewayapp.NewLocalStack(cfg)
+}
 
 // StaticProviderHTTPClient adapts a fixture transport into Stack construction
 // without putting HTTP clients on the Configuration wire contract.

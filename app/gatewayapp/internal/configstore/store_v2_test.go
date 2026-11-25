@@ -409,10 +409,88 @@ func TestStoreLoadPreservesBytesWhenLegacyHasNoSafeContent(t *testing.T) {
 	}
 }
 
+func TestStoreReplacesUnusableLegacyOnlyOnCurrentSave(t *testing.T) {
+	store := New(t.TempDir())
+	original := []byte(`{
+		"schema_version": 1,
+		"sandbox": "unusable",
+		"models": {"configs": [
+			{"provider":"openai","model":"gpt-5","credential_ref":"apikey:test:shared","token":"first-secret"},
+			{"provider":"openai","model":"gpt-5","credential_ref":"apikey:test:shared","token":"second-secret"}
+		]}
+	}`)
+	path := store.Path()
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.SchemaVersion != SchemaVersionV2 || doc.ConfigurationRevision != 0 || len(doc.ModelProfiles.Profiles) != 0 ||
+		doc.Sandbox.RequestedType != "auto" || SandboxNetworkEnabled(doc.Sandbox) || doc.Runtime.ApprovalMode != "manual" {
+		t.Fatalf("legacy recovery document = %#v", doc)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("load changed the legacy source: %v", err)
+	}
+	report := store.MigrationReport()
+	if !report.SourcePreserved || report.Migrated || report.BackupPath != "" {
+		t.Fatalf("migration report = %#v", report)
+	}
+	doc.Sandbox.ReadOnlySubpaths = []string{"private"}
+	saved, err := store.CompareAndSave(t.Context(), doc.ConfigurationRevision, doc)
+	if err != nil || saved.ConfigurationRevision != 1 {
+		t.Fatalf("current save revision = %d, error = %v", saved.ConfigurationRevision, err)
+	}
+	if got, err := os.ReadFile(path + ".v1.bak"); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("save did not retain the exact legacy source: %v", err)
+	}
+	current, err := New(filepath.Dir(path)).Load()
+	if err != nil || current.ConfigurationRevision != 1 || len(current.Sandbox.ReadOnlySubpaths) != 1 ||
+		current.Sandbox.ReadOnlySubpaths[0] != "private" || SandboxNetworkEnabled(current.Sandbox) || current.Runtime.ApprovalMode != "manual" {
+		t.Fatalf("saved current config = %#v, error = %v", current, err)
+	}
+}
+
+func TestStoreMigratesLegacySandboxWithoutDiscardingReadableRestrictions(t *testing.T) {
+	store := New(t.TempDir())
+	original := []byte(`{
+		"schema_version": 1,
+		"sandbox": {
+			"requested_type": "landlock", "helper_path": "retired-helper",
+			"writable_roots": ["grant"], "network_enabled": "unusable",
+			"read_only_subpaths": ["private", {}, "vendor"]
+		},
+		"runtime": {"approval_mode": {}, "policy_profile": "workspace_write"}
+	}`)
+	if err := os.WriteFile(store.Path(), original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.ConfigurationRevision != 1 || doc.Sandbox.RequestedType != "auto" || doc.Sandbox.HelperPath != "" ||
+		len(doc.Sandbox.WritableRoots) != 0 || SandboxNetworkEnabled(doc.Sandbox) ||
+		strings.Join(doc.Sandbox.ReadOnlySubpaths, ",") != "private,vendor" || doc.Runtime.ApprovalMode != "manual" ||
+		doc.Runtime.PolicyProfile != "workspace-write" {
+		t.Fatalf("migrated execution settings = %#v, %#v", doc.Sandbox, doc.Runtime)
+	}
+	report := store.MigrationReport()
+	requireMigrationDrop(t, report, "sandbox.read_only_subpaths", "sandbox.read_only_subpaths[1]", "malformed_record")
+	requireMigrationDrop(t, report, "sandbox.network_enabled", "sandbox.network_enabled", "malformed_value")
+	requireMigrationDrop(t, report, "runtime.approval_mode", "runtime.approval_mode", "malformed_value")
+	if got, err := os.ReadFile(store.Path() + ".v1.bak"); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("migration did not retain the exact legacy source: %v", err)
+	}
+}
+
 func TestStoreLoadRejectsMalformedAndFutureSchemasWithoutRewrite(t *testing.T) {
 	for name, original := range map[string][]byte{
-		"malformed": []byte(`{"models":`),
-		"future":    []byte(`{"schema_version":99}`),
+		"malformed":       []byte(`{"models":`),
+		"future":          []byte(`{"schema_version":99}`),
+		"current sandbox": []byte(`{"schema_version":2,"sandbox":{"network_enabled":"unusable"}}`),
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

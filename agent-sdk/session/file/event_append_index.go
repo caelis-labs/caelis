@@ -49,13 +49,10 @@ type eventAppendPreparation struct {
 }
 
 // eventAppendPrewarm carries immutable append-index snapshots from the
-// lock-free preparation phase into the authoritative write and WAL-recovery
-// transactions.
+// lock-free preparation phase into the authoritative write.
 type eventAppendPrewarm struct {
 	indexes map[string]*eventAppendIndex
 }
-
-type eventAppendPrewarmContextKey struct{}
 
 func newEventAppendPrewarm() *eventAppendPrewarm {
 	return &eventAppendPrewarm{indexes: map[string]*eventAppendIndex{}}
@@ -78,21 +75,6 @@ func (p *eventAppendPrewarm) indexFor(documentPath string) *eventAppendIndex {
 	return p.indexes[filepath.Clean(documentPath)]
 }
 
-func contextWithEventAppendPrewarm(ctx context.Context, prewarm *eventAppendPrewarm) context.Context {
-	if prewarm == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, eventAppendPrewarmContextKey{}, prewarm)
-}
-
-func eventAppendPrewarmFromContext(ctx context.Context) *eventAppendPrewarm {
-	if ctx == nil {
-		return nil
-	}
-	prewarm, _ := ctx.Value(eventAppendPrewarmContextKey{}).(*eventAppendPrewarm)
-	return prewarm
-}
-
 func (s *Store) prewarmEventAppendIndexContext(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -111,7 +93,7 @@ func (s *Store) prewarmEventAppendIndexContext(
 	// Path discovery runs before the Store mutex and root write lock so a cold
 	// index scan cannot monopolize unrelated Session interactions. The cache avoids a
 	// namespace walk on every append; the locked transaction verifies the path.
-	pathKey := sanitizeSessionID(ref.SessionID)
+	pathKey := ref.SessionID
 	cachedPath, _ := s.eventAppendPaths.Load(pathKey)
 	documentPath, _ := cachedPath.(string)
 	if strings.TrimSpace(documentPath) == "" {
@@ -129,6 +111,11 @@ func (s *Store) prewarmEventAppendIndexContext(
 		switch {
 		case err == nil && info.Size() > s.eventLogCacheLimitBytes():
 			index, err := s.readEventAppendIndexContext(ctx, documentPath, nil)
+			// A speculative filename match can belong to another opaque ID.
+			// The locked lookup reports content errors from the exact Session.
+			if errors.Is(err, session.ErrUnreadableSession) {
+				return nil, nil
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -155,7 +142,7 @@ func (s *Store) eventAppendPreparationContext(
 	if err != nil {
 		return eventAppendPreparation{}, err
 	}
-	s.eventAppendPaths.Store(sanitizeSessionID(doc.Session.SessionID), filepath.Clean(documentPath))
+	s.eventAppendPaths.Store(doc.Session.SessionID, filepath.Clean(documentPath))
 	logInfo, statErr := os.Stat(eventLogPath(documentPath))
 	if statErr == nil && logInfo.Size() <= s.eventLogCacheLimitBytes() {
 		existingEvents, err := s.readCachedEventLogContext(ctx, documentPath)

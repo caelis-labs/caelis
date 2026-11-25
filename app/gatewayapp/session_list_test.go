@@ -17,7 +17,7 @@ func TestSessionListIncludesRecentCWDSpellings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -48,6 +48,18 @@ func TestSessionListIncludesRecentCWDSpellings(t *testing.T) {
 	if _, loaded := stack.sessionRuntimes.loaded("recent-session"); loaded {
 		t.Fatal("listing activated recent-session")
 	}
+	// An archived workspace may no longer exist on the Host filesystem.
+	offline := filepath.Join(t.TempDir(), "offline")
+	if _, err := stack.Sessions().StartSession(t.Context(), session.StartSessionRequest{
+		AppName: stack.AppName(), UserID: stack.UserID(), PreferredSessionID: "offline-session",
+		Workspace: session.WorkspaceRef{Key: "archived", CWD: offline},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = client.ListSessions(t.Context(), appserver.ListSessionsRequest{WorkspaceKey: "archived", CWD: offline})
+	if err != nil || len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != "offline-session" {
+		t.Fatalf("offline workspace directory = %#v, %v", listed, err)
+	}
 }
 
 func TestSessionListDoesNotReadColdHistoryOrActivateRuntime(t *testing.T) {
@@ -57,7 +69,7 @@ func TestSessionListDoesNotReadColdHistoryOrActivateRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})

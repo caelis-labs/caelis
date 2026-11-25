@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestBuildMutationDiffHunksSplitsSeparatedChanges(t *testing.T) {
+func TestMutationDiffHunksSplitsSeparatedChanges(t *testing.T) {
 	before := strings.Join([]string{
 		"a1",
 		"target-a",
@@ -26,9 +26,9 @@ func TestBuildMutationDiffHunksSplitsSeparatedChanges(t *testing.T) {
 	}, "\n")
 	after := strings.ReplaceAll(before, "target-", "changed-")
 
-	hunks, truncated := BuildMutationDiffHunks(before, after, 1, 10, 100)
+	hunks, truncated := compareLines(before, after).hunks(1, 10, 100)
 	if truncated {
-		t.Fatal("BuildMutationDiffHunks() truncated unexpectedly")
+		t.Fatal("hunks() truncated unexpectedly")
 	}
 	if len(hunks) != 2 {
 		t.Fatalf("len(hunks) = %d, want 2: %#v", len(hunks), hunks)
@@ -46,13 +46,13 @@ func TestBuildMutationDiffHunksSplitsSeparatedChanges(t *testing.T) {
 	}
 }
 
-func TestBuildMutationDiffHunksTruncatesBeforeCollectingAllLines(t *testing.T) {
+func TestMutationDiffHunksTruncatesBeforeCollectingAllLines(t *testing.T) {
 	before := strings.Repeat("old\n", 600)
 	after := strings.Repeat("new\n", 600)
 
-	hunks, truncated := BuildMutationDiffHunks(before, after, 0, 10, 5)
+	hunks, truncated := compareLines(before, after).hunks(0, 10, 5)
 	if !truncated {
-		t.Fatal("BuildMutationDiffHunks() truncated = false, want true")
+		t.Fatal("hunks() truncated = false, want true")
 	}
 	if len(hunks) != 1 {
 		t.Fatalf("len(hunks) = %d, want 1", len(hunks))
@@ -65,7 +65,7 @@ func TestBuildMutationDiffHunksTruncatesBeforeCollectingAllLines(t *testing.T) {
 	}
 }
 
-func TestBuildMutationDiffHunksLargeRewriteShowsBothSidesWhenTruncated(t *testing.T) {
+func TestMutationDiffHunksLargeRewriteShowsBothSidesWhenTruncated(t *testing.T) {
 	beforeLines := make([]string, 600)
 	afterLines := make([]string, 600)
 	for i := range beforeLines {
@@ -73,9 +73,9 @@ func TestBuildMutationDiffHunksLargeRewriteShowsBothSidesWhenTruncated(t *testin
 		afterLines[i] = "new-" + strconv.Itoa(i+1)
 	}
 
-	hunks, truncated := BuildMutationDiffHunks(strings.Join(beforeLines, "\n"), strings.Join(afterLines, "\n"), 0, 10, 9)
+	hunks, truncated := compareLines(strings.Join(beforeLines, "\n"), strings.Join(afterLines, "\n")).hunks(0, 10, 9)
 	if !truncated {
-		t.Fatal("BuildMutationDiffHunks() truncated = false, want true")
+		t.Fatal("hunks() truncated = false, want true")
 	}
 	if len(hunks) != 1 {
 		t.Fatalf("len(hunks) = %d, want 1", len(hunks))
@@ -128,9 +128,12 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	rawHunks, ok := toolMeta["diff_hunks"].([]MutationDiffHunk)
+	rawHunks, ok := toolMeta["diff_hunks"].([]toolpresentation.DiffHunk)
 	if !ok {
-		t.Fatalf("result.Metadata diff_hunks = %T, want []MutationDiffHunk", toolMeta["diff_hunks"])
+		t.Fatalf("result.Metadata diff_hunks = %T, want []toolpresentation.DiffHunk", toolMeta["diff_hunks"])
+	}
+	if toolMeta["added_lines"] != 2 || toolMeta["removed_lines"] != 2 {
+		t.Fatalf("display counts = +%v -%v", toolMeta["added_lines"], toolMeta["removed_lines"])
 	}
 	if len(rawHunks) != 2 {
 		t.Fatalf("len(diff_hunks) = %d, want 2: %#v", len(rawHunks), rawHunks)
@@ -151,11 +154,11 @@ func TestSparseLargeMutationDiffRetainsUnchangedMiddle(t *testing.T) {
 	newLines := append([]string(nil), oldLines...)
 	newLines[3], newLines[1500] = "new first", "new last"
 	before, after := strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
-	stats := CountLineDiff(before, after)
-	if stats.Added != 2 || stats.Removed != 2 {
-		t.Fatalf("sparse diff stats = %+v", stats)
+	change := (fileMutationPlan{before: before, after: after}).describeChange()
+	if change.AddedLines != 2 || change.RemovedLines != 2 {
+		t.Fatalf("sparse diff counts = +%d -%d", change.AddedLines, change.RemovedLines)
 	}
-	hunks, truncated := BuildMutationDiffHunks(before, after, 2, 64, 800)
+	hunks, truncated := change.Hunks, change.Truncated
 	if truncated || len(hunks) != 2 {
 		t.Fatalf("sparse diff produced %d hunks, truncated=%v", len(hunks), truncated)
 	}

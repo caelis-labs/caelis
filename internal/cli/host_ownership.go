@@ -19,10 +19,8 @@ const (
 // Host instead of starting a second product Host.
 var ErrProductHostOwnershipConflict = errors.New("cli: another product Control Host already owns this store directory")
 
-// acquireProductHostOwnership takes the exclusive product Host ownership guard
-// for one store directory. Call only at product Host process entry (caelis serve
-// or embedded, whether explicit or a missing-service fallback) before opening shared Host state. Do not call from
-// NewLocalStack or generic Runtime assembly.
+// acquireProductHostOwnership takes the exclusive Store ownership guard used
+// by product Host processes and offline doctor repair.
 func acquireProductHostOwnership(storeDir string) (*hostownership.Authority, error) {
 	path := productHostOwnershipPath(storeDir)
 	if path == "" {

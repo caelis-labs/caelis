@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
@@ -164,7 +165,7 @@ func validateExternalAgents(configuration controlagents.Configuration) error {
 		return fmt.Errorf("gatewayapp: invalid external Agent configuration: %w", err)
 	}
 	for _, agent := range controlagents.ListAgents(configuration) {
-		if forbiddenExternalAgentID(agent.ID) {
+		if !agentregistry.ExternalAgentNameAllowed(agent.ID) {
 			return fmt.Errorf("gatewayapp: external Agent %q conflicts with a product command or system Agent", agent.ID)
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -58,44 +57,6 @@ func TestEffectiveConfigDoesNotGrantHomeThroughSymlink(t *testing.T) {
 	cfg := effectiveConfig(alias, home, configstore.SandboxConfig{})
 	if len(cfg.WritableRoots) != 0 {
 		t.Fatalf("WritableRoots = %#v, did not want symlinked home grant", cfg.WritableRoots)
-	}
-}
-
-func TestNormalizeBackendAcceptsWindowsAliases(t *testing.T) {
-	t.Parallel()
-
-	for _, input := range []string{"windows", "windows-restricted-token", "windows-elevated", "windows_elevated", "windows elevated", "elevated"} {
-		got, err := NormalizeBackend(input)
-		if err != nil {
-			t.Fatalf("NormalizeBackend(%q) error = %v", input, err)
-		}
-		if got != "windows" {
-			t.Fatalf("NormalizeBackend(%q) = %q, want windows", input, got)
-		}
-	}
-}
-
-func TestNormalizeBackendAcceptsHost(t *testing.T) {
-	t.Parallel()
-
-	got, err := NormalizeBackend("host")
-	if err != nil {
-		t.Fatalf("NormalizeBackend(host) error = %v", err)
-	}
-	if got != "host" {
-		t.Fatalf("NormalizeBackend(host) = %q, want host", got)
-	}
-}
-
-func TestNormalizeBackendRejectsRetiredProductLandlockBackend(t *testing.T) {
-	t.Parallel()
-
-	_, err := NormalizeBackend("landlock")
-	if err == nil {
-		t.Fatal("NormalizeBackend(landlock) error = nil, want retired product backend rejection")
-	}
-	if message := err.Error(); !strings.Contains(message, "retired") || !strings.Contains(message, "bwrap") {
-		t.Fatalf("NormalizeBackend(landlock) error = %q, want actionable retirement guidance", message)
 	}
 }
 

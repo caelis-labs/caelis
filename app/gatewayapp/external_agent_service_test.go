@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
@@ -154,13 +155,13 @@ func TestSplitACPCommandLineCanonicalizesRelativeExecutable(t *testing.T) {
 
 func TestRosterNameValidationRejectsRuntimeAndRunAddresses(t *testing.T) {
 	for _, name := range []string{"self", "local", "main", "kernel", "sandbox", "guardian", "reviewer", "steward", "status", "worker(lina)", "bad name"} {
-		if !forbiddenExternalAgentID(name) {
-			t.Fatalf("forbiddenExternalAgentID(%q) = false", name)
+		if agentregistry.ExternalAgentNameAllowed(name) {
+			t.Fatalf("ExternalAgentNameAllowed(%q) = true", name)
 		}
 	}
 	for _, name := range []string{"opus", "worker-2", "deepseek-v4-pro", "mimo-v2-5-pro"} {
-		if forbiddenExternalAgentID(name) {
-			t.Fatalf("forbiddenExternalAgentID(%q) = true", name)
+		if !agentregistry.ExternalAgentNameAllowed(name) {
+			t.Fatalf("ExternalAgentNameAllowed(%q) = false", name)
 		}
 	}
 }

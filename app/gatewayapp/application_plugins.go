@@ -116,7 +116,7 @@ func applicationPluginSkills(bundles []skill.PluginBundle) ([]skill.Meta, error)
 }
 
 // Runtime defaults remain available when the optional Profile selection is empty.
-func applicationRuntimePluginContributions(productDefaults productPluginDefaults, profile sessionprofile.Profile, paths plugin.RuntimePaths, defaults ...plugin.Config) (plugin.Contributions, error) {
+func applicationRuntimePluginContributions(productDefaults plugin.BuiltinPackage, profile sessionprofile.Profile, paths plugin.RuntimePaths, defaults ...plugin.Config) (plugin.Contributions, error) {
 	optional, err := applicationPluginContributions(profile, paths)
 	if err != nil {
 		return plugin.Contributions{}, err
@@ -129,12 +129,12 @@ func applicationRuntimePluginContributions(productDefaults productPluginDefaults
 	}
 	var combined plugin.Contributions
 	if selectedProduct {
-		combined, err = plugin.WithProductContributions(optional, paths, defaults...)
+		combined, err = productDefaults.Select(optional, paths, defaults...)
 		if err != nil {
 			return combined, err
 		}
 	} else {
-		combined = productDefaults.apply(optional, paths, defaults...)
+		combined = productDefaults.Available(optional, paths, defaults...)
 	}
 	if err := validateApplicationMCPNamespaces(profile, combined); err != nil {
 		return plugin.Contributions{}, err

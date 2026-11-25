@@ -124,8 +124,7 @@ ChatGPT 订阅登录使用社区兼容的 Codex OAuth 流程，而非 OpenAI 文
 模型请求会发送给你选择的服务商或外部 Agent；本地存储不代表离线推理。
 
 托管本地 Host 启动失败时，会给出稳定的 `CAELIS_STARTUP_*` 错误码。
-其中 `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` 可通过 `caelis doctor` 修复；
-正常启动不会改写持久会话数据。
+如果不同目录下的会话共用了一个工作区键，可运行 `caelis doctor` 修复受影响的会话。其他工作区仍可正常使用。
 
 ## 文档
 

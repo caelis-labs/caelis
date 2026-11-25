@@ -582,7 +582,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := gatewayapptest.NewStack(gatewayapp.Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1165,11 +1165,11 @@ func TestRunDoctorUsesDiagnosticStatusClient(t *testing.T) {
 func TestDoctorOutputReportsRepairAndCodedStartupFailure(t *testing.T) {
 	report := doctorResult{
 		ServiceState:     "unavailable",
-		ServiceErrorCode: string(gatewayapp.StartupIssueWorkspaceIdentityConflict),
-		ServiceError:     "stored Session workspace identities conflict",
+		ServiceErrorCode: startupCodePermissionDenied,
+		ServiceError:     "permission denied",
 		ServiceLogPath:   "/private/logs/service.log",
 		Repairs: []doctorRepairResult{{
-			Code: string(gatewayapp.StartupIssueWorkspaceIdentityConflict), Status: "repaired",
+			Code: gatewayapp.DoctorWorkspaceIdentityConflict, Status: "repaired",
 			ConflictingWorkspaceKeys: 2, AffectedSessions: 4, RepairedSessions: 4, RepairedTasks: 3,
 		}},
 	}
@@ -1177,8 +1177,8 @@ func TestDoctorOutputReportsRepairAndCodedStartupFailure(t *testing.T) {
 	for _, want := range []string{
 		"repair [CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT]: repaired",
 		"affected_sessions=4 repaired_sessions=4 repaired_tasks=3 conflicting_workspace_keys=2",
-		"blocked [CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT]: stored Session workspace identities conflict",
-		"service_error_code: CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT",
+		"blocked [CAELIS_STARTUP_PERMISSION_DENIED]: permission denied",
+		"service_error_code: CAELIS_STARTUP_PERMISSION_DENIED",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("doctor text missing %q:\n%s", want, text)
@@ -1412,7 +1412,7 @@ func TestWithCLIAppServerClosesHostAfterAction(t *testing.T) {
 	if !errors.Is(err, actionErr) {
 		t.Fatalf("withCLIAppServer() error = %v, want action error", err)
 	}
-	reopened, err := gatewayapp.NewLocalStack(cfg)
+	reopened, err := gatewayapptest.NewStack(cfg)
 	if err != nil {
 		t.Fatalf("reopen Host after CLI action: %v", err)
 	}
@@ -1541,7 +1541,7 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 
 func seedCLIModel(t *testing.T, storeDir string, model gatewayapp.ModelConfig) string {
 	t.Helper()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := gatewayapptest.NewStack(gatewayapp.Config{
 		StoreDir:                  storeDir,
 		WorkspaceKey:              "cli-seed",
 		WorkspaceCWD:              t.TempDir(),
@@ -1671,3 +1671,6 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 		t.Fatalf("sandbox clean output = %q, want requested host backend", out.String())
 	}
 }
+
+// CLI entry points share the isolated Host constructor throughout the test process.
+func init() { newLocalStack = gatewayapptest.NewStack }

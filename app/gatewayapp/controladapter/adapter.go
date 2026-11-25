@@ -207,12 +207,7 @@ func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]cont
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
-	result, err := d.listSessions(ctx, kernel.ListSessionsRequest{
-		AppName: d.deps.Session.AppName,
-		UserID:  d.deps.Session.UserID,
-		CWD:     d.deps.Session.Workspace.CWD,
-		Limit:   limit,
-	})
+	result, err := d.listWorkspaceSessions(ctx, "", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -223,14 +218,19 @@ func (d *assembler) listResumeCandidates(ctx context.Context, limit int) ([]cont
 	return out, nil
 }
 
-func (d *assembler) listSessions(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
+func (d *assembler) listWorkspaceSessions(ctx context.Context, cursor string, limit int) (session.SessionList, error) {
 	if d == nil || d.deps == nil || d.deps.Session.ListSessionsFn == nil {
 		return session.SessionList{}, missingRuntimeDependency("session list")
 	}
-	// Principal-bound Control owns visibility; the durable Runtime user
-	// partition is never forwarded as an authorization substitute.
-	req.UserID = ""
-	return d.deps.Session.ListSessionsFn(ctx, req)
+	// The bound Control principal owns visibility for every page.
+	scope := d.deps.Session
+	return scope.ListSessionsFn(ctx, kernel.ListSessionsRequest{
+		AppName:      scope.AppName,
+		WorkspaceKey: scope.Workspace.Key,
+		CWD:          scope.Workspace.CWD,
+		Cursor:       cursor,
+		Limit:        limit,
+	})
 }
 
 func (d *assembler) ListAgents(ctx context.Context, limit int) ([]controlprompt.AgentCandidate, error) {

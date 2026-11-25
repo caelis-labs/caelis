@@ -911,6 +911,33 @@ func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
 	}
 }
 
+func TestSubagentReadIgnoresRetiredSpawnResult(t *testing.T) {
+	ctx := t.Context()
+	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "current final"}}
+	rt, active := newSubagentTaskTestRuntime(t, runner)
+	started, err := rt.tasks.StartSubagent(ctx, active, active.SessionRef, runner, task.SubagentStartRequest{Agent: "helper", Prompt: "review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := rt.tasks.store.Get(ctx, started.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Spec["spawn_result"] = map[string]any{"final_message": "retired final", "result": "retired output"}
+	delete(entry.Result, "result")
+	if _, err := rt.tasks.store.(task.CASStore).Put(ctx, task.PutRequest{Entry: entry, ExpectedRevision: entry.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := New(Config{Sessions: rt.sessions, TaskStore: rt.tasks.store, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := reader.tasks.Read(ctx, active.SessionRef, task.ControlRequest{TaskID: entry.TaskID, Principal: session.ActorKindTool})
+	if err != nil || snapshot.State != task.StateCompleted || snapshot.Result["final_message"] != "current final" || snapshot.Result["result"] != nil {
+		t.Fatalf("rehydrated Task = %+v, %v", snapshot, err)
+	}
+}
+
 func TestSubagentReadDoesNotAdvanceCancellationReconciliation(t *testing.T) {
 	t.Parallel()
 

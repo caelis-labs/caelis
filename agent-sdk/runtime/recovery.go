@@ -21,13 +21,7 @@ func (r *Runtime) recoverRuntimeState(ctx context.Context, ref session.SessionRe
 		if entry == nil {
 			continue
 		}
-		if handled, err := r.recoverLegacySubagentContinue(ctx, entry); handled {
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		if !entry.Running {
+		if !entry.Running && entry.Kind != task.KindSubagent {
 			continue
 		}
 		switch entry.Kind {
@@ -199,6 +193,25 @@ func (tm *taskRuntime) hasActiveCommandTask(entry *task.Entry) bool {
 func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) error {
 	if r == nil || r.tasks == nil || entry == nil {
 		return nil
+	}
+	// A retired Continue could leave a completed-looking Task before
+	// delivery. Only a recorded post-effect terminal state is conclusive.
+	phase := firstNonEmpty(taskStringValue(entry.Metadata["continue_phase"]), taskSpecString(entry.Spec, "continue_phase"))
+	if phase != "" {
+		if phase != "continue_post_effect" || entry.Running || !task.IsTerminalState(entry.State) {
+			entry.State = task.StateUnknownOutcome
+		}
+		entry.Running = false
+		normalizeSubagentEntryResult(entry, entry.FailureDiagnostic)
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]any{}
+		}
+		entry.Metadata["state"] = string(entry.State)
+		for _, key := range []string{"continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason"} {
+			delete(entry.Metadata, key)
+			delete(entry.Spec, key)
+		}
+		return r.tasks.persistTaskEntry(ctx, entry)
 	}
 	if !entry.Running {
 		return nil

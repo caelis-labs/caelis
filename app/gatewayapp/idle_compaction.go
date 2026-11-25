@@ -246,7 +246,8 @@ func recoverIdleCompactionAccounting(ctx context.Context, sessions session.Lifec
 			return err
 		}
 		for _, entry := range listed.Sessions {
-			if err := recovery.RecoverCompactionReceipts(ctx, session.SessionRef{SessionID: entry.SessionID}, owner); err != nil && !session.IsCommitted(err) {
+			err := recovery.RecoverCompactionReceipts(ctx, session.SessionRef{SessionID: entry.SessionID}, owner)
+			if err != nil && !session.IsCommitted(err) && !errors.Is(err, session.ErrUnreadableSession) {
 				return err
 			}
 		}

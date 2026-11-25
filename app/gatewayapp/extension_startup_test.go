@@ -57,7 +57,7 @@ func TestLocalHostStartsWithBrokenOptionalExtensions(t *testing.T) {
 	if err := os.WriteFile(configStore.path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stack, err := newIsolatedGatewayAppTestStack(t, Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName: "CAELIS", StoreDir: storeDir, WorkspaceCWD: workspace,
 		SkillDirs: []string{regular}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})

@@ -47,12 +47,12 @@ func productOverride(configs []Config, paths RuntimePaths) (Contributions, bool,
 		out.Sources[0].Status = "override"
 	}
 	if err == nil && builtinDesktopWorldTarget != "" && productSemver(out.Sources[0].Version) != "" {
-		bundle, bundleErr := desktopWorldBundle()
-		if bundleErr != nil {
-			return Contributions{}, true, bundleErr
+		pin, pinErr := pinnedDesktopWorld()
+		if pinErr != nil {
+			return Contributions{}, true, pinErr
 		}
-		if newerProductVersion(bundle.version, out.Sources[0].Version) {
-			out, err = ProductContributions(paths)
+		if newerProductVersion(pin.Version, out.Sources[0].Version) {
+			return Contributions{}, false, nil
 		}
 	}
 	return out, true, err

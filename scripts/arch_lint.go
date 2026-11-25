@@ -817,7 +817,6 @@ func deletedSDKImplPaths() []deletedSDKImplPath {
 		deletedSDKImplPath{prefix: "impl/session/memory", sdk: "agent-sdk/session/memory"},
 		deletedSDKImplPath{prefix: "impl/sandbox/host", sdk: "agent-sdk/sandbox/host"},
 		deletedSDKImplPath{prefix: "impl/sandbox/bwrap", sdk: "agent-sdk/sandbox/bwrap"},
-		deletedSDKImplPath{prefix: "impl/sandbox/landlock", sdk: "agent-sdk/sandbox/landlock"},
 		deletedSDKImplPath{prefix: "impl/sandbox/seatbelt", sdk: "agent-sdk/sandbox/seatbelt"},
 		deletedSDKImplPath{prefix: "impl/sandbox/windows", sdk: "agent-sdk/sandbox/windows"},
 		deletedSDKImplPath{prefix: "impl/tool/mcp", sdk: "agent-sdk/tool/mcp"},
@@ -1016,8 +1015,6 @@ func agentSDKSandboxMovedLeaf(rel string) string {
 		return "textstream"
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/bwrap/"):
 		return "bwrap"
-	case strings.HasPrefix(rel, "agent-sdk/sandbox/landlock/"):
-		return "landlock"
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/seatbelt/"):
 		return "seatbelt"
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/windows/winps/"):
@@ -1088,7 +1085,7 @@ func isAllowedAgentSDKSandboxMovedLeafTarget(leaf, target string) bool {
 			"agent-sdk/sandbox/consoleoutput",
 			"agent-sdk/sandbox/textstream",
 		)
-	case leaf == "bwrap", leaf == "landlock", leaf == "seatbelt", leaf == "windows":
+	case leaf == "bwrap", leaf == "seatbelt", leaf == "windows":
 		allowed = append(allowed, allowedAgentSDKSandboxBackendDependencyPrefixes()...)
 	case strings.HasPrefix(leaf, "backend/"):
 		allowed = append(allowed, allowedAgentSDKSandboxBackendDependencyPrefixes()...)
@@ -1110,7 +1107,6 @@ func allowedAgentSDKSandboxBackendDependencyPrefixes() []string {
 		"agent-sdk/sandbox/consoleoutput",
 		"agent-sdk/sandbox/textstream",
 		"agent-sdk/sandbox/bwrap",
-		"agent-sdk/sandbox/landlock",
 		"agent-sdk/sandbox/seatbelt",
 		"agent-sdk/sandbox/windows",
 		"agent-sdk/sandbox/windows/winps",

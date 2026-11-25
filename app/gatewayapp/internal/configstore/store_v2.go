@@ -16,9 +16,10 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
 
-// Load reads the current AppConfig. A pre-v2 wire document is converted once
-// when at least one record can be mapped safely; otherwise its bytes remain
-// untouched and an empty current document is returned.
+// Load reads the current AppConfig. A pre-v2 document is converted once when
+// it contains settings that can be adopted safely. When none can be adopted,
+// Load preserves the file and returns current defaults with any conservative
+// execution settings required by malformed legacy fields.
 func (s *Store) Load() (document AppConfig, returnErr error) {
 	return s.LoadContext(context.Background())
 }

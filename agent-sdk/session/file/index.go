@@ -85,11 +85,17 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 	summaries := make([]session.SessionSummary, 0)
 	for rows.Next() {
 		entry, err := scanSessionIndexEntry(rows)
-		if err != nil {
-			return session.SessionList{}, err
+		if err == nil {
+			var path string
+			path, err = s.indexEntryPath(entry)
+			if err == nil {
+				s.pathCache[entry.Session.SessionID] = path
+			}
 		}
-		if path := s.indexEntryPath(entry); path != "" {
-			s.pathCache[sanitizeSessionID(entry.Session.SessionID)] = path
+		if errors.Is(err, session.ErrUnreadableSession) {
+			delete(s.pathCache, entry.Session.SessionID)
+		} else if err != nil {
+			return session.SessionList{}, err
 		}
 		summaries = append(summaries, entry.Session)
 	}
@@ -129,7 +135,7 @@ func (s *Store) lookupSessionIndex(sessionID string) (sessionIndexEntry, error) 
 	entry, err := scanSessionIndexEntry(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return sessionIndexEntry{}, session.ErrSessionNotFound
+			return sessionIndexEntry{}, s.unindexedTransactionError(db, sessionID)
 		}
 		return sessionIndexEntry{}, err
 	}
@@ -197,15 +203,19 @@ func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) ses
 	}
 }
 
-func (s *Store) indexEntryPath(entry sessionIndexEntry) string {
-	path := strings.TrimSpace(entry.Path)
-	if path == "" {
-		return ""
-	}
+func (s *Store) indexEntryPath(entry sessionIndexEntry) (string, error) {
+	path := entry.Path
 	if filepath.IsAbs(path) {
-		return path
+		rel, err := filepath.Rel(s.rootDir, path)
+		if err != nil {
+			return "", fmt.Errorf("%w: invalid indexed document path: %w", session.ErrUnreadableSession, err)
+		}
+		path = rel
 	}
-	return filepath.Join(s.rootDir, path)
+	if !filepath.IsLocal(path) || path == "." {
+		return "", fmt.Errorf("%w: invalid indexed path for Session %q", session.ErrUnreadableSession, entry.Session.SessionID)
+	}
+	return filepath.Join(s.rootDir, path), nil
 }
 
 type sessionIndexScanner interface {
@@ -239,13 +249,7 @@ func scanSessionIndexEntry(scanner sessionIndexScanner) (sessionIndexEntry, erro
 	); err != nil {
 		return sessionIndexEntry{}, err
 	}
-	metadata := map[string]any(nil)
-	if strings.TrimSpace(metadataRaw) != "" && strings.TrimSpace(metadataRaw) != "null" {
-		if err := json.Unmarshal([]byte(metadataRaw), &metadata); err != nil {
-			return sessionIndexEntry{}, fmt.Errorf("agent-sdk/session/file: decode session index metadata: %w", err)
-		}
-	}
-	return sessionIndexEntry{
+	entry := sessionIndexEntry{
 		Session: session.SessionSummary{
 			SessionRef: session.NormalizeSessionRef(session.SessionRef{
 				AppName:      appName,
@@ -255,12 +259,18 @@ func scanSessionIndexEntry(scanner sessionIndexScanner) (sessionIndexEntry, erro
 			}),
 			CWD:       strings.TrimSpace(cwd),
 			Title:     strings.TrimSpace(title),
-			Metadata:  session.CloneState(metadata),
 			UpdatedAt: unixNanoToTime(updatedAtNS),
 		},
 		Path:      strings.TrimSpace(path),
 		CreatedAt: unixNanoToTime(createdAtNS),
-	}, nil
+	}
+	if strings.TrimSpace(metadataRaw) != "" {
+		if err := json.Unmarshal([]byte(metadataRaw), &entry.Session.Metadata); err != nil {
+			entry.Session.Metadata = nil
+			return entry, fmt.Errorf("%w: decode metadata for Session %q: %w", session.ErrUnreadableSession, sessionID, err)
+		}
+	}
+	return entry, nil
 }
 
 func (s *Store) openSessionIndex() (*sql.DB, error) {
@@ -305,6 +315,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 	path TEXT NOT NULL,
 	created_at_ns INTEGER NOT NULL,
 	updated_at_ns INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS unreadable_transactions (
+	path_key TEXT NOT NULL,
+	path TEXT NOT NULL,
+	PRIMARY KEY(path_key, path)
 );
 CREATE INDEX IF NOT EXISTS sessions_workspace_updated_idx ON sessions(workspace_key, updated_at_ns DESC);
 CREATE INDEX IF NOT EXISTS sessions_app_user_updated_idx ON sessions(app_name, user_id, updated_at_ns DESC);

@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 
@@ -10,9 +11,8 @@ import (
 
 var _ session.ApprovalRecoveryService = (*Store)(nil)
 
-// PendingApprovals returns every durable permission without a later
-// settlement. A stable SessionRef snapshot is captured under one short root
-// transaction; per-Session recovery then releases all locks between Sessions.
+// PendingApprovals returns unsettled durable permissions from readable Sessions.
+// It snapshots SessionRefs under the root lock and releases all locks between Sessions.
 func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -27,6 +27,9 @@ func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval
 			return nil, err
 		}
 		pending, err := s.pendingApprovalsForSession(ctx, ref)
+		if errors.Is(err, session.ErrUnreadableSession) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +127,6 @@ func (s *Store) SettlePendingApproval(
 	if err != nil {
 		return err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return err
 	}

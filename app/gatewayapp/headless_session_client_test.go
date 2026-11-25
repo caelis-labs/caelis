@@ -23,7 +23,7 @@ func TestHeadlessSessionTurnMatchesInProcessAndHTTPClients(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			workspace := t.TempDir()
-			stack, err := NewLocalStack(Config{
+			stack, err := newTestLocalStack(Config{
 				StoreDir:     t.TempDir(),
 				WorkspaceKey: "headless-workspace",
 				WorkspaceCWD: workspace,

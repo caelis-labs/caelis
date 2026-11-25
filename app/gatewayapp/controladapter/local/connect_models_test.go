@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 )
 
 func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
@@ -18,7 +19,7 @@ func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
 		WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},

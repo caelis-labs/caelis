@@ -44,6 +44,13 @@ func (c *Client) listSessions(ctx context.Context, principal Principal, req List
 		Cursor:       strings.TrimSpace(req.Cursor),
 		Limit:        req.Limit,
 	}
+	if listReq.WorkspaceKey != "" && listReq.CWD != "" && c.config.ResolveWorkspaceDirectory != nil {
+		// Live workspace addresses use the Host's physical path. A directory
+		// that is offline can still be listed by its stored address.
+		if cwd, err := c.config.ResolveWorkspaceDirectory(listReq.CWD); err == nil {
+			listReq.CWD = cwd
+		}
+	}
 	if !principal.HasRole("admin") {
 		listReq.UserID = strings.TrimSpace(principal.ID)
 	}

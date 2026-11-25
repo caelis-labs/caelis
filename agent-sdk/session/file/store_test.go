@@ -935,8 +935,8 @@ func TestStoreListSurfacesCorruptSessionIndex(t *testing.T) {
 		WorkspaceKey: "ws-1",
 	})
 
-	if err == nil {
-		t.Fatal("List() error = nil, want corrupt SQLite index failure")
+	if err == nil || errors.Is(err, session.ErrUnreadableSession) {
+		t.Fatalf("List() error = %v, want shared SQLite index failure", err)
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "session index") {
 		t.Fatalf("List() error = %v, want session index failure", err)
@@ -958,8 +958,8 @@ func TestStoreListSurfacesSessionIndexOpenError(t *testing.T) {
 		UserID:  "user-1",
 	})
 
-	if err == nil {
-		t.Fatal("List() error = nil, want index open failure")
+	if err == nil || errors.Is(err, session.ErrUnreadableSession) {
+		t.Fatalf("List() error = %v, want shared index open failure", err)
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "database") {
 		t.Fatalf("List() error = %v, want database open failure to be surfaced", err)

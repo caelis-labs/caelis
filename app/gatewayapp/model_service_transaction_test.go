@@ -385,7 +385,7 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	if closeErr := stack.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	reloaded, reloadErr := NewLocalStack(Config{
+	reloaded, reloadErr := newTestLocalStack(Config{
 		StoreDir:     storeDir,
 		WorkspaceKey: workspaceKey,
 		WorkspaceCWD: workspaceCWD,

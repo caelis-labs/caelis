@@ -34,7 +34,7 @@ func TestRunDoctorStartupRepairsWorkspaceIdentityConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Code != string(gatewayapp.StartupIssueWorkspaceIdentityConflict) ||
+	if len(results) != 1 || results[0].Code != gatewayapp.DoctorWorkspaceIdentityConflict ||
 		results[0].Status != "repaired" || results[0].AffectedSessions != 2 || results[0].RepairedSessions != 2 {
 		t.Fatalf("doctor repair results = %#v", results)
 	}

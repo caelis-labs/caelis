@@ -14,13 +14,15 @@ import (
 	"testing"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/caelis-labs/caelis/internal/testenv/plugintest"
 )
 
 // This is an ordinary MCP subprocess behind an explicit Host launch proxy. No
@@ -227,7 +229,8 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	root := t.TempDir()
 	audit := filepath.Join(root, "remote-exec-audit")
 	provider := &nativePluginProvider{}
-	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
+	load, fixedRoot := plugintest.DesktopWorld(t)
+	host := startApplicationHTTPHostWithPackage(t, filepath.Join(root, "store"), root, provider, "host", load)
 	defer host.close(t)
 	var observers []io.Closer
 	defer func() {
@@ -431,7 +434,11 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 			t.Fatalf("Session index=%d %s real atomic results=%d want=%d event_count=%d", index, sid, executions, want, len(loaded.Events))
 		}
 	}
-	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.5.1") || !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.5.2") || !strings.Contains(provider.snapshot(), "desktop-world:desktop-world") {
+	modelRequests := provider.snapshot()
+	if !strings.Contains(modelRequests, "SYNTHETIC_EXEC:fixture.app.one") {
+		t.Fatal("the model did not receive the selected MCP server's tool result")
+	}
+	if !strings.Contains(modelRequests, "PAIRED_VERSION_0.5.1") || !strings.Contains(modelRequests, "PAIRED_VERSION_0.5.2") || !strings.Contains(modelRequests, "desktop-world:desktop-world") {
 		t.Fatal("selected MCP package did not carry its paired Skill")
 	}
 	if data, err := os.ReadFile(audit); err != nil || len(strings.Fields(string(data))) != 12 {
@@ -459,7 +466,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatal("default-only observation requested approval")
 	}
 	observed, err = client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(observed.Plugins) != 1 || !strings.HasPrefix(observed.Plugins[0].Root, filepath.Join(canonicalNativeFixtureStore(t, filepath.Join(root, "store")), "builtin-plugins", "desktop-world")+string(filepath.Separator)) || observed.Plugins[0].Version != builtinComputerUseVersion(t) {
+	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != fixedRoot || observed.Plugins[0].Version != "fixture" {
 		t.Fatalf("removing explicit selection lost global DTW default: %+v %v", observed, err)
 	}
 }

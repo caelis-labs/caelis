@@ -47,6 +47,10 @@ var (
 	// elsewhere or that fence identity CAS failed.
 	ErrFenceConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: fence conflict")
 
+	// ErrUnreadableSession reports corrupt or unsupported durable data belonging
+	// to one Session. Store-wide recovery can continue with other Sessions.
+	ErrUnreadableSession = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/session: unreadable Session")
+
 	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
 	// no longer a supported replay source.
 	ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")

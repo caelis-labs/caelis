@@ -23,6 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -35,7 +36,7 @@ func TestACPConnectHTTPCommitsSelectedModelsInOneRevision(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
 		WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
@@ -92,28 +93,30 @@ func TestACPConnectHTTPCommitsSelectedModelsInOneRevision(t *testing.T) {
 		AdapterID: "custom", Launcher: agents.LauncherChoiceCommand,
 		CommandLine: strings.Join([]string{strconv.Quote(os.Args[0]), "-test.run=^TestGatewayACPOnboardingHelperProcess$", "--", "caelis-onboarding-helper", "multimodel", strconv.Quote(filepath.Join(root, "starts"))}, " "),
 	}
-	roster, err := adapter.DiscoverACPConnection(t.Context(), request)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	roster, err := adapter.DiscoverACPConnection(ctx, request)
 	if err != nil || len(roster.Models) != 3 || roster.SelectedModelID != "" {
 		t.Fatalf("discover roster = %#v, %v", roster, err)
 	}
-	revision, err := host.ControlStatus().ConfigurationRevision(t.Context())
+	revision, err := host.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	invalid := request
 	invalid.ModelIDs = []string{"vendor/alpha", "vendor/unavailable"}
-	if _, err := adapter.ConnectACP(t.Context(), invalid); err == nil || !strings.Contains(err.Error(), `prepare ACP model "vendor/unavailable"`) {
+	if _, err := adapter.ConnectACP(ctx, invalid); err == nil || !strings.Contains(err.Error(), `prepare ACP model "vendor/unavailable"`) {
 		t.Fatalf("unavailable model error = %v", err)
 	}
-	if after, err := host.ControlStatus().ConfigurationRevision(t.Context()); err != nil || after != revision {
+	if after, err := host.ControlStatus().ConfigurationRevision(ctx); err != nil || after != revision {
 		t.Fatalf("revision after failed model preparation = %d, %v", after, err)
 	}
 	request.ModelIDs = []string{"vendor/beta", "vendor/alpha"}
-	connected, err := adapter.ConnectACP(t.Context(), request)
+	connected, err := adapter.ConnectACP(ctx, request)
 	if err != nil || len(connected.Profiles) != 2 || connected.Connection.ID == "" {
 		t.Fatalf("connect = %#v, %v", connected, err)
 	}
-	doc, err := configstore.New(filepath.Join(root, "store")).LoadContext(t.Context())
+	doc, err := configstore.New(filepath.Join(root, "store")).LoadContext(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +133,7 @@ func TestACPConnectHTTPCommitsSelectedModelsInOneRevision(t *testing.T) {
 	}
 	select {
 	case operationID := <-connectOperation:
-		observed, err := client.Operation(t.Context(), operationID)
+		observed, err := client.Operation(ctx, operationID)
 		if err != nil || observed.Outcome != appserver.OutcomeCommitted || observed.Revision != doc.ConfigurationRevision ||
 			observed.ACPConnect == nil || !reflect.DeepEqual(observed.ACPConnect.Profiles, connected.Profiles) {
 			t.Fatalf("stored batch receipt = %#v, %v", observed, err)
@@ -141,7 +144,7 @@ func TestACPConnectHTTPCommitsSelectedModelsInOneRevision(t *testing.T) {
 
 	retired := agents.ACPPrepareRequest{AdapterID: "custom", Launcher: agents.LauncherChoiceCommand, CommandLine: request.CommandLine, CWD: workspace,
 		Install: &agents.RuntimeInstallation{Directory: filepath.Join(root, "retired"), ArchiveURL: "https://example.invalid/retired.zip"}}
-	rejected, err := clients.Agents.PrepareACP(t.Context(), appserver.PrepareACPRequest{
+	rejected, err := clients.Agents.PrepareACP(ctx, appserver.PrepareACPRequest{
 		WriteBase: appserver.WriteBase{OperationID: "acp-retired-install", ExpectedRevision: &doc.ConfigurationRevision}, Request: retired,
 	})
 	var remoteErr *httpclient.RemoteError
@@ -149,7 +152,7 @@ func TestACPConnectHTTPCommitsSelectedModelsInOneRevision(t *testing.T) {
 		!errors.As(err, &remoteErr) || remoteErr.StatusCode != http.StatusBadRequest || !strings.Contains(rejected.Detail, "ACP runtime installation is no longer supported") {
 		t.Fatalf("retired installation = %#v, %v", rejected, err)
 	}
-	observed, err := client.Operation(t.Context(), rejected.OperationID)
+	observed, err := client.Operation(ctx, rejected.OperationID)
 	if err != nil || !reflect.DeepEqual(observed, rejected) {
 		t.Fatalf("retired installation receipt = %#v, %v; want %#v", observed, err, rejected)
 	}

@@ -97,6 +97,21 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	}, nil
 }
 
+// ExternalAgentNameAllowed reports whether a persisted or proposed name can
+// identify a product external Agent without shadowing a reserved name.
+func ExternalAgentNameAllowed(id string) bool {
+	id = controlagents.NormalizeName(id)
+	if !controlagents.IsName(id) || ReservedSlashCommandName(id) {
+		return false
+	}
+	switch id {
+	case "guardian", "reviewer", "steward", "self", "breeze", "orbit", "zenith", "local", "main", "kernel":
+		return false
+	default:
+		return true
+	}
+}
+
 func ReservedSlashCommandName(name string) bool {
 	name = strings.TrimSpace(name)
 	return controlprompt.IsKnown(name) || strings.EqualFold(name, "sandbox") || strings.EqualFold(name, "lead")

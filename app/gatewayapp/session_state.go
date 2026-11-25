@@ -52,9 +52,6 @@ func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref sessio
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
-	if key := kernel.UnsupportedLegacyStateKey(state); key != "" {
-		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
-	}
 	modelRef := kernel.CurrentModelAlias(state)
 	modelID := ""
 	modelAlias := ""

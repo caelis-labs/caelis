@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/caelis-labs/caelis/control/plugin"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/plugin"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	streamspoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
@@ -39,9 +39,11 @@ import (
 )
 
 type Config struct {
-	AppName  string
-	UserID   string
-	StoreDir string
+	// BuiltinPackage supplies this Host's fixed plugin. Nil uses the embedded release.
+	BuiltinPackage plugin.BuiltinPackage
+	AppName        string
+	UserID         string
+	StoreDir       string
 	// SandboxHostAuthorityDir optionally injects a writable Host-user authority
 	// base for platform sandbox coordination. Production normally uses the
 	// platform default; tests and restricted embeddings may provide one.
@@ -332,19 +334,14 @@ type SandboxStatus struct {
 }
 
 func NewLocalStack(cfg Config) (*Stack, error) {
-	return newLocalStack(cfg, plugin.WithAvailableProductContributions)
-}
-
-func newLocalStack(cfg Config, productDefaults productPluginDefaults) (*Stack, error) {
 	if modelConfigSupplied(cfg.Model) {
 		return nil, fmt.Errorf("gatewayapp: runtime model overrides are unsupported; configure the model with /connect and select its ModelProfile")
 	}
 	appName := firstNonEmpty(strings.TrimSpace(cfg.AppName), "caelis")
 	userID := firstNonEmpty(strings.TrimSpace(cfg.UserID), "local-user")
 	workspaceCWD := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceCWD), mustGetwd())
-	workspaceKey := firstNonEmpty(strings.TrimSpace(cfg.WorkspaceKey), "workspace")
 	workspace, err := canonicalWorkspaceRef(
-		session.WorkspaceRef{Key: workspaceKey, CWD: workspaceCWD},
+		session.WorkspaceRef{Key: cfg.WorkspaceKey, CWD: workspaceCWD},
 		session.WorkspaceRef{},
 	)
 	if err != nil {
@@ -537,7 +534,7 @@ func newLocalStack(cfg Config, productDefaults productPluginDefaults) (*Stack, e
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
-				productDefaults:         productDefaults,
+				productDefaults:         cfg.BuiltinPackage,
 				mcp:                     newHostMCP(newAppConfigStore(storeDir), doc, runtimeDiagnostics),
 				applicationChildClients: &applicationChildClientFactory{},
 				appName:                 appName,

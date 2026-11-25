@@ -172,7 +172,7 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 				Seq uint64 `json:"seq"`
 			}
 			if err := json.Unmarshal([]byte(trimmed), &header); err != nil {
-				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d header: %w", path, lineNo, err)
+				return session.EventPage{}, fmt.Errorf("%w: decode event log %s line %d header: %w", session.ErrUnreadableSession, path, lineNo, err)
 			}
 			// A finite read owns only its durable cut. In particular, history
 			// provenance lookups must not decode the entire remaining Session
@@ -229,7 +229,7 @@ func decodeEventLogRecord(data []byte, path string, lineNo int) (*session.Event,
 	}
 	event, err := session.UnmarshalEventJSON(data)
 	if err != nil {
-		return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s: %w", label, err)
+		return nil, fmt.Errorf("%w: decode event log %s: %w", session.ErrUnreadableSession, label, err)
 	}
 	return event, nil
 }

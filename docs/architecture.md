@@ -114,10 +114,10 @@ Managed startup retains and reaps the exact launched process until its identity
 is ready. A child exit ends readiness polling immediately; phase durations and
 the complete cause stay in the owner-only service log. Startup failures expose
 a stable `CAELIS_STARTUP_*` code and bounded public description. Recognized
-compatibility repair belongs to `caelis doctor`: it stops the local Host,
-performs a resumable offline Store repair through the persistence owner, and
-then starts the Host and validates current status. Normal Host startup detects
-incompatible durable state but never mutates it.
+compatibility repair belongs to `caelis doctor`. It stops the local Host, holds
+exclusive Host ownership while the persistence owner applies the resumable
+repair, then starts the Host and validates current status. Sessions with pending
+workspace repairs cannot activate until the repair completes.
 
 `control/appserver.AppServerClients` is the aggregate capability boundary used by
 product clients. Focused Control packages remain the semantic owners behind it.
@@ -400,11 +400,26 @@ owner retains its priority, and existing effects are never replayed. See
 
 ## Compatibility and current limits
 
+After an upgrade, the Host can start and run new Sessions with the current
+configuration even when individual Sessions are unreadable. An unrecognized
+saved sandbox backend selects the platform default and drops its helper path.
+The configured network and filesystem rules still apply. An explicit backend
+selection must name a supported backend. The Host adopts usable pre-v2 AppConfig
+settings, discards ambiguous legacy credentials, and keeps readable restrictions.
+When no settings can be adopted, the original file stays in place until the next
+configuration save, which keeps a backup.
+
+Supported older Sessions can resume with readable history. Their model context
+may omit obsolete tool batches. Runtime uses current policy and never dispatches
+a historical tool call. The [Agent SDK Boundary](agent-sdk-boundary.md#session-storage-for-embedders)
+describes the file Store's format and recovery errors.
+
 - The root `protocol/acp/*` and product-host `ports/*` trees are retired and
   guarded against recreation.
-- Sessions written before v0.42 may retain historical workspace-key aliases for
-  the same canonical CWD. Keep this reader until the minimum supported upgrade
-  source is v0.42 or newer.
+- Workspace pickers match the stored key and canonical directory. Resume by
+  Session ID uses the stored address. The current directory can claim its
+  derived key from a conflicting historical binding. Affected old Sessions
+  elsewhere can be repaired with `caelis doctor`.
 - `UserID` remains a deprecated persistence compatibility field. It is not a
   Runtime partition key and must not enter new SDK contracts.
 - External ACP compatibility readers and their removal conditions are listed in

@@ -49,7 +49,7 @@ func TestGuardianRealMimoReviewWithoutOutputBudget(t *testing.T) {
 		productionEffort = "high"
 	}
 	workspace := t.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		AppName:            "caelis",
 		UserID:             "guardian-real-mimo-e2e",
 		StoreDir:           e2eStore,

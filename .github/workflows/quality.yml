@@ -151,14 +151,12 @@ jobs:
       - name: Native Linux sandbox execution tests
         env:
           CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'
-        run: |
-          go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap
-          go test -count=1 -timeout=3m -v ./agent-sdk/sandbox/landlock
+        run: go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap
 
       - name: Native application execution tests
         env:
           CAELIS_TEST_APPLICATION_NATIVE: '1'
-        run: bash scripts/go_test_nonempty.sh ./app/gatewayapp '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|ExternalExecutionClientHTTP|SharedWorkerNativeHTTP)' linux-application-native -count=1
+        run: bash scripts/go_test_nonempty.sh ./app/gatewayapp '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|SessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool|ExternalExecutionClientHTTP|SharedWorkerNativeHTTP)' linux-application-native -count=1
 
   quality:
     needs: [changes, govulncheck, go-quality, linux-sandbox]

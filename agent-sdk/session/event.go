@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -70,9 +71,6 @@ type EventTool struct {
 	Error     string           `json:"error,omitempty"`
 	ErrorCode string           `json:"error_code,omitempty"`
 	Parent    *EventParentTool `json:"parent,omitempty"`
-	// LegacyModelCall preserves the model envelope of routed MCP history through
-	// v0.84.1. Remove when those Sessions leave the supported resume window.
-	LegacyModelCall *model.ToolCall `json:"model_call,omitempty"`
 	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
 	ProposedCall *model.ToolCall `json:"proposed_call,omitempty"`
 	ID           string          `json:"id,omitempty"`
@@ -106,9 +104,6 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	if call := decoded.LegacyModelCall; call != nil && (call.Name != "mcp_call" || call.ID == "" || call.ID != decoded.ID || call.Args == "") {
-		return coreEventValidationError("invalid historical MCP envelope")
-	}
 	if len(fields.Input) > 0 && string(fields.Input) != "null" {
 		decoder := json.NewDecoder(bytes.NewReader(fields.Input))
 		decoder.UseNumber()
@@ -134,13 +129,11 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 		if len(previous.Metadata) > 0 {
 			// Old tool metadata was arbitrary JSON. Only recognized values contribute.
 			var meta struct {
-				Discovery bool `json:"caelis.mcp.discovery.v1"`
-				Callback  struct {
+				Callback struct {
 					Format string `json:"result_format"`
 				} `json:"application_call"`
 			}
 			_ = json.Unmarshal(previous.Metadata, &meta)
-			decoded.Discovery = decoded.Discovery || meta.Discovery
 			if fields.LegacyResultFormat == "" {
 				fields.LegacyResultFormat = meta.Callback.Format
 			}
@@ -212,17 +205,16 @@ type Event struct {
 	Compaction              *EventCompactionContext  `json:"compaction_context,omitempty"`
 	// MessageID identifies one logical message across transient chunks and its
 	// canonical durable event. It is semantic event state, not display metadata.
-	MessageID     string            `json:"message_id,omitempty"`
-	Message       *model.Message    `json:"message,omitempty"`
-	Tool          *EventTool        `json:"tool,omitempty"`
-	PlanPayload   *EventPlanPayload `json:"plan,omitempty"`
-	Notice        *EventNotice      `json:"notice,omitempty"`
-	Lifecycle     *EventLifecycle   `json:"lifecycle,omitempty"`
-	Approval      *ApprovalRecord   `json:"approval,omitempty"`
-	legacyJournal json.RawMessage
-	Protocol      *EventProtocol `json:"protocol,omitempty"`
-	Text          string         `json:"-"`
-	Meta          map[string]any `json:"_meta,omitempty"`
+	MessageID   string            `json:"message_id,omitempty"`
+	Message     *model.Message    `json:"message,omitempty"`
+	Tool        *EventTool        `json:"tool,omitempty"`
+	PlanPayload *EventPlanPayload `json:"plan,omitempty"`
+	Notice      *EventNotice      `json:"notice,omitempty"`
+	Lifecycle   *EventLifecycle   `json:"lifecycle,omitempty"`
+	Approval    *ApprovalRecord   `json:"approval,omitempty"`
+	Protocol    *EventProtocol    `json:"protocol,omitempty"`
+	Text        string            `json:"-"`
+	Meta        map[string]any    `json:"_meta,omitempty"`
 }
 
 // UnmarshalJSON expands event-local media and preserves numeric tokens in the
@@ -240,8 +232,7 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 	fields := struct {
 		*eventAlias
-		Meta    json.RawMessage `json:"_meta"`
-		Journal json.RawMessage `json:"journal"`
+		Meta json.RawMessage `json:"_meta"`
 	}{eventAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -259,12 +250,20 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	if decoded.Approval != nil && decoded.Approval.Schema > ApprovalSchemaVersion {
 		return &SchemaVersionError{Kind: SchemaKind("approval"), From: decoded.Approval.Schema, To: ApprovalSchemaVersion, Current: ApprovalSchemaVersion, Detail: "future approval schema"}
 	}
-	decoded.legacyJournal = fields.Journal
-	if err := decodeRetiredJournal((*Event)(&decoded)); err != nil {
-		return err
-	}
 	if err := validateCheckpointContract((*Event)(&decoded)); err != nil {
 		return err
+	}
+	// Retire the single-result model wrapper written by routed MCP through
+	// v0.84.1. The typed receipt remains readable and replay omits incompatible
+	// batches. Remove this reader when these logs leave the resume window.
+	if decoded.Type == EventTypeToolResult && decoded.Tool != nil && decoded.Tool.ID != "" && decoded.Tool.Name != "" && decoded.Message != nil && len(decoded.Message.Parts) == 1 {
+		result := decoded.Message.Parts[0].ToolResult
+		if result != nil && result.Name == "mcp_call" && result.ToolUseID == decoded.Tool.ID && decoded.Tool.Name != result.Name {
+			route := gjson.GetBytes(data, "tool.model_call")
+			if route.Get("name").String() == result.Name && route.Get("id").String() == result.ToolUseID {
+				decoded.Message = nil
+			}
+		}
 	}
 	*e = Event(decoded)
 	return nil

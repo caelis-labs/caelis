@@ -41,9 +41,7 @@ func newStore(cfg Config) *Store {
 		eventLogCaches:     map[string]*eventLogCache{},
 		eventAppendIndexes: map[string]*eventAppendIndex{},
 	}
-	if store.rootDir == "" {
-		store.rootDir = filepath.Join(os.TempDir(), "caelis-sdk-sessions")
-	}
+	store.rootDir = store.normalizedRootDir()
 	if store.clock == nil {
 		store.clock = time.Now
 	}
@@ -99,17 +97,12 @@ func (s *Store) withRootLockContext(ctx context.Context, fn func() error) error 
 	if err != nil {
 		return err
 	}
-	// A full legacy scan is required once per process/root. Current writers
+	// Scan outstanding transactions once per process/root. Current writers
 	// maintain a durable root marker, so subsequent operations pay only one
 	// Stat unless a committed WAL was abandoned by a crashed process.
 	if !rootLock.recoveryInitialized || pending {
 		if err := s.recoverTransactions(ctx); err != nil {
 			return err
-		}
-		if !rootLock.recoveryInitialized {
-			if err := s.migrateLegacyGeneratedTitles(ctx); err != nil {
-				return err
-			}
 		}
 		rootLock.recoveryInitialized = true
 	}
@@ -271,7 +264,6 @@ func (s *Store) AppendEvent(
 	if err != nil {
 		return nil, err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return nil, err
@@ -407,7 +399,6 @@ func (s *Store) AppendEvents(
 	if err != nil {
 		return nil, err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return nil, err
@@ -451,7 +442,6 @@ func (s *Store) AppendEventsAndUpdateState(
 	if err != nil {
 		return nil, err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 
 	if err := s.mu.LockContext(ctx); err != nil {
 		return nil, err
@@ -616,7 +606,6 @@ func (s *Store) BindControllerWithEvent(
 	if err != nil {
 		return session.Session{}, nil, err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, nil, err
 	}
@@ -722,7 +711,6 @@ func (s *Store) PutParticipantWithEvent(
 	if err != nil {
 		return session.Session{}, nil, err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, nil, err
 	}
@@ -836,7 +824,6 @@ func (s *Store) RemoveParticipantWithEvent(
 	if err != nil {
 		return session.Session{}, nil, err
 	}
-	ctx = contextWithEventAppendPrewarm(ctx, prewarm)
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.Session{}, nil, err
 	}

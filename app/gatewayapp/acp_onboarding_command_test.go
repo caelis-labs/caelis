@@ -699,7 +699,7 @@ func TestGatewayACPOnboardingHelperProcess(t *testing.T) {
 	multiModel := mode == "multimodel" || mode == "multimodel-reauth"
 	var authMethod string
 	switch mode {
-	case "needs-auth", "multimodel":
+	case "needs-auth":
 		authMethod = "agent-login"
 	case "multimodel-reauth":
 		data, err := os.ReadFile(marker + ".auth")

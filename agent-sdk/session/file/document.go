@@ -32,25 +32,30 @@ func (s *Store) readDocument(sessionID string, workspaceKey ...string) (persiste
 	if err != nil {
 		return persistedDocument{}, err
 	}
-	return s.readDocumentAt(path)
+	// Any retained WAL is a write barrier, even for processes that cached
+	// the path before the transaction was published.
+	if err := retainedTransactionError(transactionPath(path)); err != nil {
+		return persistedDocument{}, err
+	}
+	doc, err := s.readDocumentAt(path)
+	if err == nil && doc.Session.SessionID != sessionID {
+		return persistedDocument{}, fmt.Errorf("%w: document %s has a different Session identity", session.ErrUnreadableSession, path)
+	}
+	return doc, err
 }
 
 func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return persistedDocument{}, session.ErrSessionNotFound
+			return persistedDocument{}, fmt.Errorf("%w: missing indexed document %s", session.ErrUnreadableSession, path)
 		}
 		return persistedDocument{}, err
 	}
-	if err := rejectUnsupportedLegacyDocument(data, path); err != nil {
-		return persistedDocument{}, err
-	}
-	doc, report, err := decodePersistedDocumentWithReport(data)
+	doc, err := decodePersistedDocument(data)
 	if err != nil {
-		return persistedDocument{}, fmt.Errorf("agent-sdk/session/file: decode %s: %w", path, err)
+		return persistedDocument{}, fmt.Errorf("%w: decode %s: %w", session.ErrUnreadableSession, path, err)
 	}
-	s.recordMigrationReport(report)
 	doc.Session = session.CloneSession(doc.Session)
 	if doc.State != nil {
 		doc.State = cloneState(doc.State)
@@ -59,62 +64,35 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	return doc, nil
 }
 
-func decodePersistedDocumentWithReport(data []byte) (persistedDocument, MigrationReport, error) {
+func decodePersistedDocument(data []byte) (persistedDocument, error) {
 	var header struct {
-		Kind    string `json:"kind"`
-		Version int    `json:"version"`
+		Kind    string          `json:"kind"`
+		Version int             `json:"version"`
+		Events  json.RawMessage `json:"events"`
 	}
 	if err := json.Unmarshal(data, &header); err != nil {
-		return persistedDocument{}, MigrationReport{}, err
+		return persistedDocument{}, err
 	}
-	if header.Kind != documentKind {
-		return persistedDocument{}, MigrationReport{}, fmt.Errorf(
-			"agent-sdk/session/file: unsupported document %q version %d",
-			header.Kind,
-			header.Version,
-		)
+	if header.Kind == documentKind && (header.Version == 0 || header.Version == 1) {
+		return persistedDocument{}, fmt.Errorf("%w: unsupported document version %d", session.ErrUnsupportedLegacyFormat, header.Version)
 	}
-
-	switch header.Version {
-	case documentVersion:
-		var doc persistedDocument
-		if err := json.Unmarshal(data, &doc); err != nil {
-			return persistedDocument{}, MigrationReport{}, err
+	if header.Kind != documentKind || header.Version != documentVersion {
+		return persistedDocument{}, fmt.Errorf("unsupported document %q version %d", header.Kind, header.Version)
+	}
+	if len(header.Events) != 0 {
+		var events []json.RawMessage
+		if json.Unmarshal(header.Events, &events) != nil || len(events) != 0 {
+			return persistedDocument{}, fmt.Errorf("%w: session document has legacy embedded events", session.ErrUnsupportedLegacyFormat)
 		}
-		return doc, MigrationReport{}, nil
-	case legacyV1DocumentVersion:
-		return decodeLegacyV1DocumentWithReport(data)
-	default:
-		return persistedDocument{}, MigrationReport{}, fmt.Errorf(
-			"agent-sdk/session/file: unsupported document %q version %d",
-			header.Kind,
-			header.Version,
-		)
 	}
-}
-
-func rejectUnsupportedLegacyDocument(data []byte, path string) error {
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		//nolint:nilerr // This legacy-shape probe defers malformed JSON to the authoritative document decoder.
-		return nil
+	var doc persistedDocument
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return persistedDocument{}, err
 	}
-	raw, ok := root["events"]
-	if !ok {
-		return nil
+	if strings.TrimSpace(doc.Session.SessionID) == "" || strings.TrimSpace(doc.Session.AppName) == "" || strings.TrimSpace(doc.Session.UserID) == "" {
+		return persistedDocument{}, errors.New("missing document Session identity")
 	}
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "null" {
-		return nil
-	}
-	var events []json.RawMessage
-	if err := json.Unmarshal(raw, &events); err != nil {
-		return fmt.Errorf("agent-sdk/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
-	}
-	if len(events) == 0 {
-		return nil
-	}
-	return fmt.Errorf("agent-sdk/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
+	return doc, nil
 }
 
 type committedDocumentWriteError struct {
@@ -146,6 +124,27 @@ func (s *Store) writeDocument(ctx context.Context, doc persistedDocument) error 
 }
 
 func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument, injectFault bool, updateIndex bool) error {
+	path, err := s.resolveWritePath(doc.Session)
+	if err != nil {
+		return err
+	}
+	if injectFault && s.writeDocumentFault != nil {
+		if err := s.writeDocumentFault(); err != nil {
+			return err
+		}
+	}
+	if err := s.writeDocumentAt(ctx, path, doc); err != nil {
+		return err
+	}
+	if updateIndex {
+		if err := s.upsertSessionIndex(doc.Session, path); err != nil {
+			return committedDocumentWrite(err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) writeDocumentAt(ctx context.Context, path string, doc persistedDocument) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
@@ -158,15 +157,6 @@ func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument
 	}
 	data = append(data, '\n')
 
-	path, err := s.resolveWritePath(doc.Session)
-	if err != nil {
-		return err
-	}
-	if injectFault && s.writeDocumentFault != nil {
-		if err := s.writeDocumentFault(); err != nil {
-			return err
-		}
-	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -200,11 +190,6 @@ func (s *Store) writeDocumentInternal(ctx context.Context, doc persistedDocument
 	if err := s.durability.SyncDirectory(dir); err != nil {
 		return committedDocumentWrite(err)
 	}
-	s.pathCache[sanitizeSessionID(doc.Session.SessionID)] = path
-	if updateIndex {
-		if err := s.upsertSessionIndex(doc.Session, path); err != nil {
-			return committedDocumentWrite(err)
-		}
-	}
+	s.pathCache[doc.Session.SessionID] = path
 	return nil
 }

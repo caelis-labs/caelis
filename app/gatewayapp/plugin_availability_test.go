@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -22,22 +23,13 @@ func TestBrokenBuiltinPluginDoesNotBlockHostOrHTTPPrompt(t *testing.T) {
 	for _, beforeHost := range []bool{true, false} {
 		t.Run(map[bool]string{true: "Host startup", false: "Session activation"}[beforeHost], func(t *testing.T) {
 			store, workspace := t.TempDir(), t.TempDir()
-			fixed, err := plugin.ProductContributions(plugin.RuntimePaths{StoreDir: store})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(fixed.SkillBundles) == 0 {
-				t.Skip("no embedded desktop-world for this platform")
-			}
-			skillPath := filepath.Join(fixed.SkillBundles[0].Root, "dtw", "SKILL.md")
-			breakPlugin := func() {
-				t.Helper()
-				if err := os.WriteFile(skillPath, []byte("damaged Skill"), 0600); err != nil {
-					t.Fatal(err)
+			var broken atomic.Bool
+			broken.Store(beforeHost)
+			load := func(plugin.RuntimePaths) (plugin.Contributions, error) {
+				if broken.Load() {
+					return plugin.Contributions{}, fmt.Errorf("fixture package unavailable")
 				}
-			}
-			if beforeHost {
-				breakPlugin()
+				return plugin.Contributions{}, nil
 			}
 			var modelCalls atomic.Int32
 			modelClient := &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -45,16 +37,15 @@ func TestBrokenBuiltinPluginDoesNotBlockHostOrHTTPPrompt(t *testing.T) {
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"test","message":{"role":"assistant","content":"harness available"},"done":true}`)), Request: req}, nil
 			})}
 			stack, err := newGatewayAppTestStack(t, Config{
-				StoreDir: store, WorkspaceKey: workspace, WorkspaceCWD: workspace,
+				BuiltinPackage: load, StoreDir: store, WorkspaceKey: workspace, WorkspaceCWD: workspace,
 				Sandbox: SandboxConfig{RequestedType: "host"},
 				Model:   ModelConfig{Provider: "ollama", API: model.APIOllama, Model: "test", HTTPClient: modelClient},
 			})
 			if err != nil {
 				t.Fatalf("plugin blocked Host startup: %v", err)
 			}
-			t.Cleanup(func() { _ = stack.Close() })
 			if !beforeHost {
-				breakPlugin()
+				broken.Store(true)
 			}
 			if _, err := stack.composition.resolveApplicationPlugins(sessionprofile.Profile{}, applicationPluginPaths(store, "unrelated-configuration", workspace)); err != nil {
 				t.Fatalf("unavailable default blocked unrelated configuration: %v", err)
@@ -83,7 +74,7 @@ func TestBrokenBuiltinPluginDoesNotBlockHostOrHTTPPrompt(t *testing.T) {
 				t.Fatal("Session lost its plugin status")
 			}
 			status := loaded.instance.capabilityStatus(configuration.Revision)
-			if len(status.Plugins) != 1 || status.Plugins[0].ID != "desktop-world" || status.Plugins[0].Status != "failed" || !strings.Contains(status.Plugins[0].Warning, "builtin desktop-world: builtin file checksum mismatch") {
+			if len(status.Plugins) != 1 || status.Plugins[0].ID != "desktop-world" || status.Plugins[0].Status != "failed" || !strings.Contains(status.Plugins[0].Warning, "fixture package unavailable") {
 				t.Fatalf("plugin status lost the concrete cause: %+v", status.Plugins)
 			}
 			deadline := time.After(3 * time.Second)
@@ -91,7 +82,7 @@ func TestBrokenBuiltinPluginDoesNotBlockHostOrHTTPPrompt(t *testing.T) {
 				select {
 				case delivery := <-observed.Subscription.Deliveries():
 					for _, event := range delivery.Events {
-						if event.Kind == eventstream.KindNotice && strings.Contains(event.Notice, `Plugin "desktop-world" disabled: builtin desktop-world: builtin file checksum mismatch: skills`) {
+						if event.Kind == eventstream.KindNotice && strings.Contains(event.Notice, `Plugin "desktop-world" disabled: fixture package unavailable`) {
 							if event.Delivery == nil || event.Delivery.Mode != eventstream.DeliveryTransient {
 								t.Fatalf("package diagnostic became canonical data: %+v", event)
 							}

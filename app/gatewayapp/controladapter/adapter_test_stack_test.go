@@ -28,7 +28,7 @@ func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack
 	model := cfg.Model
 	cfg.Model = gatewayapp.ModelConfig{}
 	cfg.ResolveProviderHTTPClient = gatewayapptest.StaticProviderHTTPClient(model.HTTPClient)
-	stack, err := gatewayapp.NewLocalStack(cfg)
+	stack, err := gatewayapptest.NewStack(cfg)
 	if err == nil {
 		t.Cleanup(func() { _ = stack.Close() })
 	}

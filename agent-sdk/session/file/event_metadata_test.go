@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -180,5 +182,61 @@ func TestEventMetadataRecoversCommittedWALBeforeReadingCachedIndex(t *testing.T)
 	}
 	if _, err := os.Stat(reopened.transactionRecoveryMarkerPath()); !os.IsNotExist(err) {
 		t.Fatalf("recovery marker=%v, want removed", err)
+	}
+}
+
+func TestReopenRetiredJournalRebuildsApprovalIndex(t *testing.T) {
+	s, active := newEventPageIndexFixture(t, 0)
+	ctx := t.Context()
+	ref := active.SessionRef
+	old, err := s.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The old approval lived only in the journal and its rebuildable sidecar.
+	raw, err := json.Marshal(struct {
+		*session.Event
+		Schema  int             `json:"schema"`
+		Journal json.RawMessage `json:"journal"`
+	}{old, 2, json.RawMessage(`{"schema":1,"kind":"pause_token","pause_token":{"schema":1,"token_id":"old","session_id":"event-page-index-session","run_id":"run","turn_id":"turn","tool_call_id":"original-call","tool_name":"Write","revision":2,"status":"resolved","approved":true,"review_text":"old approval"}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := s.resolveWritePath(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := eventLogPath(doc)
+	historical := append(raw, '\n')
+	if err := os.WriteFile(path, historical, 0600); err != nil {
+		t.Fatal(err)
+	}
+	index, err := s.readEventMetadata(ctx, doc)
+	if err != nil || len(index.Records) != 1 {
+		t.Fatalf("historical index: %+v, %v", index, err)
+	}
+	index.Version = 2
+	index.Records[0].ReviewedApproval, index.Records[0].Replay = true, true
+	s.saveEventMetadataIndex(ctx, path, index)
+	if saved := loadEventMetadataIndex(path); saved == nil || saved.Version != 2 || !saved.Records[0].ReviewedApproval {
+		t.Fatal("missing historical approval index fixture")
+	}
+
+	cold := NewStore(Config{RootDir: s.rootDir})
+	page, err := cold.EventMetadataPage(ctx, session.EventPageRequest{SessionRef: ref, Visibility: session.EventPageClientReplay})
+	if err != nil || len(page.Events) != 0 || page.NextSeq != old.Seq {
+		t.Fatalf("reopened client replay = %+v, %v", page, err)
+	}
+	msg := model.NewTextMessage(model.RoleUser, "continue")
+	if _, err := cold.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: &session.Event{Type: session.EventTypeUser, Message: &msg}}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := NewStore(Config{RootDir: s.rootDir}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref, IncludeTransient: true})
+	if err != nil || len(loaded.Events) != 2 || loaded.Events[0].Approval != nil || loaded.Events[0].Tool != nil || loaded.Events[1].Message.TextContent() != "continue" {
+		t.Fatalf("reopened mixed log = %+v, %v", loaded, err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil || !bytes.HasPrefix(updated, historical) {
+		t.Fatalf("append changed historical row: %v", err)
 	}
 }

@@ -1,16 +1,15 @@
 package plugin
 
-// WithAvailableProductContributions selects the same package as
-// WithProductContributions, but a failed selection disables only that plugin.
+// Available selects the same package as Select, but a failed selection disables only that plugin.
 // The selected source and its cause remain observable; no fallback is activated.
-// Explicit configuration validation uses WithProductContributions instead.
-func WithAvailableProductContributions(optional Contributions, paths RuntimePaths, defaults ...Config) Contributions {
+// Explicit configuration validation uses Select instead.
+func (load BuiltinPackage) Available(optional Contributions, paths RuntimePaths, defaults ...Config) Contributions {
 	for _, source := range optional.Sources {
 		if source.ID == "desktop-world" && source.Error != "" {
 			return optional
 		}
 	}
-	combined, err := WithProductContributions(optional, paths, defaults...)
+	combined, err := load.Select(optional, paths, defaults...)
 	if err == nil {
 		return combined
 	}

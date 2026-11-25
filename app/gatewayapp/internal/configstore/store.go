@@ -11,6 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/plugin"
 )
@@ -370,6 +371,18 @@ func dedupeProviderEndpointsForSave(endpoints []modelconfig.ProviderEndpointConf
 	return out
 }
 
+// NormalizeBackend resolves one explicitly selected product sandbox backend.
+func NormalizeBackend(backend string) (string, error) {
+	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
+	case "":
+		return "auto", nil
+	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendWindows:
+		return string(normalized), nil
+	default:
+		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
+	}
+}
+
 func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 	cfg.RequestedType = strings.ToLower(strings.TrimSpace(cfg.RequestedType))
 	cfg.HelperPath = strings.TrimSpace(cfg.HelperPath)
@@ -383,19 +396,19 @@ func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 }
 
 func NormalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
-	cfg.ApprovalMode = normalizeApprovalMode(cfg.ApprovalMode)
+	cfg.ApprovalMode, _ = normalizeApprovalMode(cfg.ApprovalMode)
 	cfg.PolicyProfile = policyapi.NormalizeProfileName(cfg.PolicyProfile)
 	return cfg
 }
 
-func normalizeApprovalMode(mode string) string {
+func normalizeApprovalMode(mode string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "manual":
-		return "manual"
-	case "", "auto", "auto-review", "auto_review", "autoreview":
-		return "auto-review"
+		return "manual", true
+	case "", "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
+		return "auto-review", true
 	default:
-		return "auto-review"
+		return "auto-review", false
 	}
 }
 

@@ -49,7 +49,6 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 	}
 	for _, key := range []string{
 		"final_event_persisted", subagentCancelPhaseKey, subagentCancelTurnSeqKey,
-		"continue_phase", "continue_prompt", "continue_context", "continue_digest", "continue_turn_seq", "continue_reason",
 	} {
 		if _, kept := liveMetadata[key]; !kept {
 			delete(mergedMetadata, key)
@@ -72,9 +71,6 @@ func (tm *taskRuntime) rebaseObservedSubagentTask(task *subagentTask, current *t
 		if _, kept := rebased.Spec[key]; !kept {
 			delete(mergedSpec, key)
 		}
-	}
-	for _, key := range []string{"continue_phase", "continue_digest", "continue_turn_seq"} {
-		delete(mergedSpec, key)
 	}
 	rebased.Spec = mergedSpec
 	return rebased

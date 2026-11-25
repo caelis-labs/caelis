@@ -1,11 +1,12 @@
 package gatewayapp
 
 import (
+	"testing"
+
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver"
-	"testing"
 )
 
 func TestIdleShutdownUsesRuntimeOwnerAndIgnoresSubscriptions(t *testing.T) {
@@ -50,7 +51,7 @@ func TestIdleShutdownUsesRuntimeOwnerAndIgnoresSubscriptions(t *testing.T) {
 
 func TestIdleShutdownIgnoresDetachedTaskAndChildReference(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "upgrade-background", "Upgrade background task.")
-	stack, err := NewLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "upgrade-background", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
+	stack, err := newTestLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "upgrade-background", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,15 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 )
 
-// Retired Patch arguments remain accepted only so recoverable invocations
-// issued under the former schema can still execute. They are intentionally
-// absent from the definition and ignored. Remove these allowances once that
-// recovery window falls below the supported upgrade floor.
-const (
-	retiredPatchIfRevisionArg      = "if_revision"
-	retiredExpectedReplacementsArg = "expected_replacements"
-)
-
 type fileMutationPlan struct {
 	path      string
 	created   bool
@@ -239,7 +230,7 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 		if !ok {
 			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("arg \"edits[%d]\" must be an object", idx))
 		}
-		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all", retiredExpectedReplacementsArg); err != nil {
+		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all"); err != nil {
 			return nil, fmt.Errorf("patch edits[%d]: %w", idx, err)
 		}
 		oldValue, err := requiredPatchEditString(item, idx, "old")

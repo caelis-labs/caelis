@@ -262,7 +262,7 @@ func managedProductFailure(storeDir string, phase string, err error) error {
 	}
 	detail := classifyManagedStartupFailure(err)
 	return &managedStartupFailure{
-		code: detail.code, description: detail.description, repairable: detail.repairable,
+		code: detail.code, description: detail.description,
 		logPath: filepath.Join(productpaths.ServiceLogDir(storeDir), localHostLogFilename), cause: err,
 	}
 }
@@ -270,16 +270,12 @@ func managedProductFailure(storeDir string, phase string, err error) error {
 type managedStartupFailure struct {
 	code        string
 	description string
-	repairable  bool
 	logPath     string
 	cause       error
 }
 
 func (e *managedStartupFailure) Error() string {
 	message := fmt.Sprintf("caelis startup failed [%s]: %s", e.code, e.description)
-	if e.repairable {
-		return message + "; run `caelis doctor` to repair"
-	}
 	if e.logPath != "" {
 		return message + "; details: " + e.logPath
 	}
@@ -291,20 +287,9 @@ func (e *managedStartupFailure) Unwrap() error { return e.cause }
 type managedStartupFailureDetail struct {
 	code        string
 	description string
-	repairable  bool
 }
 
 func classifyManagedStartupFailure(err error) managedStartupFailureDetail {
-	code, ok := gatewayapp.StartupIssueCodeOf(err)
-	if !ok {
-		code, ok = gatewayapp.ParseStartupIssueCode(err.Error())
-	}
-	if ok {
-		return managedStartupFailureDetail{
-			code: string(code), description: gatewayapp.StartupIssueDescription(code),
-			repairable: gatewayapp.StartupIssueRepairable(code),
-		}
-	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return managedStartupFailureDetail{code: startupCodeTimeout, description: "local Control Host did not become ready before the startup deadline"}
 	}
@@ -541,18 +526,6 @@ func (p *detachedLocalHostProcess) release() error {
 	return nil
 }
 
-type managedLoggedStartupIssue struct {
-	code gatewayapp.StartupIssueCode
-}
-
-func (e *managedLoggedStartupIssue) Error() string {
-	return gatewayapp.StartupIssueDescription(e.code)
-}
-
-func (e *managedLoggedStartupIssue) StartupIssueCode() gatewayapp.StartupIssueCode {
-	return e.code
-}
-
 func managedStartupCauseFromLog(path string, offset int64) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -577,9 +550,6 @@ func managedStartupCauseFromLog(path string, offset int64) error {
 	}
 	lines := strings.Split(string(raw), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		if code, ok := gatewayapp.ParseStartupIssueCode(lines[i]); ok {
-			return &managedLoggedStartupIssue{code: code}
-		}
 		if cause := userFacingHostBlocker(errors.New(lines[i])); cause != "" {
 			return errors.New(cause)
 		}

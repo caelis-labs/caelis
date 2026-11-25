@@ -682,7 +682,7 @@ func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stac
 	model := cfg.Model
 	cfg.Model = gatewayapp.ModelConfig{}
 	cfg.ResolveProviderHTTPClient = gatewayapptest.StaticProviderHTTPClient(model.HTTPClient)
-	stack, err := gatewayapp.NewLocalStack(cfg)
+	stack, err := gatewayapptest.NewStack(cfg)
 	if err != nil {
 		return nil, err
 	}

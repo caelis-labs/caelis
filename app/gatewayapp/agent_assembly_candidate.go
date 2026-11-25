@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -37,7 +38,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 	}
 	for _, configured := range doc.Plugins {
 		if configured.Enabled && plugin.IsProductPlugin(configured) {
-			if _, err := plugin.WithProductContributions(contributions, plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD}, doc.Plugins...); err != nil {
+			if _, err := s.authorities.productDefaults.Select(contributions, plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD}, doc.Plugins...); err != nil {
 				return err
 			}
 			break
@@ -56,7 +57,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 	}
 
 	for _, configured := range controlagents.ListAgents(doc.ExternalAgents) {
-		if forbiddenExternalAgentID(configured.ID) {
+		if !agentregistry.ExternalAgentNameAllowed(configured.ID) {
 			return fmt.Errorf("gatewayapp: external Agent %q conflicts with a product command or system Agent", configured.ID)
 		}
 		name := agentAssemblyNameKey(configured.ID)

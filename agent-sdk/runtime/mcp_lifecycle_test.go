@@ -12,7 +12,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -26,8 +25,8 @@ func TestLegacyMCPSearchReceiptAfterStoreReopen(t *testing.T) {
 		name   string
 		marked bool
 	}{
-		{"marked-stale", true},
-		{"unmarked-undiscovered", false},
+		{"marked", true},
+		{"unmarked", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -52,14 +51,12 @@ func TestLegacyMCPSearchReceiptAfterStoreReopen(t *testing.T) {
 			storeRoot := filepath.Join(root, "sessions")
 			writeLegacyMCPSearchReceipt(t, storeRoot, tc.marked)
 			reopened := file.NewStore(file.Config{RootDir: storeRoot})
-			if !tc.marked {
-				events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got := codeModeBindings(events); len(got) != 0 {
-					t.Fatalf("unmarked receipt restored a binding: %v", got)
-				}
+			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := codeModeBindings(events); len(got) != 0 {
+				t.Fatalf("legacy receipt restored a binding: %v", got)
 			}
 
 			var effects atomic.Int32
@@ -68,8 +65,8 @@ func TestLegacyMCPSearchReceiptAfterStoreReopen(t *testing.T) {
 				return tool.Result{}, nil
 			}})
 			resumed := &mcpScriptModel{steps: func(step int, _ *model.Request) []model.ToolCall {
-				if tc.marked && step == 0 {
-					return []model.ToolCall{{ID: "after-upgrade", Name: codemode.ToolName, Args: `{"code":"return await tools.call('docs__read', {});"}`}}
+				if step == 0 {
+					return []model.ToolCall{{ID: "after-upgrade", Name: codemode.ToolName, Args: `{"code":"await tools.search({name:'docs__read'}); return await tools.call('docs__read', {});"}`}}
 				}
 				return nil
 			}}
@@ -81,15 +78,21 @@ func TestLegacyMCPSearchReceiptAfterStoreReopen(t *testing.T) {
 			if len(resumed.requests) == 0 || !reflect.DeepEqual(resumed.requests[0].Messages, want) {
 				t.Fatal("reopened history differs from the original model context")
 			}
-			if effects.Load() != 0 {
-				t.Fatalf("reopened discovery dispatched %d effects against the replacement", effects.Load())
+			if effects.Load() != 1 {
+				t.Fatalf("fresh search and call dispatched %d effects, want 1", effects.Load())
 			}
-			if tc.marked {
-				result := errorDeliveryModelResult(t, resumed.requests[len(resumed.requests)-1], "after-upgrade")
-				parts := errorDeliveryJSON(t, result.Content)
-				if !result.IsError || !bytes.Contains(parts, []byte(`"code":"stale_revision"`)) {
-					t.Fatalf("resumed model received %s, want stale_revision", parts)
+			events, err = file.NewStore(file.Config{RootDir: storeRoot}).Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var receipts []*session.Event
+			for _, event := range events {
+				if event.Type == session.EventTypeToolResult {
+					receipts = append(receipts, event)
 				}
+			}
+			if got := codeModeBindings(receipts)["docs__read"]; got != mcp.BindingForDefinition(fixtureMCPDefinition("v2")) {
+				t.Fatalf("did not restore new binding after re-open: %+v", got)
 			}
 		})
 	}
@@ -121,14 +124,14 @@ func writeLegacyMCPSearchReceipt(t *testing.T, root string, marked bool) {
 		if event.Tool.Result == nil || !event.Tool.Discovery || event.Tool.Outcome != session.ToolOutcomeSucceeded {
 			t.Fatal("fixture did not produce a successful discovery receipt")
 		}
-		// v0.83.1 wrote plain model parts with the trusted marker in result.metadata.
+		// v0.83.1 wrote plain model parts with its marker in result.metadata.
 		// Replace only this wire record so the resumed Store must decode that shape.
 		legacy := struct {
 			Content  []model.Part    `json:"content"`
 			Metadata map[string]bool `json:"metadata,omitempty"`
 		}{Content: tool.ModelParts(event.Tool.Result.Content)}
 		if marked {
-			legacy.Metadata = map[string]bool{mcpdiscovery.MetadataKey: true}
+			legacy.Metadata = map[string]bool{"caelis.mcp.discovery.v1": true}
 		}
 		row := struct {
 			*session.Event

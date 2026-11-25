@@ -7,27 +7,44 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func (s *Store) resolveWritePath(sess session.Session) (string, error) {
-	key := sanitizeSessionID(sess.SessionID)
+	key := sess.SessionID
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
 	}
 	if entry, err := s.lookupSessionIndex(sess.SessionID); err == nil {
-		path := s.indexEntryPath(entry)
+		path, err := s.indexEntryPath(entry)
+		if err != nil {
+			return "", err
+		}
 		s.pathCache[key] = path
 		return path, nil
 	} else if !errors.Is(err, session.ErrSessionNotFound) {
 		return "", err
 	}
-	return s.newDocumentPath(sess), nil
+	if workspaceDirName(sess.WorkspaceKey) == ".." {
+		return "", fmt.Errorf("%w: workspace directory escapes Session Store", session.ErrInvalidSession)
+	}
+	path := s.newDocumentPath(sess)
+	// Distinct opaque IDs can sanitize to the same rollout name in the same
+	// second. Only the index or recovery may adopt an occupied path.
+	for _, occupied := range []string{path, eventLogPath(path), transactionPath(path)} {
+		if _, err := os.Lstat(occupied); err == nil {
+			return "", fmt.Errorf("%w: Session rollout path already exists", session.ErrInvalidSession)
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	return path, nil
 }
 
 func (s *Store) resolveDocumentPath(sessionID string, workspaceKey string) (string, error) {
-	key := sanitizeSessionID(sessionID)
+	key := sessionID
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
 	}
@@ -38,9 +55,9 @@ func (s *Store) resolveDocumentPath(sessionID string, workspaceKey string) (stri
 	if key := strings.TrimSpace(workspaceKey); key != "" && entry.Session.WorkspaceKey != key {
 		return "", session.ErrSessionNotFound
 	}
-	path := s.indexEntryPath(entry)
-	if path == "" {
-		return "", session.ErrSessionNotFound
+	path, err := s.indexEntryPath(entry)
+	if err != nil {
+		return "", err
 	}
 	s.pathCache[key] = path
 	return path, nil
@@ -50,6 +67,9 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 	searchRoot := s.rootDir
 	requireUnique := true
 	if key := strings.TrimSpace(workspaceKey); key != "" {
+		if workspaceDirName(key) == ".." {
+			return "", session.ErrInvalidSession
+		}
 		searchRoot = filepath.Join(searchRoot, workspaceDirName(key))
 		requireUnique = false
 	}
@@ -61,10 +81,10 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 			}
 			return err
 		}
-		if d.IsDir() || !currentDocumentFileName(d.Name()) {
+		if !d.Type().IsRegular() || !strings.HasSuffix(d.Name(), "-"+sanitizeSessionID(sessionID)+".json") {
 			return nil
 		}
-		if strings.HasSuffix(d.Name(), "-"+sanitizeSessionID(sessionID)+".json") {
+		if rolloutPathKey(s.rootDir, path) == sanitizeSessionID(sessionID) {
 			found = append(found, path)
 			if !requireUnique {
 				return fs.SkipAll
@@ -92,8 +112,37 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 	}
 }
 
-func currentDocumentFileName(name string) bool {
-	return strings.HasPrefix(name, "rollout-") && filepath.Ext(name) == ".json"
+// rolloutPathKey extracts the filename component reserved by a writer.
+// Sanitization is lossy. This key can guard reuse of an unindexed rollout,
+// but cannot supply a SessionRef or a listing row.
+func rolloutPathKey(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	// The workspace key "." puts the date directory directly under the root.
+	if len(parts) == 5 && parts[0] == workspaceDirName(parts[0]) {
+		parts = parts[1:]
+	}
+	if len(parts) != 4 || !filepath.IsLocal(rel) {
+		return ""
+	}
+	const layout = "2006-01-02T15-04-05"
+	name, ok := strings.CutPrefix(parts[3], "rollout-")
+	if !ok {
+		return ""
+	}
+	name, ok = strings.CutSuffix(name, ".json")
+	if !ok || len(name) <= len(layout)+1 || name[len(layout)] != '-' {
+		return ""
+	}
+	at, err := time.Parse(layout, name[:len(layout)])
+	key := name[len(layout)+1:]
+	if err != nil || at.Format("2006/01/02") != strings.Join(parts[:3], "/") || sanitizeSessionID(key) != key {
+		return ""
+	}
+	return key
 }
 
 func (s *Store) newDocumentPath(session session.Session) string {

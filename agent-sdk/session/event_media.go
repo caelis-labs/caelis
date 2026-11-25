@@ -111,13 +111,26 @@ func expandEventMedia(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	if len(used) != len(media) {
-		return nil, fmt.Errorf("agent-sdk/session: unreferenced event media")
+		// A schema-2 table can have entries referenced only by a retired
+		// journal. Count those entries without expanding the discarded body.
+		_, err := mapRawMedia(raw, "journal.tool_execution.result.content", eventMediaSourceKind, func(source model.MediaSource) (model.MediaSource, error) {
+			if _, exists := media[source.Data]; exists {
+				used[source.Data] = true
+			}
+			return source, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(used) != len(media) {
+			return nil, fmt.Errorf("agent-sdk/session: unreferenced event media")
+		}
 	}
 	return out, nil
 }
 
 func mapEventMedia(raw json.RawMessage, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (json.RawMessage, error) {
-	for _, path := range []string{"input_evidence.message.parts", "message.parts", "tool.result.content", "journal.tool_execution.result.content"} {
+	for _, path := range []string{"input_evidence.message.parts", "message.parts", "tool.result.content"} {
 		var err error
 		raw, err = mapRawMedia(raw, path, kind, visit)
 		if err != nil {

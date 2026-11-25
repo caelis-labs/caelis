@@ -2090,6 +2090,39 @@ func TestMessagesFromContextDropsIncompleteToolCallRun(t *testing.T) {
 	}
 }
 
+func TestHistoryRequiresMatchingOutcomesForWholeBatch(t *testing.T) {
+	before := model.NewTextMessage(model.RoleUser, "old question")
+	after := model.NewTextMessage(model.RoleUser, "continue")
+	call := model.ToolCall{ID: "a", Name: "Read", Args: "{}"}
+	route := model.ToolCall{ID: "b", Name: "mcp_call", Args: "{}"}
+	result := model.NewToolResultJSONPart("a", "Read", nil, false)
+	for _, tc := range []struct {
+		name   string
+		second model.ToolCall
+		reply  model.Part
+		keep   bool
+	}{
+		{"retired route", route, model.NewToolResultJSONPart("b", "docs__read", nil, false), false},
+		{"unknown result ID", route, model.NewToolResultJSONPart("other", route.Name, nil, false), false},
+		{"duplicate result ID", route, result, false},
+		{"duplicate call ID", call, result, false},
+		{"result identified by ID alone", route, model.NewToolResultJSONPart("b", "", nil, false), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call, tc.second}, "")
+			replies := model.NewMessage(model.RoleTool, tc.reply, result)
+			history := []model.Message{before, group, replies, after}
+			want := []model.Message{before, after}
+			if tc.keep {
+				want = history
+			}
+			if got := normalizeToolCallHistory(history); !reflect.DeepEqual(got, want) {
+				t.Fatalf("replayed messages = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestMessagesFromContextDropsInvalidToolCallRun(t *testing.T) {
 	t.Parallel()
 

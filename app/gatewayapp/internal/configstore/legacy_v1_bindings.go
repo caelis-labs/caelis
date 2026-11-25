@@ -22,6 +22,8 @@ type legacyAppConfig struct {
 	Runtime            RuntimeConfig                 `json:"runtime,omitempty"`
 	Plugins            []PluginConfig                `json:"plugins,omitempty"`
 	PluginMarketplaces []MarketplaceConfig           `json:"plugin_marketplaces,omitempty"`
+	malformedSandbox   bool
+	malformedRuntime   bool
 }
 
 func (c *legacyAppConfig) UnmarshalJSON(data []byte) error {
@@ -180,8 +182,8 @@ func decodeLegacyWireAppConfigWithReport(data []byte) (legacyAppConfig, Migratio
 	if system, ok := decodeLegacyNestedObject(root["system_agents"], "system_agents", &report); ok {
 		decoded.SystemAgents.Bindings = decodeLegacyRecords[legacySystemBinding](system["bindings"], "system_agents.bindings", &report)
 	}
-	decodeLegacyValue(root["sandbox"], &decoded.Sandbox, "sandbox", &report)
-	decodeLegacyValue(root["runtime"], &decoded.Runtime, "runtime", &report)
+	decoded.Sandbox, decoded.malformedSandbox = decodeLegacySandbox(root["sandbox"], &report)
+	decoded.Runtime, decoded.malformedRuntime = decodeLegacyRuntime(root["runtime"], &report)
 	decoded.Plugins = decodeLegacyRecords[PluginConfig](root["plugins"], "plugins", &report)
 	decoded.PluginMarketplaces = decodeLegacyRecords[MarketplaceConfig](root["plugin_marketplaces"], "plugin_marketplaces", &report)
 	return decoded, report, nil
@@ -207,13 +209,73 @@ func decodeLegacyNestedObject(data json.RawMessage, category string, report *Mig
 	return object, true
 }
 
+// Decode legacy policy fields independently so a malformed sibling cannot hide
+// a valid restriction. Migration applies conservative defaults when decoding
+// is incomplete.
+func decodeLegacySandbox(data json.RawMessage, report *MigrationReport) (SandboxConfig, bool) {
+	if len(data) == 0 {
+		return SandboxConfig{}, false
+	}
+	var fields struct {
+		RequestedType    json.RawMessage `json:"requested_type"`
+		HelperPath       json.RawMessage `json:"helper_path"`
+		WritableRoots    json.RawMessage `json:"writable_roots"`
+		ReadOnlySubpaths json.RawMessage `json:"read_only_subpaths"`
+		NetworkEnabled   json.RawMessage `json:"network_enabled"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		report.addDrop("sandbox", "sandbox", "malformed_object")
+		return SandboxConfig{}, true
+	}
+	before := len(report.Dropped)
+	cfg := SandboxConfig{
+		RequestedType:    decodeLegacyValue[string](fields.RequestedType, "sandbox.requested_type", report),
+		HelperPath:       decodeLegacyValue[string](fields.HelperPath, "sandbox.helper_path", report),
+		WritableRoots:    decodeLegacyValue[[]string](fields.WritableRoots, "sandbox.writable_roots", report),
+		ReadOnlySubpaths: decodeLegacyRecords[string](fields.ReadOnlySubpaths, "sandbox.read_only_subpaths", report),
+		NetworkEnabled:   decodeLegacyValue[*bool](fields.NetworkEnabled, "sandbox.network_enabled", report),
+	}
+	if len(report.Dropped) != before {
+		// Retain independently decoded restrictions and discard optional grants.
+		restricted := SandboxConfig{ReadOnlySubpaths: cfg.ReadOnlySubpaths}
+		if cfg.NetworkEnabled != nil && !*cfg.NetworkEnabled {
+			restricted.NetworkEnabled = cfg.NetworkEnabled
+		}
+		return restricted, true
+	}
+	return cfg, false
+}
+
+func decodeLegacyRuntime(data json.RawMessage, report *MigrationReport) (RuntimeConfig, bool) {
+	if len(data) == 0 {
+		return RuntimeConfig{}, false
+	}
+	var fields struct {
+		ApprovalMode  json.RawMessage `json:"approval_mode"`
+		PolicyProfile json.RawMessage `json:"policy_profile"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		report.addDrop("runtime", "runtime", "malformed_object")
+		return RuntimeConfig{}, true
+	}
+	before := len(report.Dropped)
+	cfg := RuntimeConfig{
+		ApprovalMode:  decodeLegacyValue[string](fields.ApprovalMode, "runtime.approval_mode", report),
+		PolicyProfile: decodeLegacyValue[string](fields.PolicyProfile, "runtime.policy_profile", report),
+	}
+	if _, known := normalizeApprovalMode(cfg.ApprovalMode); !known {
+		report.addDrop("runtime.approval_mode", "runtime.approval_mode", "unsupported_value")
+	}
+	return cfg, len(report.Dropped) != before
+}
+
 func decodeLegacyModels(object map[string]json.RawMessage, report *MigrationReport) legacyPersistedModelConfig {
-	var decoded legacyPersistedModelConfig
-	decodeLegacyValue(object["default_alias"], &decoded.DefaultAlias, "models.default_alias", report)
-	decodeLegacyValue(object["default_model_id"], &decoded.DefaultID, "models.default_model_id", report)
-	decoded.Profiles = decodeLegacyRecords[legacyProviderEndpoint](object["profiles"], "models.profiles", report)
-	decoded.Configs = decodeLegacyRecords[legacyModelConfig](object["configs"], "models.configs", report)
-	return decoded
+	return legacyPersistedModelConfig{
+		DefaultAlias: decodeLegacyValue[string](object["default_alias"], "models.default_alias", report),
+		DefaultID:    decodeLegacyValue[string](object["default_model_id"], "models.default_model_id", report),
+		Profiles:     decodeLegacyRecords[legacyProviderEndpoint](object["profiles"], "models.profiles", report),
+		Configs:      decodeLegacyRecords[legacyModelConfig](object["configs"], "models.configs", report),
+	}
 }
 
 func decodeLegacyAgentRoster(object map[string]json.RawMessage, report *MigrationReport) legacyAgentConfiguration {
@@ -245,11 +307,14 @@ func decodeLegacyRecords[T any](data json.RawMessage, category string, report *M
 	return decoded
 }
 
-func decodeLegacyValue(data json.RawMessage, out any, category string, report *MigrationReport) {
-	if len(data) == 0 {
-		return
+func decodeLegacyValue[T any](data json.RawMessage, category string, report *MigrationReport) T {
+	var value T
+	if len(data) != 0 {
+		if err := json.Unmarshal(data, &value); err != nil {
+			report.addDrop(category, category, "malformed_value")
+			var zero T
+			return zero
+		}
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		report.addDrop(category, category, "malformed_value")
-	}
+	return value
 }

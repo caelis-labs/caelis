@@ -161,7 +161,7 @@ func runGuardianE2EScenario(t *testing.T, modelAlias string, scenario guardianE2
 	scenario.setup(t, repo)
 	storeDir := isolatedGuardianE2EStore(t)
 
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "guardian-live-e2e",
 		StoreDir:     storeDir,

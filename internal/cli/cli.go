@@ -63,6 +63,7 @@ type productClientOpener func(context.Context, gatewayapp.Config, productClientO
 type builtInChildControlBinder func(*gatewayapp.Stack, string, string)
 
 var (
+	newLocalStack                                     = gatewayapp.NewLocalStack
 	runSandboxSetupCommand  sandboxCommandFunc        = runSandboxSetupFromConfig
 	runSandboxFixCommand    sandboxCommandFunc        = runSandboxFixFromConfig
 	runSandboxResetCommand  sandboxCommandFunc        = runSandboxResetFromConfig
@@ -520,7 +521,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	defer func() { _ = ownership.Close() }()
 	cfg.HostOwnership = ownership
 	cfg.SessionScopedMCP = true
-	stack, err := gatewayapp.NewLocalStack(cfg)
+	stack, err := newLocalStack(cfg)
 	if err != nil {
 		return sandboxStartupEscapeError(err)
 	}

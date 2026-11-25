@@ -40,7 +40,6 @@ const (
 	BackendHost     Backend = "host"
 	BackendSeatbelt Backend = "seatbelt"
 	BackendBwrap    Backend = "bwrap"
-	BackendLandlock Backend = "landlock"
 	BackendWindows  Backend = "windows"
 	// BackendWindowsElevated is a legacy alias normalized to BackendWindows.
 	BackendWindowsElevated Backend = "windows-elevated"
@@ -62,8 +61,6 @@ func CanonicalBackend(backend Backend) Backend {
 		return BackendSeatbelt
 	case "bwrap":
 		return BackendBwrap
-	case "landlock":
-		return BackendLandlock
 	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
 		return BackendWindows
 	case "custom":
@@ -198,7 +195,7 @@ type Config struct {
 	RequestedBackend    Backend   `json:"requested_backend,omitempty"`
 	BackendCandidates   []Backend `json:"backend_candidates,omitempty"`
 	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
-	// HelperPath selects a trusted self-exec binary for Landlock and Seatbelt.
+	// HelperPath selects a trusted self-exec binary for Seatbelt.
 	// Seatbelt requires its process entry to dispatch seatbelt.MaybeRunInternalHelper;
 	// the helper executable must be inside an explicit ResourceLimits.ReadPaths.
 	HelperPath string `json:"helper_path,omitempty"`

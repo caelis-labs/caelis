@@ -36,7 +36,7 @@ func BenchmarkNewLocalStackFirstFrameBoundary(b *testing.B) {
 			var maximum time.Duration
 			for i := 0; i < b.N; i++ {
 				started := time.Now()
-				stack, err := NewLocalStack(cfg)
+				stack, err := newTestLocalStack(cfg)
 				elapsed := time.Since(started)
 				b.StopTimer()
 				if err != nil {
@@ -61,7 +61,7 @@ func BenchmarkNewLocalStackFirstFrameBoundary(b *testing.B) {
 
 func BenchmarkNewSessionControlPath(b *testing.B) {
 	workspaceDir := b.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		AppName: "caelis", UserID: "performance-user", StoreDir: b.TempDir(),
 		WorkspaceKey: "performance-workspace", WorkspaceCWD: workspaceDir,
 	})

@@ -59,7 +59,7 @@ func TestControlHostRealMimoMultiWorkspaceParallel(t *testing.T) {
 		"When the user includes CAELIS_REAL_APP_SERVER_E2E, reply with exactly E2E_WORKSPACE_BETA and no other text. Do not call tools.",
 	)
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:           e2eStore,
 		WorkspaceKey:       "real-mimo-workspace-a",
 		WorkspaceCWD:       workspaceA,

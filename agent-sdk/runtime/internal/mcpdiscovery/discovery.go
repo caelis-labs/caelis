@@ -8,49 +8,28 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
-const MetadataKey = "caelis.mcp.discovery.v1"
-
-// Apply accepts successful canonical discovery receipts with a trusted marker.
-// Old name-only results and Exposure Active/Pending never grant call eligibility.
+// Apply restores bindings from a successful, Runtime-observed exact search.
 func Apply(out map[string]tool.Binding, event *session.Event) {
-	if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == mcp.SearchToolName && event.Tool.Result != nil && event.Tool.Outcome == session.ToolOutcomeSucceeded && (session.IsMainInvocationVisibleEvent(event) || event.Tool.Parent != nil && event.Tool.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool") {
-		if !event.Tool.Discovery {
-			return
-		}
-		result := event.Tool.Result
-		if value, ok := result.Structured(); ok {
-			applyJSON(out, value)
-			return
-		}
-		// v0.83.1 emitted ordinary JSON parts. The Session decoder lifts the old
-		// receipt marker into Discovery. Keep this until those Stores age out.
-		for _, part := range tool.ModelParts(result.Content) {
-			if part.JSON != nil {
-				applyJSON(out, part.JSON.Value)
-			}
-		}
+	if event == nil || event.Type != session.EventTypeToolResult || event.Tool == nil {
 		return
 	}
-	if event == nil || !session.IsCanonicalHistoryEvent(event) || event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != mcp.SearchToolName || event.Tool.Status != "completed" {
+	fact := event.Tool
+	if fact.Name != mcp.SearchToolName || !fact.Discovery || fact.Outcome != session.ToolOutcomeSucceeded || fact.Result == nil {
 		return
 	}
-	admitted, ok := event.Meta[MetadataKey].(bool)
-	if !ok || !admitted {
+	nested := fact.Parent != nil && fact.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool"
+	if !session.IsMainInvocationVisibleEvent(event) && !nested {
 		return
 	}
-	// The receipt's canonical output owns the binding. The metadata marker
-	// distinguishes this admitted format without storing another binding list.
-	applyEntries(out, mcp.ParseToolSearchOutput(event.Tool.Output))
-}
-
-func applyJSON(out map[string]tool.Binding, value json.RawMessage) {
+	value, ok := fact.Result.Structured()
+	if !ok {
+		return
+	}
 	var raw map[string]any
-	if json.Unmarshal(value, &raw) == nil {
-		applyEntries(out, mcp.ParseToolSearchOutput(raw))
+	if json.Unmarshal(value, &raw) != nil {
+		return
 	}
-}
-
-func applyEntries(out map[string]tool.Binding, selected mcp.ToolSearchResult) {
+	selected := mcp.ParseToolSearchOutput(raw)
 	for _, entry := range selected.Tools {
 		b := entry.Binding
 		if b != nil && entry.Name == b.Name && entry.InputSchema != nil && b.Name != "" && b.Identity != "" && b.Version != "" {

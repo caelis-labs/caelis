@@ -10,7 +10,7 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
-func TestRuntimeRecoveryConvergesLegacyContinuePhasesWithoutRemoteEffect(t *testing.T) {
+func TestRuntimeRecoveryRetiresContinueWithoutReplayingInput(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -21,11 +21,11 @@ func TestRuntimeRecoveryConvergesLegacyContinuePhasesWithoutRemoteEffect(t *test
 		wantState   taskapi.State
 		wantMessage string
 	}{
-		{name: "prepared", phase: legacyContinuePrepared, state: taskapi.StateCompleted, wantState: taskapi.StateInterrupted, wantMessage: legacyContinueInterruptedDiagnostic},
-		{name: "pending terminal-shaped", phase: legacyContinuePending, state: taskapi.StateCompleted, wantState: taskapi.StateUnknownOutcome, wantMessage: legacyContinueUnknownDiagnostic},
-		{name: "unknown", phase: legacyContinueUnknownOutcome, state: taskapi.StateUnknownOutcome, wantState: taskapi.StateUnknownOutcome, wantMessage: legacyContinueUnknownDiagnostic},
-		{name: "post effect terminal", phase: legacyContinuePostEffect, state: taskapi.StateCompleted, wantState: taskapi.StateCompleted},
-		{name: "post effect running", phase: legacyContinuePostEffect, state: taskapi.StateRunning, running: true, wantState: taskapi.StateUnknownOutcome, wantMessage: legacyContinueUnknownDiagnostic},
+		{name: "prepared", phase: "continue_prepared", state: taskapi.StateCompleted, wantState: taskapi.StateUnknownOutcome, wantMessage: "participant outcome could not be confirmed"},
+		{name: "pending terminal-shaped", phase: "continue_pending", state: taskapi.StateCompleted, wantState: taskapi.StateUnknownOutcome, wantMessage: "participant outcome could not be confirmed"},
+		{name: "unknown", phase: "continue_unknown_outcome", state: taskapi.StateUnknownOutcome, wantState: taskapi.StateUnknownOutcome, wantMessage: "participant outcome could not be confirmed"},
+		{name: "post effect terminal", phase: "continue_post_effect", state: taskapi.StateCompleted, wantState: taskapi.StateCompleted},
+		{name: "post effect running", phase: "continue_post_effect", state: taskapi.StateRunning, running: true, wantState: taskapi.StateUnknownOutcome, wantMessage: "participant outcome could not be confirmed"},
 	}
 
 	for _, tt := range tests {
@@ -71,26 +71,18 @@ func TestRuntimeRecoveryConvergesLegacyContinuePhasesWithoutRemoteEffect(t *test
 			if got.State != tt.wantState || got.Running || got.SupportsInput {
 				t.Fatalf("recovered entry = %#v, want terminal %q without Task input", got, tt.wantState)
 			}
-			if legacyContinuePhaseOfEntry(got) != "" {
+			if got.Metadata["continue_phase"] != nil || got.Spec["continue_phase"] != nil {
 				t.Fatalf("legacy markers survived recovery: %#v / %#v", got.Metadata, got.Spec)
 			}
 			if gotMessage := taskStringValue(got.Result["error"]); gotMessage != tt.wantMessage {
 				t.Fatalf("error = %q, want %q", gotMessage, tt.wantMessage)
 			}
-			if tt.wantState == taskapi.StateCompleted {
-				events, eventErr := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
-				if eventErr != nil {
-					t.Fatal(eventErr)
-				}
-				foundFinal := false
-				for _, event := range events {
-					if event != nil && session.EventTypeOf(event) == session.EventTypeAssistant && event.Text == "durable remote result" {
-						foundFinal = true
-					}
-				}
-				if !foundFinal {
-					t.Fatalf("legacy post-effect events = %#v, want canonical sidecar final", events)
-				}
+			if tt.wantState == taskapi.StateCompleted && got.Result["final_message"] != "durable remote result" {
+				t.Fatalf("lost confirmed result: %#v", got.Result)
+			}
+			events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
+			if err != nil || len(events) != 0 {
+				t.Fatalf("retired input produced events = %#v, %v", events, err)
 			}
 			beforeRevision := got.Revision
 			if err := runtime.recoverRuntimeState(ctx, active.SessionRef); err != nil {

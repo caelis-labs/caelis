@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sandboxport "github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
@@ -211,7 +210,6 @@ func (s *runtimeComposition) doctorForWorkspace(ctx context.Context, workspace s
 		report.Warnings = append(report.Warnings, "config file permissions are not secure")
 	}
 	report.Warnings = append(report.Warnings, s.configMigrationWarnings()...)
-	report.Warnings = append(report.Warnings, s.sessionMigrationWarnings()...)
 	report.Warnings = append(report.Warnings, s.legacyPluginSkillCopyWarnings(workspace.CWD)...)
 
 	if gw := s.KernelTurnState(); gw != nil {
@@ -229,37 +227,6 @@ func (s *runtimeComposition) doctorForWorkspace(ctx context.Context, workspace s
 	}
 
 	return report, nil
-}
-
-func (s *runtimeComposition) sessionMigrationWarnings() []string {
-	if s == nil || s.sessions == nil {
-		return nil
-	}
-	reporter, ok := s.sessions.(interface {
-		MigrationReport() sessionfile.MigrationReport
-	})
-	if !ok {
-		return nil
-	}
-	report := reporter.MigrationReport()
-	if len(report.Dropped) == 0 {
-		return nil
-	}
-	warnings := []string{fmt.Sprintf(
-		"legacy Session document version %d skipped %d unsafe participant binding(s)",
-		report.FromVersion,
-		len(report.Dropped),
-	)}
-	for _, dropped := range report.Dropped {
-		warnings = append(warnings, fmt.Sprintf(
-			"legacy Session %s skipped %s: category=%s reason=%s",
-			firstNonEmpty(strings.TrimSpace(dropped.SessionRef.SessionID), "unknown"),
-			firstNonEmpty(strings.TrimSpace(dropped.Identity), "participant"),
-			firstNonEmpty(strings.TrimSpace(dropped.Category), "unknown"),
-			firstNonEmpty(strings.TrimSpace(dropped.Reason), "unknown"),
-		))
-	}
-	return warnings
 }
 
 func (s *runtimeComposition) configMigrationWarnings() []string {

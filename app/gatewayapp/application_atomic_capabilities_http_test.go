@@ -433,7 +433,6 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	}
 	defer feed.Subscription.Close()
 	before, err := client.SessionMCPStatus(ctx, created.SessionID)
-	before = optionalCapabilityStatus(before)
 	if err != nil || len(before.Skills) != 3 || before.Skills[0].Status != "inactive" || before.Skills[1].Status != "inactive" || before.Skills[2].Status != "inactive" {
 		t.Fatalf("status read activated Skills: %+v, %v", before, err)
 	}
@@ -453,7 +452,6 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatalf("model-facing Skill catalog was incomplete or included failed/body content: %s", first)
 	}
 	status, err := client.SessionMCPStatus(ctx, created.SessionID)
-	status = optionalCapabilityStatus(status)
 	if err != nil || status.ConfigurationRevision != "1" {
 		t.Fatalf("skill status = %+v, %v", status, err)
 	}
@@ -476,7 +474,6 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	defer deadline.Stop()
 	for {
 		status, err = client.SessionMCPStatus(ctx, created.SessionID)
-		status = optionalCapabilityStatus(status)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -535,13 +532,11 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatalf("explicit recovery revision = %+v, %v", updated, err)
 	}
 	pending, err := client.SessionMCPStatus(ctx, created.SessionID)
-	pending = optionalCapabilityStatus(pending)
 	if err != nil || pending.ConfigurationRevision != "2" || len(pending.Skills) != 3 || pending.Skills[0].Status != "inactive" {
 		t.Fatalf("new revision status reused old catalog: %+v, %v", pending, err)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-refreshed", "BASIC")
 	recovered, err := client.SessionMCPStatus(ctx, created.SessionID)
-	recovered = optionalCapabilityStatus(recovered)
 	if err != nil || recovered.ConfigurationRevision != "2" {
 		t.Fatalf("recovered status = %+v, %v", recovered, err)
 	}
@@ -571,7 +566,6 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	}
 	promptAtomicCapabilityClient(t, ctx, client, onlySession.SessionID, "skill-isolation-only-basic", "BASIC")
 	onlyStatus, err := client.SessionMCPStatus(ctx, onlySession.SessionID)
-	onlyStatus = optionalCapabilityStatus(onlyStatus)
 	if err != nil || atomicSkillStatusesByPath(onlyStatus)[only].Status != "failed" {
 		t.Fatalf("Skills-only failure blocked dialogue or was hidden: %+v, %v", onlyStatus, err)
 	}
@@ -691,7 +685,6 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		status, err := client.SessionMCPStatus(ctx, session)
-		status = optionalCapabilityStatus(status)
 		if err != nil || len(status.Servers) != 1 || status.Servers[0].Status != "running" {
 			t.Fatalf("same MCP selection lost resident health after unrelated revision: %+v, %v", status, err)
 		}
@@ -712,7 +705,6 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		disabledStatus, err := client.SessionMCPStatus(ctx, session)
-		disabledStatus = optionalCapabilityStatus(disabledStatus)
 		if err != nil || disabledStatus.ConfigurationRevision != fmt.Sprint(configuration.Revision) || len(disabledStatus.Servers) != 0 {
 			t.Fatalf("disabled revision retained public MCP tools: %+v, %v", disabledStatus, err)
 		}
@@ -731,7 +723,6 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		pending, err := client.SessionMCPStatus(ctx, session)
-		pending = optionalCapabilityStatus(pending)
 		if err != nil || pending.ConfigurationRevision != fmt.Sprint(configuration.Revision) || len(pending.Servers) != 1 {
 			t.Fatalf("reloaded generation reused stale descriptions: %+v, %v", pending, err)
 		}
@@ -744,7 +735,6 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-reenabled-warm-%d", i), "BASIC")
 		waitAtomicApplicationMCPRunning(t, ctx, client, session, "documents")
 		reloaded, err := client.SessionMCPStatus(ctx, session)
-		reloaded = optionalCapabilityStatus(reloaded)
 		if err != nil || len(reloaded.Servers) != 1 || len(reloaded.Servers[0].ToolDetails) != 1 || reloaded.Servers[0].ToolDetails[0].Name != "lookup" {
 			t.Fatalf("reloaded ready generation lost tool details: %+v, %v", reloaded, err)
 		}
@@ -990,7 +980,6 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatalf("configuration = %+v, %v", configuration, err)
 	}
 	inactive, err := client.SessionMCPStatus(ctx, created.SessionID)
-	inactive = optionalCapabilityStatus(inactive)
 	if err != nil || inactive.ConfigurationRevision != "1" || len(inactive.Servers) != 2 || inactive.Servers[0].Status != "inactive" || inactive.Servers[1].Status != "inactive" {
 		t.Fatalf("status read activated a service or lost a domain: %+v, %v", inactive, err)
 	}
@@ -1036,7 +1025,6 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatalf("disable = %+v, %v", disabled, err)
 	}
 	disabledStatus, err := client.SessionMCPStatus(ctx, created.SessionID)
-	disabledStatus = optionalCapabilityStatus(disabledStatus)
 	if err != nil || len(disabledStatus.Servers) != 0 || disabledStatus.ConfigurationRevision != "2" {
 		t.Fatalf("disabled desired service status = %+v, %v", disabledStatus, err)
 	}
@@ -1177,7 +1165,6 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 	defer deadline.Stop()
 	for {
 		health, err := client.SessionMCPStatus(ctx, created.SessionID)
-		health = optionalCapabilityStatus(health)
 		if err != nil {
 			t.Fatal(err)
 		}

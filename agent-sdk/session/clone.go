@@ -61,7 +61,6 @@ func CloneEvent(in *Event) *Event {
 		p := *in.ContextEdit
 		out.ContextEdit = &p
 	}
-	out.legacyJournal = append(json.RawMessage(nil), in.legacyJournal...)
 	if in.Approval != nil {
 		a := CloneApprovalRecord(*in.Approval)
 		out.Approval = &a
@@ -292,10 +291,6 @@ func CloneEventTool(in EventTool) EventTool {
 	if in.ProposedCall != nil {
 		value := *in.ProposedCall
 		out.ProposedCall = &value
-	}
-	if in.LegacyModelCall != nil {
-		value := *in.LegacyModelCall
-		out.LegacyModelCall = &value
 	}
 	if len(in.Content) > 0 {
 		out.Content = make([]EventToolContent, 0, len(in.Content))
