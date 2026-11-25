@@ -70,16 +70,16 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	if err != nil {
 		return tool.Result{}, err
 	}
-	diffStats := CountLineDiff(plan.before, plan.after)
+	change := plan.describeChange()
 	payload := map[string]any{
 		"path":         plan.path,
 		"replacements": plan.replaced,
 		"edit_count":   plan.editCount,
 		"changed":      plan.before != plan.after || plan.created,
-		"summary":      mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
-		"revision":     textRevision(plan.after),
+		"summary":      mutationSummary(plan.created, change.AddedLines, change.RemovedLines),
+		"revision":     change.Revision,
 	}
-	toolpresentation.Patch(ctx, mutationDisplay(plan, diffStats))
+	toolpresentation.Patch(ctx, change)
 	return toolutil.JSONResult(payload)
 }
 
