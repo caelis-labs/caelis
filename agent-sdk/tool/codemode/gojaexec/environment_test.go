@@ -38,11 +38,6 @@ func TestContinuousEnvironmentBindingsAndBody(t *testing.T) {
 			t.Fatalf("lost complete Body: %+v", out)
 		}
 	}
-	for _, code := range []string{`let response=1;return response;`, `const file=1;return file;`, `file={};return file;`} {
-		if _, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, h); err == nil {
-			t.Fatalf("accepted redeclaration/constant assignment: %s", code)
-		}
-	}
 	out, err := e.Execute(t.Context(), fixed(`return count;`), codemode.Limits{}, h)
 	if err != nil || string(out.Value) != "3" {
 		t.Fatalf("ordinary JS error lost environment: %+v %v", out, err)
@@ -137,15 +132,11 @@ func TestContinuousEnvironmentIntrinsicBindingsAndFunctionAssignments(t *testing
 
 func TestContinuousEnvironmentDoWhileDeclarations(t *testing.T) {
 	code := `const seen=new Set();let after;let pages=0;do{const s={next:pages<2?"more":null};after=s.next;if(++pages>37)throw Error("loop");}while(after);return pages;`
-	script, err := prepareSource("inline.js", code)
-	if err != nil {
-		t.Fatal(err)
-	}
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()
 	out, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, testHost{})
 	if err != nil {
-		t.Fatalf("%v\n%s", err, script.code)
+		t.Fatal(err)
 	}
 	if string(out.Value) != "3" {
 		t.Fatal(string(out.Value))

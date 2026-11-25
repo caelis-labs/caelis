@@ -90,14 +90,18 @@ attachment, return the original reference from `error.result.media`.
 ## Continuous environment
 
 An active host Session has one disposable JavaScript environment. Execute scripts
-in sequence. Top-level `let`, `const`, `var`, function and class declarations stay
-available to later scripts. Use block-local `let` or `const` for temporary
-values and assignment to update an existing `let`. A top-level name can be
-redeclared only if both declarations are `var` or function declarations.
-Block and function locals retain their JavaScript scope. Top-level `await` waits for tools and
-`return` selects this script's output without clearing its bindings. Bindings are
-reserved before execution; failed or unreached lexical initialization stays
-uninitialized until the environment is reset.
+in sequence. Later scripts can read, assign or redeclare top-level names,
+regardless of their original declaration kind. Within one script, normal
+JavaScript rules still apply: a local `const` cannot be assigned, duplicate
+lexical names are errors, and block and function locals keep their scope.
+
+A successful redeclaration publishes a new binding without changing the
+one captured by an older closure. Assigning to an earlier mutable name
+updates that binding; assigning to an earlier `const` replaces only the
+Session-visible value. If a redeclaration's initializer fails, the previous
+binding stays available. This does not roll back other successful bindings or
+side effects. Top-level `await` waits for tools, and `return` selects this
+script's output without clearing published names.
 
 ```javascript
 // First js_exec

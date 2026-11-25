@@ -45,8 +45,8 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 	}
 	for _, contract := range []string{
 		"Top-level await", "Use return to select output (omitted: null)",
-		"Use block-local let/const", "Top-level bindings usually persist but may clear",
-		"Use let for reassignment", "Redeclare only var/functions",
+		"Top-level names persist in the active environment", "Later scripts can read, assign or redeclare them",
+		"JavaScript scope and const rules still apply",
 		"Reuse declared tool schemas", "(await Read(args)).data.content", "tools.call(name,args)",
 		"await tools.search({query?,after?}) returns a plain page", "next:string|null", "Pass next as after",
 		"await tools.search({name}) returns the exact entry and binds it", "input_schema", `output_format:"body"`, "output_schema describes .data", "call_path",

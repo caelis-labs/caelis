@@ -175,29 +175,29 @@ func WorkerMain() int {
 		}
 		script, runErr := prepareSource(sourceName, string(f.data))
 		if runErr == nil {
-			declarations, e := plain(script.declarations)
+			names, e := plain(script.names)
 			if e != nil {
 				return 2
 			}
 			var publish goja.Value
-			publish, runErr = prepare(goja.Undefined(), declarations)
-			if runErr == nil {
-				for _, code := range script.hoists {
-					if _, runErr = vm.RunScript(sourceName, code); runErr != nil {
-						break
-					}
-				}
-			}
+			publish, runErr = prepare(goja.Undefined(), names)
 			var value goja.Value
 			if runErr == nil {
-				value, runErr = vm.RunScript(sourceName, script.code)
+				value, runErr = vm.RunProgram(script.program)
+			}
+			if runErr == nil {
+				factory, ok := goja.AssertFunction(value)
+				if !ok {
+					return 2
+				}
+				value, runErr = factory(goja.Undefined(), publish)
 			}
 			if runErr == nil {
 				run, ok := goja.AssertFunction(value)
 				if !ok {
 					return 2
 				}
-				value, runErr = run(goja.Undefined(), publish)
+				value, runErr = run(goja.Undefined())
 			}
 			if runErr == nil {
 				promise, ok := value.Export().(*goja.Promise)

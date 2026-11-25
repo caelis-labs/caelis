@@ -1,7 +1,7 @@
 // Trusted glue retains pristine intrinsics and private identities across scripts.
 (function(rpc) {
   "use strict";
-  const globals=globalThis, SyntaxErrorType=SyntaxError,ReferenceErrorType=ReferenceError,TypeErrorType=TypeError;
+  const globals=globalThis, SyntaxErrorType=SyntaxError;
   const parse=JSON.parse, stringify=JSON.stringify, keys=Object.keys, isArray=Array.isArray;
   const finite=Number.isFinite, integer=Number.isInteger, freeze=Object.freeze, define=Object.defineProperty;
   const descriptor=Object.getOwnPropertyDescriptor, assign=Object.assign;
@@ -284,25 +284,39 @@
   return tools;
   }
   const bindings=create(null);
-  function prepare(declarations) {
-    for(let i=0;i<declarations.length;i++) {
-      const d=declarations[i];
-      if(own(bindings,d.name)?bindings[d.name].kind!=="var"||d.kind!=="var":d.name==="tools"||d.name==="runtime"||(own(globals,d.name)&&!descriptor(globals,d.name).configurable))
-        throw new SyntaxErrorType("Identifier '"+d.name+"' has already been declared");
-    }
-    for(let i=0;i<declarations.length;i++) {
-      const d=declarations[i];if(own(bindings,d.name))continue;
-      const cell={kind:d.kind,ready:d.kind==="var",value:d.kind==="var"&&own(globals,d.name)?globals[d.name]:undefined,read:null,write:null};bindings[d.name]=cell;del(toolGlobals,d.name);
-      define(globals,d.name,{enumerable:true,get(){
-        if(!cell.ready)throw new ReferenceErrorType("Cannot access '"+d.name+"' before initialization");
-        return cell.read?cell.read():cell.value;
+  function publish(name,cell) {
+    if(!own(bindings,name)) {
+      del(toolGlobals,name);
+      define(globals,name,{enumerable:true,get(){
+        return bindings[name].read();
       },set(value){
-        if(!cell.ready)throw new ReferenceErrorType("Cannot access '"+d.name+"' before initialization");
-        if(cell.kind==="const")throw new TypeErrorType("Assignment to constant variable");
-        if(cell.write)cell.write(value);else cell.value=value;
+        const cell=bindings[name];
+        if(cell.write) cell.write(value);
+        // Assigning to a published const in a later script replaces only the
+        // Session value, not the original lexical binding or its closures.
+        else bindings[name]={read:()=>value,write:null};
       }});
     }
-    return (name,read,write)=>{const cell=bindings[name];if(!cell||cell.ready)throw new ErrorType("invalid declaration initialization");cell.read=read;cell.write=write;cell.ready=true;};
+    bindings[name]=cell;
+  }
+  function prepare(names) {
+    for(let i=0;i<names.length;i++) {
+      const name=names[i];
+      if(name==="tools"||name==="runtime"||(!own(bindings,name)&&own(globals,name)&&!descriptor(globals,name).configurable))
+        throw new SyntaxErrorType("Identifier '"+name+"' has already been declared");
+    }
+    const slots=create(null);
+    return (name,read,write,onlyIfMissing)=>{
+      // Var markers can be inside a block or catch scope. Always publish
+      // the function-scoped slot registered before the script body runs.
+      if(!read) {
+        publish(name,slots[name]);
+        return;
+      }
+      const cell={read,write};
+      slots[name]=cell;
+      if(!onlyIfMissing||!own(bindings,name)) publish(name,cell);
+    };
   }
   define(globals,"runtime",{value:freeze({state:()=>({generation:state.generation,execution:state.execution})})});
   const noop=()=>{};
