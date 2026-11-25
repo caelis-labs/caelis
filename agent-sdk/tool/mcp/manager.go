@@ -238,9 +238,9 @@ func (mgr *Manager) rebuildToolsLocked() {
 				def.Metadata[MetadataModelFunction] = true
 			}
 			if info.OutputSchema != nil {
-				def.OutputSchema, err = normalizeMCPInputSchema(info.OutputSchema)
+				def.OutputSchema, err = normalizeMCPSchema(info.OutputSchema, "output schema", protocolVersion < mcpProtocolVersion20260728)
 				if err != nil {
-					mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: output schema: %v", toolLabel, err))
+					mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: %v", toolLabel, err))
 					continue
 				}
 			}

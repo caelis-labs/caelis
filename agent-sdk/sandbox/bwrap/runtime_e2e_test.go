@@ -30,13 +30,14 @@ func TestExplicitReadCeilingNative(t *testing.T) {
 		}
 	}
 	roots := []string{work}
-	for _, path := range []string{"/usr", "/bin", "/lib", "/lib64"} {
+	for _, path := range []string{"/usr/bin", "/lib", "/lib64"} {
 		if _, err := os.Stat(path); err == nil {
 			roots = append(roots, path)
 		}
 	}
 	cfg := sandbox.Config{
 		CWD: work, RequestedBackend: sandbox.BackendBwrap,
+		Execution:      &sandbox.ExecutionConfig{Shell: sandbox.ShellConfig{Path: "/usr/bin/bash"}},
 		ResourceLimits: &sandbox.ResourceLimits{ReadPaths: roots, WritePaths: []string{work}, Network: sandbox.NetworkDisabled},
 	}
 	rt, err := sandbox.New(cfg)
@@ -58,7 +59,7 @@ func TestExplicitReadCeilingNative(t *testing.T) {
 			defer cancel()
 			req := sandbox.CommandRequest{
 				Command: `set -eu
-[ "$(/bin/cat "$ALLOWED/input.txt")" = fixture ]
+[ "$(/usr/bin/cat "$ALLOWED/input.txt")" = fixture ]
 set -- "$ALLOWED"/*
 [ "$#" -eq 1 ]
 [ "$1" = "$ALLOWED/input.txt" ]

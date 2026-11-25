@@ -181,7 +181,20 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				}
 			}
 
-			msg, _, convErr := geminiResponseToMessage(out)
+			grounding := geminiGroundingMetadata(out)
+			var textIndexes map[int]int
+			if grounding != nil {
+				acc.sources = append(acc.sources, grounding.GroundingChunks...)
+				if len(grounding.GroundingSupports) != 0 {
+					textIndexes = make(map[int]int)
+				}
+			}
+			msg, _, convErr := geminiConvertResponse(out, func(wireIndex, messageIndex int, _ string) []model.Citation {
+				if textIndexes != nil {
+					textIndexes[messageIndex] = wireIndex
+				}
+				return nil
+			})
 			if convErr != nil {
 				if errors.Is(convErr, errGeminiNoCandidates) {
 					continue
@@ -193,7 +206,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			if msg.Role != "" {
 				acc.role = msg.Role
 			}
-			for _, part := range msg.Parts {
+			for index, part := range msg.Parts {
 				if delta := geminiStreamPartDelta(part); delta != nil {
 					if !yield(&model.StreamEvent{
 						Type:      model.StreamEventPartDelta,
@@ -202,7 +215,11 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 						return
 					}
 				}
-				acc.addPart(part)
+				if wireIndex, ok := textIndexes[index]; ok {
+					acc.addGroundedText(part, wireIndex, grounding.GroundingSupports)
+				} else {
+					acc.addPart(part)
+				}
 			}
 		}
 
@@ -376,8 +393,27 @@ func (l *geminiLLM) newClient(ctx context.Context) (*genai.Client, error) {
 }
 
 type geminiAccumulator struct {
-	role  model.Role
-	parts []model.Part
+	role     model.Role
+	parts    []model.Part
+	sources  []*genai.GroundingChunk
+	grounded []geminiGroundedText
+}
+
+type geminiGroundedText struct {
+	target  *model.TextPart
+	offset  int
+	length  int
+	support *genai.GroundingSupport
+}
+
+func (a *geminiAccumulator) addGroundedText(part model.Part, wireIndex int, supports []*genai.GroundingSupport) {
+	length := len(part.Text.Text)
+	target, offset := a.addTextPart(part)
+	for _, support := range supports {
+		if support != nil && support.Segment != nil && int(support.Segment.PartIndex) == wireIndex {
+			a.grounded = append(a.grounded, geminiGroundedText{target: target, offset: offset, length: length, support: support})
+		}
+	}
 }
 
 func (a *geminiAccumulator) addPart(part model.Part) {
@@ -395,24 +431,20 @@ func (a *geminiAccumulator) addPart(part model.Part) {
 	}
 }
 
-func (a *geminiAccumulator) addTextPart(part model.Part) {
+func (a *geminiAccumulator) addTextPart(part model.Part) (*model.TextPart, int) {
 	if part.Text == nil || part.Text.Text == "" {
-		return
+		return nil, 0
 	}
 	if len(a.parts) > 0 {
 		last := &a.parts[len(a.parts)-1]
 		if last.Kind == model.PartKindText && last.Text != nil {
 			offset := len(last.Text.Text)
 			last.Text.Text += part.Text.Text
-			for _, citation := range part.Text.Citations {
-				citation.StartIndex += offset
-				citation.EndIndex += offset
-				last.Text.Citations = append(last.Text.Citations, citation)
-			}
-			return
+			return last.Text, offset
 		}
 	}
 	a.parts = append(a.parts, part)
+	return part.Text, 0
 }
 
 func (a *geminiAccumulator) addReasoningPart(part model.Part) {
@@ -451,6 +483,16 @@ func (a *geminiAccumulator) mergeToolUsePart(part model.Part) bool {
 }
 
 func (a *geminiAccumulator) message() model.Message {
+	// A support's source indices address the chunks from the entire stream.
+	for _, text := range a.grounded {
+		citation := geminiGroundingCitation(text.support, a.sources)
+		fragment := text.target.Text[text.offset : text.offset+text.length]
+		for _, valid := range model.NormalizeCitations(fragment, []model.Citation{citation}) {
+			valid.StartIndex += text.offset
+			valid.EndIndex += text.offset
+			text.target.Citations = append(text.target.Citations, valid)
+		}
+	}
 	return model.NewMessage(a.role, a.parts...)
 }
 
@@ -732,6 +774,13 @@ func mergeGeminiUsage(existing, next model.Usage) model.Usage {
 }
 
 func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message, model.Usage, error) {
+	grounding := geminiGroundingMetadata(out)
+	return geminiConvertResponse(out, func(wireIndex, _ int, text string) []model.Citation {
+		return geminiGroundingCitationsForPart(grounding, wireIndex, text)
+	})
+}
+
+func geminiConvertResponse(out *genai.GenerateContentResponse, citations func(wireIndex, messageIndex int, text string) []model.Citation) (model.Message, model.Usage, error) {
 	usage := geminiUsageFromResponse(out)
 	if out == nil || len(out.Candidates) == 0 || out.Candidates[0] == nil || out.Candidates[0].Content == nil {
 		return model.Message{}, usage, errGeminiNoCandidates
@@ -783,7 +832,7 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 				parts = append(parts, model.NewReasoningPart(part.Text, model.ReasoningVisibilityVisible))
 			}
 		} else if part.Text != "" {
-			parts = append(parts, model.NewTextPartWithCitations(part.Text, geminiGroundingCitationsForPart(out, partIndex, part.Text)))
+			parts = append(parts, model.NewTextPartWithCitations(part.Text, citations(partIndex, len(parts), part.Text)))
 		}
 	}
 	return model.NewMessage(model.RoleAssistant, parts...), usage, nil

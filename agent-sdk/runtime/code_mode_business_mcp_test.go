@@ -83,6 +83,11 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 		{"missing_schema_result", `return await live.missing({});`, "outputSchema requires structuredContent", false},
 		{"null_schema_result", `return await live.null_result({});`, "structuredContent must be a JSON object", false},
 		{"non_object_result", `return await live.non_object({});`, "structuredContent must be a JSON object", false},
+		{"modern_array", `const r=await live.array_value({});if(!Array.isArray(r.data)||r.data[0]!=="array-value")throw Error("missing array data");return r.data;`, "array-value", false},
+		{"modern_null", `const r=await live.null_result({});if(r.data!==null)throw Error("missing null data");return {data:r.data};`, "null", false},
+		{"modern_scalar", `const r=await live.non_object({});if(r.data!==false)throw Error("missing boolean data");return {data:r.data};`, "false", false},
+		{"modern_invalid", `return await live.invalid({});`, "outputSchema", false},
+		{"modern_missing", `return await live.missing({});`, "outputSchema requires structuredContent", false},
 		{"exact_echo_only", `const r=await live.echo({});if(Object.keys(r.data).length!==0||r.text!=="before\n{ }\nafter")throw Error('changed content: '+r.text);return r;`, "before", false},
 		{"failed_schema", `return await live.failed({});`, "business failure", false},
 		{"failed_missing_schema_result", `return await live.failed_missing({});`, "business failure", false},
@@ -104,17 +109,29 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				t.Fatal(err)
 			}
 			var effects atomic.Int32
+			modern := strings.HasPrefix(tc.name, "modern_")
 			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "business", Version: "1"}, nil)
-			for _, name := range []string{"value", "fallback", "invalid", "failed", "collision", "no_schema", "missing", "null_result", "non_object", "echo", "failed_missing"} {
+			for _, name := range []string{"value", "fallback", "invalid", "failed", "collision", "no_schema", "missing", "null_result", "non_object", "echo", "failed_missing", "array_value"} {
 				def := &mcpsdk.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}
 				switch name {
 				case "fallback", "no_schema", "non_object":
 				case "echo":
 					def.OutputSchema = map[string]any{"type": "object"}
+				case "array_value":
+					if !modern {
+						continue
+					}
+					def.OutputSchema = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 				default:
 					def.OutputSchema = map[string]any{"type": "object", "required": []string{"name", "n"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "n": map[string]any{"type": "integer"}}}
 				}
-				server.AddTool(def, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+				if modern && (name == "null_result" || name == "missing") {
+					def.OutputSchema = map[string]any{"type": "null"}
+				}
+				server.AddTool(def, func(_ context.Context, request *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+					if modern && request.Params.GetMeta()[mcpsdk.MetaKeyProtocolVersion] != "2026-07-28" {
+						t.Error("tools/call did not use MCP 2026-07-28")
+					}
 					effects.Add(1)
 					structured := map[string]any{"name": "business", "n": json.Number("9223372036854775807")}
 					if name == "invalid" {
@@ -139,8 +156,16 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 						result.StructuredContent = nil
 					case "null_result":
 						result.StructuredContent = json.RawMessage(`null`)
+					case "array_value":
+						result.StructuredContent = []string{"array-value"}
+						result.Content = nil
 					case "non_object":
-						result.StructuredContent = []any{"not an object"}
+						if modern {
+							result.StructuredContent = false
+							result.Content = nil
+						} else {
+							result.StructuredContent = []any{"not an object"}
+						}
 					case "echo":
 						result.StructuredContent = map[string]any{}
 						result.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: "before"}, &mcpsdk.TextContent{Text: "{}"}, &mcpsdk.TextContent{Text: "{ }"}, &mcpsdk.TextContent{Text: "after"}}
@@ -155,7 +180,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 					return result, nil
 				})
 			}
-			endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+			endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{Stateless: modern}))
 			defer endpoint.Close()
 			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "live", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil)
 			if err != nil {
@@ -225,7 +250,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				t.Fatalf("effects=%d requests=%d", effects.Load(), len(driver.requests))
 			}
 			visible := errorDeliveryModelResult(t, driver.requests[len(stages)], "business")
-			wantError := strings.HasSuffix(tc.name, "_result") || tc.name == "invalid_schema" || tc.name == "failed_schema"
+			wantError := strings.HasSuffix(tc.name, "_result") || tc.name == "invalid_schema" || tc.name == "failed_schema" || tc.name == "modern_invalid" || tc.name == "modern_missing"
 			if visible.IsError != wantError {
 				t.Fatalf("unexpected script disposition: %s", errorDeliveryJSON(t, visible.Content))
 			}

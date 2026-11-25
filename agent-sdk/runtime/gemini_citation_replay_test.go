@@ -24,7 +24,9 @@ func TestRuntimeGeminiStreamCitationReplay(t *testing.T) {
 
 data: {"candidates":[{"content":{"role":"model","parts":[{"text":" "}]}}]}
 
-data: {"candidates":[{"content":{"role":"model","parts":[{"text":"café 世界"}]},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://second.test","title":"Café"}},{"web":{"uri":"https://third.test","title":"世界"}}],"groundingSupports":[{"segment":{"endIndex":5},"groundingChunkIndices":[0,1]},{"segment":{"startIndex":6,"endIndex":12},"groundingChunkIndices":[1]}]},"finishReason":"STOP"}]}
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"café 世界"}]},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://second.test","title":"Café"}}],"groundingSupports":[{"segment":{"endIndex":5},"groundingChunkIndices":[0,1]},{"segment":{"startIndex":6,"endIndex":12},"groundingChunkIndices":[2]}]}}]}
+
+data: {"candidates":[{"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://third.test","title":"世界"}}]},"finishReason":"STOP"}]}
 
 `
 	root := t.TempDir()
@@ -84,11 +86,11 @@ data: {"candidates":[{"content":{"role":"model","parts":[{"text":"café 世界"}
 	runTurn(rt, "continue before reopen")
 	runTurn(makeRuntime(sessionfile.NewStore(sessionfile.Config{RootDir: root})), "continue after reopen")
 	first := model.CitationSource{RefID: "grounding-0", URL: "https://first.test", Title: "第一"}
-	second := model.CitationSource{RefID: "grounding-0", URL: "https://second.test", Title: "Café"}
-	third := model.CitationSource{RefID: "grounding-1", URL: "https://third.test", Title: "世界"}
+	second := model.CitationSource{RefID: "grounding-1", URL: "https://second.test", Title: "Café"}
+	third := model.CitationSource{RefID: "grounding-2", URL: "https://third.test", Title: "世界"}
 	want := model.NewTextPartWithCitations("你好 café 世界", []model.Citation{
 		{StartIndex: 0, EndIndex: 6, Sources: []model.CitationSource{first}},
-		{StartIndex: 7, EndIndex: 12, Sources: []model.CitationSource{second, third}},
+		{StartIndex: 7, EndIndex: 12, Sources: []model.CitationSource{first, second}},
 		{StartIndex: 13, EndIndex: 19, Sources: []model.CitationSource{third}},
 	})
 	if len(requests) != 3 || len(requests[1]) < 2 || len(requests[2]) < len(requests[1]) {

@@ -288,6 +288,23 @@ func TestFileAPIsApplyReadCeiling(t *testing.T) {
 	}
 }
 
+func TestReadCeilingSupportsIndividualFileGrant(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fsys := New(testFileSystem{wd: dir}, func() policy.Policy {
+		return policy.Policy{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{path}}}
+	})
+	if got, err := fsys.ReadFile("input.txt"); err != nil || string(got) != "fixture" {
+		t.Fatalf("ReadFile = %q, %v", got, err)
+	}
+	if _, err := fsys.ReadDir(dir); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("parent directory received read authority: %v", err)
+	}
+}
+
 type rawOpenFileSystem struct {
 	sandbox.FileSystem
 	opened *os.File
@@ -308,7 +325,7 @@ func TestRestrictedOpenClosesRawDirectoryHandle(t *testing.T) {
 	t.Cleanup(func() { _ = base.Close() })
 	raw := &rawOpenFileSystem{FileSystem: base.FileSystem()}
 	fsys := New(raw, func() policy.Policy {
-		return policy.Policy{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{root}}}
+		return policy.Policy{HiddenRoots: []string{filepath.Join(root, "hidden")}}
 	})
 	file, err := fsys.Open(root)
 	if file != nil || !errors.Is(err, fs.ErrInvalid) {
@@ -317,7 +334,7 @@ func TestRestrictedOpenClosesRawDirectoryHandle(t *testing.T) {
 	if raw.opened == nil {
 		t.Fatal("underlying Open did not return a directory handle")
 	}
-	if _, err := raw.opened.Stat(); !errors.Is(err, os.ErrClosed) {
+	if err := raw.opened.Close(); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("underlying directory handle is still open: %v", err)
 	}
 }

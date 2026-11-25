@@ -24,10 +24,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const (
-	mcpProtocolVersion20260728 = "2026-07-28"
-	mcpLegacyProtocolVersion   = "2025-11-25"
-)
+const mcpLegacyProtocolVersion = "2025-11-25"
 
 func TestProcessEnvironmentTargetOSCaseSemantics(t *testing.T) {
 	base := []string{"PATH=/bin", "dtw_node_path=/package", "DTW_NODE_PATH=/stale"}

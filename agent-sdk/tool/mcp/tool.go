@@ -66,8 +66,9 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		return result, tool.NewError(errorcode.UnknownOutcome, "MCP server returned no tool execution receipt")
 	}
 	blocks, contentErr := mcpContentBlocks(resp.Content)
+	// The SDK decodes an explicit null as json.RawMessage("null") and leaves an omitted field nil.
 	if resp.StructuredContent != nil {
-		structured, err := structuredContentBlock(resp.StructuredContent)
+		structured, err := structuredContentBlock(resp.StructuredContent, t.client.protocolVersion() < mcpProtocolVersion20260728)
 		if err != nil {
 			contentErr = errors.Join(contentErr, err)
 		} else {

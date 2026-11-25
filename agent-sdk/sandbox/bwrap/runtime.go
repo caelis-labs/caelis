@@ -130,29 +130,28 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 		return fmt.Errorf("bwrap sandbox unavailable: shell %q not found: %w", shell, err)
 	}
 	effectivePolicy := policy.Default(b.cfg, sandbox.Constraints{})
-	var probeArgs []string
-	if b.cfg.ResourceLimits != nil && b.cfg.ResourceLimits.ReadPaths != nil {
+	// Validate the configured mounts separately from the fixed backend probe.
+	// The probe only exercises Bubblewrap startup with a trusted no-op.
+	if effectivePolicy.ResourceLimits != nil && effectivePolicy.ResourceLimits.ReadPaths != nil {
 		workDir, err := procutil.ResolveHostWorkDir(b.cfg.CWD)
 		if err != nil {
 			return fmt.Errorf("bwrap sandbox probe failed: %w", err)
 		}
-		probeArgs, err = buildBwrapArgs(effectivePolicy, workDir)
-		if err != nil {
+		if _, err := buildBwrapArgs(effectivePolicy, workDir); err != nil {
 			return fmt.Errorf("bwrap sandbox probe failed: %w", err)
 		}
-	} else {
-		probeArgs = []string{
-			"--ro-bind", "/", "/",
-			"--dev", "/dev",
-			"--proc", "/proc",
-			"--new-session",
-			"--die-with-parent",
-			"--unshare-user",
-			"--unshare-pid",
-		}
-		if !effectivePolicy.NetworkAccess {
-			probeArgs = append(probeArgs, "--unshare-net")
-		}
+	}
+	probeArgs := []string{
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--new-session",
+		"--die-with-parent",
+		"--unshare-user",
+		"--unshare-pid",
+	}
+	if !effectivePolicy.NetworkAccess {
+		probeArgs = append(probeArgs, "--unshare-net")
 	}
 	probeArgs = append(probeArgs, "--", bwrapProbeExecutable)
 	if ctx == nil {

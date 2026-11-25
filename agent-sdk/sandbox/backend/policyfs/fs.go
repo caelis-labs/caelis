@@ -2,6 +2,7 @@ package policyfs
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -33,6 +34,13 @@ func (f *policyFileSystem) Open(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.ceiling != nil {
+		_, target, err := f.resolveReadPath(path, p)
+		if err != nil {
+			return nil, err
+		}
+		return openPhysicalFile(target)
+	}
 	path, err = f.checkReadPath(path, p)
 	if err != nil {
 		return nil, err
@@ -63,19 +71,47 @@ func (f *policyFileSystem) ReadDir(path string) ([]os.DirEntry, error) {
 }
 
 func (f *policyFileSystem) Stat(path string) (os.FileInfo, error) {
-	path, err := f.readPath(path)
+	p, err := f.readPolicy()
 	if err != nil {
 		return nil, err
 	}
-	return f.base.Stat(path)
+	return f.stat(path, p)
+}
+
+func (f *policyFileSystem) stat(path string, p readPolicy) (os.FileInfo, error) {
+	path, target, err := f.resolveReadPath(path, p)
+	if err != nil {
+		return nil, err
+	}
+	if p.ceiling == nil {
+		return f.base.Stat(path)
+	}
+	parent, name, err := openPhysicalParent(target)
+	if err != nil {
+		return nil, err
+	}
+	defer parent.Close()
+	return physicalInfo(parent, name)
 }
 
 func (f *policyFileSystem) ReadFile(path string) ([]byte, error) {
-	path, err := f.readPath(path)
+	p, err := f.readPolicy()
 	if err != nil {
 		return nil, err
 	}
-	return f.base.ReadFile(path)
+	path, target, err := f.resolveReadPath(path, p)
+	if err != nil {
+		return nil, err
+	}
+	if p.ceiling == nil {
+		return f.base.ReadFile(path)
+	}
+	file, err := openPhysicalFile(target)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
 }
 
 func (f *policyFileSystem) Glob(pattern string) ([]string, error) {
@@ -102,6 +138,12 @@ func (f *policyFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
 	path, err := f.checkReadPath(root, p)
 	if err != nil {
 		return err
+	}
+	if p.ceiling != nil {
+		walk := ceilingWalk{fsys: f, policy: p, dir: path}
+		return fs.WalkDir(walk, ".", func(name string, entry fs.DirEntry, err error) error {
+			return fn(walk.path(name), entry, err)
+		})
 	}
 	if !p.restricted() {
 		return f.base.WalkDir(path, fn)
@@ -198,33 +240,31 @@ func (f *policyFileSystem) readPolicy() (readPolicy, error) {
 	return result, nil
 }
 
-func (f *policyFileSystem) readPath(path string) (string, error) {
-	p, err := f.readPolicy()
-	if err != nil {
-		return "", err
-	}
-	return f.checkReadPath(path, p)
+func (f *policyFileSystem) checkReadPath(path string, p readPolicy) (string, error) {
+	path, _, err := f.resolveReadPath(path, p)
+	return path, err
 }
 
-func (f *policyFileSystem) checkReadPath(path string, p readPolicy) (string, error) {
+func (f *policyFileSystem) resolveReadPath(path string, p readPolicy) (logical, physical string, err error) {
 	if !p.restricted() {
-		return path, nil
+		return path, path, nil
 	}
 	if path == "" {
-		return "", permissionError("read", path, "missing path")
+		return "", "", permissionError("read", path, "missing path")
 	}
 	if !filepath.IsAbs(path) {
 		wd, err := f.base.Getwd()
 		if err != nil || !filepath.IsAbs(wd) || filepath.VolumeName(path) != "" || os.IsPathSeparator(path[0]) {
-			return "", permissionError("read", path, "cannot resolve path against sandbox working directory")
+			return "", "", permissionError("read", path, "cannot resolve path against sandbox working directory")
 		}
 		path = filepath.Join(wd, path)
 	}
 	path = filepath.Clean(path)
+	target := path
 	if p.ceiling != nil {
-		target, err := fsboundary.ResolvePath(path)
+		target, err = fsboundary.ResolvePath(path)
 		if err != nil {
-			return "", permissionError("read", path, "cannot resolve path against read ceiling")
+			return "", "", permissionError("read", path, "cannot resolve path against read ceiling")
 		}
 		allowed := false
 		for _, root := range p.ceiling {
@@ -234,19 +274,30 @@ func (f *policyFileSystem) checkReadPath(path string, p readPolicy) (string, err
 			}
 		}
 		if !allowed {
-			return "", permissionError("read", path, "outside explicit read ceiling")
+			return "", "", permissionError("read", path, "outside explicit read ceiling")
 		}
 	}
-	if len(p.hidden) > 0 && fsboundary.IsWithinRoots(path, p.hidden, f.base) {
-		return "", permissionError("read", path, "path is hidden by sandbox policy")
+	if p.ceiling == nil && len(p.hidden) > 0 && fsboundary.IsWithinRoots(path, p.hidden, f.base) {
+		return "", "", permissionError("read", path, "path is hidden by sandbox policy")
 	}
-	return path, nil
+	if p.ceiling != nil {
+		for _, root := range p.hidden {
+			root = fsboundary.ResolveAbsRoot(root, f.base)
+			if fsboundary.PathIsUnder(path, root) || fsboundary.PathIsUnder(target, fsboundary.ResolvePathWithSymlinks(root)) {
+				return "", "", permissionError("read", path, "path is hidden by sandbox policy")
+			}
+		}
+	}
+	return path, target, nil
 }
 
 func (f *policyFileSystem) readDir(path string, p readPolicy) ([]os.DirEntry, error) {
-	path, err := f.checkReadPath(path, p)
+	path, target, err := f.resolveReadPath(path, p)
 	if err != nil {
 		return nil, err
+	}
+	if p.ceiling != nil {
+		return f.readPhysicalDir(path, target, p)
 	}
 	entries, err := f.base.ReadDir(path)
 	if len(entries) == 0 || !p.restricted() {
@@ -273,12 +324,11 @@ func (f *policyFileSystem) glob(pattern string, p readPolicy, depth int) ([]stri
 		return nil, filepath.ErrBadPattern
 	}
 	if !globHasMeta(pattern) {
-		path, err := f.checkReadPath(pattern, p)
-		if err != nil {
+		if _, err := f.checkReadPath(pattern, p); err != nil {
 			return nil, err
 		}
 		// As in filepath.Glob, an inaccessible entry is omitted.
-		if _, err := f.base.Stat(path); err == nil {
+		if _, err := f.stat(pattern, p); err == nil {
 			return []string{pattern}, nil
 		}
 		return nil, nil

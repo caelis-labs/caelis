@@ -21,6 +21,8 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const mcpProtocolVersion20260728 = "2026-07-28"
+
 // DefaultStartupTimeout bounds transport startup and protocol initialization.
 // For stdio this includes any launcher/package resolution before the peer replies.
 const DefaultStartupTimeout = 30 * time.Second
@@ -412,6 +414,15 @@ func (c *Client) ListTools(ctx context.Context) ([]*mcpsdk.Tool, error) {
 		seenCursors[cursor] = true
 	}
 	return out, nil
+}
+
+func (c *Client) protocolVersion() string {
+	if c.session != nil {
+		if initialized := c.session.InitializeResult(); initialized != nil {
+			return initialized.ProtocolVersion
+		}
+	}
+	return ""
 }
 
 func (c *Client) CallTool(ctx context.Context, params *mcpsdk.CallToolParams) (*mcpsdk.CallToolResult, error) {

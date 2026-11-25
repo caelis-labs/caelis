@@ -59,7 +59,7 @@ func TestMCPUnsupportedAndOversizedContentIsExplicit(t *testing.T) {
 	if err == nil || len(parts) != 4 || !strings.Contains(err.Error(), "audio content is not supported") || parts[3] != tool.Text("survives") {
 		t.Fatalf("unsupported content = %+v, %v", parts, err)
 	}
-	if _, err := structuredContentBlock(map[string]string{"large": strings.Repeat("x", maxMCPStructuredBytes)}); err == nil {
+	if _, err := structuredContentBlock(map[string]string{"large": strings.Repeat("x", maxMCPStructuredBytes)}, false); err == nil {
 		t.Fatal("oversized structured content accepted")
 	}
 }
