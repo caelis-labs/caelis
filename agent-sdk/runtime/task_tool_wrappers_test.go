@@ -193,14 +193,12 @@ func TestRuntimeExplicitSDKSendMessageSurvivesWorkspaceWritePolicy(t *testing.T)
 	}
 	runtime := &Runtime{hooks: hook.Set{ToolPolicy: registry}, defaultPolicyMode: policy.ProfileWorkspaceWrite}
 	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{Tools: []tool.Tool{sendmessage.New()}}, runtimeToolContext{inputSender: sender})
-	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
-		ctx: context.Background(),
-	})
+	wrapped := runtime.wrapTurnTools(t.Context(), activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, nil, "run-1", "turn-1", nil)
 	if len(wrapped) != 1 {
 		t.Fatalf("wrapped tools = %d, want only SendMessage", len(wrapped))
 	}
 	raw, _ := json.Marshal(map[string]any{"to": "parent", "message": "status update"})
-	result, err := wrapped[0].Call(context.Background(), tool.Call{ID: "message-policy-1", Name: "SendMessage", Input: raw})
+	result, err := wrapped[0].Call(t.Context(), tool.Call{ID: "message-policy-1", Name: "SendMessage", Input: raw})
 	if err != nil {
 		t.Fatal(err)
 	}

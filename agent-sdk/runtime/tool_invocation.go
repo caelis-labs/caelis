@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -41,19 +40,6 @@ func (t invocationTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, ca
 
 func (t invocationTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.InvocationContext {
 	return tool.InvocationContext{SessionID: t.sessionID, TurnID: t.turnID, ItemID: fmt.Sprintf("tool-%d:%s", t.sequence.Add(1), strings.TrimSpace(call.ID))}
-}
-
-func wrapToolsForInvocation(ref session.SessionRef, turnID string, sequence *atomic.Uint64, tools []tool.Tool) []tool.Tool {
-	if sequence == nil {
-		sequence = new(atomic.Uint64)
-	}
-	out := make([]tool.Tool, 0, len(tools))
-	for _, item := range tools {
-		if item != nil {
-			out = append(out, invocationTool{base: item, sessionID: strings.TrimSpace(ref.SessionID), turnID: strings.TrimSpace(turnID), sequence: sequence})
-		}
-	}
-	return out
 }
 
 // toolTaskOperationID binds a genuine Task submission to this admitted

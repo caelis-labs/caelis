@@ -58,14 +58,3 @@ func (t resultHookTool) RuntimeCall(_ toolbinding.Token, ctx context.Context, c 
 	}
 	return r, err
 }
-
-func wrapToolResults(concrete, tools []tool.Tool) []tool.Tool {
-	out := make([]tool.Tool, 0, len(tools))
-	// The wrapper chain preserves concrete registration order and drops nils.
-	for _, one := range concrete {
-		if one != nil {
-			out = append(out, resultHookTool{base: tools[len(out)], concrete: one})
-		}
-	}
-	return out
-}
