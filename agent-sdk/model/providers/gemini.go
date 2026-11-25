@@ -35,12 +35,18 @@ type geminiLLM struct {
 }
 
 func newGemini(cfg Config, token string) model.LLM {
+	client := *coalesceHTTPClient(cfg.HTTPClient)
+	transport := client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.Transport = providerStatusTransport{inner: transport}
 	return &geminiLLM{
 		name:                cfg.Model,
 		provider:            cfg.Provider,
 		token:               token,
 		httpOptions:         buildGeminiHTTPOptions(cfg.BaseURL, cfg.Headers),
-		httpClient:          cfg.HTTPClient,
+		httpClient:          &client,
 		requestTimeout:      cfg.Timeout,
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
@@ -361,17 +367,11 @@ func stringSliceFromAny(value any) []string {
 }
 
 func (l *geminiLLM) newClient(ctx context.Context) (*genai.Client, error) {
-	client := *coalesceHTTPClient(l.httpClient)
-	transport := client.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-	client.Transport = providerStatusTransport{inner: transport}
 	return genai.NewClient(ctx, &genai.ClientConfig{
 		Backend:     genai.BackendGeminiAPI,
 		APIKey:      l.token,
 		HTTPOptions: l.httpOptions,
-		HTTPClient:  &client,
+		HTTPClient:  l.httpClient,
 	})
 }
 
@@ -402,7 +402,13 @@ func (a *geminiAccumulator) addTextPart(part model.Part) {
 	if len(a.parts) > 0 {
 		last := &a.parts[len(a.parts)-1]
 		if last.Kind == model.PartKindText && last.Text != nil {
+			offset := len(last.Text.Text)
 			last.Text.Text += part.Text.Text
+			for _, citation := range part.Text.Citations {
+				citation.StartIndex += offset
+				citation.EndIndex += offset
+				last.Text.Citations = append(last.Text.Citations, citation)
+			}
 			return
 		}
 	}
@@ -772,12 +778,12 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 			}
 			continue
 		}
-		if strings.TrimSpace(part.Text) != "" {
-			if part.Thought {
+		if part.Thought {
+			if strings.TrimSpace(part.Text) != "" {
 				parts = append(parts, model.NewReasoningPart(part.Text, model.ReasoningVisibilityVisible))
-			} else {
-				parts = append(parts, model.NewTextPartWithCitations(part.Text, geminiGroundingCitationsForPart(out, partIndex, part.Text)))
 			}
+		} else if part.Text != "" {
+			parts = append(parts, model.NewTextPartWithCitations(part.Text, geminiGroundingCitationsForPart(out, partIndex, part.Text)))
 		}
 	}
 	return model.NewMessage(model.RoleAssistant, parts...), usage, nil
