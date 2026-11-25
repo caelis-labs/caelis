@@ -108,15 +108,15 @@ gate_status=0
 cd "$repo_dir"
 run_gate protocol-conformance \
   go test -count=1 ./internal/acpagentbridge \
-  -run '^(TestBuiltInProjectionAndExternalWireShareSDKSemantics|TestRuntimeAgentConformance.*|TestRuntimeAgentACPSessionLoadSpawnGolden|TestRuntimeAgentACPSpawnLifecycleGolden)$' || gate_status=1
+  -run '^(TestBuiltInProjectionAndExternalIngressRoundTripShareSemantics|TestRuntimeAgentConformance.*|TestRuntimeAgentACPSessionLoadSpawnGolden|TestRuntimeAgentACPSpawnLifecycleGolden)$' || gate_status=1
 run_gate product-typed-client \
   go test -count=1 ./internal/integration/acpsurface -run '^TestNewFromClients' || gate_status=1
 run_gate product-typed-participant \
   go test -count=1 ./app/gatewayapp ./internal/controlprompt/appserveradapter \
-  -run '^(TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission|TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient)$' || gate_status=1
+  -run '^(TestControlClientParticipantPromptUsesHostLifecycleAfterAdmission|TestReviewStartsPersistentTasksAndContinuesByHandle)$' || gate_status=1
 run_gate tui-side-acp-overlay \
   go test -count=1 ./surfaces/tui/app \
-  -run '^(TestDurableTaskWaitFinalCompletesOriginalSpawnPanel|TestCanonicalTaskSequenceRendersIdenticallyLiveAndReplay|TestSideACPProjected.*)$' || gate_status=1
+  -run '^(TestCanonicalSpawnFinalCompletesOriginalRowWithoutInjectingTaskWaitOutput|TestCanonicalTaskSequenceRendersIdenticallyLiveAndReplay|TestSideACPProjected.*)$' || gate_status=1
 
 printf 'ACP_ACCEPTANCE_WORKSPACE\n' >"$run_dir/workspace/README.txt"
 printf -v quoted_binary '%q' "$binary"

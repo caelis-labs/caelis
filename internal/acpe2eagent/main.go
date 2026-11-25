@@ -40,17 +40,6 @@ import (
 )
 
 func main() {
-	if mode := strings.TrimSpace(os.Getenv("SDK_ACP_WIRE_MODE")); mode != "" {
-		switch mode {
-		case "delayed_xsearch":
-			if err := surfaceacp.ServeStdio(context.Background(), newDelayedXSearchAgent(), os.Stdin, os.Stdout); err != nil {
-				log.Fatal(err)
-			}
-			return
-		default:
-			log.Fatalf("unknown SDK_ACP_WIRE_MODE %q", mode)
-		}
-	}
 	llm, err := resolveLLM()
 	if err != nil {
 		log.Fatal(err)
@@ -203,10 +192,6 @@ var _ controltaskstream.Authorizer = acpe2eTaskStreamAuthorizer{}
 func resolveLLM() (model.LLM, error) {
 	if mode := strings.TrimSpace(os.Getenv("SDK_ACP_SCRIPTED_MODE")); mode != "" {
 		switch mode {
-		case "async_command":
-			return &scriptedAsyncCommandLLM{}, nil
-		case "interactive_command":
-			return &scriptedInteractiveCommandLLM{}, nil
 		case "approval_command":
 			return &scriptedApprovalCommandLLM{}, nil
 		case "probe_spawn":
@@ -222,13 +207,7 @@ func resolveLLM() (model.LLM, error) {
 		}
 	}
 	if reply := strings.TrimSpace(os.Getenv("SDK_ACP_STUB_REPLY")); reply != "" {
-		delay := time.Duration(0)
-		if raw := strings.TrimSpace(os.Getenv("SDK_ACP_STUB_DELAY_MS")); raw != "" {
-			if ms, err := time.ParseDuration(raw + "ms"); err == nil {
-				delay = ms
-			}
-		}
-		return staticLLM{text: reply, delay: delay}, nil
+		return staticLLM{text: reply}, nil
 	}
 	return nil, fmt.Errorf("set SDK_ACP_SCRIPTED_MODE or SDK_ACP_STUB_REPLY for acpe2eagent")
 }
@@ -295,25 +274,6 @@ func resolveAssembly() (assemblyapi.ResolvedAssembly, error) {
 			},
 		}}
 	}
-	if strings.TrimSpace(os.Getenv("SDK_ACP_ENABLE_MODEL_CONFIG")) == "1" {
-		assembly.Configs = append(assembly.Configs,
-			assemblyapi.ConfigOption{
-				ID: "model", Name: "Model", Description: "E2E model catalog", DefaultValue: "sonnet",
-				Options: []assemblyapi.ConfigSelectOption{
-					{Value: "sonnet", Name: "Sonnet"},
-					{Value: "opus", Name: "Opus"},
-				},
-			},
-			assemblyapi.ConfigOption{
-				ID: "effort", Name: "Reasoning effort", Description: "E2E reasoning default", DefaultValue: "high",
-				Options: []assemblyapi.ConfigSelectOption{
-					{Value: "high", Name: "High", Runtime: assemblyapi.RuntimeOverrides{Reasoning: model.ReasoningConfig{Effort: "high"}}},
-					{Value: "max", Name: "Max", Runtime: assemblyapi.RuntimeOverrides{Reasoning: model.ReasoningConfig{Effort: "max"}}},
-				},
-			},
-		)
-	}
-
 	if strings.TrimSpace(os.Getenv("SDK_ACP_CHILD_NO_SPAWN")) == "1" {
 		return assembly, nil
 	}
@@ -346,8 +306,7 @@ func newSessionID() string {
 }
 
 type staticLLM struct {
-	text  string
-	delay time.Duration
+	text string
 }
 
 func (m staticLLM) Name() string { return "static" }
@@ -358,9 +317,6 @@ func (m staticLLM) Capabilities() model.Capabilities {
 
 func (m staticLLM) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
-		if m.delay > 0 {
-			time.Sleep(m.delay)
-		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
@@ -490,16 +446,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-type scriptedAsyncCommandLLM struct {
-	calls      int
-	taskHandle string
-}
-
-type scriptedInteractiveCommandLLM struct {
-	calls      int
-	taskHandle string
-}
-
 type scriptedSpawnLLM struct {
 	calls      int
 	taskHandle string
@@ -577,23 +523,11 @@ func (m *scriptedSpawnLLM) Generate(_ context.Context, req *model.Request) iter.
 	}
 }
 
-func (m *scriptedAsyncCommandLLM) Name() string { return "scripted-async-command" }
-
-func (m *scriptedInteractiveCommandLLM) Name() string { return "scripted-interactive-command" }
-
 func (m *scriptedApprovalCommandLLM) Name() string { return "scripted-approval-command" }
 
 func (m *scriptedProbeSpawnLLM) Name() string       { return "scripted-probe-spawn" }
 func (m *scriptedSpawnPassthroughLLM) Name() string { return "scripted-spawn-passthrough" }
 func (m *scriptedModeConfigLLM) Name() string       { return "scripted-mode-config" }
-
-func (*scriptedAsyncCommandLLM) Capabilities() model.Capabilities {
-	return scriptedModelCapabilities()
-}
-
-func (*scriptedInteractiveCommandLLM) Capabilities() model.Capabilities {
-	return scriptedModelCapabilities()
-}
 
 func (*scriptedApprovalCommandLLM) Capabilities() model.Capabilities {
 	return scriptedModelCapabilities()
@@ -617,121 +551,6 @@ func (*scriptedModeConfigLLM) Capabilities() model.Capabilities {
 
 func scriptedModelCapabilities() model.Capabilities {
 	return model.Capabilities{ToolCalls: true, Streaming: true}
-}
-
-func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	m.calls++
-	if m.calls == 2 {
-		m.taskHandle = findTaskHandle(req)
-	}
-	return func(yield func(*model.StreamEvent, error) bool) {
-		switch m.calls {
-		case 1:
-			yield(&model.StreamEvent{
-				Type: model.StreamEventTurnDone,
-				Response: &model.Response{
-					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "command-async-1",
-						Name: shell.RunCommandToolName,
-						Args: string(mustJSON(map[string]any{
-							"command":       "sleep 0.05; printf 'acpx async command ok'",
-							"workdir":       ".",
-							"yield_time_ms": 5,
-						})),
-					}}, ""),
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					FinishReason: model.FinishReasonToolCalls,
-				},
-			}, nil)
-		case 2:
-			yield(&model.StreamEvent{
-				Type: model.StreamEventTurnDone,
-				Response: &model.Response{
-					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "task-wait-1",
-						Name: tasktool.ToolName,
-						Args: string(mustJSON(map[string]any{"action": "wait", "handle": m.taskHandle})),
-					}}, ""),
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					FinishReason: model.FinishReasonToolCalls,
-				},
-			}, nil)
-		default:
-			yield(&model.StreamEvent{
-				Type: model.StreamEventTurnDone,
-				Response: &model.Response{
-					Message:      model.NewTextMessage(model.RoleAssistant, "acpx async command ok"),
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					FinishReason: model.FinishReasonStop,
-				},
-			}, nil)
-		}
-	}
-}
-
-func (m *scriptedInteractiveCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	m.calls++
-	if m.calls == 2 {
-		m.taskHandle = findTaskHandle(req)
-	}
-	return func(yield func(*model.StreamEvent, error) bool) {
-		var response model.Response
-		response.TurnComplete = true
-		response.StepComplete = true
-		response.Status = model.ResponseStatusCompleted
-		response.FinishReason = model.FinishReasonToolCalls
-		switch m.calls {
-		case 1:
-			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-				ID:   "command-interactive-1",
-				Name: shell.RunCommandToolName,
-				Args: string(mustJSON(map[string]any{
-					"command":       "printf 'interactive ready\\n'; while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; sleep 0.25; printf 'later:%s\\n' \"$line\"; done",
-					"workdir":       ".",
-					"yield_time_ms": 5,
-					"tty":           true,
-				})),
-			}}, "")
-		case 2:
-			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-				ID:   "task-write-interactive-1",
-				Name: tasktool.ToolName,
-				Args: string(mustJSON(map[string]any{
-					"action": "write",
-					"handle": m.taskHandle,
-					"input":  "ping",
-				})),
-			}}, "")
-		case 3:
-			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-				ID:   "task-read-interactive-1",
-				Name: tasktool.ToolName,
-				Args: string(mustJSON(map[string]any{
-					"action": "wait", "yield_time_ms": 0,
-					"handle": m.taskHandle,
-				})),
-			}}, "")
-		case 4:
-			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-				ID:   "task-cancel-interactive-1",
-				Name: tasktool.ToolName,
-				Args: string(mustJSON(map[string]any{
-					"action": "cancel",
-					"handle": m.taskHandle,
-				})),
-			}}, "")
-		default:
-			response.Message = model.NewTextMessage(model.RoleAssistant, "acpx interactive command ok")
-			response.FinishReason = model.FinishReasonStop
-		}
-		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &response}, nil)
-	}
 }
 
 func (m *scriptedApprovalCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
