@@ -181,7 +181,8 @@ func (d *responsesStreamErrorDetails) merge(payload *openAICodexErrorPayload) {
 	}
 }
 
-var responsesRateLimitRetryAfterPattern = regexp.MustCompile(`(?i)\bplease try again in ([0-9]+(?:\.[0-9]+)?)s\.(?:\s|$)`)
+// ParseDuration validates the captured elapsed time and rejects overflow.
+var responsesRateLimitRetryAfterPattern = regexp.MustCompile(`(?i)\bplease try again in ([0-9.hmsunµ]+)\.(?:\s|$)`)
 
 func responsesRateLimitRetryAfter(message string) time.Duration {
 	if strings.Count(strings.ToLower(message), "please try again in") != 1 {
@@ -191,7 +192,7 @@ func responsesRateLimitRetryAfter(message string) time.Duration {
 	if len(match) != 2 {
 		return 0
 	}
-	delay, err := time.ParseDuration(match[1] + "s")
+	delay, err := time.ParseDuration(strings.ToLower(match[1]))
 	if err != nil || delay <= 0 {
 		return 0
 	}

@@ -276,6 +276,9 @@ type assistantOutputReducer struct {
 }
 
 func (r *assistantOutputReducer) Observe(env eventstream.Envelope) (string, bool) {
+	if r == nil {
+		return "", false
+	}
 	if env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == session.LifecycleStatusModelAttemptReset {
 		messageID := session.ModelAttemptResetMessageID(env.Meta)
 		return "", r.assistant.DiscardMessage(messageID)

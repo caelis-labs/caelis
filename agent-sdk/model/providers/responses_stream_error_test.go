@@ -187,6 +187,23 @@ func TestResponsesStreamRateLimitRetryAfterFromMessage(t *testing.T) {
 			wantAfter: 4326 * time.Millisecond,
 		},
 		{
+			name:      "compact minutes and seconds",
+			event:     `{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Please try again in 1m30s."}}}`,
+			wantCode:  errorcode.RateLimited,
+			wantAfter: 90 * time.Second,
+		},
+		{
+			name:      "compact milliseconds",
+			event:     `{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Please try again in 250ms."}}}`,
+			wantCode:  errorcode.RateLimited,
+			wantAfter: 250 * time.Millisecond,
+		},
+		{
+			name:     "malformed compact duration is ignored",
+			event:    `{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Please try again in 1m30."}}}`,
+			wantCode: errorcode.RateLimited,
+		},
+		{
 			name:     "unconfirmed rate limit does not use message delay",
 			event:    `{"type":"response.failed","response":{"error":{"code":"novel_gateway_error","message":"Please try again in 4.326s."}}}`,
 			wantCode: errorcode.Unavailable,

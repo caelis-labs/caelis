@@ -5,16 +5,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -61,6 +67,63 @@ func connectApplicationChildModelWithImage(t *testing.T, ctx context.Context, ho
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("connect child model: %+v %v", result, err)
 	}
+}
+
+type retryingApplicationChildProvider struct {
+	calls atomic.Int32
+}
+
+func (p *retryingApplicationChildProvider) RoundTrip(req *http.Request) (*http.Response, error) {
+	defer req.Body.Close()
+	if p.calls.Add(1) == 1 {
+		const partialStream = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Retired child answer.\"}}]}\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(partialStream)), Request: req}, nil
+	}
+	return reviewerHTTPStream(req, map[string]any{"role": "assistant"}, "stop")
+}
+
+func TestApplicationProfileChildRetiresAttemptAcrossDraftACP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	provider := &retryingApplicationChildProvider{}
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
+	defer host.close(t)
+	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
+	parent := createApplicationHTTPSession(t, ctx, client, "parent")
+	_, taskID := applicationProfileChild(t, ctx, client, parent)
+	tasks, err := httpclient.NewTaskClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := tasks.Subscribe(ctx, taskstream.SubscribeRequest{SessionID: parent, TaskID: taskID, Follow: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Subscription.Close()
+	var partialID string
+	cleared := false
+	for delivery := range stream.Subscription.Deliveries() {
+		for _, event := range delivery.Events {
+			if chunk, ok := event.Update.(eventstream.ContentChunk); ok && chunk.SessionUpdate == eventstream.UpdateAgentMessage {
+				switch text := session.ExtractProtocolText(chunk.Content); {
+				case text == "Retired child answer.":
+					partialID = chunk.MessageID
+				case text == "" && chunk.Replacement && partialID != "" && chunk.MessageID == partialID:
+					cleared = true
+				}
+			}
+			if event.Lifecycle != nil && eventstream.IsTerminalLifecycleState(event.Lifecycle.State) {
+				if event.Lifecycle.State != eventstream.LifecycleStateCompleted || !cleared || provider.calls.Load() != 2 {
+					t.Fatalf("child terminal = %q, partial = %q, cleared = %t, requests = %d", event.Lifecycle.State, partialID, cleared, provider.calls.Load())
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("child Task stream ended before completion: %v", stream.Subscription.Err())
 }
 
 func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {

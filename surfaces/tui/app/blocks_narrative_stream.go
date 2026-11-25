@@ -80,15 +80,19 @@ func (b *MainACPTurnBlock) ClearActiveBuffers(messageID string) {
 	// Preserve exploration containers the narrative already settled, even if
 	// the reset arrives before their first render.
 	b.explorationProjection.preserveBeforeEventRemoval(b.Events, b.Status)
+	b.Events = b.narrativeStream.clearAttempt(b.Events, messageID)
+}
+
+func (s *narrativeStreamState) clearAttempt(events []SubagentEvent, messageID string) []SubagentEvent {
 	identity := newNarrativeSourceIdentity(messageID, "", "").stableKey()
 	if identity == "" {
-		b.narrativeStream.reset()
-	} else if b.narrativeStream.activeIdentity == identity {
+		s.reset()
+	} else if s.activeIdentity == identity {
 		// Close the failed append route and its pending prefix while keeping
 		// earlier message identities available for canonical snapshot repairs.
-		b.narrativeStream.advanceBoundary()
+		s.advanceBoundary()
 	}
-	b.Events = slices.DeleteFunc(b.Events, func(event SubagentEvent) bool {
+	return slices.DeleteFunc(events, func(event SubagentEvent) bool {
 		if !activeNarrativeEventKind(event.Kind) || event.narrativeFinal {
 			return false
 		}
