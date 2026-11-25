@@ -8,10 +8,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const FetchToolName = "WebFetch"
+const FetchToolName = names.WebFetch
 
 const (
 	defaultFetchTimeout     = 30 * time.Second

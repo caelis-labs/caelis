@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 // ApplyResultPresentation projects the bounded result into the Session tool event.
@@ -105,7 +105,7 @@ func toolCallStatus(call model.ToolCall, meta map[string]any, err error, rawOutp
 	// Spawn, Task, and SendMessage, do not transfer their invocation lifecycle
 	// to the target they address or observe.
 	if trustedTaskResult &&
-		((strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) && runtimeTaskKind(meta) == "command") || (call.Name == "js_exec" && runtimeTaskKind(meta) == "code_mode")) {
+		((strings.EqualFold(strings.TrimSpace(call.Name), names.RunCommand) && runtimeTaskKind(meta) == "command") || (call.Name == "js_exec" && runtimeTaskKind(meta) == "code_mode")) {
 		state, _ := rawOutput["state"].(string)
 		if call.Name == "js_exec" {
 			// Returned business data may itself contain a running inner Task.

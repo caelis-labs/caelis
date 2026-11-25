@@ -3,30 +3,24 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 const (
-	surfaceToolRead        = filesystem.ReadToolName
-	surfaceToolViewImage   = filesystem.ViewImageToolName
-	surfaceToolWrite       = filesystem.WriteToolName
-	surfaceToolPatch       = filesystem.PatchToolName
-	surfaceToolGlob        = filesystem.GlobToolName
-	surfaceToolGrep        = filesystem.SearchToolName
-	surfaceToolRunCommand  = shell.RunCommandToolName
-	surfaceToolTask        = tasktool.ToolName
-	surfaceToolSkill       = skilltool.ToolName
-	surfaceToolWebSearch   = web.SearchToolName
-	surfaceToolWebFetch    = web.FetchToolName
-	surfaceToolSpawn       = spawn.ToolName
-	surfaceToolSendMessage = sendmessage.ToolName
+	surfaceToolRead        = names.Read
+	surfaceToolViewImage   = names.ViewImage
+	surfaceToolWrite       = names.Write
+	surfaceToolPatch       = names.Patch
+	surfaceToolGlob        = names.Glob
+	surfaceToolGrep        = names.Grep
+	surfaceToolRunCommand  = names.RunCommand
+	surfaceToolTask        = names.Task
+	surfaceToolSkill       = names.Skill
+	surfaceToolWebSearch   = names.WebSearch
+	surfaceToolWebFetch    = names.WebFetch
+	surfaceToolSpawn       = names.StartThread
+	surfaceToolSendMessage = names.SendMessage
 	surfaceToolRemember    = "Remember" // Historical rendering only.
 	surfaceToolRecall      = "Recall"   // Historical rendering only.
 )

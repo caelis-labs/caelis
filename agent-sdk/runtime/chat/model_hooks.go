@@ -17,7 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 func cloneResponse(r model.Response) model.Response {
@@ -115,9 +115,9 @@ func (a *Agent) prepareModel(ctx agent.Context, e hook.PrepareContext, req *mode
 	}
 	// ModelPrepare may select a different model. Apply the native image tool's
 	// presentation rule only after the model and tool presentation are final.
-	if toolbinding.HideViewImage(a.toolsByName[filesystem.ViewImageToolName], a.model) {
+	if toolbinding.HideViewImage(a.toolsByName[names.ViewImage], a.model) {
 		p.Request.Tools = slices.DeleteFunc(p.Request.Tools, func(spec model.ToolSpec) bool {
-			return spec.Function != nil && spec.Function.Name == filesystem.ViewImageToolName
+			return spec.Function != nil && spec.Function.Name == names.ViewImage
 		})
 	}
 	if err := model.ValidateRequestCapabilities(a.model, p.Request); err != nil {

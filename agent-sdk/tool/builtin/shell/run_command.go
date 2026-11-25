@@ -12,12 +12,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
 const (
-	RunCommandToolName       = "RunCommand"
+	RunCommandToolName       = names.RunCommand
 	defaultRunCommandTimeout = 30 * time.Minute
 )
 

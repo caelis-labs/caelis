@@ -10,8 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
@@ -201,9 +200,9 @@ func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, 
 	if toolName == "" {
 		switch descriptor.Kind {
 		case task.KindSubagent:
-			toolName = spawn.ToolName
+			toolName = names.StartThread
 		case task.KindCommand:
-			toolName = shell.RunCommandToolName
+			toolName = names.RunCommand
 		}
 	}
 	terminalID := firstString(frame.TerminalID, descriptor.CurrentTurnID)

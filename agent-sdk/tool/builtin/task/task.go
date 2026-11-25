@@ -7,10 +7,11 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const ToolName = "Task"
+const ToolName = names.Task
 
 // MaxWaitMilliseconds bounds one model-requested Task observation.
 const MaxWaitMilliseconds = 300000

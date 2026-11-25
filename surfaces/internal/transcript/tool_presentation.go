@@ -3,12 +3,7 @@ package transcript
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 // ToolPresentation is the surface-owned display interpretation of one ACP
@@ -91,20 +86,20 @@ func toolExplorationVerb(name string, kind string) string {
 	switch kind {
 	case "read":
 		switch name {
-		case filesystem.ViewImageToolName:
+		case names.ViewImage:
 			return "View"
-		case filesystem.GlobToolName:
+		case names.Glob:
 			return "Glob"
-		case skilltool.ToolName:
+		case names.Skill:
 			return "Skill"
 		default:
 			return "Read"
 		}
 	case "search":
 		switch name {
-		case filesystem.GlobToolName:
+		case names.Glob:
 			return "Glob"
-		case web.FetchToolName:
+		case names.WebFetch:
 			return "Fetch"
 		}
 		return "Search"
@@ -112,17 +107,17 @@ func toolExplorationVerb(name string, kind string) string {
 		return "Fetch"
 	case "":
 		switch name {
-		case filesystem.ReadToolName:
+		case names.Read:
 			return "Read"
-		case filesystem.ViewImageToolName:
+		case names.ViewImage:
 			return "View"
-		case filesystem.GlobToolName:
+		case names.Glob:
 			return "Glob"
-		case filesystem.SearchToolName, web.SearchToolName:
+		case names.Grep, names.WebSearch:
 			return "Search"
-		case skilltool.ToolName:
+		case names.Skill:
 			return "Skill"
-		case web.FetchToolName:
+		case names.WebFetch:
 			return "Fetch"
 		default:
 			return ""
@@ -160,12 +155,12 @@ func standardToolKindLabel(kind string) string {
 }
 
 func transcriptToolIsPlan(name string) bool {
-	return name == plan.ToolName
+	return name == names.Plan
 }
 
 func transcriptToolIsTerminalPanel(name string) bool {
 	switch name {
-	case shell.RunCommandToolName, spawn.ToolName:
+	case names.RunCommand, names.StartThread:
 		return true
 	default:
 		return false

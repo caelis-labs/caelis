@@ -4,14 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -71,29 +64,29 @@ type projectedToolProfile struct {
 // tools and historical aliases remain generic and retain their exact names.
 func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 	switch name {
-	case filesystem.ReadToolName, filesystem.ViewImageToolName:
+	case names.Read, names.ViewImage:
 		return projectedToolProfile{kind: projectedToolKindRead, title: projectedTitlePath, result: projectedResultRead}, true
-	case filesystem.WriteToolName, filesystem.PatchToolName:
+	case names.Write, names.Patch:
 		return projectedToolProfile{kind: projectedToolKindEdit, title: projectedTitlePath, result: projectedResultMutation}, true
-	case filesystem.GlobToolName:
+	case names.Glob:
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitlePath, result: projectedResultGlob}, true
-	case filesystem.SearchToolName:
+	case names.Grep:
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitlePath, result: projectedResultSearch}, true
-	case shell.RunCommandToolName:
+	case names.RunCommand:
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleCommandAction, result: projectedResultCommand, terminalKnown: true, terminalPanel: true}, true
-	case tasktool.ToolName:
+	case names.Task:
 		return projectedToolProfile{kind: projectedToolKindOther, title: projectedTitleCommandAction, result: projectedResultTask, terminalKnown: true}, true
-	case plan.ToolName, mcp.SearchToolName:
+	case names.Plan, mcp.SearchToolName:
 		return projectedToolProfile{kind: projectedToolKindOther}, true
-	case skilltool.ToolName:
+	case names.Skill:
 		return projectedToolProfile{kind: projectedToolKindRead, title: projectedTitleSkill}, true
-	case web.SearchToolName:
+	case names.WebSearch:
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleQuery, result: projectedResultWebSearch}, true
-	case web.FetchToolName:
+	case names.WebFetch:
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleURL, result: projectedResultWebFetch}, true
-	case spawn.ToolName, "Spawn": // Historical presentation only; never an execution alias.
+	case names.StartThread, "Spawn": // Historical presentation only; never an execution alias.
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleSpawn, result: projectedResultSpawn, terminalKnown: true, terminalPanel: true}, true
-	case sendmessage.ToolName:
+	case names.SendMessage:
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleMessage}, true
 	case "Remember": // Retained historical presentation only; never an execution alias.
 		return projectedToolProfile{kind: projectedToolKindEdit, title: projectedTitleMemoryUpdate, suppressSuccessfulEmpty: true}, true

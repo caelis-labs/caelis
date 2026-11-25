@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
-const ToolName = "Plan"
+const ToolName = names.Plan
 
 type Status string
 

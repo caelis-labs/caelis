@@ -6,10 +6,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/toolpresentation"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
 )
 
-const PatchToolName = "Patch"
+const PatchToolName = names.Patch
 
 type PatchTool struct {
 	runtime sandbox.Runtime

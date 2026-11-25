@@ -3,7 +3,7 @@ package transcript
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 func TestResolveToolPresentationKeepsExactNameSeparateFromStandardFields(t *testing.T) {
@@ -22,7 +22,7 @@ func TestResolveToolPresentationKeepsExactNameSeparateFromStandardFields(t *test
 		{name: "standard search", kind: "search", title: "Search ToolCall", wantDisplay: "Search", wantExploration: "Search"},
 		{name: "generic other uses atomic title", kind: "other", title: "Start subagent reviewer", wantDisplay: "Start subagent reviewer", wantTitleLabel: true},
 		{name: "exact builtin enriches kind", exactName: "Glob", kind: "read", title: "Read files", wantDisplay: "Glob", wantExploration: "Glob"},
-		{name: "web fetch refines search kind", exactName: web.FetchToolName, kind: "search", title: "WebFetch https://example.com/a/b.md", wantDisplay: web.FetchToolName, wantExploration: "Fetch"},
+		{name: "web fetch refines search kind", exactName: names.WebFetch, kind: "search", title: "WebFetch https://example.com/a/b.md", wantDisplay: names.WebFetch, wantExploration: "Fetch"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

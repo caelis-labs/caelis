@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 )
 
 const (
@@ -254,7 +254,7 @@ func modelCallsAreOnlyTaskWaits(calls []model.ToolCall) bool {
 		return false
 	}
 	for _, call := range calls {
-		if call.Name != tasktool.ToolName {
+		if call.Name != names.Task {
 			return false
 		}
 		args, ok := decodeComparableToolArgs(call.Args)

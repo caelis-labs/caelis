@@ -535,6 +535,9 @@ Native projections retain the tool-name metadata alongside standard `name` for
 older clients; remove that compatibility writer when all supported consumers
 read the standard field.
 
+The SDK's `tool/builtin/names` package supplies the exact shipped names for
+these presentation profiles. Each presentation owner defines its own mapping.
+
 Provider-specific metadata is normalized at the Host-private ingress under an
 exact maintained profile. Unknown, malformed, or mutability-inconsistent values
 stay generic. Provider compatibility must not overwrite a specific standard
