@@ -6,8 +6,24 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
+
+func TestSessionManagerCloseStopsCleanupWithoutNextTick(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		manager := NewSessionManager(DefaultSessionManagerConfig())
+		synctest.Wait()
+		if err := manager.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+		if err := manager.Close(); err != nil {
+			t.Fatalf("second Close() error = %v", err)
+		}
+		// The bubble waits for cleanup to exit without advancing its clock after
+		// this function returns.
+	})
+}
 
 func TestSessionManagerContextTimeoutWaitPreservesExitForLaterWait(t *testing.T) {
 	manager := NewSessionManager(DefaultSessionManagerConfig())
