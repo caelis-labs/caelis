@@ -55,7 +55,7 @@ func (t *PatchTool) Definition() tool.Definition {
 }
 
 func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

@@ -59,7 +59,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 
 // CallWithBackend binds provider search for only this invocation.
 func (t *SearchTool) CallWithBackend(ctx context.Context, call tool.Call, backend SearchBackend) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

@@ -65,7 +65,7 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if t == nil || t.loader == nil {
 		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "skill tool is unavailable")
 	}
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

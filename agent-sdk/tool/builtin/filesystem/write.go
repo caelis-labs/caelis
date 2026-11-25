@@ -49,7 +49,7 @@ func (t *WriteTool) Definition() tool.Definition {
 }
 
 func (t *WriteTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

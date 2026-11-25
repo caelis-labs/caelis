@@ -52,7 +52,7 @@ func (t *ViewImageTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 
 // CallWithImageInput checks the receiving model's image capability before any file access.
 func (t *ViewImageTool) CallWithImageInput(ctx context.Context, call tool.Call, imageInput bool) (tool.Result, error) {
-	if err := toolutil.WithContextCancel(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
 	}
 	args, err := toolutil.DecodeArgs(call)

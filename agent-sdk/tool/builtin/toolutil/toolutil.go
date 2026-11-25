@@ -1,7 +1,6 @@
 package toolutil
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -27,13 +26,4 @@ func JSONResult(payload map[string]any) (tool.Result, error) {
 		return tool.Result{}, err
 	}
 	return tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}, nil
-}
-
-func WithContextCancel(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
-	}
 }
