@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.86.2](https://github.com/caelis-labs/caelis/compare/v0.86.1...v0.86.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **codemode:** allow redeclaring names across scripts ([#295](https://github.com/caelis-labs/caelis/issues/295)) ([cb6dda3](https://github.com/caelis-labs/caelis/commit/cb6dda3848a23dabf159ceb2d706d8fa72380f2f))
+* complete Agent SDK correctness and simplification follow-ups ([#296](https://github.com/caelis-labs/caelis/issues/296)) ([42060a3](https://github.com/caelis-labs/caelis/commit/42060a3c4ea30ca47a609b87d14a92589d4af1fc))
+* retry transient model errors after streamed output ([#290](https://github.com/caelis-labs/caelis/issues/290)) ([f543bda](https://github.com/caelis-labs/caelis/commit/f543bdaca8541768401b6021288317369ab1d988))
+
 ## [0.86.1](https://github.com/caelis-labs/caelis/compare/v0.86.0...v0.86.1) (2026-11-24)
 
 
