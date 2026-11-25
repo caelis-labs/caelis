@@ -1991,7 +1991,7 @@ func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 func TestToolMetaCarriesOnlyRuntimeToolName(t *testing.T) {
 	t.Parallel()
 
-	meta := toolMeta("Task")
+	meta := toolbinding.ToolMeta("Task")
 	caelis, ok := meta["caelis"].(map[string]any)
 	if !ok {
 		t.Fatalf("meta = %#v, want caelis wrapper", meta)
@@ -2315,7 +2315,7 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`)}},
 	}
 	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
-	message := toolResultMessageFromCanonical(model.ToolCall{
+	message := toolbinding.ResultMessage(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
 	}, canonical, nil)
@@ -2384,7 +2384,7 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 		Args: `{"command":"echo hello"}`,
 	}, tool.Result{
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"error":"terminal session failed"}`)}},
-	}, tool.FailedReply("tool failed"), nil, runtimeTaskResultSourceMeta(true))
+	}, tool.FailedReply("tool failed"), nil, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event.Tool = nil, want tool result payload")
@@ -2413,7 +2413,7 @@ func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 			"target_kind":    "subagent",
 			"output_preview": "正在读取 hello_from_spawn.txt\n",
 		})}},
-	}, nil, nil, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2443,7 +2443,7 @@ func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
 			"state":         "completed",
 			"final_message": "child final answer\n",
 		})}},
-	}, nil, nil, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2534,7 +2534,7 @@ func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 			"error":       "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
 			"exit_code":   1,
 		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2623,7 +2623,7 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 		t.Fatal("messageFromDurableEvent() = false, want Task result")
 	}
 	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
-	live := toolResultMessageFromCanonical(call, canonical, nil)
+	live := toolbinding.ResultMessage(call, canonical, nil)
 	if !reflect.DeepEqual(replayed, live) {
 		t.Fatalf("Task result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
 	}
@@ -2644,7 +2644,7 @@ func TestImageToolResultModelContextRoundTrip(t *testing.T) {
 		},
 	}
 	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
-	live := toolResultMessageFromCanonical(call, canonical, nil)
+	live := toolbinding.ResultMessage(call, canonical, nil)
 	event := toolResultEvent(call, result, nil, &live)
 	replayed, ok := messageFromDurableEvent(event)
 	if !ok {
@@ -2756,7 +2756,7 @@ func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state": "cancelled",
 		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2833,7 +2833,7 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 			"result":    "go: module internal registry: network unreachable\n",
 			"exit_code": 1,
 		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2861,7 +2861,7 @@ func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"exit_code": 1,
 		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, runtimeTaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")
@@ -2918,7 +2918,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		Args: `{"command":"find /tmp -delete"}`,
 	}
 	canonical, truncationMeta := (tool.ResultProjection{}).Project(t.Context(), result)
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
@@ -2998,7 +2998,7 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 		})}},
 	}
 	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
-	message := toolResultMessageFromCanonical(model.ToolCall{
+	message := toolbinding.ResultMessage(model.ToolCall{
 		ID:   "call-1",
 		Name: "RunCommand",
 	}, canonical, nil)
@@ -3745,7 +3745,7 @@ func persistedToolCallEvent(id string, name string, input map[string]any) *sessi
 		ID:   "call:" + id,
 		Type: session.EventTypeToolCall,
 		Tool: toolEventPayload(call, "pending", input),
-		Meta: mergeEventMeta(toolMeta(name)),
+		Meta: toolbinding.MergeEventMeta(toolbinding.ToolMeta(name)),
 	}
 }
 
@@ -3755,7 +3755,7 @@ func persistedToolResultEvent(id string, name string, input map[string]any, outp
 		Name: name,
 		Args: string(mustRawJSON(input)),
 	}
-	meta := mergeEventMeta(toolMeta(name))
+	meta := toolbinding.MergeEventMeta(toolbinding.ToolMeta(name))
 	payload := toolEventPayload(call, "completed", input)
 	payload.Output = session.CloneState(output)
 	return &session.Event{

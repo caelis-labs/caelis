@@ -9,7 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -66,16 +65,16 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		}
 		observation.Apply(event.Tool, def, effectErr == nil)
 		projection := hookrun.FromContext(ctx).Hooks.ToolProjection
-		message, _, viewErr := chat.ProjectToolResult(ctx, def, call, full, callErr, projection.Preview)
+		message, _, viewErr := toolbinding.ProjectResult(ctx, def, call, full, callErr, projection.Preview)
 		processingErr = viewErr
 		if viewErr != nil {
 			observation.BuiltinDisplay = nil
 		}
 		event.Message = &message
 		if ownsNestedCommandPresentation(ctx, call, source) {
-			chat.ApplyRuntimeToolResultPresentation(event, full, source, callErr, observation.EventMeta())
+			toolbinding.ApplyResultPresentation(event, full, callErr, "", observation.EventMeta(), toolbinding.TaskResultSourceMeta(true))
 		} else if callErr == nil && processingErr == nil && isCodeModeChild(ctx) && len(observation.BuiltinDisplay) > 0 {
-			chat.ApplyRuntimeToolResultPresentation(event, full, nil, nil, observation.EventMeta())
+			toolbinding.ApplyResultPresentation(event, full, nil, "", observation.EventMeta(), toolbinding.TaskResultSourceMeta(false))
 		}
 		event.Tool.ErrorCode = string(errorcode.CodeOf(callErr))
 		event.Tool.ProcessingFailure = hookrun.ProcessingFailure(errors.Join(callErr, processingErr))
@@ -145,6 +144,6 @@ func (o nestedCommandObserver) ObserveToolResult(progress toolbinding.Progress) 
 		Actor: session.ActorRef{Kind: session.ActorKindTool, ID: fact.ID, Name: fact.Name},
 		Tool:  &fact,
 	}
-	chat.ApplyRuntimeToolResultPresentation(event, progress.Result, o.target, nil, progress.EventMeta)
+	toolbinding.ApplyResultPresentation(event, progress.Result, nil, "", progress.EventMeta, toolbinding.TaskResultSourceMeta(toolbinding.IsTaskResultSource(o.target)))
 	o.publish(event)
 }

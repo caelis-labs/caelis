@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -46,7 +47,7 @@ func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t 
 		t.Fatalf("canonical result still exceeds policy: %#v", info)
 	}
 	call := model.ToolCall{ID: "call-json", Name: "ECHO", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	response := message.ToolResponse()
 	if response == nil {
 		t.Fatal("ToolResponse() = nil, want provider-facing artifact metadata")
@@ -328,7 +329,7 @@ func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(
 				t.Fatalf("event provenance = %#v, want collision marker", provenance)
 			}
 			call := model.ToolCall{ID: "forged-" + tt.name, Name: "ECHO", Args: `{}`}
-			message := toolResultMessageFromCanonical(call, canonical, nil)
+			message := toolbinding.ResultMessage(call, canonical, nil)
 			response := message.ToolResponse()
 			if response == nil {
 				t.Fatal("ToolResponse() = nil")
@@ -350,7 +351,7 @@ func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.
 	})}}}
 	canonical, eventMeta := (tool.ResultProjection{}).Project(t.Context(), result)
 	call := model.ToolCall{ID: "forged-replay", Name: "ECHO", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
 
 	root := t.TempDir()
@@ -416,7 +417,7 @@ func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
 		},
 	}
 	canonical, eventMeta := (tool.ResultProjection{}).Project(t.Context(), result)
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
 	var businessValues []json.RawMessage
 	for _, part := range message.ToolResults()[0].Content {
@@ -485,7 +486,7 @@ func TestLargeInlineImageResultSurvivesSessionFileReload(t *testing.T) {
 		tool.StructuredContent{Value: mustJSON(map[string]any{"outcome": "succeeded"})},
 	}}
 	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	event := toolResultEvent(call, canonical, nil, &message)
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-large-result" }})
 	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
@@ -524,7 +525,7 @@ func TestCanonicalArtifactMetadataPreservesTaskStateAndInvocationStatus(t *testi
 	})}}}
 	canonical, truncationMeta := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), result)
 	call := model.ToolCall{ID: "task-wait-artifact", Name: "Task", Args: `{"action":"wait","handle":"command-task"}`}
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	event := toolResultEvent(call, canonical, nil, &message, truncationMeta)
 	if event.Tool == nil {
 		t.Fatal("tool event = nil")

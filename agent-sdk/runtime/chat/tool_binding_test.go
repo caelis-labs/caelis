@@ -62,7 +62,10 @@ func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
 			if got := event.Tool.Status; got != test.wantStatus {
 				t.Fatalf("tool status = %q, want %q", got, test.wantStatus)
 			}
-			if got := runtimeTaskKind(event.Meta); got != test.wantRuntimeKind {
+			caelis, _ := event.Meta["caelis"].(map[string]any)
+			runtimeMeta, _ := caelis["runtime"].(map[string]any)
+			taskMeta, _ := runtimeMeta["task"].(map[string]any)
+			if got, _ := taskMeta["kind"].(string); got != test.wantRuntimeKind {
 				t.Fatalf("runtime task kind = %q, want %q; meta=%#v", got, test.wantRuntimeKind, event.Meta)
 			}
 		})

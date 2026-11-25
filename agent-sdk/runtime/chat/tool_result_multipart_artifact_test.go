@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -76,7 +77,7 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 				t.Fatal("canonical multipart result still needs truncation")
 			}
 			call := model.ToolCall{ID: "multipart", Name: "fixture", Args: `{}`}
-			message := toolResultMessageFromCanonical(call, canonical, nil)
+			message := toolbinding.ResultMessage(call, canonical, nil)
 			event := session.CanonicalizeEvent(toolResultEvent(call, canonical, nil, &message, meta))
 			if err := session.ValidateDurableCoreEvent(event); err != nil {
 				t.Fatal(err)
@@ -127,7 +128,7 @@ func TestCanonicalMultipartResultArtifactFailureStaysBounded(t *testing.T) {
 		}
 	}
 	call := model.ToolCall{ID: "quota", Name: "fixture", Args: `{}`}
-	message := toolResultMessageFromCanonical(call, canonical, nil)
+	message := toolbinding.ResultMessage(call, canonical, nil)
 	if err := session.ValidateDurableCoreEvent(session.CanonicalizeEvent(toolResultEvent(call, canonical, nil, &message, meta))); err != nil {
 		t.Fatal(err)
 	}
