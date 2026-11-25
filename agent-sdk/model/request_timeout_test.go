@@ -9,6 +9,48 @@ import (
 	"time"
 )
 
+type retryTimeoutProbe struct {
+	budgets []time.Duration
+}
+
+func (*retryTimeoutProbe) Name() string { return "fixture" }
+
+func (*retryTimeoutProbe) RequestTimeout() time.Duration { return time.Second }
+
+func (m *retryTimeoutProbe) Generate(ctx context.Context, _ *Request) iter.Seq2[*StreamEvent, error] {
+	return func(yield func(*StreamEvent, error) bool) {
+		deadline, _ := ctx.Deadline()
+		m.budgets = append(m.budgets, time.Until(deadline))
+		if len(m.budgets) == 1 {
+			<-ctx.Done()
+			yield(nil, ctx.Err())
+			return
+		}
+		yield(StreamEventFromResponse(&Response{TurnComplete: true}), nil)
+	}
+}
+
+func TestRetryUsesProviderTimeoutForEachAttempt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inner := &retryTimeoutProbe{}
+		llm := WithRetry(inner, RetryConfig{MaxRetries: 1, BaseDelay: 2 * time.Second, MaxDelay: 2 * time.Second})
+		var receipts []Invocation
+		ctx := WithInvocationObserver(t.Context(), func(in Invocation) { receipts = append(receipts, in) })
+		for _, err := range Generate(ctx, llm, &Request{}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(inner.budgets) != 2 || inner.budgets[0] != time.Second || inner.budgets[1] != time.Second {
+			t.Fatalf("actual attempt budgets = %v, want two fresh provider timeouts", inner.budgets)
+		}
+		if len(receipts) != 2 || receipts[0].Outcome != "failed" || receipts[1].Outcome != "completed" ||
+			receipts[1].StartedAt.Sub(receipts[0].FinishedAt) < time.Second {
+			t.Fatalf("retry waiting consumed the next attempt or changed accounting: %+v", receipts)
+		}
+	})
+}
+
 type consumerDeadlineLLM struct {
 	final, reportContext bool
 	calls                int
