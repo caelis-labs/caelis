@@ -226,13 +226,10 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	if err != nil {
 		if strings.TrimSpace(snapshot.Ref.TaskID) != "" {
 			payload := taskToolPayload(snapshot)
-			if diag, ok := commanddiag.Best(commanddiag.Input{
-				ToolName: shell.RunCommandToolName, Command: command,
-				Error: strings.TrimSpace(err.Error()), ExitCode: 1,
-			}); ok {
-				if hint := strings.TrimSpace(diag.Hint); hint != "" {
-					payload["system_hint"] = hint
-				}
+			if hint := commanddiag.Hint(commanddiag.Input{
+				Command: command, Error: strings.TrimSpace(err.Error()), ExitCode: 1,
+			}); hint != "" {
+				payload["system_hint"] = hint
 			}
 			result, _ := taskSnapshotToolResultWithPayload(ctx, snapshot, payload)
 			if approved && !isCommandToolError(err) {
@@ -298,22 +295,19 @@ func commandStartDiagnosticToolResult(name, command string, err error) (tool.Res
 	if err == nil {
 		return tool.Result{}, false
 	}
-	diag, ok := commanddiag.Best(commanddiag.Input{
-		ToolName: shell.RunCommandToolName,
+	hint := commanddiag.Hint(commanddiag.Input{
 		Command:  command,
 		Error:    strings.TrimSpace(err.Error()),
 		ExitCode: 1,
 	})
-	if !ok {
+	if hint == "" {
 		return tool.Result{}, false
 	}
 	payload := map[string]any{
-		"state":     "failed",
-		"error":     strings.TrimSpace(err.Error()),
-		"tool_name": strings.TrimSpace(name),
-	}
-	if hint := strings.TrimSpace(diag.Hint); hint != "" {
-		payload["system_hint"] = hint
+		"state":       "failed",
+		"error":       strings.TrimSpace(err.Error()),
+		"tool_name":   strings.TrimSpace(name),
+		"system_hint": hint,
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{

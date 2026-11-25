@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
@@ -57,8 +56,7 @@ func (tm *taskRuntime) finalizeTerminalCommand(
 	stderrText := result.Stderr
 	finalText := terminalFinalText(outputText, stdoutText, stderrText, resultErr)
 	finalOutputText := terminalOutputText(outputText, stdoutText, stderrText)
-	diagnostic, hasDiagnostic := commanddiag.Best(commanddiag.Input{
-		ToolName: shell.RunCommandToolName,
+	hint := commanddiag.Hint(commanddiag.Input{
 		Command:  command,
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
@@ -104,10 +102,8 @@ func (tm *taskRuntime) finalizeTerminalCommand(
 			task.result["error_code"] = code
 		}
 	}
-	if hasDiagnostic {
-		if hint := strings.TrimSpace(diagnostic.Hint); hint != "" {
-			task.result["system_hint"] = hint
-		}
+	if hint != "" {
+		task.result["system_hint"] = hint
 	}
 	task.emitOutputTerminalLocked(state, status, commandExitCodeAvailable(state, result.ExitCode, resultErr))
 	snapshot := commandObservationSnapshot(task.snapshotLocked(status), exactStartCursor, exactOutputDelta)

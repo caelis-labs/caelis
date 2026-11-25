@@ -19,54 +19,50 @@ import (
 const (
 	RunCommandToolName       = "RunCommand"
 	defaultRunCommandTimeout = 30 * time.Minute
-	defaultRunCommandIdle    = 0
 )
 
 var runCommandAllowedArgs = []string{"command", "workdir", "yield_time_ms", "tty", "sandbox_permissions", "justification"}
 
+// ValidateRunCommandArgs validates command options for the Runtime wrapper,
+// which accepts the legacy spelling for default execution.
 func ValidateRunCommandArgs(args map[string]any) error {
+	_, err := validateRunCommandArgs(args, true)
+	return err
+}
+
+func validateRunCommandArgs(args map[string]any, allowLegacy bool) (bool, error) {
 	if err := tool.RejectUnknownArgs(args, runCommandAllowedArgs...); err != nil {
-		return err
+		return false, err
 	}
-	permission := tool.CommandSandboxPermissionUseDefault
-	if raw, present := args["sandbox_permissions"]; present && raw != nil {
-		value, ok := raw.(string)
-		if !ok {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"sandbox_permissions\" must be string")
-		}
-		normalized, err := tool.NormalizeCommandSandboxPermission(value, true)
-		if err != nil {
-			return err
-		}
-		permission = normalized
+	value, err := argparse.String(args, "sandbox_permissions", false)
+	if err != nil {
+		return false, tool.NewError(tool.ErrorCodeInvalidInput, err.Error())
 	}
-	justification := ""
-	if raw, present := args["justification"]; present && raw != nil {
-		value, ok := raw.(string)
-		if !ok {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"justification\" must be string")
-		}
-		justification = value
+	permission, err := tool.NormalizeCommandSandboxPermission(value, allowLegacy)
+	if err != nil {
+		return false, err
 	}
-	if _, err := argparse.Bool(args, "tty", false); err != nil {
-		return err
+	justification, err := argparse.String(args, "justification", false)
+	if err != nil {
+		return false, tool.NewError(tool.ErrorCodeInvalidInput, err.Error())
 	}
-	if permission == tool.CommandSandboxPermissionRequireEscalated {
-		if strings.TrimSpace(justification) == "" {
-			return tool.NewError(tool.ErrorCodeInvalidInput, "arg \"justification\" is required when sandbox_permissions is require_escalated")
-		}
+	tty, err := argparse.Bool(args, "tty", false)
+	if err != nil {
+		return false, err
 	}
-	return nil
+	if permission == tool.CommandSandboxPermissionRequireEscalated && strings.TrimSpace(justification) == "" {
+		return false, tool.NewError(tool.ErrorCodeInvalidInput, "arg \"justification\" is required when sandbox_permissions is require_escalated")
+	}
+	return tty, nil
 }
 
 type RunCommandConfig struct {
-	Timeout     time.Duration
-	IdleTimeout time.Duration
-	Runtime     sandbox.Runtime
+	Timeout time.Duration
+	Runtime sandbox.Runtime
 }
 
 type RunCommandTool struct {
-	cfg     RunCommandConfig
+	timeout time.Duration
 	runtime sandbox.Runtime
 }
 
@@ -78,10 +74,7 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultRunCommandTimeout
 	}
-	if cfg.IdleTimeout <= 0 {
-		cfg.IdleTimeout = defaultRunCommandIdle
-	}
-	return &RunCommandTool{cfg: cfg, runtime: resolvedRuntime}, nil
+	return &RunCommandTool{timeout: cfg.Timeout, runtime: resolvedRuntime}, nil
 }
 
 func (t *RunCommandTool) Definition() tool.Definition {
@@ -146,7 +139,8 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := ValidateRunCommandArgs(args); err != nil {
+	tty, err := validateRunCommandArgs(args, false)
+	if err != nil {
 		return tool.Result{}, err
 	}
 	command, err := argparse.String(args, "command", true)
@@ -163,22 +157,6 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if _, err := argparse.Int(args, "yield_time_ms", 0); err != nil {
 		return tool.Result{}, err
 	}
-	tty, err := argparse.Bool(args, "tty", false)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	sandboxPermissions, err := argparse.String(args, "sandbox_permissions", false)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if _, present := args["sandbox_permissions"]; present {
-		if _, err := tool.NormalizeCommandSandboxPermission(sandboxPermissions, false); err != nil {
-			return tool.Result{}, err
-		}
-	}
-	if _, err := argparse.String(args, "justification", false); err != nil {
-		return tool.Result{}, err
-	}
 	var (
 		result sandbox.CommandResult
 	)
@@ -186,7 +164,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		req := sandbox.CommandRequest{
 			Command:     command,
 			Dir:         workingDir,
-			Timeout:     t.cfg.Timeout,
+			Timeout:     t.timeout,
 			TTY:         tty,
 			Constraints: constraints,
 		}
@@ -196,7 +174,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		result, err = t.runtime.Run(ctx, sandbox.CommandRequest{
 			Command:     command,
 			Dir:         workingDir,
-			Timeout:     t.cfg.Timeout,
+			Timeout:     t.timeout,
 			TTY:         tty,
 			Constraints: constraints,
 		})
@@ -214,7 +192,7 @@ func (t *RunCommandTool) CommandTimeout() time.Duration {
 	if t == nil {
 		return 0
 	}
-	return t.cfg.Timeout
+	return t.timeout
 }
 
 func defaultRunCommandConstraints(runtime sandbox.Runtime) sandbox.Constraints {
@@ -244,15 +222,6 @@ func defaultRunCommandConstraints(runtime sandbox.Runtime) sandbox.Constraints {
 			constraints.PathRules = defaults.PathRules
 		}
 	}
-	if constraints.Route == "" {
-		constraints.Route = sandbox.RouteSandbox
-	}
-	if constraints.Permission == "" {
-		constraints.Permission = sandbox.PermissionWorkspaceWrite
-	}
-	if constraints.Network == "" {
-		constraints.Network = sandbox.NetworkEnabled
-	}
 	return constraints
 }
 
@@ -280,8 +249,7 @@ func runCommandPayloadForCommand(command string, result sandbox.CommandResult, e
 	if commandExitCodeAvailable(result.ExitCode, err) {
 		payload["exit_code"] = result.ExitCode
 	}
-	if diag, ok := commanddiag.Best(commanddiag.Input{
-		ToolName: RunCommandToolName,
+	if hint := commanddiag.Hint(commanddiag.Input{
 		Command:  command,
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
@@ -289,10 +257,8 @@ func runCommandPayloadForCommand(command string, result sandbox.CommandResult, e
 		ExitCode: result.ExitCode,
 		Route:    result.Route,
 		Backend:  result.Backend,
-	}); ok {
-		if hint := strings.TrimSpace(diag.Hint); hint != "" {
-			payload["system_hint"] = hint
-		}
+	}); hint != "" {
+		payload["system_hint"] = hint
 	}
 	return payload
 }

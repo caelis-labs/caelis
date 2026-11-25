@@ -7,17 +7,6 @@ import (
 )
 
 const (
-	CodeWindowsMSYSSSHSignalPipe   = "windows_msys_ssh_signal_pipe"
-	CodeWindowsSChannelCredentials = "windows_schannel_no_credentials"
-	CodeGitIndexLockSandboxDenied  = "git_index_lock_sandbox_denied"
-	CodeWindowsGitCredential       = "windows_git_credential_sandbox_incompatible"
-	CodeGoPrivateDependency        = "go_private_dependency_sandbox_incompatible"
-	CodeSandboxCacheDenied         = "sandbox_cache_write_denied"
-	CodeWindowsSandboxACLDenied    = "windows_sandbox_acl_denied"
-	CodeHostExecutionApproval      = "host_execution_requires_approval"
-)
-
-const (
 	// hintEscalationOnce is the only allowed escalation teaching string: same
 	// command, once, no habit transfer to later similar commands.
 	hintEscalationOnce = "If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a justification that cites this failure. Do not escalate later similar commands by habit."
@@ -32,7 +21,6 @@ const (
 )
 
 type Input struct {
-	ToolName string
 	Command  string
 	Stdout   string
 	Stderr   string
@@ -40,65 +28,45 @@ type Input struct {
 	ExitCode int
 	Route    sandbox.Route
 	Backend  sandbox.Backend
-	GOOS     string
 }
 
-type Diagnostic struct {
-	Code                        string
-	Hint                        string
-	Severity                    string
-	RetryableWithHost           bool
-	SuggestedSandboxPermissions string
-	SuggestedPrefixRule         []string
-}
-
-func Best(input Input) (Diagnostic, bool) {
+// Hint returns model-facing guidance for a recognized failed command.
+func Hint(input Input) string {
 	if !isFailedCommand(input) {
-		return Diagnostic{}, false
+		return ""
 	}
 	text := diagnosticText(input)
 	lower := strings.ToLower(text)
 	if isHostExecutionApprovalRequired(lower) {
-		return hostRetryDiagnostic(input, CodeHostExecutionApproval, sandbox.HostExecutionRequiresApprovalMessage), true
+		return sandbox.HostExecutionRequiresApprovalMessage
 	}
 	if isGitIndexLockSandboxDenied(input, lower) {
-		return hostRetryDiagnostic(input, CodeGitIndexLockSandboxDenied, hintGitIndexLockSandbox), true
+		return hintGitIndexLockSandbox
 	}
 	if isSandboxCacheDenied(input, lower) {
-		return hostRetryDiagnostic(input, CodeSandboxCacheDenied, hintSandboxCacheDenied), true
+		return hintSandboxCacheDenied
 	}
 	if !isWindowsSandbox(input) {
-		return Diagnostic{}, false
+		return ""
 	}
 	switch {
 	case isWindowsSandboxACLSetupDenied(lower):
-		return hostRetryDiagnostic(input, CodeWindowsSandboxACLDenied, hintWindowsSandboxACLDenied), true
+		return hintWindowsSandboxACLDenied
 	case isMSYSSSHSignalPipeFailure(lower):
-		return hostRetryDiagnostic(input, CodeWindowsMSYSSSHSignalPipe, hintWindowsMSYSSSHSignalPipe), true
+		return hintWindowsMSYSSSHSignalPipe
 	case isSChannelNoCredentialsFailure(lower):
-		return hostRetryDiagnostic(input, CodeWindowsSChannelCredentials, hintWindowsSChannel), true
+		return hintWindowsSChannel
 	case isWindowsGitCredentialFailure(lower):
-		return hostRetryDiagnostic(input, CodeWindowsGitCredential, hintWindowsGitCredential), true
+		return hintWindowsGitCredential
 	case isGoPrivateDependencyFailure(input, lower):
-		return hostRetryDiagnostic(input, CodeGoPrivateDependency, hintGoPrivateDependency), true
+		return hintGoPrivateDependency
 	default:
-		return Diagnostic{}, false
+		return ""
 	}
 }
 
 func isWindowsSandbox(input Input) bool {
-	if goos := strings.TrimSpace(input.GOOS); goos != "" && !strings.EqualFold(goos, "windows") {
-		return false
-	}
-	if !isSandbox(input) {
-		return false
-	}
-	switch sandbox.CanonicalBackend(input.Backend) {
-	case sandbox.BackendWindows:
-		return true
-	default:
-		return false
-	}
+	return isSandbox(input) && sandbox.CanonicalBackend(input.Backend) == sandbox.BackendWindows
 }
 
 func isSandbox(input Input) bool {
@@ -181,48 +149,6 @@ func hasGitIndexLockEvidence(lower string) bool {
 		strings.Contains(lower, "unable to create") ||
 		strings.Contains(lower, "unable to create file") ||
 		strings.Contains(lower, "fatal:")
-}
-
-func hostRetryDiagnostic(input Input, code string, hint string) Diagnostic {
-	return Diagnostic{
-		Code:                        code,
-		Hint:                        hint,
-		Severity:                    "warning",
-		RetryableWithHost:           true,
-		SuggestedSandboxPermissions: "require_escalated",
-		SuggestedPrefixRule:         suggestedPrefixRule(input.Command),
-	}
-}
-
-func suggestedPrefixRule(command string) []string {
-	fields := strings.Fields(strings.TrimSpace(command))
-	if len(fields) == 0 {
-		return nil
-	}
-	first := strings.ToLower(commandBase(fields[0]))
-	switch first {
-	case "go", "go.exe":
-		if len(fields) >= 2 {
-			switch strings.ToLower(strings.Trim(fields[1], `"'`)) {
-			case "test", "mod", "list", "get", "work", "run", "build":
-				return []string{fields[0], fields[1]}
-			}
-		}
-	case "git", "git.exe":
-		if len(fields) >= 2 && isGitSubcommand(fields[1]) {
-			return []string{fields[0], fields[1]}
-		}
-	}
-	return nil
-}
-
-func isGitSubcommand(value string) bool {
-	switch strings.ToLower(strings.Trim(value, `"'`)) {
-	case "add", "clone", "fetch", "pull", "push", "submodule":
-		return true
-	default:
-		return false
-	}
 }
 
 func isWindowsSandboxACLSetupDenied(lower string) bool {
