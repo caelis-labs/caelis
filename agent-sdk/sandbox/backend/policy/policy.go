@@ -1,12 +1,14 @@
 package policy
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 )
 
 type Type string
@@ -31,6 +33,36 @@ type Policy struct {
 	WriteOverrides   []string
 	HiddenRoots      []string
 	ReadOnlySubpaths []string
+}
+
+// ReadRoot pairs a configured absolute path with its physical filesystem path.
+type ReadRoot struct {
+	Path     string
+	Physical string
+}
+
+// ReadCeiling returns the configured roots, preserving nil for ambient reads
+// and an empty slice for a ceiling that grants no reads.
+func (p Policy) ReadCeiling() ([]ReadRoot, error) {
+	if p.ResourceLimits == nil || p.ResourceLimits.ReadPaths == nil {
+		return nil, nil
+	}
+	roots := make([]ReadRoot, 0, len(p.ResourceLimits.ReadPaths))
+	for _, root := range p.ResourceLimits.ReadPaths {
+		if !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
+			return nil, fmt.Errorf("sandbox: read ceiling requires absolute non-root paths")
+		}
+		root = filepath.Clean(root)
+		physical, err := fsboundary.ResolvePath(root)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox: resolve read ceiling: %w", err)
+		}
+		if filepath.Dir(root) == root || filepath.Dir(physical) == physical {
+			return nil, fmt.Errorf("sandbox: read ceiling requires absolute non-root paths")
+		}
+		roots = append(roots, ReadRoot{Path: root, Physical: physical})
+	}
+	return roots, nil
 }
 
 func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {

@@ -33,8 +33,8 @@ func TestDirectoryLinksDoNotExpandWriteRoots(t *testing.T) {
 	}
 	for _, suffix := range []string{"existing.txt", filepath.Join("new", "file.txt")} {
 		path := filepath.Join(link, suffix)
-		if got := ResolvePathWithSymlinks(path); got != filepath.Join(canonical, suffix) {
-			t.Fatalf("physical path = %q; want %q", got, filepath.Join(canonical, suffix))
+		if got, err := ResolvePath(path); err != nil || got != filepath.Join(canonical, suffix) {
+			t.Fatalf("physical path = %q, %v; want %q", got, err, filepath.Join(canonical, suffix))
 		}
 		if IsWithinRoots(path, []string{workspace}, nil) {
 			t.Fatalf("directory link expanded the workspace write root: %s", path)
@@ -42,5 +42,11 @@ func TestDirectoryLinksDoNotExpandWriteRoots(t *testing.T) {
 		if !IsWithinRoots(path, []string{outside}, nil) {
 			t.Fatalf("explicit physical write root did not admit %s", path)
 		}
+	}
+	if err := os.RemoveAll(outside); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ResolvePath(filepath.Join(link, "existing.txt")); err == nil {
+		t.Fatalf("resolution through a dangling directory link returned %q", got)
 	}
 }

@@ -1,8 +1,10 @@
 package fsboundary
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -68,46 +70,74 @@ func ResolvePathWithSymlinks(path string) string {
 	if path == "" {
 		return ""
 	}
-	clean := filepath.Clean(path)
-	if resolved, err := ResolveExistingPath(clean); err == nil {
-		return filepath.Clean(resolved)
+	resolved, err := ResolvePath(path)
+	if err != nil {
+		return filepath.Clean(path)
 	}
+	return resolved
+}
 
-	cur := clean
-	suffix := make([]string, 0, 4)
+// ResolvePath resolves symbolic links, including those above a missing suffix.
+// An existing component that cannot be resolved is an error.
+func ResolvePath(path string) (string, error) {
+	if path == "" {
+		return "", os.ErrInvalid
+	}
+	cur := filepath.Clean(path)
+	var suffix []string
 	for {
-		if cur == "" {
-			return clean
-		}
-		if _, err := os.Lstat(cur); err == nil {
-			resolved, err := ResolveExistingPath(cur)
-			if err != nil {
-				return clean
-			}
-			resolved = filepath.Clean(resolved)
+		resolved, err := ResolveExistingPath(cur)
+		if err == nil {
 			for i := len(suffix) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, suffix[i])
 			}
-			return filepath.Clean(resolved)
+			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		// A dangling link also returns ErrNotExist from resolution. Only
+		// unresolved components that are themselves absent can be appended.
+		if _, statErr := os.Lstat(cur); statErr == nil {
+			return "", err
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return "", statErr
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return clean
+			return "", err
 		}
 		suffix = append(suffix, filepath.Base(cur))
 		cur = parent
 	}
 }
 
+// PathIsUnder reports whether the target is the root or one of its descendants.
 func PathIsUnder(target, root string) bool {
-	if target == root {
+	if target == "" || root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	if runtime.GOOS != "windows" {
 		return true
 	}
-	prefix := root
-	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
-		prefix += string(filepath.Separator)
+
+	// Windows Rel accepts case variants. Confirm that a spelling difference
+	// actually names the same directory on filesystems with case-sensitive paths.
+	ancestor := filepath.Clean(target)
+	for ; rel != "."; rel = filepath.Dir(rel) {
+		ancestor = filepath.Dir(ancestor)
 	}
-	return strings.HasPrefix(target, prefix)
+	root = filepath.Clean(root)
+	if ancestor == root {
+		return true
+	}
+	ancestorInfo, ancestorErr := os.Stat(ancestor)
+	rootInfo, rootErr := os.Stat(root)
+	return ancestorErr == nil && rootErr == nil && os.SameFile(ancestorInfo, rootInfo)
 }
 
 func IsWithinRoots(target string, roots []string, ctx PathContext) bool {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 )
@@ -40,23 +41,55 @@ func TestBuildBwrapArgsPreservesHostReadsAndManagedMounts(t *testing.T) {
 
 func TestBuildBwrapArgsReadCeilingRejectsAmbientRoot(t *testing.T) {
 	workDir := t.TempDir()
-	for _, roots := range [][]string{{}, {workDir, "/usr", "/bin"}} {
-		p := policy.Default(sandbox.Config{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: roots, WritePaths: []string{workDir}, Network: sandbox.NetworkDisabled}}, sandbox.Constraints{Permission: sandbox.PermissionFullAccess, Network: sandbox.NetworkEnabled})
+	for _, roots := range [][]string{nil, {}, {workDir, "/usr", "/bin"}} {
+		var writes []string
+		if roots == nil || len(roots) > 0 {
+			writes = []string{workDir}
+		}
+		p := policy.Default(sandbox.Config{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: roots, WritePaths: writes, Network: sandbox.NetworkDisabled}}, sandbox.Constraints{Permission: sandbox.PermissionFullAccess, Network: sandbox.NetworkEnabled})
 		args, err := buildBwrapArgs(p, workDir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if hasBwrapPair(args, "--ro-bind", "/", "/") || !containsString(args, "--unshare-net") {
-			t.Fatalf("mandatory ceiling widened: %v", args)
+		if hasBwrapPair(args, "--ro-bind", "/", "/") != (roots == nil) || !containsString(args, "--unshare-net") {
+			t.Fatalf("mounts for ReadPaths %v: %v", roots, args)
 		}
 		for _, root := range roots {
-			if !hasBwrapPair(args, "--ro-bind", root, root) {
+			if !hasBwrapPair(args, "--ro-bind", fsboundary.ResolvePathWithSymlinks(root), root) {
 				t.Fatalf("missing explicit system/work mount: %s", root)
 			}
+		}
+		if hasBwrapPair(args, "--bind", workDir, workDir) != (len(writes) != 0) {
+			t.Fatalf("write mounts for ReadPaths %v: %v", roots, args)
 		}
 	}
 	if _, err := buildBwrapArgs(policy.Policy{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{"/"}}}, workDir); err == nil {
 		t.Fatal("ambient root read grant accepted")
+	}
+}
+
+func TestBuildBwrapArgsRejectsWritableBindsOutsideReadCeiling(t *testing.T) {
+	parent := t.TempDir()
+	allowed := filepath.Join(parent, "allowed")
+	outside := filepath.Join(parent, "outside")
+	for _, dir := range []string{allowed, outside} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(allowed, "alias")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []sandbox.ResourceLimits{
+		{ReadPaths: []string{}, WritePaths: []string{allowed}},
+		{ReadPaths: []string{allowed}, WritePaths: []string{outside}},
+		{ReadPaths: []string{allowed}, WritePaths: []string{link}},
+	} {
+		p := policy.Default(sandbox.Config{ResourceLimits: &test}, sandbox.Constraints{})
+		if _, err := buildBwrapArgs(p, allowed); err == nil || !strings.Contains(err.Error(), "inside mandatory read ceiling") {
+			t.Fatalf("limits = %+v, error = %v", test, err)
+		}
 	}
 }
 

@@ -14,6 +14,81 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
+func TestExplicitReadCeilingNative(t *testing.T) {
+	if os.Getenv("CAELIS_LINUX_SANDBOX_SMOKE_E2E") != "1" {
+		t.Skip("set CAELIS_LINUX_SANDBOX_SMOKE_E2E=1 for native Bubblewrap evidence")
+	}
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	outside := filepath.Join(root, "outside")
+	for _, dir := range []string{work, outside} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "input.txt"), []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	roots := []string{work}
+	for _, path := range []string{"/usr", "/bin", "/lib", "/lib64"} {
+		if _, err := os.Stat(path); err == nil {
+			roots = append(roots, path)
+		}
+	}
+	cfg := sandbox.Config{
+		CWD: work, RequestedBackend: sandbox.BackendBwrap,
+		ResourceLimits: &sandbox.ResourceLimits{ReadPaths: roots, WritePaths: []string{work}, Network: sandbox.NetworkDisabled},
+	}
+	rt, err := sandbox.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+	constraints := sandbox.Constraints{Route: sandbox.RouteHost, Permission: sandbox.PermissionFullAccess}
+	fsys := rt.(sandbox.FileSystemProvider).FileSystemFor(constraints)
+	if entries, err := fsys.ReadDir(work); err != nil || len(entries) != 1 || entries[0].Name() != "input.txt" {
+		t.Fatalf("allowed ReadDir = %v, %v", entries, err)
+	}
+	if _, err := fsys.ReadDir(outside); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("denied ReadDir = %v", err)
+	}
+	for _, mode := range []string{"Run", "Start", "TTY"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			req := sandbox.CommandRequest{
+				Command: `set -eu
+[ "$(/bin/cat "$ALLOWED/input.txt")" = fixture ]
+set -- "$ALLOWED"/*
+[ "$#" -eq 1 ]
+[ "$1" = "$ALLOWED/input.txt" ]
+[ ! -e "$DENIED/input.txt" ]
+[ ! -d "$DENIED" ]
+printf 'ceiling-ok'`,
+				Dir: work, Env: map[string]string{"ALLOWED": work, "DENIED": outside},
+				Constraints: constraints, TTY: mode == "TTY",
+			}
+			var result sandbox.CommandResult
+			var err error
+			if mode == "Run" {
+				result, err = rt.Run(ctx, req)
+			} else {
+				session, startErr := rt.Start(ctx, req)
+				if startErr != nil {
+					t.Fatal(startErr)
+				}
+				if _, waitErr := session.Wait(ctx, 10*time.Second); waitErr != nil {
+					t.Fatal(waitErr)
+				}
+				result, err = session.Result(ctx)
+			}
+			if err != nil || result.ExitCode != 0 || result.Backend != sandbox.BackendBwrap || result.Route != sandbox.RouteSandbox || result.Stdout != "ceiling-ok" {
+				t.Fatalf("command error = %v; result = %+v", err, result)
+			}
+		})
+	}
+}
+
 func TestExecutionConfigurationSmoke(t *testing.T) {
 	if os.Getenv("CAELIS_LINUX_SANDBOX_SMOKE_E2E") != "1" {
 		t.Skip("set CAELIS_LINUX_SANDBOX_SMOKE_E2E=1 to run native bwrap execution configuration tests")
