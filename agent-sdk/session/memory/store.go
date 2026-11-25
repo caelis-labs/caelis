@@ -492,16 +492,11 @@ func (s *Store) PutParticipant(
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
 		return session.Session{}, err
 	}
-	if strings.TrimSpace(req.Binding.ID) != "" {
-		expected := strings.TrimSpace(req.Binding.DelegationID)
-		if req.ExpectedDelegationID != nil {
-			expected = strings.TrimSpace(*req.ExpectedDelegationID)
-		}
-		if err := session.CheckParticipantDelegation(&record.session, req.Binding.ID, expected); err != nil {
-			return session.Session{}, err
-		}
+	changed, err := session.PutParticipantBindingWithDelegation(&record.session, req.Binding, req.ExpectedDelegationID)
+	if err != nil {
+		return session.Session{}, err
 	}
-	if session.PutParticipantBinding(&record.session, req.Binding) {
+	if changed {
 		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
@@ -526,16 +521,7 @@ func (s *Store) PutParticipantWithEvent(
 		record,
 		[]*session.Event{req.Event},
 		func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
-			if strings.TrimSpace(req.Binding.ID) != "" {
-				expected := strings.TrimSpace(req.Binding.DelegationID)
-				if req.ExpectedDelegationID != nil {
-					expected = strings.TrimSpace(*req.ExpectedDelegationID)
-				}
-				if err := session.CheckParticipantDelegation(activeSession, req.Binding.ID, expected); err != nil {
-					return false, err
-				}
-			}
-			return session.PutParticipantBinding(activeSession, req.Binding), nil
+			return session.PutParticipantBindingWithDelegation(activeSession, req.Binding, req.ExpectedDelegationID)
 		},
 		nil,
 		req.ExpectedRevision,
@@ -567,12 +553,11 @@ func (s *Store) RemoveParticipant(
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
 		return session.Session{}, err
 	}
-	if req.ExpectedDelegationID != nil {
-		if err := session.CheckParticipantDelegation(&record.session, req.ParticipantID, *req.ExpectedDelegationID); err != nil {
-			return session.Session{}, err
-		}
+	changed, err := session.RemoveParticipantBindingWithDelegation(&record.session, req.ParticipantID, req.ExpectedDelegationID)
+	if err != nil {
+		return session.Session{}, err
 	}
-	if session.RemoveParticipantBinding(&record.session, req.ParticipantID) {
+	if changed {
 		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
@@ -597,12 +582,7 @@ func (s *Store) RemoveParticipantWithEvent(
 		record,
 		[]*session.Event{req.Event},
 		func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
-			if req.ExpectedDelegationID != nil {
-				if err := session.CheckParticipantDelegation(activeSession, req.ParticipantID, *req.ExpectedDelegationID); err != nil {
-					return false, err
-				}
-			}
-			return session.RemoveParticipantBinding(activeSession, req.ParticipantID), nil
+			return session.RemoveParticipantBindingWithDelegation(activeSession, req.ParticipantID, req.ExpectedDelegationID)
 		},
 		nil,
 		req.ExpectedRevision,

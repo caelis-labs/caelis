@@ -48,6 +48,21 @@ func CheckParticipantDelegation(activeSession *Session, participantID, expectedD
 	return nil
 }
 
+// PutParticipantBindingWithDelegation checks delegation ownership and writes
+// the binding. A nil expectedDelegation uses the binding's own delegation ID.
+func PutParticipantBindingWithDelegation(activeSession *Session, binding ParticipantBinding, expectedDelegation *string) (bool, error) {
+	if strings.TrimSpace(binding.ID) != "" {
+		expected := binding.DelegationID
+		if expectedDelegation != nil {
+			expected = *expectedDelegation
+		}
+		if err := CheckParticipantDelegation(activeSession, binding.ID, expected); err != nil {
+			return false, err
+		}
+	}
+	return PutParticipantBinding(activeSession, binding), nil
+}
+
 // PutParticipantBinding creates or replaces one participant binding in a
 // session. Empty participant IDs are appended to preserve existing store
 // behavior for invalid or synthetic bindings.
@@ -64,6 +79,17 @@ func PutParticipantBinding(activeSession *Session, binding ParticipantBinding) b
 	}
 	activeSession.Participants = append(activeSession.Participants, normalized)
 	return true
+}
+
+// RemoveParticipantBindingWithDelegation removes the binding after checking
+// delegation ownership when expectedDelegation is supplied.
+func RemoveParticipantBindingWithDelegation(activeSession *Session, participantID string, expectedDelegation *string) (bool, error) {
+	if expectedDelegation != nil {
+		if err := CheckParticipantDelegation(activeSession, participantID, *expectedDelegation); err != nil {
+			return false, err
+		}
+	}
+	return RemoveParticipantBinding(activeSession, participantID), nil
 }
 
 // RemoveParticipantBinding removes participant bindings matching participantID
