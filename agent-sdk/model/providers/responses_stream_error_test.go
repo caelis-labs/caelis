@@ -2,7 +2,9 @@ package providers
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -164,6 +166,61 @@ func TestOpenAICodexStreamErrorClassification(t *testing.T) {
 			}
 			if got := model.IsBackpressureLLMError(err); got != tt.wantBackpressure {
 				t.Errorf("backpressure = %v, want %v; error = %v", got, tt.wantBackpressure, err)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamRateLimitRetryAfterFromMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		event     string
+		wantCode  errorcode.Code
+		wantAfter time.Duration
+	}{
+		{
+			name:      "rate limit with documentation after the wait time",
+			event:     `{"type":"error","error":{"type":"tokens","code":"rate_limit_exceeded","message":"Rate limit reached. Please try again in 4.326s. Visit https://platform.openai.com/account/rate-limits to learn more."}}`,
+			wantCode:  errorcode.RateLimited,
+			wantAfter: 4326 * time.Millisecond,
+		},
+		{
+			name:     "unconfirmed rate limit does not use message delay",
+			event:    `{"type":"response.failed","response":{"error":{"code":"novel_gateway_error","message":"Please try again in 4.326s."}}}`,
+			wantCode: errorcode.Unavailable,
+		},
+		{
+			name:     "multiple retry suggestions are ambiguous",
+			event:    `{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Please try again in 5s. Please try again in 4.326s."}}}`,
+			wantCode: errorcode.RateLimited,
+		},
+		{
+			name:     "unrepresentable duration is ignored",
+			event:    `{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Please try again in 999999999999999999999999s."}}}`,
+			wantCode: errorcode.RateLimited,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var event openAICodexStreamWire
+			if err := json.Unmarshal([]byte(tt.event), &event); err != nil {
+				t.Fatalf("decode event: %v", err)
+			}
+			err := responsesStreamError("openai codex", event, openAICodexTerminalErrorCodes)
+			if got := errorcode.CodeOf(err); got != tt.wantCode {
+				t.Fatalf("error code = %q, want %q; error = %v", got, tt.wantCode, err)
+			}
+
+			var retryAfter model.RetryAfterError
+			var gotAfter time.Duration
+			if errors.As(err, &retryAfter) {
+				gotAfter = retryAfter.RetryAfter()
+			}
+			if gotAfter != tt.wantAfter {
+				t.Errorf("RetryAfter() = %s, want %s", gotAfter, tt.wantAfter)
 			}
 		})
 	}

@@ -158,7 +158,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		Compaction:   compaction,
 		Hooks: hook.Set{
 			ToolPolicy:     toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules},
-			StreamMode:     hook.StreamIncremental,
+			StreamMode:     hook.StreamIncrementalRetry,
 			ToolProjection: localResultProjection,
 		},
 		Diagnostics:          a.deps.authorities.diagnostics,

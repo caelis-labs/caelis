@@ -118,16 +118,21 @@ attempt factories identify `provider` and retain their real invocation identity,
 including attempts discarded by transport retry. A discarded candidate never
 publishes its buffered text.
 
-Caelis interactive Session assembly explicitly selects Incremental while it has
-no final-response mutators. Incremental derives live fragments and final text
-from one accumulator; already transformed text is not transformed again at the
-final boundary. Published text remains authoritative when the provider's final
-snapshot differs; a matching snapshot can fill an unstreamed suffix. UTF-8 split
-across chunks and empty chunks are supported; attempt reset discards its state.
-Irreversible output prevents automatic retry. Incremental rejects ModelResult
-and Completion registrations at assembly because they could replace published
-text. Synthetic candidates still pass through the final transformer and emit no
-speculative fragments.
+Incremental modes derive live fragments and final text from one accumulator.
+Already transformed text passes through the final boundary as is. Published
+text remains authoritative when the provider's final snapshot differs. A
+matching snapshot can fill an unstreamed suffix. The accumulator handles empty
+chunks and UTF-8 split across chunks. Both modes reject ModelResult and
+Completion registrations. Synthetic candidates use the final transformer and
+publish once the candidate is accepted.
+
+`StreamIncremental` treats published text as irreversible. Caelis uses
+`StreamIncrementalRetry`, which gives a retried request a fresh message ID and
+retires the failed attempt's live output through a transient attempt reset.
+Observers can clear that message or display the next attempt as a separate
+message. The accepted attempt alone supplies the final model response. The
+existing automatic retry rules for request completion and provider-executed
+tools apply in both modes.
 
 Completion hooks share a feedback budget of two by default. New accepted input
 invalidates the old finish decision. Runtime closes final input and drains real

@@ -29,6 +29,11 @@ func (o *liveContentOwnership) observe(event *session.Event) agentsdk.PublishedC
 		return 0
 	}
 	if session.IsUIOnly(event) {
+		if event.Lifecycle != nil && event.Lifecycle.Status == session.LifecycleStatusModelAttemptReset {
+			messageID := session.ModelAttemptResetMessageID(event.Meta)
+			delete(o.messages, liveEventContentKey(event, messageID))
+			return 0
+		}
 		published := liveNarrativeContent(event)
 		if published == 0 {
 			return 0

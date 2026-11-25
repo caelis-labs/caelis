@@ -1539,10 +1539,11 @@ func TestCollectFinalResponseAnnotatesContextWindow(t *testing.T) {
 			TotalTokens:      17,
 		},
 	}
-	final, _, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, "", nil, nil)
+	collected, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, nil, nil)
 	if err != nil {
 		t.Fatalf("collectFinalResponse() error = %v", err)
 	}
+	final := collected.response
 	if final.ContextWindowTokens != 128000 {
 		t.Fatalf("final.ContextWindowTokens = %d, want model context window", final.ContextWindowTokens)
 	}
@@ -2661,7 +2662,7 @@ func TestCollectFinalResponseRejectsImagesForTextOnlyModel(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			probe := &requestCapabilityProbeModel{}
-			_, _, err := collectFinalResponse(context.Background(), probe, test.request, "", nil, nil)
+			_, err := collectFinalResponse(context.Background(), probe, test.request, nil, nil)
 			var capabilityErr *model.CapabilityError
 			if !errors.As(err, &capabilityErr) || capabilityErr.Capability != model.CapabilityImageInput {
 				t.Fatalf("collectFinalResponse() error = %#v, want image-input capability error", err)

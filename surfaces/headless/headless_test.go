@@ -126,6 +126,48 @@ func TestRunSessionOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T)
 	}
 }
 
+func TestRunSessionOnceRetiresFailedAssistantAttempt(t *testing.T) {
+	t.Parallel()
+
+	chunk := func(id, text string) eventstream.Envelope {
+		return eventstream.Envelope{Kind: eventstream.KindSessionUpdate, Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: id,
+			Content: eventstream.TextContent{Type: "text", Text: text},
+		}}
+	}
+	reset := session.NewModelAttemptResetForMessage(model.AttemptReset{Attempt: 1, Retrying: true}, "failed")
+	for _, answer := range []string{"Recovered answer.", ""} {
+		t.Run(answer, func(t *testing.T) {
+			events := []eventstream.Envelope{
+				chunk("failed", "Partial answer."),
+				{Kind: eventstream.KindLifecycle, Lifecycle: &eventstream.Lifecycle{State: reset.Lifecycle.Status}, Meta: reset.Meta},
+			}
+			if answer != "" {
+				events = append(events, chunk("retry", answer))
+			}
+			var streamed []string
+			result, err := RunSessionOnce(t.Context(), fakeStarter{turn: newFakeACPHandle(events)}, appserver.SessionTurnStartRequest{SessionID: "session-1", Input: "hello"}, Options{
+				ObserveEnvelope: func(env eventstream.Envelope) error {
+					if update, ok := env.Update.(eventstream.ContentChunk); ok {
+						streamed = append(streamed, update.MessageID)
+					}
+					return nil
+				},
+			})
+			if err != nil || result.Output != answer {
+				t.Fatalf("output = %q, err = %v, want %q", result.Output, err, answer)
+			}
+			wantIDs := []string{"failed"}
+			if answer != "" {
+				wantIDs = append(wantIDs, "retry")
+			}
+			if !reflect.DeepEqual(streamed, wantIDs) {
+				t.Fatalf("streamed IDs = %q, want %q", streamed, wantIDs)
+			}
+		})
+	}
+}
+
 func TestRunSessionOnceReplacesTransientAssistantWithCanonicalFinal(t *testing.T) {
 	t.Parallel()
 

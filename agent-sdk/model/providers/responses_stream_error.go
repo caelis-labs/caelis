@@ -2,7 +2,9 @@ package providers
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -24,6 +26,7 @@ type responsesProviderError struct {
 	provider string
 	details  responsesStreamErrorDetails
 	class    responsesErrorClassification
+	after    time.Duration
 }
 
 var responsesTerminalErrorTypes = map[string]responsesErrorClassification{
@@ -111,6 +114,13 @@ func (e *responsesProviderError) Backpressure() bool {
 	return e != nil && e.class.backpressure
 }
 
+func (e *responsesProviderError) RetryAfter() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return e.after
+}
+
 func (e *responsesProviderError) ErrorCode() errorcode.Code {
 	if e == nil {
 		return errorcode.Unknown
@@ -133,6 +143,9 @@ func responsesStreamError(
 		provider: provider,
 		details:  details,
 		class:    class,
+	}
+	if class.errorCode == errorcode.RateLimited {
+		providerErr.after = responsesRateLimitRetryAfter(details.message)
 	}
 	if strings.EqualFold(details.code, "context_length_exceeded") ||
 		looksLikeContextOverflow(details.message, http.StatusBadRequest) {
@@ -166,6 +179,23 @@ func (d *responsesStreamErrorDetails) merge(payload *openAICodexErrorPayload) {
 	if d.message == "" {
 		d.message = strings.TrimSpace(payload.Message)
 	}
+}
+
+var responsesRateLimitRetryAfterPattern = regexp.MustCompile(`(?i)\bplease try again in ([0-9]+(?:\.[0-9]+)?)s\.(?:\s|$)`)
+
+func responsesRateLimitRetryAfter(message string) time.Duration {
+	if strings.Count(strings.ToLower(message), "please try again in") != 1 {
+		return 0
+	}
+	match := responsesRateLimitRetryAfterPattern.FindStringSubmatch(message)
+	if len(match) != 2 {
+		return 0
+	}
+	delay, err := time.ParseDuration(match[1] + "s")
+	if err != nil || delay <= 0 {
+		return 0
+	}
+	return delay
 }
 
 func classifyResponsesStreamError(

@@ -318,7 +318,6 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		*visibility = newToolVisibility(a.tools)
 		stream := a.request.StreamEnabled(false)
-		messageID := uuid.NewString()
 		request := &model.Request{
 			Messages:    *messages,
 			Tools:       visibility.modelSpecs(),
@@ -389,13 +388,17 @@ func (a *Agent) collectCanonicalModelStep(
 		modelCtx = modelHookContext(modelCtx, requestContext)
 		evidence := hook.OutputContext{RequestContext: requestContext}
 		final := cached
+		var messageID string
 		var err error
 		if final == nil {
 			evidence.OutputSource = hook.OutputProvider
-			final, a.outputStream, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+			var collected collectedResponse
+			collected, err = collectFinalResponse(modelCtx, a.model, request, watchdog, yield)
+			final, a.outputStream, messageID = collected.response, collected.stream, collected.messageID
 		} else {
 			evidence.OutputSource = hook.OutputCache
 			a.outputStream, err = newTextStream(ctx, evidence)
+			messageID = uuid.NewString()
 		}
 		for _, receipt := range receipts {
 			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {
@@ -416,7 +419,7 @@ func (a *Agent) collectCanonicalModelStep(
 		if err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		if hookrun.FromContext(ctx).Hooks.StreamMode != hook.StreamIncremental {
+		if !run.Hooks.StreamMode.PublishesIncrementally() {
 			final.Message = normalizeAssistantCitations(final.Message, *messages)
 		}
 
@@ -430,7 +433,7 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		invalidAttempts++
 		run.FinishRequest(logicalID)
-		if reset := invalidToolCallAttemptResetEvent(invalidAttempts); reset != nil {
+		if reset := invalidToolCallAttemptResetEvent(invalidAttempts, messageID); reset != nil {
 			if yield != nil && !yield(reset) {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
 			}

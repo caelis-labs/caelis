@@ -47,7 +47,7 @@ func (h Set) Validate() error {
 	}
 	switch h.StreamMode {
 	case "", StreamBuffered:
-	case StreamIncremental:
+	case StreamIncremental, StreamIncrementalRetry:
 		if len(h.ModelResult) > 0 || len(h.Completion) > 0 {
 			return fmt.Errorf("hooks: incremental output cannot combine with final response/completion transformations")
 		}

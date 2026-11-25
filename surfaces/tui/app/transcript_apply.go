@@ -546,8 +546,8 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent, reconnectReplay 
 		if block == nil {
 			return m, nil
 		}
-		if event.State == "attempt_reset" {
-			block.ClearActiveBuffers()
+		if event.State == session.LifecycleStatusModelAttemptReset {
+			block.ClearActiveBuffers(session.ModelAttemptResetMessageID(event.Meta))
 			if !isRetryingAttemptReset(event) {
 				block.clearTransientRetryNotice()
 			}
