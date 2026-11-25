@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 )
 
@@ -12,7 +13,7 @@ func TestUTF8OutputForwarderKeepsRuneSplitAtReadBoundary(t *testing.T) {
 	raw := append(bytes.Repeat([]byte("x"), 8191), []byte("中文\n")...)
 	var got string
 	var cursors []int64
-	forward := UTF8OutputForwarder(func(chunk OutputChunk) {
+	forward := UTF8OutputForwarder(func(chunk sandbox.OutputChunk) {
 		if chunk.Stream != "stdout" {
 			t.Fatalf("stream = %q, want stdout", chunk.Stream)
 		}
@@ -37,7 +38,7 @@ func TestUTF8OutputForwarderKeepsRuneSplitAtReadBoundary(t *testing.T) {
 func TestUTF8OutputForwarderKeepsStreamDecoderStateSeparate(t *testing.T) {
 	raw := []byte("中")
 	got := map[string]string{}
-	forward := UTF8OutputForwarder(func(chunk OutputChunk) { got[chunk.Stream] += chunk.Text })
+	forward := UTF8OutputForwarder(func(chunk sandbox.OutputChunk) { got[chunk.Stream] += chunk.Text })
 	forward(cmdsession.AsyncOutputChunk{Stream: "stdout", Data: raw[:1], Cursor: 1})
 	forward(cmdsession.AsyncOutputChunk{Stream: "stderr", Data: raw[:2], Cursor: 2})
 	forward(cmdsession.AsyncOutputChunk{Stream: "stdout", Data: raw[1:], Cursor: 3})

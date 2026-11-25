@@ -14,28 +14,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/sessionrun"
 )
 
-type OutputChunk struct {
-	Stream string
-	Text   string
-	Cursor int64
-}
-
-type Request struct {
-	Command      string
-	Dir          string
-	Timeout      time.Duration
-	IdleTimeout  time.Duration
-	TTY          bool
-	EnvOverrides map[string]string
-	UnsetEnv     []string
-	Stdin        []byte
-	Constraints  sandbox.Constraints
-	OnOutput     func(OutputChunk)
-}
-
+// Runner executes commands for a backend and manages its asynchronous sessions.
 type Runner interface {
-	Run(context.Context, Request) (sandbox.CommandResult, error)
-	StartAsync(context.Context, Request) (string, error)
+	Run(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error)
+	StartAsync(context.Context, sandbox.CommandRequest) (string, error)
 	WriteInput(sessionID string, input []byte) error
 	ReadOutput(sessionID string, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
 	AwaitOutput(context.Context, string, sandbox.OutputCursor) (cmdsession.OutputObservation, error)
@@ -109,7 +91,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	if r.runner == nil {
 		return sandbox.CommandResult{}, fmt.Errorf("ports/sandbox: backend %q runner is unavailable", r.backend)
 	}
-	result, err := r.runner.Run(ctx, translateRequest(req))
+	result, err := r.runner.Run(ctx, sandbox.CloneRequest(req))
 	if result.Route == "" {
 		result.Route = sandbox.RouteSandbox
 	}
@@ -127,7 +109,7 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if r.runner == nil {
 		return nil, fmt.Errorf("ports/sandbox: backend %q runner is unavailable", r.backend)
 	}
-	sessionID, err := r.runner.StartAsync(ctx, translateRequest(req))
+	sessionID, err := r.runner.StartAsync(ctx, sandbox.CloneRequest(req))
 	if err != nil {
 		return nil, err
 	}
@@ -253,27 +235,6 @@ func plainCommandExitError(err error) bool {
 
 func (s *session) Terminate(_ context.Context) error {
 	return s.runner.TerminateSession(s.sessionID)
-}
-
-func translateRequest(req sandbox.CommandRequest) Request {
-	req = sandbox.CloneRequest(req)
-	return Request{
-		Command:      req.Command,
-		Dir:          req.Dir,
-		Timeout:      req.Timeout,
-		IdleTimeout:  req.IdleTimeout,
-		TTY:          req.TTY,
-		EnvOverrides: req.Env,
-		UnsetEnv:     req.UnsetEnv,
-		Stdin:        append([]byte(nil), req.Stdin...),
-		Constraints:  req.Constraints,
-		OnOutput: func(chunk OutputChunk) {
-			if req.OnOutput == nil {
-				return
-			}
-			req.OnOutput(sandbox.OutputChunk{Stream: chunk.Stream, Text: chunk.Text, Cursor: chunk.Cursor})
-		},
-	}
 }
 
 func translateStatus(backend sandbox.Backend, sessionID string, status cmdsession.SessionStatus) sandbox.SessionStatus {

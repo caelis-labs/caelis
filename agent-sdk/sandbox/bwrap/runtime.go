@@ -174,7 +174,7 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	return nil
 }
 
-func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
+func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	runCtx := ctx
 	cancel := func() {}
 	if req.Timeout > 0 {
@@ -192,7 +192,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
 	}
 	shell, args := sandbox.ShellArgs(b.cfg.Execution, req.Command)
-	bwrapArgs = appendBwrapEnvironment(bwrapArgs, b.env.Build(req.UnsetEnv, req.EnvOverrides))
+	bwrapArgs = appendBwrapEnvironment(bwrapArgs, b.env.Build(req.UnsetEnv, req.Env))
 	cmd, payload, err := b.commandWithArgs(runCtx, bwrapArgs, shell, args)
 	if err != nil {
 		return sandbox.CommandResult{}, err
@@ -249,7 +249,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 	return result, fmt.Errorf("tool: bwrap sandbox command failed: %w; %s", waitErr, commandOutputSummary(result))
 }
 
-func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (string, error) {
+func (b *bwrapRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) (string, error) {
 	manager, err := b.asyncSessionManager()
 	if err != nil {
 		return "", err
@@ -268,7 +268,7 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (
 	session, err := manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:         req.Command,
 		Dir:             req.Dir,
-		Env:             b.env.Build(req.UnsetEnv, req.EnvOverrides),
+		Env:             b.env.Build(req.UnsetEnv, req.Env),
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
@@ -529,12 +529,12 @@ func commandOutputSummary(result sandbox.CommandResult) string {
 	}
 }
 
-func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
+func emitOutput(fn func(sandbox.OutputChunk)) func(string, string) {
 	if fn == nil {
 		return nil
 	}
 	return func(stream string, text string) {
-		fn(runnerruntime.OutputChunk{Stream: stream, Text: text})
+		fn(sandbox.OutputChunk{Stream: stream, Text: text})
 	}
 }
 
