@@ -136,15 +136,16 @@ func (l *anthropicSDKLLM) Generate(ctx context.Context, req *model.Request) iter
 			yield(nil, err)
 			return
 		}
+		allowInBandRecovery := !l.UsesProviderExecutedTools(req)
 		if req.Stream {
-			l.generateStreaming(ctx, params, yield)
+			l.generateStreaming(ctx, params, allowInBandRecovery, yield)
 			return
 		}
-		l.generateNonStreaming(ctx, params, yield)
+		l.generateNonStreaming(ctx, params, allowInBandRecovery, yield)
 	}
 }
 
-func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthropic.MessageNewParams, yield func(*model.StreamEvent, error) bool) {
+func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthropic.MessageNewParams, allowInBandRecovery bool, yield func(*model.StreamEvent, error) bool) {
 	runCtx := ctx
 	cancel := func() {}
 	if l.requestTimeout > 0 {
@@ -158,11 +159,15 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	}
 	resp, err := l.client.Messages.New(runCtx, params, opts...)
 	if err != nil {
-		yield(nil, classifyAnthropicImageError(err))
+		yield(nil, classifyAnthropicGenerationError(err, allowInBandRecovery))
 		return
 	}
 	if resp != nil {
 		model.RecordInvocationUsage(runCtx, anthropicUsageToKernel(resp.Usage))
+		if err := anthropicOverflowStop(resp.StopReason, allowInBandRecovery); err != nil {
+			yield(nil, err)
+			return
+		}
 	}
 	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(l.provider, resp)
 	if err != nil {
@@ -186,7 +191,7 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	}, nil)
 }
 
-func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropic.MessageNewParams, yield func(*model.StreamEvent, error) bool) {
+func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropic.MessageNewParams, allowInBandRecovery bool, yield func(*model.StreamEvent, error) bool) {
 	stream := l.client.Messages.NewStreaming(ctx, params)
 	if stream == nil {
 		yield(nil, fmt.Errorf("providers: anthropic stream is nil"))
@@ -229,11 +234,15 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 		}
 	}
 	if err := stream.Err(); err != nil {
-		yield(nil, classifyAnthropicImageError(err))
+		yield(nil, classifyAnthropicGenerationError(err, allowInBandRecovery))
 		return
 	}
 	if !messageStopped {
 		yield(nil, fmt.Errorf("providers: anthropic stream ended before message_stop: %w", io.ErrUnexpectedEOF))
+		return
+	}
+	if err := anthropicOverflowStop(acc.StopReason, allowInBandRecovery); err != nil {
+		yield(nil, err)
 		return
 	}
 	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(l.provider, &acc)
@@ -258,17 +267,35 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	}, nil)
 }
 
-func classifyAnthropicImageError(err error) error {
+func classifyAnthropicGenerationError(err error, allowInBandRecovery bool) error {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
 		var header http.Header
 		if apiErr.Response != nil {
 			header = apiErr.Response.Header
 		}
-		classified := newProviderHTTPError(apiErr.StatusCode, apiErr.RawJSON(), header, err)
-		return classifyImageInputError(classified, apiErr.RawJSON(), apiErr.StatusCode)
+		status := apiErr.StatusCode
+		allowOverflowRecovery := true
+		// The SDK attaches the successful HTTP status to typed SSE errors.
+		if status == http.StatusOK && apiErr.Type() == "invalid_request_error" {
+			status = http.StatusBadRequest
+			allowOverflowRecovery = allowInBandRecovery
+		}
+		classified := newProviderHTTPError(status, apiErr.RawJSON(), header, err)
+		return classifyProviderRequestError(classified, apiErr.RawJSON(), status, allowOverflowRecovery)
 	}
 	return err
+}
+
+func anthropicOverflowStop(reason anthropic.StopReason, allowRecovery bool) error {
+	if reason != anthropic.StopReasonModelContextWindowExceeded {
+		return nil
+	}
+	cause := &model.TerminalResponseError{Detail: "model: anthropic response ended with " + string(reason)}
+	if allowRecovery {
+		return &model.ContextOverflowError{Cause: cause}
+	}
+	return cause
 }
 
 func normalizeAccumulatedToolUseInput(acc *anthropic.Message, stop anthropic.ContentBlockStopEvent) {

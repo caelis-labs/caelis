@@ -119,7 +119,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		if !req.Stream {
 			out, err := client.Models.GenerateContent(runCtx, l.name, contents, cfg)
 			if err != nil {
-				yield(nil, classifyGeminiImageError(err))
+				yield(nil, classifyGeminiGenerationError(err, true))
 				return
 			}
 			model.RecordInvocationUsage(runCtx, geminiUsageFromResponse(out))
@@ -158,7 +158,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		var abnormalReason genai.FinishReason
 		for out, err := range client.Models.GenerateContentStream(runCtx, l.name, contents, cfg) {
 			if err != nil {
-				yield(nil, classifyGeminiImageError(err))
+				yield(nil, classifyGeminiGenerationError(err, !googleSearchEnabled))
 				return
 			}
 			if out == nil {
@@ -230,14 +230,14 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 	}
 }
 
-func classifyGeminiImageError(err error) error {
+func classifyGeminiGenerationError(err error, allowInBandRecovery bool) error {
 	var apiErr genai.APIError
 	if errors.As(err, &apiErr) {
 		raw, _ := json.Marshal(struct {
 			Error genai.APIError `json:"error"`
 		}{apiErr})
 		classified := newProviderHTTPError(apiErr.Code, string(raw), nil, err)
-		return classifyImageInputError(classified, apiErr.Message, apiErr.Code)
+		return classifyProviderRequestError(classified, apiErr.Message, apiErr.Code, allowInBandRecovery)
 	}
 	return err
 }

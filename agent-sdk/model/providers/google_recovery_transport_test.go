@@ -33,7 +33,7 @@ func TestGoogleRPCSDKAndTransportRecovery(t *testing.T) {
 				if err := json.Unmarshal([]byte(tc.body), &native); err != nil {
 					t.Fatal(err)
 				}
-				nativeErr := classifyGeminiImageError(native.Error)
+				nativeErr := classifyGeminiGenerationError(native.Error, true)
 				var after model.RetryAfterError
 				if model.IsRetryableLLMError(nativeErr) != (tc.calls == 2) || !errors.As(nativeErr, &after) || after.RetryAfter() != tc.wait {
 					t.Fatalf("native SDK classification lost: %v", nativeErr)
