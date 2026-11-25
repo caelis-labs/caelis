@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +24,7 @@ import (
 // The retired tools' canonical messages remain model context. This uses stored
 // historical results, then compares the complete provider request across restart.
 func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	root, workspace := t.TempDir(), t.TempDir()
 	requests := make(chan map[string]any, 8)
@@ -42,9 +43,16 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 		_, _ = fmt.Fprint(recorder, "data: [DONE]\n\n")
 		return recorder.Result(), nil
 	})}
+	// The native acceptance job exercises the actual default backend. Other
+	// environments can exercise Store upgrades without a platform sandbox.
+	backend := "host"
+	native := os.Getenv("CAELIS_TEST_APPLICATION_NATIVE") == "1"
+	if native {
+		backend = "auto"
+	}
 	cfg := Config{
 		AppName: "caelis", UserID: "retirement-test", StoreDir: root, WorkspaceKey: "workspace", WorkspaceCWD: workspace, SkillDirs: []string{},
-		Sandbox:                   SandboxConfig{RequestedType: "host"},
+		Sandbox:                   SandboxConfig{RequestedType: backend},
 		ResolveProviderHTTPClient: func(context.Context, ModelConfig) (*http.Client, error) { return client, nil },
 		Model:                     ModelConfig{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "retirement-test", BaseURL: "http://retirement.test", HTTPClient: client, Token: "fixture-token", AuthType: model.AuthBearerToken, ContextWindowTokens: 128000, MaxOutputTok: 4096},
 		MemoryBindingRef:          "missing-retired-binding",
@@ -113,6 +121,8 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 			next = map[string]any{}
 		}
 		next["gateway.memory.binding.v1"] = pin
+		next["gateway.current_session_mode"] = "manual"
+		next["gateway.current_sandbox_mode"] = "full-access"
 		return next, nil
 	}}); err != nil {
 		t.Fatal(err)
@@ -142,16 +152,73 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	}
 	before := <-requests
 	assertRetiredMemoryAbsentFromRequest(t, before)
+	unsupported, err := startGatewayAppTestSession(ctx, stack, "retired-inline-history")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(controlStreamSpoolRoot(root)); err != nil {
 		t.Fatal(err)
 	}
+	// Reopen a mixed-generation store through the normal Host entry point.
+	upgradeDocument := func(id string) string {
+		t.Helper()
+		matches, err := filepath.Glob(filepath.Join(root, "sessions", "*", "*", "*", "*", "rollout-*-"+id+".json"))
+		if err != nil || len(matches) != 1 {
+			t.Fatalf("Session document for %s = %v, %v", id, matches, err)
+		}
+		return matches[0]
+	}
+	replaceFixtureField := func(path, field, value string) {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		raw[field] = json.RawMessage(value)
+		data, err = json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replaceFixtureField(upgradeDocument(active.SessionID), "version", "1")
+	replaceFixtureField(upgradeDocument(unsupported.SessionID), "events", `[{"type":"user","id":"embedded"}]`)
+	replaceFixtureField(configPath, "sandbox", `{"requested_type":"landlock","helper_path":"retired-helper"}`)
 	cfg.Model = ModelConfig{}
-	stack, err = newGatewayAppTestStack(t, cfg)
+	if native {
+		cfg.Sandbox = SandboxConfig{}
+	}
+	stack, err = NewLocalStack(cfg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	config, err := LoadAppConfig(root)
+	if err != nil || config.Sandbox.RequestedType != "auto" || config.Sandbox.HelperPath != "" {
+		t.Fatalf("upgraded Host sandbox = %#v, %v", config.Sandbox, err)
+	}
+	fresh, err := startGatewayAppTestSession(ctx, stack, "fresh-after-upgrade")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, fresh, fresh.SessionID, "start fresh", headless.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	freshRequest := <-requests
+	freshMessages, err := json.Marshal(freshRequest["messages"])
+	if err != nil || !strings.Contains(string(freshMessages), "start fresh") || strings.Contains(string(freshMessages), "retained-receipt") {
+		t.Fatalf("fresh model context = %s, %v", freshMessages, err)
+	}
+	if _, err := stack.composition.sessions.Session(ctx, unsupported.SessionRef); !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("inline history error = %v", err)
 	}
 	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, active, active.SessionID, "continue after restart", headless.Options{}); err != nil {
 		t.Fatal(err)

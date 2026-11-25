@@ -99,17 +99,12 @@ func (s *Store) withRootLockContext(ctx context.Context, fn func() error) error 
 	if err != nil {
 		return err
 	}
-	// A full legacy scan is required once per process/root. Current writers
+	// Scan outstanding transactions once per process/root. Current writers
 	// maintain a durable root marker, so subsequent operations pay only one
 	// Stat unless a committed WAL was abandoned by a crashed process.
 	if !rootLock.recoveryInitialized || pending {
 		if err := s.recoverTransactions(ctx); err != nil {
 			return err
-		}
-		if !rootLock.recoveryInitialized {
-			if err := s.migrateLegacyGeneratedTitles(ctx); err != nil {
-				return err
-			}
 		}
 		rootLock.recoveryInitialized = true
 	}

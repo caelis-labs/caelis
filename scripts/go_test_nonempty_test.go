@@ -9,7 +9,7 @@ import (
 func TestGoTestNonemptyRejectsEmptyAndUnmatchedSelectors(t *testing.T) {
 	t.Parallel()
 
-	for _, selector := range []string{"", "^TestDefinitelyDoesNotExist$"} {
+	for _, selector := range []string{"", "^TestDefinitelyDoesNotExist$", "^(TestCheckMarkdownLinks|TestDefinitelyDoesNotExist)$"} {
 		cmd := exec.Command(testBash(t), "./go_test_nonempty.sh", "./markdown_links", selector, "contract-test")
 		output, err := cmd.CombinedOutput()
 		if err == nil {

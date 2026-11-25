@@ -400,6 +400,17 @@ owner retains its priority, and existing effects are never replayed. See
 
 ## Compatibility and current limits
 
+Upgrades support new Sessions with the current configuration. An unrecognized
+saved sandbox backend selects the platform default and drops its helper path.
+The configured network and filesystem rules still apply. An explicit backend
+selection must name a supported backend.
+
+Older Sessions can resume when their stored state and history can be read.
+Retired mode keys have no effect on current policy. A tool that has disappeared
+from the catalog can still have a readable historical result. Its old calls
+are never dispatched on resume. Early formats may lose context or report an
+unsupported-format error for that Session.
+
 - The root `protocol/acp/*` and product-host `ports/*` trees are retired and
   guarded against recreation.
 - Sessions written before v0.42 may retain historical workspace-key aliases for

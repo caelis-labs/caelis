@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -97,26 +96,28 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 }
 
-func TestStackSessionRuntimeStateRejectsLegacySessionState(t *testing.T) {
+func TestStackSessionRuntimeStateIgnoresRetiredModes(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	before, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
 		next["gateway.current_session_mode"] = "manual"
+		next["gateway.current_sandbox_mode"] = "full-access"
 		return next, nil
 	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 
-	_, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
-	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
-		t.Fatalf("SessionRuntimeState() error = %v, want ErrUnsupportedLegacyFormat", err)
-	}
-	if !strings.Contains(err.Error(), "gateway.current_session_mode") {
-		t.Fatalf("SessionRuntimeState() error = %v, want legacy key detail", err)
+	after, err := stack.ControlStatus().SessionRuntimeState(ctx, activeSession.SessionRef)
+	if err != nil || after.SessionMode != before.SessionMode || after.PolicyProfile != before.PolicyProfile {
+		t.Fatalf("SessionRuntimeState after retired modes = %#v, %v; before = %#v", after, err, before)
 	}
 }
 

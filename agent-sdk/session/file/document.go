@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 
+	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -32,6 +33,14 @@ func (s *Store) readDocument(sessionID string, workspaceKey ...string) (persiste
 	if err != nil {
 		return persistedDocument{}, err
 	}
+	// The root recovery barrier applies every supported WAL before this
+	// read. A verified retired WAL remains the owner's durable write barrier,
+	// including for another process that already cached the document path.
+	if _, err := os.Stat(transactionPath(path)); err == nil {
+		return persistedDocument{}, fmt.Errorf("%w: Session %q has an unsupported committed transaction", session.ErrUnsupportedLegacyFormat, sessionID)
+	} else if !os.IsNotExist(err) {
+		return persistedDocument{}, err
+	}
 	return s.readDocumentAt(path)
 }
 
@@ -43,14 +52,10 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 		}
 		return persistedDocument{}, err
 	}
-	if err := rejectUnsupportedLegacyDocument(data, path); err != nil {
-		return persistedDocument{}, err
-	}
-	doc, report, err := decodePersistedDocumentWithReport(data)
+	doc, err := decodePersistedDocument(data)
 	if err != nil {
 		return persistedDocument{}, fmt.Errorf("agent-sdk/session/file: decode %s: %w", path, err)
 	}
-	s.recordMigrationReport(report)
 	doc.Session = session.CloneSession(doc.Session)
 	if doc.State != nil {
 		doc.State = cloneState(doc.State)
@@ -59,62 +64,43 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	return doc, nil
 }
 
-func decodePersistedDocumentWithReport(data []byte) (persistedDocument, MigrationReport, error) {
-	var header struct {
-		Kind    string `json:"kind"`
-		Version int    `json:"version"`
+func decodePersistedDocument(data []byte) (persistedDocument, error) {
+	// Capture the retired inline history shape in the same decode as the
+	// document. The WAL reader needs the Session identity even when its history
+	// cannot be recovered.
+	var wire struct {
+		persistedDocument
+		Events json.RawMessage `json:"events"`
 	}
-	if err := json.Unmarshal(data, &header); err != nil {
-		return persistedDocument{}, MigrationReport{}, err
+	err := json.Unmarshal(data, &wire)
+	doc := wire.persistedDocument
+	if doc.Kind == documentKind && ((doc.Version == 0 && err == nil) || (doc.Version == 1 && err != nil)) {
+		return doc, fmt.Errorf("%w: unsupported document version %d or field shape", session.ErrUnsupportedLegacyFormat, doc.Version)
 	}
-	if header.Kind != documentKind {
-		return persistedDocument{}, MigrationReport{}, fmt.Errorf(
-			"agent-sdk/session/file: unsupported document %q version %d",
-			header.Kind,
-			header.Version,
-		)
+	if err != nil {
+		return persistedDocument{}, err
 	}
-
-	switch header.Version {
-	case documentVersion:
-		var doc persistedDocument
-		if err := json.Unmarshal(data, &doc); err != nil {
-			return persistedDocument{}, MigrationReport{}, err
+	if doc.Kind != documentKind || (doc.Version != 1 && doc.Version != documentVersion) {
+		return persistedDocument{}, fmt.Errorf("agent-sdk/session/file: unsupported document %q version %d", doc.Kind, doc.Version)
+	}
+	if len(wire.Events) != 0 {
+		var events []json.RawMessage
+		if json.Unmarshal(wire.Events, &events) != nil || len(events) != 0 {
+			return doc, fmt.Errorf("%w: session document has legacy embedded events", session.ErrUnsupportedLegacyFormat)
 		}
-		return doc, MigrationReport{}, nil
-	case legacyV1DocumentVersion:
-		return decodeLegacyV1DocumentWithReport(data)
-	default:
-		return persistedDocument{}, MigrationReport{}, fmt.Errorf(
-			"agent-sdk/session/file: unsupported document %q version %d",
-			header.Kind,
-			header.Version,
-		)
 	}
-}
-
-func rejectUnsupportedLegacyDocument(data []byte, path string) error {
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		//nolint:nilerr // This legacy-shape probe defers malformed JSON to the authoritative document decoder.
-		return nil
+	if doc.Version == 1 {
+		// V1 predates creation-bound execution settings, idle compaction and
+		// mandatory sealed ACP placement. Never infer an endpoint on resume.
+		doc.Version = documentVersion
+		doc.Idle = session.IdleCompactionState{}
+		doc.Session.ExecutionConfig = nil
+		doc.Session.SessionRef = session.NormalizeSessionRef(doc.Session.SessionRef)
+		doc.Session.Participants = slices.DeleteFunc(doc.Session.Participants, func(binding session.ParticipantBinding) bool {
+			return binding.Kind == session.ParticipantKindACP && placement.ValidateSealed(binding.Placement) != nil
+		})
 	}
-	raw, ok := root["events"]
-	if !ok {
-		return nil
-	}
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "null" {
-		return nil
-	}
-	var events []json.RawMessage
-	if err := json.Unmarshal(raw, &events); err != nil {
-		return fmt.Errorf("agent-sdk/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
-	}
-	if len(events) == 0 {
-		return nil
-	}
-	return fmt.Errorf("agent-sdk/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
+	return doc, nil
 }
 
 type committedDocumentWriteError struct {

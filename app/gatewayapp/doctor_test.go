@@ -9,8 +9,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -34,53 +32,6 @@ func TestConfigMigrationWarningsUseProcessSnapshot(t *testing.T) {
 	warnings := composition.configMigrationWarnings()
 	if len(warnings) != 3 {
 		t.Fatalf("migration warnings = %#v, want summary, dropped count, and dropped record", warnings)
-	}
-}
-
-type doctorSessionMigrationReporter struct {
-	session.ManagedService
-	report sessionfile.MigrationReport
-}
-
-func (r doctorSessionMigrationReporter) MigrationReport() sessionfile.MigrationReport {
-	return r.report
-}
-
-func TestDoctorReportsObservedLegacySessionParticipantDrop(t *testing.T) {
-	root := t.TempDir()
-	workdir := t.TempDir()
-	stack, err := newGatewayAppTestStack(t, Config{
-		AppName: "caelis", UserID: "doctor-session-migration", StoreDir: root,
-		WorkspaceKey: workdir, WorkspaceCWD: workdir, Assembly: assembly.ResolvedAssembly{},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	stack.composition.sessions = doctorSessionMigrationReporter{
-		ManagedService: stack.composition.sessions,
-		report: sessionfile.MigrationReport{
-			FromVersion: 1,
-			Dropped: []sessionfile.MigrationDrop{{
-				SessionRef: session.SessionRef{SessionID: "legacy-session"},
-				Category:   "acp_participant",
-				Identity:   "participants[2]",
-				Reason:     "invalid_sealed_placement",
-			}},
-		},
-	}
-
-	report, err := stack.ControlStatus().Doctor(context.Background(), DoctorRequest{})
-	if err != nil {
-		t.Fatalf("Doctor() error = %v", err)
-	}
-	warnings := strings.Join(report.Warnings, "\n")
-	for _, want := range []string{
-		"legacy Session document version 1 skipped 1 unsafe participant binding",
-		"legacy Session legacy-session skipped participants[2]: category=acp_participant reason=invalid_sealed_placement",
-	} {
-		if !strings.Contains(warnings, want) {
-			t.Fatalf("Doctor warnings = %q, want %q", warnings, want)
-		}
 	}
 }
 

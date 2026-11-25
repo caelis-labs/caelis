@@ -29,7 +29,7 @@ func (s *controlCommandBackend) setSandboxBackendAtRevision(ctx context.Context,
 		return SandboxStatus{}, doc.ConfigurationRevision, classifyConfigurationPreEffectError(err)
 	}
 	currentRevision := doc.ConfigurationRevision
-	normalized, err := normalizeSandboxBackend(backend)
+	normalized, err := configstore.NormalizeBackend(backend)
 	if err != nil {
 		return SandboxStatus{}, currentRevision, configurationRejectedError(errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err))
 	}
@@ -225,10 +225,6 @@ func applySandboxSetupProjection(status *SandboxStatus, setup sandbox.SetupStatu
 			status.SetupError = strings.TrimSpace(workspace.Error)
 		}
 	}
-}
-
-func normalizeSandboxBackend(backend string) (string, error) {
-	return sandboxpolicy.NormalizeBackend(backend)
 }
 
 func mergeSandboxConfig(stored SandboxConfig, override SandboxConfig) SandboxConfig {

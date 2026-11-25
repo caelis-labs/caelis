@@ -314,12 +314,19 @@ External effects use durable intent and stable identities. Identical retries
 deduplicate, changed payloads conflict, and indeterminate effects remain
 `unknown_outcome`.
 
-The SendMessage migration retains a read-only compatibility path for Task records
-written by the retired Continue saga. It never repeats the old remote effect.
-Remove it only after the supported upgrade floor reaches the first release that
-no longer wrote `continue_phase`; v0.35.0 is the last known writer.
+A Task carrying a retired Continue marker has no live input to replay. Recovery
+retains a confirmed terminal result or records an unknown outcome, then clears
+the marker. Existing Session history is the source of past messages.
 
 ## Session storage for embedders
+
+The file Store writes document version 2. Version 1 uses the common document
+reader for fields it recognizes. ACP participants require a sealed placement.
+A later Store write saves the resulting document in the current format.
+Retired embedded event histories are unsupported. A committed transaction with
+a verified Session identity and a recognized retired format stays on disk and
+blocks access to that Session. Corrupt or unidentifiable transactions stop
+recovery.
 
 A host supplies one `session.Service` to `runtime.Config.Sessions`.
 Each `Runtime.Run` selects an existing Session through `RunRequest.SessionRef`

@@ -26,7 +26,7 @@ CAELIS_WINDOWS_SANDBOX_E2E=1 bash ./scripts/go_test_nonempty.sh \
   ./agent-sdk/sandbox/windows '^TestRestrictedToken(ExecutionConfig|PythonEnvironment)E2E$' windows-execution-config -count=1
 
 CAELIS_TEST_APPLICATION_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
-  '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|ExternalExecutionClientHTTP|SharedWorker(NativeHTTP|HTTP))' windows-application-native -count=1
+  '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|SessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool|ExternalExecutionClientHTTP|SharedWorker(NativeHTTP|HTTP))' windows-application-native -count=1
 
 # Verify the target's embedded package and cache/parser contracts; no GUI evidence.
 go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" ./control/plugin -run '^TestProduct'

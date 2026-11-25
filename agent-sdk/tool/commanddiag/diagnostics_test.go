@@ -336,7 +336,7 @@ func sandboxInput() Input {
 	return Input{
 		ExitCode: 1,
 		Route:    sandbox.RouteSandbox,
-		Backend:  sandbox.BackendLandlock,
+		Backend:  sandbox.BackendBwrap,
 	}
 }
 

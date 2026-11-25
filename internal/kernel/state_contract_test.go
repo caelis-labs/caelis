@@ -26,30 +26,6 @@ func TestCurrentSessionModeOrDefaultNormalizesFallback(t *testing.T) {
 	}
 }
 
-func TestUnsupportedLegacyStateKey(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		state map[string]any
-		want  string
-	}{
-		{name: "none", state: map[string]any{StateCurrentApprovalMode: "manual"}, want: ""},
-		{name: "legacy session mode", state: map[string]any{"gateway.current_session_mode": "manual"}, want: "gateway.current_session_mode"},
-		{name: "legacy sandbox mode", state: map[string]any{"gateway.current_sandbox_mode": "workspace-write"}, want: "gateway.current_sandbox_mode"},
-		{name: "empty legacy value ignored", state: map[string]any{"gateway.current_session_mode": " "}, want: ""},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := UnsupportedLegacyStateKey(tt.state); got != tt.want {
-				t.Fatalf("UnsupportedLegacyStateKey(%#v) = %q, want %q", tt.state, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCurrentPolicyProfileNormalizesCompatibilityValues(t *testing.T) {
 	t.Parallel()
 

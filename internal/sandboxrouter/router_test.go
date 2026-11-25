@@ -93,7 +93,7 @@ func TestForGOOSUsesOneRequiredBackendPerPlatform(t *testing.T) {
 	}
 }
 
-func TestForGOOSLinuxRejectsLandlockInsteadOfFallingBack(t *testing.T) {
+func TestForGOOSLinuxDefaultsToBwrapAndRejectsUnknownBackend(t *testing.T) {
 	route, err := ForGOOS("linux", "")
 	if err != nil {
 		t.Fatalf("ForGOOS(linux, auto) error = %v", err)
@@ -101,8 +101,8 @@ func TestForGOOSLinuxRejectsLandlockInsteadOfFallingBack(t *testing.T) {
 	if route.Backend != sandbox.BackendBwrap || len(route.BackendCandidates) != 1 || route.BackendCandidates[0] != sandbox.BackendBwrap {
 		t.Fatalf("ForGOOS(linux, auto) = %#v, want only bwrap", route)
 	}
-	if _, err := ForGOOS("linux", sandbox.BackendLandlock); err == nil || !strings.Contains(err.Error(), "unsupported on linux") {
-		t.Fatalf("ForGOOS(linux, landlock) error = %v, want unsupported", err)
+	if _, err := ForGOOS("linux", "unsupported-backend"); err == nil || !strings.Contains(err.Error(), "unsupported on linux") {
+		t.Fatalf("ForGOOS(linux, unsupported-backend) error = %v, want unsupported", err)
 	}
 }
 

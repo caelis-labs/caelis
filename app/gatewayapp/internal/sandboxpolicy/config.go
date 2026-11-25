@@ -1,14 +1,12 @@
 package sandboxpolicy
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
@@ -106,19 +104,6 @@ func pathContains(root, target string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
-func NormalizeBackend(backend string) (string, error) {
-	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
-	case "":
-		return "auto", nil
-	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendWindows:
-		return string(normalized), nil
-	case sandbox.BackendLandlock:
-		return "", fmt.Errorf("gatewayapp: sandbox backend %q is retired from the product; use auto (bwrap on Linux) or explicit host execution", backend)
-	default:
-		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
-	}
 }
 
 func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxConfig) configstore.SandboxConfig {

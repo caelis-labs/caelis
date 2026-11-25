@@ -2,7 +2,9 @@ package configstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -474,5 +476,71 @@ func testProviderProfile(model modelconfig.Config, effort string) modelprofile.M
 		ID: modelprofile.BuildProviderID(model.ID), DisplayName: model.ID,
 		Backend: modelprofile.Backend{Provider: &modelprofile.ProviderBackend{ModelConfigID: model.ID}},
 		Effort:  modelprofile.EffortCapability{DefaultEffort: effort, Choices: choices},
+	}
+}
+
+func TestNormalizeBackendAcceptsWindowsAliases(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{"windows", "windows-restricted-token", "windows-elevated", "windows_elevated", "windows elevated", "elevated"} {
+		got, err := NormalizeBackend(input)
+		if err != nil {
+			t.Fatalf("NormalizeBackend(%q) error = %v", input, err)
+		}
+		if got != "windows" {
+			t.Fatalf("NormalizeBackend(%q) = %q, want windows", input, got)
+		}
+	}
+}
+
+func TestNormalizeBackendAcceptsHost(t *testing.T) {
+	t.Parallel()
+
+	got, err := NormalizeBackend("host")
+	if err != nil {
+		t.Fatalf("NormalizeBackend(host) error = %v", err)
+	}
+	if got != "host" {
+		t.Fatalf("NormalizeBackend(host) = %q, want host", got)
+	}
+}
+
+func TestStoreRepairsUnsupportedSandboxOnUpgrade(t *testing.T) {
+	for _, version := range []int{1, SchemaVersionV2} {
+		for _, backend := range []string{"Landlock", "retired-backend"} {
+			t.Run(fmt.Sprintf("schema%d/%s", version, backend), func(t *testing.T) {
+				store := New(t.TempDir())
+				raw := fmt.Sprintf(`{"schema_version":%d,"sandbox":{"requested_type":%q,"helper_path":"old-helper","writable_roots":["work"],"network_enabled":false}}`, version, backend)
+				if err := os.WriteFile(store.Path(), []byte(raw), 0600); err != nil {
+					t.Fatal(err)
+				}
+				doc, err := store.Load()
+				if err != nil {
+					t.Fatal(err)
+				}
+				check := func(cfg SandboxConfig) {
+					t.Helper()
+					if cfg.RequestedType != "auto" || cfg.HelperPath != "" || len(cfg.WritableRoots) != 1 || cfg.WritableRoots[0] != "work" || cfg.NetworkEnabled == nil || *cfg.NetworkEnabled {
+						t.Fatalf("repaired sandbox = %#v", cfg)
+					}
+				}
+				check(doc.Sandbox)
+				if err := store.Save(doc); err != nil {
+					t.Fatal(err)
+				}
+				disk, err := os.ReadFile(store.Path())
+				if err != nil {
+					t.Fatal(err)
+				}
+				var saved AppConfig
+				if err := json.Unmarshal(disk, &saved); err != nil {
+					t.Fatal(err)
+				}
+				check(saved.Sandbox)
+				if _, err := NormalizeBackend(backend); err == nil {
+					t.Fatal("explicit unsupported selection was accepted")
+				}
+			})
+		}
 	}
 }

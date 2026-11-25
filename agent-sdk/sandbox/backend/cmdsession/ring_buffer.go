@@ -110,7 +110,7 @@ func (rb *RingBuffer) ReadNewSince(marker int64) ([]byte, int64) {
 	newBytes := currentTotal - marker
 	if newBytes > int64(rb.capacity) {
 		// Some data was lost due to wrap-around
-		newBytes = int64(rb.Len())
+		newBytes = int64(rb.lenLocked())
 	}
 
 	data := rb.readAllLocked()

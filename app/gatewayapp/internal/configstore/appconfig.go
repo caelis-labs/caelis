@@ -181,6 +181,12 @@ func Normalize(doc AppConfig) AppConfig {
 	refreshProviderProfiles(&doc)
 	doc.AgentBindings = agentbinding.NormalizeConfiguration(doc.AgentBindings)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
+	// An unavailable backend saved by an older Host uses platform auto-selection.
+	// Its helper executable belongs to the retired backend.
+	if _, err := NormalizeBackend(doc.Sandbox.RequestedType); err != nil {
+		doc.Sandbox.RequestedType = "auto"
+		doc.Sandbox.HelperPath = ""
+	}
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = plugin.DedupeConfigs(doc.Plugins)
 	doc.PluginMarketplaces = plugin.DedupeMarketplaceConfigs(doc.PluginMarketplaces)

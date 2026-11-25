@@ -16,6 +16,19 @@ if [[ -z "${matches}" ]]; then
   exit 1
 fi
 
+# Anchored lists name individual contracts. A surviving name must not hide a
+# renamed or deleted sibling. Other regular expressions keep normal Go matching.
+literal_list='^\^\((Test[[:alnum:]_]+(\|Test[[:alnum:]_]+)*)\)\$$'
+if [[ "${selector}" =~ ${literal_list} ]]; then
+  IFS='|' read -r -a expected <<< "${BASH_REMATCH[1]}"
+  for name in "${expected[@]}"; do
+    if ! grep -Fxq "${name}" <<< "${matches}"; then
+      echo "go-test-nonempty: ${label} missing ${name} in ${package}" >&2
+      exit 1
+    fi
+  done
+fi
+
 echo "go-test-nonempty: ${label} matched:"
 printf '%s\n' "${matches}"
 go test -timeout "${GO_TEST_TIMEOUT:-5m}" "${package}" -run "${selector}" "${@:4}"

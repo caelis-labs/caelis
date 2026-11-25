@@ -520,7 +520,6 @@ func TestCanonicalBackendNormalizesAliases(t *testing.T) {
 		{name: "host", raw: " HOST ", want: BackendHost},
 		{name: "seatbelt", raw: "Seatbelt", want: BackendSeatbelt},
 		{name: "bwrap", raw: "BWRAP", want: BackendBwrap},
-		{name: "landlock", raw: "landlock", want: BackendLandlock},
 		{name: "windows", raw: "windows", want: BackendWindows},
 		{name: "windows restricted token dash", raw: "windows-restricted-token", want: BackendWindows},
 		{name: "windows restricted token underscore", raw: "windows_restricted_token", want: BackendWindows},

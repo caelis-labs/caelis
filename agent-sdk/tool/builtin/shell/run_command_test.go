@@ -585,7 +585,7 @@ func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
 		Stderr:   "fatal: Unable to create '/workspace/.git/index.lock': Read-only file system\n",
 		ExitCode: 128,
 		Route:    sandbox.RouteSandbox,
-		Backend:  sandbox.BackendLandlock,
+		Backend:  sandbox.BackendBwrap,
 	}, err: fmt.Errorf("exit status 128")}
 	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {

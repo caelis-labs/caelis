@@ -92,6 +92,9 @@ func sweepAbandonedApprovals(
 		}
 		for _, summary := range list.Sessions {
 			retryAt, err := sweepSessionApprovals(ctx, store, summary.SessionRef)
+			if errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+				continue
+			}
 			if err != nil {
 				return result, err
 			}
@@ -106,7 +109,7 @@ func sweepAbandonedApprovals(
 
 // sweepPriorHostSessionFences is the only product path allowed to replace a
 // durable execution fence. Host ownership proves the prior process is gone,
-// and the startup gate completes this full sweep before admitting new Turns.
+// and the startup gate sweeps readable Sessions before admitting new Turns.
 func sweepPriorHostSessionFences(
 	ctx context.Context,
 	store ApprovalRecoveryStore,
@@ -132,6 +135,9 @@ func sweepPriorHostSessionFences(
 		}
 		for _, summary := range list.Sessions {
 			durable, err := fences.SessionFence(ctx, summary.SessionRef)
+			if errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+				continue
+			}
 			if err != nil {
 				return err
 			}

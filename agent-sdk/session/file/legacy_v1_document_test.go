@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -80,7 +81,7 @@ func TestStoreLegacyV1DocumentFiltersACPPlacementWithoutReadRepair(t *testing.T)
 	}
 	legacy := map[string]any{
 		"kind":    documentKind,
-		"version": legacyV1DocumentVersion,
+		"version": 1,
 		"session": map[string]any{
 			"app_name":      active.AppName,
 			"user_id":       active.UserID,
@@ -183,38 +184,6 @@ func TestStoreLegacyV1DocumentFiltersACPPlacementWithoutReadRepair(t *testing.T)
 	if len(loaded.Events) != 1 || session.EventText(loaded.Events[0]) != "persisted before v2" {
 		t.Fatalf("legacy Events = %#v, want existing canonical event", loaded.Events)
 	}
-	wantReport := MigrationReport{
-		FromVersion: legacyV1DocumentVersion,
-		Dropped: []MigrationDrop{
-			{
-				SessionRef: active.SessionRef,
-				Category:   legacyMigrationCategoryACPParticipant,
-				Identity:   "participants[1]",
-				Reason:     legacyMigrationReasonMissingPlacement,
-			},
-			{
-				SessionRef: active.SessionRef,
-				Category:   legacyMigrationCategoryACPParticipant,
-				Identity:   "participants[2]",
-				Reason:     legacyMigrationReasonInvalidPlacement,
-			},
-		},
-	}
-	if got := reopened.MigrationReport(); !reflect.DeepEqual(got, wantReport) {
-		t.Fatalf("MigrationReport() = %#v, want %#v", got, wantReport)
-	}
-	detached := reopened.MigrationReport()
-	detached.Dropped[0].Reason = "mutated-by-caller"
-	if got := reopened.MigrationReport(); !reflect.DeepEqual(got, wantReport) {
-		t.Fatalf("MigrationReport() shared caller mutation: %#v, want %#v", got, wantReport)
-	}
-	if _, err := reopened.Session(ctx, active.SessionRef); err != nil {
-		t.Fatalf("Session(second v1 read) error = %v", err)
-	}
-	if got := reopened.MigrationReport(); !reflect.DeepEqual(got, wantReport) {
-		t.Fatalf("MigrationReport() after repeated read = %#v, want deduplicated %#v", got, wantReport)
-	}
-
 	afterRead, err := os.ReadFile(documentPath)
 	if err != nil {
 		t.Fatalf("ReadFile(after read) error = %v", err)
@@ -249,9 +218,6 @@ func TestStoreLegacyV1DocumentFiltersACPPlacementWithoutReadRepair(t *testing.T)
 	}
 	if got := len(current.Session.Participants); got != 3 {
 		t.Fatalf("persisted v2 participants = %#v, want only recoverable bindings", current.Session.Participants)
-	}
-	if got := reopened.MigrationReport(); !reflect.DeepEqual(got, wantReport) {
-		t.Fatalf("MigrationReport() after v2 mutation = %#v, want retained %#v", got, wantReport)
 	}
 
 	rehydrated, err := NewStore(Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
@@ -351,7 +317,7 @@ func TestDecodePersistedTransactionAppliesLegacyV1ParticipantRules(t *testing.T)
 		"version": transactionVersion,
 		"document": map[string]any{
 			"kind":    documentKind,
-			"version": legacyV1DocumentVersion,
+			"version": 1,
 			"session": map[string]any{
 				"session_id": "legacy-transaction",
 				"participants": []any{
@@ -375,9 +341,9 @@ func TestDecodePersistedTransactionAppliesLegacyV1ParticipantRules(t *testing.T)
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	record, report, err := decodePersistedTransactionWithReport(raw)
+	record, err := decodePersistedTransaction(raw)
 	if err != nil {
-		t.Fatalf("decodePersistedTransactionWithReport() error = %v", err)
+		t.Fatalf("decodePersistedTransaction() error = %v", err)
 	}
 	if record.Document.Version != documentVersion {
 		t.Fatalf("transaction document version = %d, want %d", record.Document.Version, documentVersion)
@@ -392,17 +358,28 @@ func TestDecodePersistedTransactionAppliesLegacyV1ParticipantRules(t *testing.T)
 	if got := record.Document.Session.Participants; !reflect.DeepEqual(got, want) {
 		t.Fatalf("transaction participants = %#v, want %#v", got, want)
 	}
-	wantReport := MigrationReport{
-		FromVersion: legacyV1DocumentVersion,
-		Dropped: []MigrationDrop{{
-			SessionRef: session.SessionRef{SessionID: "legacy-transaction"},
-			Category:   legacyMigrationCategoryACPParticipant,
-			Identity:   "participants[0]",
-			Reason:     legacyMigrationReasonMissingPlacement,
-		}},
-	}
-	if !reflect.DeepEqual(report, wantReport) {
-		t.Fatalf("transaction MigrationReport = %#v, want %#v", report, wantReport)
+}
+
+func TestDecodePersistedDocumentLimitsRetiredFormatsToTheirOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		doc     string
+		retired bool
+	}{
+		{"before v1", `{"kind":"caelis.sdk.session","session":{"session_id":"old"}}`, true},
+		{"v1 unsupported shape", `{"kind":"caelis.sdk.session","version":1,"session":{"session_id":"old"},"state":[]}`, true},
+		{"current schema malformed", `{"kind":"caelis.sdk.session","version":2,"session":{"session_id":"old"},"state":[]}`, false},
+		{"invalid version", `{"kind":"caelis.sdk.session","version":"invalid","session":{"session_id":"old"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := decodePersistedDocument([]byte(tc.doc))
+			if err == nil || errors.Is(err, session.ErrUnsupportedLegacyFormat) != tc.retired {
+				t.Fatalf("decode error = %v, want retired = %t", err, tc.retired)
+			}
+			if tc.retired && doc.Session.SessionID != "old" {
+				t.Fatalf("missing retired transaction owner: %#v", doc.Session)
+			}
+		})
 	}
 }
 

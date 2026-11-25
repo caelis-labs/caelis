@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -204,14 +205,30 @@ func (s *Store) recoverTransactions(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		record, report, err := decodePersistedTransactionWithReport(data)
-		if err != nil {
-			return fmt.Errorf("agent-sdk/session/file: decode committed transaction %s: %w", path, err)
-		}
-		s.recordMigrationReport(report)
+		record, err := decodePersistedTransaction(data)
 		documentPath := strings.TrimSuffix(path, transactionSuffix)
-		if err := s.applyTransaction(ctx, path, record, prewarm.indexFor(documentPath)); err != nil {
+		if err == nil {
+			err = s.applyTransaction(ctx, path, record, prewarm.indexFor(documentPath))
+		}
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+			return fmt.Errorf("agent-sdk/session/file: recover committed transaction %s: %w", path, err)
+		}
+		// Leave the committed bytes untouched. Only a known older format
+		// with a verified owner can be isolated from the rest of the root.
+		if err := s.validateTransactionPath(path, record); err != nil {
 			return err
+		}
+		// Reserve even a Session created just before the old writer crashed.
+		// Existing index rows already point to the original document.
+		_, indexErr := s.lookupSessionIndex(record.Document.Session.SessionID)
+		if errors.Is(indexErr, session.ErrSessionNotFound) {
+			indexErr = s.upsertSessionIndex(record.Document.Session, documentPath)
+		}
+		if indexErr != nil {
+			return indexErr
 		}
 	}
 	return s.clearTransactionRecoveryMarker(ctx)
@@ -235,7 +252,7 @@ func transactionPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-func decodePersistedTransactionWithReport(data []byte) (persistedTransaction, MigrationReport, error) {
+func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
 	var raw struct {
 		Kind     string            `json:"kind"`
 		Version  int               `json:"version"`
@@ -243,33 +260,31 @@ func decodePersistedTransactionWithReport(data []byte) (persistedTransaction, Mi
 		Events   []json.RawMessage `json:"events"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return persistedTransaction{}, MigrationReport{}, err
+		return persistedTransaction{}, err
 	}
 	record := persistedTransaction{Kind: raw.Kind, Version: raw.Version}
-	document, report, err := decodePersistedDocumentWithReport(raw.Document)
-	if err != nil {
-		return persistedTransaction{}, MigrationReport{}, err
-	}
+	document, err := decodePersistedDocument(raw.Document)
 	record.Document = document
+	if err != nil {
+		return record, err
+	}
 	record.Events = make([]*session.Event, 0, len(raw.Events))
 	for index, eventRaw := range raw.Events {
 		event, err := session.UnmarshalEventJSON(eventRaw)
 		if err != nil {
-			return persistedTransaction{}, MigrationReport{}, fmt.Errorf("decode event %d: %w", index, err)
+			return record, fmt.Errorf("decode event %d: %w", index, err)
 		}
 		record.Events = append(record.Events, event)
 	}
-	return record, report, nil
+	return record, nil
 }
 
-func (s *Store) applyTransaction(
-	ctx context.Context,
-	path string,
-	record persistedTransaction,
-	appendIndex *eventAppendIndex,
-) error {
+func (s *Store) validateTransactionPath(path string, record persistedTransaction) error {
 	if record.Kind != transactionKind || record.Version != transactionVersion {
 		return fmt.Errorf("agent-sdk/session/file: unsupported transaction %q version %d", record.Kind, record.Version)
+	}
+	if strings.TrimSpace(record.Document.Session.SessionID) == "" {
+		return fmt.Errorf("agent-sdk/session/file: transaction has no session identity")
 	}
 	documentPath := strings.TrimSuffix(path, transactionSuffix)
 	resolvedPath, err := s.resolveWritePath(record.Document.Session)
@@ -279,6 +294,19 @@ func (s *Store) applyTransaction(
 	if filepath.Clean(resolvedPath) != filepath.Clean(documentPath) {
 		return fmt.Errorf("agent-sdk/session/file: transaction path does not match session identity")
 	}
+	return nil
+}
+
+func (s *Store) applyTransaction(
+	ctx context.Context,
+	path string,
+	record persistedTransaction,
+	appendIndex *eventAppendIndex,
+) error {
+	if err := s.validateTransactionPath(path, record); err != nil {
+		return err
+	}
+	documentPath := strings.TrimSuffix(path, transactionSuffix)
 	if len(record.Events) > 0 {
 		if err := s.appendMissingTransactionEvents(documentPath, record.Events, appendIndex); err != nil {
 			return err
@@ -297,7 +325,7 @@ func (s *Store) applyTransaction(
 	// path. Keep the committed WAL until the corresponding index entry is
 	// durable so a restart can repair an index failure without losing the
 	// Session or rebuilding the canonical event log.
-	if err := s.upsertSessionIndex(record.Document.Session, resolvedPath); err != nil {
+	if err := s.upsertSessionIndex(record.Document.Session, documentPath); err != nil {
 		return committedDocumentWrite(err)
 	}
 	if err := s.injectTransactionFault("after_index"); err != nil {

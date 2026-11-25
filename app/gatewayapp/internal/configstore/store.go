@@ -11,6 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/plugin"
 )
@@ -368,6 +369,18 @@ func dedupeProviderEndpointsForSave(endpoints []modelconfig.ProviderEndpointConf
 		out = append(out, endpoint)
 	}
 	return out
+}
+
+// NormalizeBackend resolves one explicitly selected product sandbox backend.
+func NormalizeBackend(backend string) (string, error) {
+	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
+	case "":
+		return "auto", nil
+	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendWindows:
+		return string(normalized), nil
+	default:
+		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
+	}
 }
 
 func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
