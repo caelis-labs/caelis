@@ -18,7 +18,7 @@ import (
 // This disposable index stores provenance and byte locations, never transcript
 // payloads. It is built only for a requested Session, catches up incrementally,
 // and survives Host restart. The canonical log and its WAL remain authoritative.
-const eventMetadataIndexVersion = 2
+const eventMetadataIndexVersion = 3
 const maxEventMetadataIndexBytes = 32 << 20
 const eventMetadataCheckpointStride = 200
 

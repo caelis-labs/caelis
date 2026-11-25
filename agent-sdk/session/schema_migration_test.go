@@ -1,9 +1,10 @@
 package session_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"strings"
+	"fmt"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -28,146 +29,57 @@ func TestPrepareEventsForAppendAlwaysPersistsCurrentEventSchema(t *testing.T) {
 	}
 }
 
-func TestMigrationRegistryRejectsGapsDuplicatesAndFutureSchemas(t *testing.T) {
-	t.Parallel()
-
-	registry := session.NewMigrationRegistry()
-	identity := func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }
-	if err := registry.Register(session.SchemaKindEvent, 0, 2, identity); err == nil {
-		t.Fatal("Register(non-adjacent) error = nil")
-	}
-	if err := registry.Register(session.SchemaKindEvent, 0, 1, identity); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if err := registry.Register(session.SchemaKindEvent, 0, 1, identity); err == nil {
-		t.Fatal("Register(duplicate) error = nil")
-	}
-	_, err := registry.Migrate(session.SchemaKindEvent, 0, 2, json.RawMessage(`{}`))
-	var versionErr *session.SchemaVersionError
-	if !errors.As(err, &versionErr) || versionErr.From != 1 {
-		t.Fatalf("Migrate(gap) error = %v, want SchemaVersionError at version 1", err)
-	}
-	_, err = session.MigrateEvent(session.Event{Schema: session.EventSchemaVersion + 1})
-	if !errors.As(err, &versionErr) {
-		t.Fatalf("MigrateEvent(future) error = %v, want SchemaVersionError", err)
-	}
-}
-
-func TestMigrateEventJSONRejectsNullRecord(t *testing.T) {
-	t.Parallel()
-
-	_, err := session.MigrateEventJSON(json.RawMessage("null"))
-	var versionErr *session.SchemaVersionError
-	if !errors.As(err, &versionErr) || versionErr.Kind != session.SchemaKindEvent {
-		t.Fatalf("MigrateEventJSON(null) = %v, want event schema error", err)
-	}
-}
-
-func TestMigrateEventJSONPreservesUnknownFieldCorpusAtEveryJournalLevel(t *testing.T) {
-	t.Parallel()
-
-	raw := json.RawMessage(`{
-		"schema":0,
-		"type":"lifecycle",
-		"visibility":"journal",
-		"future_top":{"sentinel":"top"},
-		"journal":{
-			"schema":0,
-			"kind":"run",
-			"future_journal":{"sentinel":"journal"},
-			"execution":{"schema":0,"future_execution":{"sentinel":"execution"}},
-			"tool_execution":{"schema":0,"future_tool":{"sentinel":"tool"}},
-			"pause_token":{"schema":0,"future_pause":{"sentinel":"pause"}}
+func TestEventEnvelopeKeepsOpaqueFields(t *testing.T) {
+	for version := 0; version <= session.EventSchemaVersion; version++ {
+		raw := json.RawMessage(fmt.Sprintf(` { "schema":%d, "type":"lifecycle", "visibility":"journal", "extra":9007199254740993123456789, "journal":{"schema":899,"pause_token":{"schema":100},"tool_execution":{"result":true}} } `, version))
+		migrated, err := session.MigrateEventJSON(raw)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}`)
-	migrated, err := session.MigrateEventJSON(raw)
-	if err != nil {
-		t.Fatalf("MigrateEventJSON() error = %v", err)
-	}
-	var event map[string]any
-	if err := json.Unmarshal(migrated, &event); err != nil {
-		t.Fatal(err)
-	}
-	assertMigrationSentinel(t, event, "future_top", "top")
-	journal := migrationObject(t, event, "journal")
-	assertMigrationSentinel(t, journal, "future_journal", "journal")
-	assertMigrationSentinel(t, migrationObject(t, journal, "execution"), "future_execution", "execution")
-	assertMigrationSentinel(t, migrationObject(t, journal, "tool_execution"), "future_tool", "tool")
-	assertMigrationSentinel(t, migrationObject(t, journal, "pause_token"), "future_pause", "pause")
-	for name, object := range map[string]map[string]any{
-		"event":          event,
-		"journal":        journal,
-		"execution":      migrationObject(t, journal, "execution"),
-		"tool_execution": migrationObject(t, journal, "tool_execution"),
-		"pause_token":    migrationObject(t, journal, "pause_token"),
-	} {
-		wantSchema := float64(1)
-		if name == "event" {
-			wantSchema = float64(session.EventSchemaVersion)
+		var fields map[string]json.RawMessage
+		if err = json.Unmarshal(migrated, &fields); err != nil {
+			t.Fatal(err)
 		}
-		if object["schema"] != wantSchema {
-			t.Fatalf("%s schema = %#v, want %v", name, object["schema"], wantSchema)
+		if string(fields["schema"]) != fmt.Sprint(session.EventSchemaVersion) || string(fields["extra"]) != "9007199254740993123456789" || !bytes.Contains(fields["journal"], []byte(`"schema":899`)) {
+			t.Fatalf("schema %d changed opaque fields: %s", version, migrated)
+		}
+		event, err := session.UnmarshalEventJSON(raw)
+		if err != nil || event.Tool != nil || event.Approval != nil {
+			t.Fatalf("schema %d produced retired facts: %+v, %v", version, event, err)
+		}
+		if version == session.EventSchemaVersion && !bytes.Equal(raw, migrated) {
+			t.Fatal("current schema rewrote its input")
+		}
+		migrated[0] = 'x'
+		if raw[0] == 'x' {
+			t.Fatal("migration aliases its caller's input")
 		}
 	}
 }
 
-func migrationObject(t *testing.T, object map[string]any, key string) map[string]any {
-	t.Helper()
-	value, ok := object[key].(map[string]any)
-	if !ok {
-		t.Fatalf("%s = %#v, want object", key, object[key])
-	}
-	return value
-}
-
-func assertMigrationSentinel(t *testing.T, object map[string]any, key, want string) {
-	t.Helper()
-	sentinel := migrationObject(t, object, key)
-	if sentinel["sentinel"] != want {
-		t.Fatalf("%s sentinel = %#v, want %q", key, sentinel["sentinel"], want)
-	}
-}
-
-func TestCurrentSchemaMigrationPreservesPayloadWithoutAliasing(t *testing.T) {
-	raw := json.RawMessage(` { "schema":4, "future":{"large":"preserved"}, "journal": { "schema":1, "execution":{"schema":1,"unknown":123}, "tool_execution":{"schema":1}, "pause_token":{"schema":1} } } `)
-	migrated, err := session.MigrateEventJSON(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(migrated) != string(raw) {
-		t.Fatal("current schemas rewrote an unchanged payload")
-	}
-	migrated[0] = 'x'
-	if raw[0] == 'x' {
-		t.Fatal("migration aliases its caller's source buffer")
-	}
-	for _, journal := range []string{`{"schema":2}`, `{"schema":1,"execution":{"schema":2}}`, `{"schema":1,"tool_execution":{"schema":2}}`, `{"schema":1,"pause_token":{"schema":2}}`} {
-		if _, err := session.MigrateEventJSON(json.RawMessage(`{"schema":2,"journal":` + journal + `}`)); err == nil {
-			t.Fatalf("future nested schema accepted: %s", journal)
+func TestEventEnvelopeRejectsUnsupportedActiveSchemas(t *testing.T) {
+	for _, raw := range []string{"null", `{"schema":-1}`, `{"schema":1.5}`, `{"schema":"1"}`, `{"schema":99}`, `{"schema":2,"approval":{"schema":99},"journal":{}}`} {
+		var versionErr *session.SchemaVersionError
+		if _, err := session.UnmarshalEventJSON([]byte(raw)); !errors.As(err, &versionErr) {
+			t.Fatalf("%s: got %v, want SchemaVersionError", raw, err)
 		}
 	}
 }
 
-func TestCurrentAndRetiredFutureSchemasFailClosed(t *testing.T) {
-	for _, raw := range []string{`{"schema":5}`, `{"schema":3,"approval":{"schema":2}}`, `{"schema":2,"journal":{"schema":2}}`, `{"schema":2,"journal":{"schema":1,"execution":{"schema":2}}}`, `{"schema":2,"journal":{"schema":1,"tool_execution":{"schema":2}}}`} {
-		var event session.Event
-		if err := json.Unmarshal([]byte(raw), &event); err == nil {
-			t.Fatalf("future schema accepted: %s", raw)
+func TestJournalOnlyCanonicalToolRecordIsUnsupportedHistory(t *testing.T) {
+	for _, kind := range []string{"tool_call", "tool_result"} {
+		raw := fmt.Sprintf(`{"schema":2,"type":%q,"journal":{"tool_execution":{"schema":1}}}`, kind)
+		if _, err := session.UnmarshalEventJSON([]byte(raw)); !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+			t.Fatalf("%s: expected unsupported legacy history, got %v", kind, err)
+		}
+		raw = fmt.Sprintf(`{"schema":%d,"type":%q}`, session.EventSchemaVersion, kind)
+		if _, err := session.UnmarshalEventJSON([]byte(raw)); err == nil || errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+			t.Fatalf("%s: expected current validation error, got %v", kind, err)
 		}
 	}
-	raw := `{"schema":2,"type":"lifecycle","visibility":"journal","journal":{"schema":1,"tool_execution":{"schema":1,"key":{"tool_call_id":"native"},"tool_name":"Write","status":"succeeded","binding":{"name":"forbidden","identity":"old","version":"old"},"result":{"content":[{"kind":"json","json":{"value":{"large":9007199254740993123456789}}}]}}}}`
-	var event session.Event
-	if err := json.Unmarshal([]byte(raw), &event); err != nil {
-		t.Fatal(err)
-	}
-	if event.Tool == nil || event.Tool.Result == nil || event.Tool.Binding != nil || event.Tool.Execution.ItemID != "" {
-		t.Fatal("legacy body lost or old authority restored")
-	}
-	encoded, err := json.Marshal(event)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), "\"journal\":") {
-		t.Fatal("retired writer restored")
+	// A missing tool must not conceal a separate invalid typed approval.
+	raw := []byte(`{"schema":2,"type":"tool_call","approval":{"schema":1},"journal":{"tool_execution":{}}}`)
+	if _, err := session.UnmarshalEventJSON(raw); !errors.Is(err, session.ErrInvalidEvent) || errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("invalid typed approval classified as retired: %v", err)
 	}
 }

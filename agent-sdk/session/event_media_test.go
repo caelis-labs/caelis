@@ -86,7 +86,7 @@ func TestRetiredJournalMediaIsConsumedBeforeIgnoringExecution(t *testing.T) {
 	if err := json.Unmarshal(migrated, &got); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Message, event.Message) {
+	if got.Tool != nil || got.Approval != nil || !reflect.DeepEqual(got.Message, event.Message) {
 		t.Fatal("legacy message media changed")
 	}
 	again, _ := json.Marshal(got)
@@ -99,6 +99,12 @@ func TestRetiredJournalMediaIsConsumedBeforeIgnoringExecution(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
+	// The old body is opaque once the live fields have no table to resolve.
+	delete(object, "media")
+	raw, _ = json.Marshal(object)
+	if err := json.Unmarshal(raw, &got); err != nil || got.Tool != nil {
+		t.Fatalf("discarded media became a live dependency: %v", err)
+	}
 }
 
 func TestLegacyToolReceiptRestoresEventFields(t *testing.T) {
@@ -107,7 +113,7 @@ func TestLegacyToolReceiptRestoresEventFields(t *testing.T) {
 	if err := json.Unmarshal([]byte(old), &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.ID != "original" || event.Outcome != ToolOutcomeFailed || !event.Discovery || !event.ResultIncludesReceipt || event.Result.Content[0] != tool.Text("old") {
+	if event.ID != "original" || event.Outcome != ToolOutcomeFailed || event.Discovery || !event.ResultIncludesReceipt || event.Result.Content[0] != tool.Text("old") {
 		t.Fatalf("restored event = %+v", event)
 	}
 	raw, err := json.Marshal(event.Result)

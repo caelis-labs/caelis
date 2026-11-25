@@ -416,10 +416,11 @@ The optional `approval.Requester` receives tool and endpoint permission requests
 Approval request/resolution facts live in `Event.Approval`. Runtime owns their
 persistence and reusable consent; Control projects their redacted request and
 live queue settlement without a second approval history writer. Restart does not
-recreate approval waiters. Session event schema 4 carries original input evidence and durable context edits;
-complete tool facts from schema 3 remain readable. The Session codec consumes known legacy execution fields and media solely
-for compatibility, preserving old messages and approval review; it never restores
-Run state, execution authority or tool bindings. Unknown future schemas fail closed.
+recreate approval waiters. Event schema 4 carries original input evidence and
+durable context edits. Resume reads canonical messages and typed tool facts,
+including schema 3 results. Retired execution journals and pause tokens are
+ignored. An event whose only canonical tool payload lived in that journal can
+make its Session unsupported. Future event and approval schemas are rejected.
 
 Runtime releases its Session writer after producers and finalization have
 drained. The file and memory services enforce ownership with a Session fence.
@@ -551,8 +552,7 @@ the parent invocation and its fence alive until actual quiescence; bounded recei
 writes begin only after that gate, and `Close` is not proof of completion.
 
 Persistence requires revision CAS, full-payload idempotency, fenced writes,
-monotonic replay, schema migration before typed decode, and fail-closed handling
-of unknown versions. Persistence or replay changes require whole-object round
+monotonic replay, and version checks on durable facts before replay. Persistence or replay changes require whole-object round
 trips proving rebuilt model context equals Runtime-produced context.
 
 Event schema 2 supports event-local sharing of repeated large inline media.
@@ -561,10 +561,8 @@ JSON encoding retains expanded values. Decoding verifies content digests and
 references and restores complete model messages and execution receipts before
 validation or recovery. Media never depends on another event or a temporary
 artifact, so retaining or discarding an event also retains or discards its media.
-Schema-1 logs remain readable without rewriting them. Older binaries reject
-schema-2 events; downgrade requires a Store backup from before those writes.
-Remove the schema-1 reader only when the supported upgrade floor requires
-schema-2 writers.
+Readers replay supported schema-1 records in place. Downgrading to a reader that
+predates schema 2 requires a Store backup from before the newer writes.
 
 Task producers own lifecycle state and typed failure diagnostics. Runtime-authored
 tool-result Events declare whether their wrapper may supply bounded final-result
@@ -670,7 +668,9 @@ runs outside that lock.
 
 Code Mode discovery browses the current ready directory without invoking a model.
 Directory pages carry only names and descriptions. Exact lookup returns schema
-and binding information but never grants execution permission. See [Code Mode](code-mode.md).
+and binding information. On resume, Runtime restores search bindings from
+successful Runtime-observed structured results. Older search markers are
+ignored. Model calls still pass through current Runtime policy. See [Code Mode](code-mode.md).
 
 WebSearch preserves `results` order for legacy
 positional references. Citation ranges use zero-based `result_indices` for

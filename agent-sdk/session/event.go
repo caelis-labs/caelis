@@ -134,13 +134,11 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 		if len(previous.Metadata) > 0 {
 			// Old tool metadata was arbitrary JSON. Only recognized values contribute.
 			var meta struct {
-				Discovery bool `json:"caelis.mcp.discovery.v1"`
-				Callback  struct {
+				Callback struct {
 					Format string `json:"result_format"`
 				} `json:"application_call"`
 			}
 			_ = json.Unmarshal(previous.Metadata, &meta)
-			decoded.Discovery = decoded.Discovery || meta.Discovery
 			if fields.LegacyResultFormat == "" {
 				fields.LegacyResultFormat = meta.Callback.Format
 			}
@@ -212,17 +210,16 @@ type Event struct {
 	Compaction              *EventCompactionContext  `json:"compaction_context,omitempty"`
 	// MessageID identifies one logical message across transient chunks and its
 	// canonical durable event. It is semantic event state, not display metadata.
-	MessageID     string            `json:"message_id,omitempty"`
-	Message       *model.Message    `json:"message,omitempty"`
-	Tool          *EventTool        `json:"tool,omitempty"`
-	PlanPayload   *EventPlanPayload `json:"plan,omitempty"`
-	Notice        *EventNotice      `json:"notice,omitempty"`
-	Lifecycle     *EventLifecycle   `json:"lifecycle,omitempty"`
-	Approval      *ApprovalRecord   `json:"approval,omitempty"`
-	legacyJournal json.RawMessage
-	Protocol      *EventProtocol `json:"protocol,omitempty"`
-	Text          string         `json:"-"`
-	Meta          map[string]any `json:"_meta,omitempty"`
+	MessageID   string            `json:"message_id,omitempty"`
+	Message     *model.Message    `json:"message,omitempty"`
+	Tool        *EventTool        `json:"tool,omitempty"`
+	PlanPayload *EventPlanPayload `json:"plan,omitempty"`
+	Notice      *EventNotice      `json:"notice,omitempty"`
+	Lifecycle   *EventLifecycle   `json:"lifecycle,omitempty"`
+	Approval    *ApprovalRecord   `json:"approval,omitempty"`
+	Protocol    *EventProtocol    `json:"protocol,omitempty"`
+	Text        string            `json:"-"`
+	Meta        map[string]any    `json:"_meta,omitempty"`
 }
 
 // UnmarshalJSON expands event-local media and preserves numeric tokens in the
@@ -240,8 +237,7 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 	fields := struct {
 		*eventAlias
-		Meta    json.RawMessage `json:"_meta"`
-		Journal json.RawMessage `json:"journal"`
+		Meta json.RawMessage `json:"_meta"`
 	}{eventAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -258,10 +254,6 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 	if decoded.Approval != nil && decoded.Approval.Schema > ApprovalSchemaVersion {
 		return &SchemaVersionError{Kind: SchemaKind("approval"), From: decoded.Approval.Schema, To: ApprovalSchemaVersion, Current: ApprovalSchemaVersion, Detail: "future approval schema"}
-	}
-	decoded.legacyJournal = fields.Journal
-	if err := decodeRetiredJournal((*Event)(&decoded)); err != nil {
-		return err
 	}
 	if err := validateCheckpointContract((*Event)(&decoded)); err != nil {
 		return err

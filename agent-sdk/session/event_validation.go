@@ -11,6 +11,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
+const (
+	missingToolCallPayload   = "tool call is missing durable Event.Tool"
+	missingToolResultPayload = "tool result is missing durable Event.Tool or model tool-result payload"
+)
+
 // EventValidationError reports a canonical session event that cannot be used to
 // rebuild model context safely.
 type EventValidationError struct {
@@ -106,7 +111,7 @@ func ValidateDurableCoreEvent(event *Event) error {
 		}
 	case EventTypeToolCall:
 		if event.Tool == nil {
-			return coreEventValidationError("tool call is missing durable Event.Tool")
+			return coreEventValidationError(missingToolCallPayload)
 		}
 		if event.Message != nil && len(event.Message.ToolCalls()) == 0 {
 			return coreEventValidationError("tool call Event.Message is missing model tool-call payload")
@@ -132,7 +137,7 @@ func validateDurableCoreToolResult(event *Event) error {
 	if event.Message != nil && len(event.Message.ToolResults()) > 0 {
 		return validateDurableCoreMeta(event.Meta)
 	}
-	return coreEventValidationError("tool result is missing durable Event.Tool or model tool-result payload")
+	return coreEventValidationError(missingToolResultPayload)
 }
 
 func validateDurableCoreToolMessageOutput(event *Event) error {

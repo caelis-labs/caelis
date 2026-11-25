@@ -9,27 +9,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
-func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
+func TestLegacyDiscoveryMarkerIsIgnored(t *testing.T) {
 	b := tool.Binding{Name: "docs__read", Identity: "source", Version: "schema-v1"}
 	entry := map[string]any{"name": b.Name, "binding": b, "input_schema": map[string]any{"type": "object"}}
-	event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Status: "completed", Output: map[string]any{"tools": []any{entry}}}, Meta: map[string]any{MetadataKey: true}}
-	if got := searchBindings(event); got[b.Name] != b {
-		t.Fatalf("canonical binding=%v", got)
-	}
-	for _, change := range []func(*session.Event){
-		func(e *session.Event) { e.Meta = nil },
-		func(e *session.Event) { e.Tool.Name = "ToolSearch" },
-		func(e *session.Event) { e.Tool.Status = "failed" },
-		func(e *session.Event) {
-			e.Tool.Output = map[string]any{"tools": []any{map[string]any{"name": b.Name, "binding": b}}}
-		},
-		func(e *session.Event) { e.Meta[MetadataKey] = []tool.Binding{b}; e.Tool.Output = nil },
-	} {
-		candidate := session.CloneEvent(event)
-		change(candidate)
-		if got := searchBindings(candidate); len(got) != 0 {
-			t.Fatalf("legacy, failed or incomplete receipt granted %v", got)
-		}
+	event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: mcp.SearchToolName, Status: "completed", Output: map[string]any{"tools": []any{entry}}}, Meta: map[string]any{"caelis.mcp.discovery.v1": true}}
+	if got := searchBindings(event); len(got) != 0 {
+		t.Fatalf("legacy search output restored a binding: %v", got)
 	}
 }
 
@@ -46,6 +31,21 @@ func TestFullDiscoveryResultsRequireTheirOwningSource(t *testing.T) {
 		}
 		if searchBindings(event)[binding.Name] != binding {
 			t.Fatal("owning discovery result lost")
+		}
+	}
+	var plain tool.Result
+	if err := json.Unmarshal([]byte(`{"content":[{"kind":"json","json":{"value":`+string(raw)+`}}]}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*session.EventTool){
+		func(fact *session.EventTool) { fact.Discovery = false },
+		func(fact *session.EventTool) { fact.Outcome = session.ToolOutcomeFailed },
+		func(fact *session.EventTool) { fact.Result = &plain },
+	} {
+		event := session.CloneEvent(original)
+		change(event.Tool)
+		if got := searchBindings(event); len(got) != 0 {
+			t.Fatalf("ineligible result restored a binding: %v", got)
 		}
 	}
 	remote := session.CloneEvent(original)
