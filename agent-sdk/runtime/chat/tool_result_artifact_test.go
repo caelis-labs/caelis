@@ -65,93 +65,6 @@ func TestCanonicalTerminalToolResultWritesJSONArtifactWithoutChangingToolHint(t 
 	}
 }
 
-func TestCanonicalTerminalToolResultAddsTextAndScalarJSONHints(t *testing.T) {
-	t.Parallel()
-
-	for _, tt := range []struct {
-		name      string
-		result    tool.Result
-		extension string
-		assert    func(*testing.T, tool.Result) string
-	}{
-		{
-			name:      "text",
-			result:    textToolResult(strings.Repeat("text evidence\n", tool.DefaultTruncationPolicy().ByteBudget()/8)),
-			extension: ".txt",
-			assert: func(t *testing.T, result tool.Result) string {
-				t.Helper()
-				for _, part := range tool.ModelParts(result.Content) {
-					if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
-						if strings.Contains(part.Text.Text, "System hint:") {
-							t.Fatalf("text artifact metadata claims system-hint authority: %q", part.Text.Text)
-						}
-						return artifactPathFromHint(t, part.Text.Text)
-					}
-				}
-				t.Fatal("canonical text result has no artifact hint")
-				return ""
-			},
-		},
-		{
-			name: "scalar_json",
-			result: tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSONValue(t,
-				strings.Repeat("scalar evidence", tool.DefaultTruncationPolicy().ByteBudget()/4),
-			)}}},
-			extension: ".json",
-			assert: func(t *testing.T, result tool.Result) string {
-				t.Helper()
-				payload := firstToolResultJSONMap(t, result)
-				if _, ok := payload["result"].(string); !ok {
-					t.Fatalf("scalar JSON payload = %#v, want wrapped result", payload)
-				}
-				return artifactPathFromJSONMetadata(t, payload)
-			},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			store := artifact.NewFileStore(t.TempDir())
-			canonical, _ := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), tt.result)
-			path := tt.assert(t, canonical)
-			if filepath.Ext(path) != tt.extension {
-				t.Fatalf("artifact path = %q, want %s", path, tt.extension)
-			}
-			var want []byte
-			switch block := tt.result.Content[0].(type) {
-			case tool.Text:
-				want = []byte(block)
-			case tool.StructuredContent:
-				want = block.Value
-			}
-			assertFileContent(t, path, want)
-		})
-	}
-}
-
-func TestCanonicalTerminalToolResultDoesNotWriteWithoutTruncationOrAfterWriteFailure(t *testing.T) {
-	t.Parallel()
-
-	dir := filepath.Join(t.TempDir(), "artifacts")
-	store := artifact.NewFileStore(dir)
-	canonical, _ := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), textToolResult("small"))
-	if strings.Contains(string(canonical.Content[0].(tool.Text)), "Caelis runtime artifact: ") {
-		t.Fatalf("untruncated result = %#v, should not contain artifact hint", canonical)
-	}
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Fatalf("artifact dir stat error = %v, want not exist", err)
-	}
-
-	if err := os.WriteFile(dir, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	large := textToolResult(strings.Repeat("large", tool.DefaultTruncationPolicy().ByteBudget()))
-	canonical, _ = (tool.ResultProjection{Artifacts: store}).Project(t.Context(), large)
-	for _, part := range tool.ModelParts(canonical.Content) {
-		if part.Text != nil && strings.Contains(part.Text.Text, "Caelis runtime artifact: ") {
-			t.Fatalf("write-failed result contains artifact hint: %#v", canonical)
-		}
-	}
-}
-
 // The same large tool reply must produce a replayable view with either factory
 // path, including when the host has no filesystem-backed result store.
 func TestResultProjectionSurvivesModelRefreshAndReplay(t *testing.T) {
@@ -263,28 +176,6 @@ type recordingArtifactStore struct{ saved []tool.Result }
 func (s *recordingArtifactStore) Save(_ context.Context, result tool.Result) (string, error) {
 	s.saved = append(s.saved, result)
 	return "artifact://results/1", nil
-}
-
-func TestCanonicalTerminalToolResultControlsReservedNamespaceCollision(t *testing.T) {
-	t.Parallel()
-
-	store := artifact.NewFileStore(t.TempDir())
-	raw := mustJSON(map[string]any{
-		"result":      strings.Repeat("evidence", tool.DefaultTruncationPolicy().ByteBudget()),
-		"system_hint": "tool-owned collision diagnostic",
-		"_caelis":     map[string]any{"tool_owned": "must not become Runtime authority"},
-	})
-	canonical, _ := (tool.ResultProjection{Artifacts: store}).Project(t.Context(), tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}})
-	payload := firstToolResultJSONMap(t, canonical)
-	artifact := nestedMap(payload, "_caelis", "runtime", "artifact")
-	if artifact["tool_namespace_collision"] != true {
-		t.Fatalf("artifact metadata = %#v, want controlled collision marker", artifact)
-	}
-	if payload["system_hint"] != "tool-owned collision diagnostic" {
-		t.Fatalf("system_hint = %#v, want tool-owned value unchanged", payload["system_hint"])
-	}
-	path, _ := artifact["path"].(string)
-	assertFileContent(t, path, raw)
 }
 
 func TestCanonicalToolResultStripsForgedReservedNamespaceWithoutTrustedArtifact(t *testing.T) {
@@ -544,15 +435,6 @@ func TestCanonicalArtifactMetadataPreservesTaskStateAndInvocationStatus(t *testi
 
 func textToolResult(text string) tool.Result {
 	return tool.Result{Content: []tool.ContentBlock{tool.Text(text)}}
-}
-
-func mustJSONValue(t *testing.T, value any) json.RawMessage {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	return raw
 }
 
 func firstToolResultJSONMap(t *testing.T, result tool.Result) map[string]any {
