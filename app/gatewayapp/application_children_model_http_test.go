@@ -321,7 +321,10 @@ func TestApplicationProfileChildUsesTeamDespiteLegacyReviewer(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
 	ready := make(chan struct{})
-	provider := &reviewerHTTPProvider{toolName: "js_exec", args: reviewerMCPArgs, decision: `{"option_id":"allow_once"}`, toolReady: ready}
+	provider := &reviewerHTTPProvider{
+		toolName: "js_exec", args: reviewerMCPArgs, decision: `{"option_id":"allow_once"}`,
+		toolReady: ready, entered: make(chan struct{}),
+	}
 	host, client, sid := setupReviewerHTTP(t, ctx, root, provider)
 	defer host.close(t)
 	child, _ := applicationProfileChild(t, ctx, client, sid)
@@ -331,6 +334,12 @@ func TestApplicationProfileChildUsesTeamDespiteLegacyReviewer(t *testing.T) {
 	}
 	waitAtomicApplicationMCPRunning(t, ctx, client, child, "documents")
 	close(ready)
+	// Idle is also observable before the background child has started its turn.
+	select {
+	case <-provider.entered:
+	case <-ctx.Done():
+		t.Fatal("child did not reach the Runtime Team Guardian before the deadline")
+	}
 	waitApplicationHTTPIdle(t, ctx, client, child)
 	reviewed := false
 	for _, request := range provider.snapshot() {

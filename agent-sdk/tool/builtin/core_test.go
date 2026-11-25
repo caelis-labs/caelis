@@ -389,15 +389,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 
 	patchTool := mustLookupTool(t, tools, filesystem.PatchToolName)
 	patchResult := runToolJSON(t, patchTool, map[string]any{
-		"path": "notes.txt",
-		"edits": []map[string]any{
-			{
-				"old":                   "world",
-				"new":                   "caelis",
-				"expected_replacements": "retired",
-			},
-		},
-		"if_revision": 42,
+		"path":  "notes.txt",
+		"edits": []map[string]any{{"old": "world", "new": "caelis"}},
 	})
 	if got := patchResult["replacements"]; got != float64(1) {
 		t.Fatalf("patch replacements = %v, want 1", got)
