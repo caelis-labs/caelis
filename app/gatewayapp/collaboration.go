@@ -245,6 +245,23 @@ func (s *runtimeComposition) collaborationTools(active session.Session) []tool.T
 	})
 }
 
+// collaborationInstructions describes the tools assembled for this request.
+// Callers supply only the Host-owned collaboration tools and Spawn declaration.
+func (s *runtimeComposition) collaborationInstructions(ctx context.Context, active session.Session, tools []tool.Tool) string {
+	definitions := make([]tool.Definition, 0, len(tools))
+	for _, item := range tools {
+		definitions = append(definitions, item.Definition())
+	}
+	if !sessionvisibility.IsSpawnedSubagentSession(active) {
+		return collaboration.ControllerInstructions(definitions)
+	}
+	handle, role, ok := s.spawnedCollaboratorIdentity(ctx, active)
+	if !ok {
+		return ""
+	}
+	return collaboration.IdentityInstructions(handle, role) + "\n" + collaboration.CollaboratorInstructions(definitions)
+}
+
 func (s *runtimeComposition) collaborationServers(spawn subagent.SpawnContext) ([]acp.McpServer, *collaboration.Grant, error) {
 	if s.authorities.collaboration == nil {
 		return nil, nil, nil

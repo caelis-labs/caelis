@@ -76,12 +76,12 @@ func (Tool) Definition() tool.Definition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "write", "cancel"},
-					"description": "wait returns state and available output on completion or yield expiry; write sends supported input; cancel requests cancellation when supported. Participant threads use ReadThread/WaitThread.",
+					"description": "wait returns state and available output on completion or yield expiry. write sends supported input. cancel requests cancellation when supported.",
 				},
 				"handle": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "A Session-scoped Task handle; wait/cancel may use a comma-separated list.",
+					"description": "A Session-scoped job handle. wait and cancel accept a comma-separated list.",
 				},
 				"yield_time_ms": map[string]any{
 					"type": "integer", "minimum": 0, "maximum": MaxWaitMilliseconds, "default": 60000,

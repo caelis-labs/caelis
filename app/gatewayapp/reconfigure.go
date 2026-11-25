@@ -466,15 +466,8 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				metadata[codemode.MetadataSelectedTools] = selectedCodeModeTools(mcpMgr.Tools())
 			}
 			if systemPrompt := baseMetadata.BasePrompt; systemPrompt != "" {
-				if spawnedChild {
-					systemPrompt = systemPromptWithoutCollaborationGuidance(systemPrompt)
-					if handle, role, ok := s.spawnedCollaboratorIdentity(ctx, activeSession); ok {
-						systemPrompt = systemPromptWithCollaboratorIdentity(systemPrompt, handle, role)
-					}
-				} else {
-					systemPrompt = systemPromptWithCollaborationGuidance(systemPrompt)
-				}
-				metadata["system_prompt"] = systemPrompt
+				guidance := s.collaborationInstructions(ctx, activeSession, augmentedTools)
+				metadata["system_prompt"] = systemPromptWithCollaborationGuidance(systemPrompt, guidance)
 			}
 			augmentation := kernelimpl.ToolAugmentation{
 				Tools:                      augmentedTools,

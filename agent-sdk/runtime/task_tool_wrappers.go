@@ -1019,7 +1019,7 @@ func commonTaskBatchKind(items []taskBatchControlItem) (taskapi.Kind, bool) {
 func (t runtimeTaskTool) resolveJobHandle(ctx context.Context, handle string) (taskControlIdentity, error) {
 	identity, err := t.tasks.resolveTaskHandle(ctx, t.sessionRef, handle)
 	if err == nil && identity.kind == taskapi.KindSubagent {
-		return taskControlIdentity{}, errorcode.New(errorcode.Unsupported, "participant handles require ReadThread or WaitThread; use SendMessage for input")
+		return taskControlIdentity{}, errorcode.New(errorcode.Unsupported, "Task requires a job handle. This handle belongs to a participant.")
 	}
 	return identity, err
 }

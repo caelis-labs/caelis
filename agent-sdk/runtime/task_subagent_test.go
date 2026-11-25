@@ -1238,7 +1238,7 @@ func TestTaskCancelRejectsSubagentWithoutRemoteEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = target.Call(ctx, tool.Call{ID: "cancel-collaborator", Name: tasktool.ToolName, Input: raw})
-	if !errorcode.Is(err, errorcode.Unsupported) || !strings.Contains(err.Error(), "ReadThread or WaitThread") {
+	if !errorcode.Is(err, errorcode.Unsupported) || !strings.Contains(err.Error(), "handle belongs to a participant") {
 		t.Fatalf("Task cancel error = %v, want unsupported command-only contract", err)
 	}
 	if runner.cancelCalls != 0 {

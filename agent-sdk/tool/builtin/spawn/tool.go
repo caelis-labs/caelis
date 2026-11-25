@@ -168,7 +168,7 @@ func spawnDefinition(agents []delegation.Agent) tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a collaborating Agent. Observe its result with ReadThread or WaitThread; continue it with SendMessage using the returned handle.",
+		Description: "Start a collaborating Agent and return its handle.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

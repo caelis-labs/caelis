@@ -39,7 +39,13 @@ func (s *runtimeComposition) delegationPlacementResolver(runtimeCfg stackRuntime
 			cfg.SessionOptions = spawnedCaelisSessionOptions(cfg.SessionOptions, spawn.ApprovalMode)
 		}
 		if err == nil && !cfg.BuiltinRuntime && spawn.TaskID != "" {
-			cfg.MCPServers, cfg.MCPGrant, err = s.collaborationServers(spawn)
+			servers, grant, installErr := s.collaborationServers(spawn)
+			if installErr != nil {
+				return cfg, installErr
+			}
+			if grant != nil {
+				cfg.MCPServers, cfg.MCPGrant = servers, grant
+			}
 		}
 		return cfg, err
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -46,12 +47,16 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 	if target.Selector != "zenith" || target.Placement.Agent != "grok" {
 		t.Fatalf("resolved target = %#v, want AgentHandle zenith backed by ACP Agent grok", target)
 	}
-	materialized, err := stack.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
+	resolve := stack.composition.delegationPlacementResolver(stack.composition.activeRuntime)
+	materialized, err := resolve(t.Context(), subagent.SpawnContext{TaskID: "child-task"}, sdkdelegation.TargetRequest{Target: target})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if materialized.Name != "grok" || materialized.Command != "grok-acp" {
 		t.Fatalf("materialized Agent = %#v, want execution identity grok", materialized)
+	}
+	if materialized.MCPGrant != nil || len(materialized.MCPServers) != 0 {
+		t.Fatalf("external child without a Control endpoint has an MCP grant or server installed")
 	}
 }
 

@@ -154,13 +154,17 @@ func TestBuiltinChildFirstProviderRequestIncludesAssignedHandle(t *testing.T) {
 		"Your assigned handle is orbit.",
 		"Address the parent as parent.",
 		"Your role is sidecar.",
+		"Use SendMessage to report meaningful progress or blockers to parent.",
+		"Use ReadMessages for an unread page",
 	} {
 		if !strings.Contains(messages, want) {
 			t.Fatalf("first provider request missing %q:\n%s", want, messages)
 		}
 	}
-	if strings.Contains(messages, "StartThread creates a collaborating Agent") || strings.Contains(messages, "CAELIS_COLLABORATION_TOKEN") {
-		t.Fatalf("first provider request leaked main-only guidance or secrets:\n%s", messages)
+	for _, unavailable := range []string{"StartThread", "ReadThread", "WaitThread", "CAELIS_COLLABORATION_TOKEN"} {
+		if strings.Contains(messages, unavailable) {
+			t.Fatalf("first provider request mentions %q:\n%s", unavailable, messages)
+		}
 	}
 }
 

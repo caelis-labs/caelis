@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
-	"github.com/caelis-labs/caelis/control/collaboration"
 )
 
 const (
@@ -59,22 +58,13 @@ func BuildSystemPrompt(cfg Config) (string, error) {
 	return result.Prompt, err
 }
 
-// WithCollaborationGuidance adds the main Agent collaboration contract to the
-// system instruction block without duplicating it.
-func WithCollaborationGuidance(prompt string) string {
-	return withSystemInstructionSection(prompt, builtInCollaborationPrompt())
-}
-
-// WithoutCollaborationGuidance removes main-only collaboration guidance from a
-// collaborating Agent's inherited system prompt.
-func WithoutCollaborationGuidance(prompt string) string {
-	return withoutSystemInstructionSection(prompt, builtInCollaborationPrompt())
-}
-
-// WithCollaboratorIdentity adds the Control-owned handle, parent, and role
-// section for a spawned collaborator without duplicating it.
-func WithCollaboratorIdentity(prompt, handle, role string) string {
-	return withSystemInstructionSection(prompt, builtInCollaboratorIdentityPrompt(handle, role))
+// WithCollaborationGuidance inserts Control's collaboration instructions into
+// the system block. Empty guidance leaves the prompt as assembled.
+func WithCollaborationGuidance(prompt, guidance string) string {
+	if guidance == "" {
+		return prompt
+	}
+	return withSystemInstructionSection(prompt, "## Collaboration\n\n"+guidance)
 }
 
 func BuildSystemPromptResult(cfg Config) (Result, error) {
@@ -213,29 +203,6 @@ func builtInPermissionBoundariesPrompt() string {
 		"If a necessary sandboxed action is denied, request Host for that same exact action; do not mutate the action to seek a bypass. Host approval is one-shot and action-scoped: a prior grant or failure does not authorize later actions.",
 		"Keep read-only inspection sandboxed unless the trusted boundary or a concrete denial requires Host.",
 		"For Host requests, briefly state the exact action, the boundary or denial requiring escalation, and why the action is necessary for the task. Never bypass the boundary.",
-	}, "\n")
-}
-
-func builtInCollaborationPrompt() string {
-	return strings.Join([]string{
-		"## Collaboration",
-		"",
-		"- After a participant completion notice, use ReadThread with its handle to read its public result; WaitThread can wait for a new result or incoming messages.",
-		"- StartThread creates a collaborating Agent only for independent work that benefits from parallelism or focused expertise.",
-		"- Own integration, validation, and the user-facing result. Verify only findings that affect the next action; do not repeat completed work.",
-	}, "\n")
-}
-
-func builtInCollaboratorIdentityPrompt(handle, role string) string {
-	identity := collaboration.IdentityInstructions(handle, role)
-	if identity == "" {
-		return ""
-	}
-	return strings.Join([]string{
-		"## Collaboration",
-		"",
-		identity,
-		collaboration.CollaboratorInstructions(),
 	}, "\n")
 }
 
@@ -403,38 +370,6 @@ func withSystemInstructionSection(prompt, section string) string {
 		return "<system_instructions>\n" + section + closingTag
 	}
 	return prompt + "\n\n" + section
-}
-
-func withoutSystemInstructionSection(prompt, section string) string {
-	section = normalizePromptText(section)
-	if section == "" {
-		return prompt
-	}
-	const closingTag = "\n</system_instructions>"
-	index := strings.Index(prompt, closingTag)
-	if index < 0 {
-		return withoutExactSection(prompt, section)
-	}
-	return withoutExactSection(prompt[:index], section) + prompt[index:]
-}
-
-func withoutExactSection(prompt, section string) string {
-	index := strings.Index(prompt, section)
-	if index < 0 {
-		return prompt
-	}
-	start, end := index, index+len(section)
-	switch {
-	case strings.HasPrefix(prompt[end:], "\n\n"):
-		end += 2
-	case start >= 2 && prompt[start-2:start] == "\n\n":
-		start -= 2
-	case strings.HasPrefix(prompt[end:], "\n"):
-		end++
-	case start >= 1 && prompt[start-1:start] == "\n":
-		start--
-	}
-	return prompt[:start] + prompt[end:]
 }
 
 func renderInstructionBlock(tag string, fragments []fragment) string {

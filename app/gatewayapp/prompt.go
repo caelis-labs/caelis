@@ -16,16 +16,8 @@ func buildSystemPromptResult(cfg promptConfig) (promptResult, error) {
 	return promptassembly.BuildSystemPromptResult(cfg)
 }
 
-func systemPromptWithCollaborationGuidance(prompt string) string {
-	return promptassembly.WithCollaborationGuidance(prompt)
-}
-
-func systemPromptWithoutCollaborationGuidance(prompt string) string {
-	return promptassembly.WithoutCollaborationGuidance(prompt)
-}
-
-func systemPromptWithCollaboratorIdentity(prompt, handle, role string) string {
-	return promptassembly.WithCollaboratorIdentity(prompt, handle, role)
+func systemPromptWithCollaborationGuidance(prompt, guidance string) string {
+	return promptassembly.WithCollaborationGuidance(prompt, guidance)
 }
 
 func resolvePromptPath(path string) (string, error) {

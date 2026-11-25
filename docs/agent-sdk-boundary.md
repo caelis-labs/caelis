@@ -170,9 +170,10 @@ restart contract is documented in [Execution Configuration](execution-configurat
 
 The assembled Tool set is the execution-admission boundary. Product policy may
 further restrict an admitted invocation, but tool names do not form a second
-allowlist. A StartThread-created collaborator receives only `ListThreads` and `SendMessage`
-from the collaboration tool set. Creation and work observation remain with the
-controller, keeping Agent collaboration one level deep.
+allowlist. Control derives collaboration instructions from the tools it installs.
+A product StartThread collaborator receives `ListThreads`, `SendMessage`, and
+`ReadMessages` when Control collaboration is available. Creation and work
+observation remain with the controller, keeping Agent collaboration one level deep.
 
 Harness Chat executes eligible calls in one native model batch concurrently
 when the active model declares parallel tool calls. Batches containing an

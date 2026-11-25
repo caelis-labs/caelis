@@ -547,7 +547,7 @@ func TestTaskRejectsParticipantHandlesForEveryAction(t *testing.T) {
 			args["input"] = "hello"
 		}
 		raw, _ := json.Marshal(args)
-		if _, err := target.Call(t.Context(), tool.Call{ID: action, Input: raw}); err == nil || !strings.Contains(err.Error(), "ReadThread") {
+		if _, err := target.Call(t.Context(), tool.Call{ID: action, Input: raw}); err == nil || !strings.Contains(err.Error(), "handle belongs to a participant") {
 			t.Fatalf("%s: %v", action, err)
 		}
 	}
