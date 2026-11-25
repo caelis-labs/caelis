@@ -52,8 +52,10 @@ func CloneEventChildOrigin(in EventChildOrigin) EventChildOrigin {
 		ACPSessionID:  strings.TrimSpace(in.ACPSessionID),
 		SourceEventID: strings.TrimSpace(in.SourceEventID),
 		ParentTool: EventParentTool{
-			CallID: strings.TrimSpace(in.ParentTool.CallID),
-			Name:   strings.TrimSpace(in.ParentTool.Name),
+			Kind:      strings.TrimSpace(in.ParentTool.Kind),
+			Execution: in.ParentTool.Execution,
+			CallID:    strings.TrimSpace(in.ParentTool.CallID),
+			Name:      strings.TrimSpace(in.ParentTool.Name),
 		},
 	}
 }
