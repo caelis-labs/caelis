@@ -85,10 +85,7 @@ func TestNativeMCPAutoReloadIsolatesBrokenFilesAndServersHTTP(t *testing.T) {
 	}
 	promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-before", "BASIC")
 	waitAtomicApplicationMCPRunning(t, ctx, host.host, created.SessionID, "documents")
-	if builtinComputerUseSupported() {
-		waitBuiltinDesktopWorldMCP(t, ctx, host.host, created.SessionID)
-		promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-baseline", "BASIC")
-	}
+	promptAtomicCapabilityClient(t, ctx, host.host, created.SessionID, "reload-baseline", "BASIC")
 	beforeTools := provider.lastTools()
 	beforeAudit := atomicAudit(audit)
 	systemPrompt := func() string {
@@ -202,10 +199,7 @@ func TestApplicationInheritedCapabilitiesAreAdditiveAndReloadHTTP(t *testing.T) 
 	defer feed.Subscription.Close()
 	promptAtomicCapabilityClient(t, ctx, client, id, "inherit-before", "BASIC")
 	waitAtomicApplicationMCPRunning(t, ctx, client, id, "documents")
-	if builtinComputerUseSupported() {
-		waitBuiltinDesktopWorldMCP(t, ctx, client, id)
-		promptAtomicCapabilityClient(t, ctx, client, id, "inherit-baseline", "BASIC")
-	}
+	promptAtomicCapabilityClient(t, ctx, client, id, "inherit-baseline", "BASIC")
 	before := atomicSystemInstructions(t, provider.lastRequest())
 	beforeTools := provider.lastTools()
 	for _, name := range []string{"host-skill", "workspace-skill", "atomic-skill"} {

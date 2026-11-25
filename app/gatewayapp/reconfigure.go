@@ -637,12 +637,12 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 
 // resolveGatewayPluginContributions samples persisted package availability.
 // Package failures remain attached to their own sources for diagnostics.
-func resolveGatewayPluginContributions(productDefaults productPluginDefaults, configs []PluginConfig, storeDir, workspaceDir string) (plugin.Contributions, error) {
+func resolveGatewayPluginContributions(productDefaults plugin.BuiltinPackage, configs []PluginConfig, storeDir, workspaceDir string) (plugin.Contributions, error) {
 	selected := plugin.OptionalUserConfigs(configs)
 	paths := plugin.RuntimePaths{StoreDir: storeDir, WorkspaceDir: workspaceDir}
 	contributions, err := plugin.ResolveAvailableContributions(selected, paths)
 	if err == nil {
-		contributions = productDefaults.apply(contributions, paths, configs...)
+		contributions = productDefaults.Available(contributions, paths, configs...)
 	}
 	if err != nil {
 		return plugin.Contributions{}, fmt.Errorf("gatewayapp: %w", err)

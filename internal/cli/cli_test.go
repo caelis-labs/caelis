@@ -582,7 +582,7 @@ func TestRunHeadlessRejectsClosedSessionWithoutRecreatingIt(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := gatewayapptest.NewStack(gatewayapp.Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1412,7 +1412,7 @@ func TestWithCLIAppServerClosesHostAfterAction(t *testing.T) {
 	if !errors.Is(err, actionErr) {
 		t.Fatalf("withCLIAppServer() error = %v, want action error", err)
 	}
-	reopened, err := gatewayapp.NewLocalStack(cfg)
+	reopened, err := gatewayapptest.NewStack(cfg)
 	if err != nil {
 		t.Fatalf("reopen Host after CLI action: %v", err)
 	}
@@ -1541,7 +1541,7 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 
 func seedCLIModel(t *testing.T, storeDir string, model gatewayapp.ModelConfig) string {
 	t.Helper()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := gatewayapptest.NewStack(gatewayapp.Config{
 		StoreDir:                  storeDir,
 		WorkspaceKey:              "cli-seed",
 		WorkspaceCWD:              t.TempDir(),
@@ -1671,3 +1671,6 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 		t.Fatalf("sandbox clean output = %q, want requested host backend", out.String())
 	}
 }
+
+// CLI entry points share the isolated Host constructor throughout the test process.
+func init() { newLocalStack = gatewayapptest.NewStack }

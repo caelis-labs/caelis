@@ -1166,7 +1166,7 @@ func TestNewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault(t *
 		t.Fatalf("WriteFile(config.json) error = %v", err)
 	}
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		AppName:      "caelis",
 		UserID:       "sandbox-bootstrap-test",
 		StoreDir:     root,
@@ -1568,7 +1568,7 @@ func newLocalStateTestHost(t *testing.T) *Stack {
 	t.Helper()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := newIsolatedGatewayAppTestStack(t, Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:      "caelis",
 		UserID:       "state-test",
 		StoreDir:     root,

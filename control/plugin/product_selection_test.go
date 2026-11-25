@@ -38,7 +38,7 @@ func TestDesktopWorldWholePackagePrecedence(t *testing.T) {
 func testDesktopWorldWholePackagePrecedence(t *testing.T, identity string) {
 	paths := RuntimePaths{StoreDir: t.TempDir()}
 	global := desktopWorldOverrideTestPackage(t, "999.0.0", identity)
-	globalOut, err := WithProductContributions(Contributions{}, paths, global)
+	globalOut, err := BuiltinPackage(fixtureRelease(t).contributions).Select(Contributions{}, paths, global)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func testDesktopWorldWholePackagePrecedence(t *testing.T, identity string) {
 		t.Fatal(err)
 	}
 	global.Root = filepath.Join(t.TempDir(), "missing-lower-priority-source")
-	got, err := WithProductContributions(selected, paths, global)
+	got, err := BuiltinPackage(fixtureRelease(t).contributions).Select(selected, paths, global)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func testDesktopWorldWholePackagePrecedence(t *testing.T, identity string) {
 	// deleting or changing the user's registration or package files.
 	global.Enabled = false
 	for _, configs := range [][]Config{{global}, nil} {
-		got, err = WithProductContributions(Contributions{}, paths, configs...)
+		got, err = BuiltinPackage(fixtureRelease(t).contributions).Select(Contributions{}, paths, configs...)
 		if err != nil || len(got.Sources) != 1 || (got.Sources[0].Status != "builtin" && !strings.HasPrefix(got.Sources[0].Status, "unsupported on ")) {
 			t.Fatalf("fallback = %+v, %v", got, err)
 		}
@@ -111,7 +111,7 @@ func testDesktopWorldNewestDefaultKeepsWholePackage(t *testing.T, identity strin
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := WithProductContributions(optional, paths, external, other)
+			got, err := BuiltinPackage(fixtureRelease(t).contributions).Select(optional, paths, external, other)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -207,10 +207,10 @@ func TestDesktopWorldPairIdentityValidation(t *testing.T) {
 					t.Fatalf("fixture services = %v, want %v", services, wantServices)
 				}
 				// Both default and explicit selection enforce the package contract.
-				if _, err := WithProductContributions(Contributions{}, paths, configured); err == nil {
+				if _, err := BuiltinPackage(fixtureRelease(t).contributions).Select(Contributions{}, paths, configured); err == nil {
 					t.Fatal("invalid global pair was accepted")
 				}
-				if _, err := WithProductContributions(selected, paths); err == nil {
+				if _, err := BuiltinPackage(fixtureRelease(t).contributions).Select(selected, paths); err == nil {
 					t.Fatal("invalid explicit pair was accepted")
 				}
 			})
@@ -276,11 +276,11 @@ func TestDesktopWorldInvalidOverrideDoesNotFallBack(t *testing.T) {
 			case "identity":
 				writeAgentPluginFile(t, configured.Root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"another-plugin","version":"0.3.3"}`)
 			}
-			got, err := WithProductContributions(Contributions{}, RuntimePaths{StoreDir: t.TempDir()}, configs...)
+			got, err := BuiltinPackage(fixtureRelease(t).contributions).Select(Contributions{}, RuntimePaths{StoreDir: t.TempDir()}, configs...)
 			if err == nil || len(got.MCPServerSpecs) != 0 {
 				t.Fatalf("invalid selection fell back: %+v, %v", got, err)
 			}
-			available := WithAvailableProductContributions(Contributions{}, RuntimePaths{StoreDir: t.TempDir()}, configs...)
+			available := BuiltinPackage(fixtureRelease(t).contributions).Available(Contributions{}, RuntimePaths{StoreDir: t.TempDir()}, configs...)
 			if len(available.Sources) != 1 || available.Sources[0].ID != "desktop-world" || available.Sources[0].Status != "failed" || available.Sources[0].Error == "" || len(available.MCPServerSpecs) != 0 || len(available.SkillBundles) != 0 {
 				t.Fatalf("unavailable override escaped isolation: %+v", available)
 			}

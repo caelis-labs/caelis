@@ -40,7 +40,7 @@ func TestPluginServiceSkillsFollowEnabledStateAndSuppressLegacyCopies(t *testing
 		t.Fatalf("write legacy copy: %v", err)
 	}
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,

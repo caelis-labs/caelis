@@ -3,18 +3,19 @@ package gatewayapp
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
+	"github.com/caelis-labs/caelis/internal/testenv/plugintest"
 )
 
 func TestFixedProductCapabilitiesSurviveOptionalEmptySelection(t *testing.T) {
+	load, _ := plugintest.DesktopWorld(t)
 	store := t.TempDir()
 	for _, plugins := range [][]sessionprofile.Plugin{nil, {}} {
-		got, err := applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, sessionprofile.Profile{Plugins: plugins}, applicationPluginPaths(store, "native-session", t.TempDir()))
+		got, err := applicationRuntimePluginContributions(load, sessionprofile.Profile{Plugins: plugins}, applicationPluginPaths(store, "native-session", t.TempDir()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -22,7 +23,7 @@ func TestFixedProductCapabilitiesSurviveOptionalEmptySelection(t *testing.T) {
 			t.Fatal("optional selection controlled the fixed product capability")
 		}
 	}
-	inherited, err := resolveGatewayPluginContributions(plugin.WithAvailableProductContributions, nil, store, t.TempDir())
+	inherited, err := resolveGatewayPluginContributions(load, nil, store, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +55,14 @@ func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
 		}
 		return root
 	}
+	load, fixedRoot := plugintest.DesktopWorld(t)
 	root := makePackage("desktop-world", "0.1.1")
 	globalRoot := makePackage("desktop-world", "999.0.0")
 	otherRoot := makePackage("other-plugin", "9999.0.0")
 	defaults := []plugin.Config{{ID: "alias", Root: globalRoot, Enabled: true}, {ID: "other-plugin", Root: otherRoot, Enabled: true}}
 	paths := applicationPluginPaths(t.TempDir(), "profile", t.TempDir())
 	selected := sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: root, MCPServers: []sessionprofile.MCPServer{{Name: "desktop-world", Transport: "stdio", Command: "must-never-launch", WorkDir: root}}}}}
-	got, err := applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, selected, paths, defaults...)
+	got, err := applicationRuntimePluginContributions(load, selected, paths, defaults...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,45 +70,25 @@ func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
 		t.Fatal("explicit Session package and its bound host launch were split or duplicated")
 	}
 	for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
-		got, err = applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, sessionprofile.Profile{Plugins: optional}, paths, defaults...)
+		got, err = applicationRuntimePluginContributions(load, sessionprofile.Profile{Plugins: optional}, paths, defaults...)
 		if err != nil || len(got.Sources) != 1 || got.Sources[0].Root != globalRoot || got.MCPServerSpecs[0].PackageRoot != globalRoot || got.SkillBundles[0].PluginRoot != globalRoot {
 			t.Fatalf("Bot/Worker default or optional isolation = %+v, %v", got, err)
 		}
 	}
-	ordinary, err := resolveGatewayPluginContributions(plugin.WithAvailableProductContributions, defaults, paths.ProductStoreDir, t.TempDir())
+	ordinary, err := resolveGatewayPluginContributions(load, defaults, paths.ProductStoreDir, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ordinary.Sources) != 2 || ordinary.Sources[0].Root != globalRoot {
 		t.Fatal("inherited optional plugins or canonical DTW selection lost")
 	}
-	olderRoot := makePackage("desktop-world", "0.1.1")
-	defaults[0].Root = olderRoot
-	builtin, err := plugin.ProductContributions(paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantRoot := olderRoot
-	if builtin.Sources[0].Status == "builtin" {
-		wantRoot = builtin.Sources[0].Root
-	}
-	for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
-		got, err = applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, sessionprofile.Profile{Plugins: optional}, paths, defaults...)
-		if err != nil || len(got.Sources) != 1 || got.Sources[0].Root != wantRoot || got.MCPServerSpecs[0].PackageRoot != wantRoot || got.SkillBundles[0].PluginRoot != wantRoot {
-			t.Fatalf("newest default in Bot/Worker profile = %+v, %v", got, err)
-		}
-	}
-	ordinary, err = resolveGatewayPluginContributions(plugin.WithAvailableProductContributions, defaults, paths.ProductStoreDir, t.TempDir())
-	if err != nil || len(ordinary.Sources) != 2 || ordinary.Sources[0].Root != wantRoot || ordinary.Sources[1].Root != otherRoot {
-		t.Fatalf("newest ordinary default or optional isolation = %+v, %v", ordinary, err)
-	}
 	defaults[0].Enabled = false
-	got, err = applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, sessionprofile.Profile{}, paths, defaults...)
-	if err != nil || len(got.Sources) != 1 || (got.Sources[0].Status != "builtin" && !strings.HasPrefix(got.Sources[0].Status, "unsupported on ")) {
+	got, err = applicationRuntimePluginContributions(load, sessionprofile.Profile{}, paths, defaults...)
+	if err != nil || len(got.Sources) != 1 || (got.Sources[0].Status != "builtin" || got.Sources[0].Root != fixedRoot) {
 		t.Fatalf("disable did not restore builtin: %+v, %v", got, err)
 	}
 	selected.Plugins[0].Root = filepath.Join(root, "missing")
-	if _, err = applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, selected, paths, defaults...); err == nil {
+	if _, err = applicationRuntimePluginContributions(load, selected, paths, defaults...); err == nil {
 		t.Fatal("broken explicit selection silently fell back")
 	}
 }

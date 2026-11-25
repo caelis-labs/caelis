@@ -37,7 +37,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 	}
 	for _, configured := range doc.Plugins {
 		if configured.Enabled && plugin.IsProductPlugin(configured) {
-			if _, err := plugin.WithProductContributions(contributions, plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD}, doc.Plugins...); err != nil {
+			if _, err := s.authorities.productDefaults.Select(contributions, plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD}, doc.Plugins...); err != nil {
 				return err
 			}
 			break

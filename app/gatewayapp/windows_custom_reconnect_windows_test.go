@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
@@ -19,8 +21,8 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
-	"golang.org/x/sys/windows"
 )
 
 // TestWindowsCustomReconnectPreservesReasoningLevels exercises the
@@ -50,7 +52,7 @@ func TestWindowsCustomReconnectPreservesReasoningLevels(t *testing.T) {
 				}
 			}
 
-			host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+			host, err := gatewayapptest.NewStack(gatewayapp.Config{
 				AppName: "caelis-windows-reconnect-test", UserID: "local-user", StoreDir: storeDir,
 				WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 				SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},

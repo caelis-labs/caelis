@@ -95,7 +95,11 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 		t.Fatal("cannot open task-owned browser page")
 	}
 	wire := &dtwLiveWire{base: &liveMCPWire{base: http.DefaultTransport}, root: artifacts}
-	host := startApplicationHTTPHost(t, filepath.Join(t.TempDir(), "store"), t.TempDir(), wire)
+	load := func(paths plugin.RuntimePaths) (plugin.Contributions, error) {
+		paths.ProductStoreDir = filepath.Join(artifacts, "packages")
+		return plugin.ProductContributions(paths)
+	}
+	host := startApplicationHTTPHostWithPackage(t, t.TempDir(), t.TempDir(), wire, "host", load)
 	defer host.close(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Minute)
 	defer cancel()

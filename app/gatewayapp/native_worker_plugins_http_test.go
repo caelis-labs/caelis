@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
+	"github.com/caelis-labs/caelis/internal/testenv/plugintest"
 )
 
 func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
@@ -26,7 +27,8 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	root := t.TempDir()
 	provider := &nativePluginProvider{}
 	store := filepath.Join(root, "store")
-	host := startApplicationHTTPHost(t, store, root, provider)
+	load, fixedRoot := plugintest.DesktopWorld(t)
+	host := startApplicationHTTPHostWithPackage(t, store, root, provider, "host", load)
 	defer func() { host.close(t) }()
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
 	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
@@ -171,12 +173,12 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatal("disabled plugin requested approval")
 	}
 	health, err = client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins) != 1 || !strings.HasPrefix(health.Plugins[0].Root, canonicalNativeFixtureStore(t, store)+string(filepath.Separator)+"builtin-plugins"+string(filepath.Separator)+"desktop-world"+string(filepath.Separator)) || health.Plugins[0].Version != builtinComputerUseVersion(t) {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != fixedRoot || health.Plugins[0].Version != "fixture" {
 		t.Fatalf("[] lost the enabled global DTW default: %+v %v", health, err)
 	}
 	_ = feed.Subscription.Close()
 	host.close(t)
-	host = startApplicationHTTPHost(t, store, root, provider)
+	host = startApplicationHTTPHostWithPackage(t, store, root, provider, "host", load)
 	client, _ = connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	recovered, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil || recovered.Native == nil || recovered.Native.Plugins == nil || len(*recovered.Native.Plugins) != 0 || recovered.Revision != 3 {
@@ -202,7 +204,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("independent native inheritance replaced: %+v %v", independentConfig, err)
 	}
 	health, err = client.SessionMCPStatus(ctx, standalone.SessionID)
-	if err != nil || len(health.Plugins) != 1 || !strings.HasPrefix(health.Plugins[0].Root, canonicalNativeFixtureStore(t, store)+string(filepath.Separator)+"builtin-plugins"+string(filepath.Separator)+"desktop-world"+string(filepath.Separator)) || health.Plugins[0].Version != builtinComputerUseVersion(t) {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != fixedRoot || health.Plugins[0].Version != "fixture" {
 		t.Fatalf("independent Core source overwritten: %+v %v", health, err)
 	}
 	t.Log("ordinary native Worker: owner/CAS/busy/receipt preserved; synthetic MCP effects=2, OS effects=0, app approval=1; optional [] survives reopen and retains the enabled global DTW default")
@@ -231,13 +233,4 @@ func TestNativeWorkerPluginImmediateConfigurationAfterModelCreate(t *testing.T) 
 			t.Fatalf("immediate native configuration index=%d: %+v %v", index, result, err)
 		}
 	}
-}
-
-func canonicalNativeFixtureStore(t *testing.T, store string) string {
-	t.Helper()
-	root, err := filepath.EvalSymlinks(store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
 }

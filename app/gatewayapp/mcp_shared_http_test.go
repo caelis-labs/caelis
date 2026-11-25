@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -384,27 +382,17 @@ func writeSharedMCPDesktopFixture(t *testing.T, root string, args []string) stri
 	t.Helper()
 	plugin := filepath.Join(root, "desktop-fixture")
 	writeAtomicSkill(t, filepath.Join(plugin, "skills", "dtw"), "dtw", "Synthetic DTW instructions")
-	executable := "fixture"
-	if runtime.GOOS == "windows" {
-		executable += ".exe"
-	}
-	source, err := os.Open(os.Args[0])
+	// Standard packages accept bare commands. Resolve the already running test
+	// executable without copying it into the disposable package directory.
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer source.Close()
-	target, err := os.OpenFile(filepath.Join(plugin, executable), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o700)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, copyErr := io.Copy(target, source)
-	if err := target.Close(); copyErr != nil || err != nil {
-		t.Fatalf("copy stdio fixture: %v, %v", copyErr, err)
-	}
+	t.Setenv("PATH", filepath.Dir(executable)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	manifest := `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world","version":"fixture"}`
 	spec, err := json.Marshal(map[string]any{
 		"$schema":    "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-		"mcpServers": map[string]any{"dtw": map[string]any{"type": "stdio", "command": "./" + executable, "args": args}},
+		"mcpServers": map[string]any{"dtw": map[string]any{"type": "stdio", "command": filepath.Base(executable), "args": args}},
 	})
 	if err != nil {
 		t.Fatal(err)

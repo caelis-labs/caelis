@@ -42,7 +42,7 @@ func TestDoctorRepairsConflictingDurableWorkspaceIdentities(t *testing.T) {
 	}
 
 	config := Config{StoreDir: storeDir, WorkspaceCWD: t.TempDir()}
-	stack, err := newIsolatedGatewayAppTestStack(t, config)
+	stack, err := newGatewayAppTestStack(t, config)
 	if err != nil {
 		t.Fatal(err)
 	}

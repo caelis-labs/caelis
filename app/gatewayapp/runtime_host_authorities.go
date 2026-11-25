@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
@@ -33,7 +34,7 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
-	productDefaults         productPluginDefaults
+	productDefaults         plugin.BuiltinPackage
 	mcp                     *hostMCP
 	policyRuleCommands      appserver.PolicyRuleCommandService
 	sessionProfiles         *sessionprofile.Store

@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,7 +45,7 @@ func TestCLIPluginWorkerProcess(t *testing.T) {
 	if err != nil {
 		os.Exit(1)
 	}
-	worker := exec.Command(filepath.Join(filepath.Dir(path), "..", "libexec", filepath.Base(path)), "-test.run=^TestCLIPluginWorkerProcess$")
+	worker := exec.Command(path, "-test.run=^TestCLIPluginWorkerProcess$")
 	worker.Env = append(os.Environ(), "CAELIS_TEST_PLUGIN_WORKER=private")
 	input, err := worker.StdinPipe()
 	if err != nil {
@@ -99,20 +98,6 @@ func TestCLIPluginWorkerProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func copyCLIPluginFile(t *testing.T, source, target string, mode os.FileMode) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, data, mode); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestCLIPluginFreshSessionAppToolsAndWorker(t *testing.T) {
 	workspace := t.TempDir()
 	root := filepath.Join(workspace, "桌面 plugin with spaces")
@@ -123,17 +108,10 @@ func TestCLIPluginFreshSessionAppToolsAndWorker(t *testing.T) {
 		}
 		writeCLIPluginFile(t, root, strings.ReplaceAll(path, "desktop-world", "cli-demo"), strings.ReplaceAll(string(data), "desktop-world", "cli-demo"))
 	}
-	name := "dtw"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	for _, dir := range []string{"bin", "libexec"} {
-		copyCLIPluginFile(t, os.Args[0], filepath.Join(root, dir, name), 0o700)
-	}
 	// The optional fixture keeps install/remove snapshot and child-process
 	// lifecycle coverage without claiming the fixed product identity.
 	marker := filepath.Join(workspace, "worker.pid")
-	writeCLIPluginFile(t, root, ".mcp.json", fmt.Sprintf(`{"mcpServers":{"cli-demo":{"command":"${CLAUDE_PLUGIN_ROOT}/bin/%s","args":["-test.run=^TestCLIPluginWorkerProcess$"],"env":{"CAELIS_TEST_PLUGIN_WORKER":"mcp","CAELIS_TEST_PLUGIN_MARKER":%q}}}}`, name, marker))
+	writeCLIPluginFile(t, root, ".mcp.json", fmt.Sprintf(`{"mcpServers":{"cli-demo":{"command":%q,"args":["-test.run=^TestCLIPluginWorkerProcess$"],"env":{"CAELIS_TEST_PLUGIN_WORKER":"mcp","CAELIS_TEST_PLUGIN_MARKER":%q}}}}`, os.Args[0], marker))
 	exerciseCLIPluginSessionLifecycle(t, root)
 	data, err := os.ReadFile(marker)
 	pid, parseErr := strconv.Atoi(string(data))
@@ -170,7 +148,7 @@ func exerciseCLIPluginSessionLifecycle(t *testing.T, pluginRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: defaultAppName, UserID: defaultPrincipalID, StoreDir: store,
 		WorkspaceKey: key, WorkspaceCWD: cwd, SkillDirs: []string{},
 		Sandbox:                   gatewayapp.SandboxConfig{RequestedType: "host"},

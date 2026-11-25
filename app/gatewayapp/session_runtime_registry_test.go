@@ -38,7 +38,7 @@ func TestSessionRuntimePinsWorkspaceConfigUntilRelease(t *testing.T) {
 	ctx := context.Background()
 	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule v1.")
 	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace-a",
 		WorkspaceCWD: workspaceA,
@@ -1218,7 +1218,7 @@ func TestClosedSessionReconnectDoesNotRepairDeletedModelReference(t *testing.T) 
 func TestRejectedFirstCommandDoesNotPinSessionRuntime(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace-rejected", "Rejected activation rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "workspace-rejected", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -1262,7 +1262,7 @@ func TestRejectedFirstCommandDoesNotPinSessionRuntime(t *testing.T) {
 func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace-observe", "Observe rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "workspace-observe", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -1305,7 +1305,7 @@ func TestAcquireControlRuntimeObservesWithoutRetainingAndReusesLoadedRuntime(t *
 func TestSessionRuntimeReleaseWaitsForRoutedControlMutation(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1398,7 +1398,7 @@ func TestSessionRuntimeReleaseWaitsForRoutedControlMutation(t *testing.T) {
 func TestHostCloseRetriesFailedSessionRuntimeResourceRelease(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1483,7 +1483,7 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 	if _, err := store.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
 		t.Fatal(err)
 	}
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     storeDir,
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1577,7 +1577,7 @@ func TestSessionRuntimeSandboxConfigIsDetachedFromHostMutation(t *testing.T) {
 
 func TestSetSandboxBackendRollsBackWhenRequiredBackendIsUnavailable(t *testing.T) {
 	ctx := context.Background()
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule."),
@@ -1606,7 +1606,7 @@ func TestSetSandboxBackendRollsBackWhenRequiredBackendIsUnavailable(t *testing.T
 func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1697,7 +1697,7 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 func TestSessionCloseWaitsForRuntimeReleaseBeforeDispatch(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1782,7 +1782,7 @@ func TestSessionCloseWaitsForRuntimeReleaseBeforeDispatch(t *testing.T) {
 func TestSessionRuntimeConfigurationWaitsForReleaseAndBuildsDisposableSnapshot(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1881,7 +1881,7 @@ func TestSessionRuntimeReassemblesCurrentConfigAfterHostRestart(t *testing.T) {
 		SkillDirs:    []string{},
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
-	first, err := NewLocalStack(config)
+	first, err := newTestLocalStack(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1896,7 +1896,7 @@ func TestSessionRuntimeReassemblesCurrentConfigAfterHostRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reloaded, err := NewLocalStack(config)
+	reloaded, err := newTestLocalStack(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1936,7 +1936,7 @@ func TestSessionRuntimeReassemblesCurrentConfigAfterHostRestart(t *testing.T) {
 func TestSessionObservationDoesNotActivateRuntime(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -1986,7 +1986,7 @@ func TestSessionObservationDoesNotActivateRuntime(t *testing.T) {
 func TestSessionRuntimeLivesUntilLastObserverDetaches(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "observer-lifetime", "Observer lifetime rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "observer-lifetime", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2039,7 +2039,7 @@ func TestSessionRuntimeLivesUntilLastObserverDetaches(t *testing.T) {
 func TestSessionRuntimeRunningWorkSurvivesObserverDetach(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "work-lifetime", "Work lifetime rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "work-lifetime", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2078,7 +2078,7 @@ func TestSessionRuntimeRunningWorkSurvivesObserverDetach(t *testing.T) {
 func TestSessionRuntimeDurableRunningTaskSurvivesObserverDetach(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "task-lifetime", "Task lifetime rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-lifetime", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2129,7 +2129,7 @@ func TestSessionRuntimeDurableRunningTaskSurvivesObserverDetach(t *testing.T) {
 func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "task-read-retry", "Task read retry rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-read-retry", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2170,7 +2170,7 @@ func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) 
 func TestSessionRuntimeIdleReleaseRetriesAfterTaskReaderRecovers(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "task-read-recovery", "Task read recovery rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-read-recovery", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2228,7 +2228,7 @@ func TestSessionRuntimeIdleReleaseRetriesAfterTaskReaderRecovers(t *testing.T) {
 
 func TestSessionRuntimeIdleReleaseRetryRespectsNewActivity(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "task-read-activity", "Task read activity rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-read-activity", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2281,7 +2281,7 @@ func TestSessionRuntimeIdleReleaseRetryRespectsNewActivity(t *testing.T) {
 func TestSessionRuntimeIdleReleaseRetryKeepsDurableTask(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "task-read-running", "Task read running rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-read-running", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2331,7 +2331,7 @@ func TestSessionRuntimeIdleReleaseRetryKeepsDurableTask(t *testing.T) {
 func TestSessionRuntimeIdleReleaseSeesTaskTerminalDuringRead(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "task-terminal-race", "Task terminal race rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-terminal-race", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2382,7 +2382,7 @@ func TestSessionRuntimeIdleReleaseSeesTaskTerminalDuringRead(t *testing.T) {
 
 func TestSessionRuntimeIdleReleaseRetryStopsOnQuiesce(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "task-read-quiesce", "Task read quiesce rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-read-quiesce", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2424,7 +2424,7 @@ func TestSessionRuntimeIdleReleaseRetryStopsOnQuiesce(t *testing.T) {
 func TestSessionRuntimeIdleReleaseRetryFencesNewActivation(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "task-read-generation", "Task read generation rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "task-read-generation", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2542,7 +2542,7 @@ func (s *transientListTaskStore) ListSession(ctx context.Context, ref session.Se
 func TestParticipantHandlesWaitForRuntimeRelease(t *testing.T) {
 	ctx := t.Context()
 	workspace := newWorkspaceRuntimeTestDir(t, "participants-release", "Workspace rule.")
-	stack, err := NewLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "participants-release", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
+	stack, err := newTestLocalStack(Config{StoreDir: t.TempDir(), WorkspaceKey: "participants-release", WorkspaceCWD: workspace, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2588,7 +2588,7 @@ func TestParticipantHandlesWaitForRuntimeRelease(t *testing.T) {
 func TestParticipantHandlesFollowRuntimeTeamRevision(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -2646,7 +2646,7 @@ func TestParticipantHandlesFollowRuntimeTeamRevision(t *testing.T) {
 func TestSessionRuntimeIdentityDoesNotPartitionByUser(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Shared workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -2694,7 +2694,7 @@ func TestControlClientRejectsForeignPreferredSessionBeforeWorkspaceDisclosure(t 
 	ctx := context.Background()
 	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule.")
 	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace-a",
 		WorkspaceCWD: workspaceA,
@@ -2759,7 +2759,7 @@ func TestControlClientRejectsForeignPreferredSessionBeforeWorkspaceDisclosure(t 
 func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -2824,7 +2824,7 @@ func TestControlClientRecordsPreDispatchRoutingFailureAsRejected(t *testing.T) {
 func TestSessionRuntimeRegistryCreatesSessionsLazilyConcurrently(t *testing.T) {
 	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule.")
 	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace-a",
 		WorkspaceCWD: workspaceA,
@@ -2888,7 +2888,7 @@ func TestSessionRuntimeRegistryCreatesSessionsLazilyConcurrently(t *testing.T) {
 func TestSessionRuntimeRegistryQuiesceWaitsForInFlightActivation(t *testing.T) {
 	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule.")
 	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace-a",
 		WorkspaceCWD: workspaceA,
@@ -2953,7 +2953,7 @@ func TestSessionRuntimeRegistryQuiesceWaitsForInFlightActivation(t *testing.T) {
 
 func TestAcquireControlRuntimeRetriesAcrossIdleRelease(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "acquire-retry", "Acquire retry rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "acquire-retry", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -2993,7 +2993,7 @@ func TestAcquireControlRuntimeRetriesAcrossIdleRelease(t *testing.T) {
 func TestCloseWaitsForScheduledIdleReleaseBeforeStoreCleanup(t *testing.T) {
 	storeDir := t.TempDir()
 	workspace := newWorkspaceRuntimeTestDir(t, "close-idle-release", "Close idle-release rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "close-idle-release", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -3025,7 +3025,7 @@ func TestCloseWaitsForScheduledIdleReleaseBeforeStoreCleanup(t *testing.T) {
 
 func TestSessionRuntimeRegistryQuiesceWaitsForRuntimeWorkAfterGatewayDrain(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "quiesce-work", "Quiesce work rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "quiesce-work", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -3069,7 +3069,7 @@ func TestSessionRuntimeRegistryQuiesceWaitsForRuntimeWorkAfterGatewayDrain(t *te
 
 func TestSessionRuntimeActivationHasNoHostConfigurationMutationLock(t *testing.T) {
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "workspace",
 		WorkspaceCWD: workspace,
@@ -3109,7 +3109,7 @@ func TestControlClientRejectsAmbiguousWorkspaceBindingBeforeSessionCreation(t *t
 	ctx := context.Background()
 	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule.")
 	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: "shared-key",
 		WorkspaceCWD: workspaceA,
@@ -3147,7 +3147,7 @@ func TestHostRebuildsWorkspaceIdentityBeforeReusingExplicitKey(t *testing.T) {
 	workspaceA := newWorkspaceRuntimeTestDir(t, "workspace-a", "Workspace A rule.")
 	workspaceB := newWorkspaceRuntimeTestDir(t, "workspace-b", "Workspace B rule.")
 	storeDir := t.TempDir()
-	first, err := NewLocalStack(Config{
+	first, err := newTestLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceA,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -3168,7 +3168,7 @@ func TestHostRebuildsWorkspaceIdentityBeforeReusingExplicitKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	moved, err := NewLocalStack(Config{
+	moved, err := newTestLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceB,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -3182,7 +3182,7 @@ func TestHostRebuildsWorkspaceIdentityBeforeReusingExplicitKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := NewLocalStack(Config{
+	reopened, err := newTestLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "shared-key", WorkspaceCWD: workspaceA,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})

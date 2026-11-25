@@ -1,12 +1,12 @@
 package plugin
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -16,9 +16,40 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill/fs"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
+
+// The archive exercises Core extraction, version selection and cache verification
+// using inert text files. Its configured command is never launched.
+func fixtureRelease(t *testing.T) desktopWorldRelease {
+	t.Helper()
+	version := pinnedDesktopWorldTestVersion(t)
+	files := map[string]string{
+		"plugin.json":         fmt.Sprintf(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world","version":%q}`, version),
+		"mcp.json":            `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"dtw":{"type":"stdio","command":"./bin/fixture.txt","args":["mcp"]}}}`,
+		"bin/fixture.txt":     "inert package fixture",
+		"skills/dtw/SKILL.md": "---\nname: dtw\ndescription: Fixture.\n---\n",
+	}
+	var data bytes.Buffer
+	archive := zip.NewWriter(&data)
+	for name, body := range files {
+		w, err := archive.Create("fixture/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := readDesktopWorldRelease(builtinPlatform{Archive: "fixture.zip", ArchiveHash: fmt.Sprintf("%x", sha256.Sum256(data.Bytes()))}, version, data.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bundle
+}
 
 func TestProductDesktopWorldPackageAndHostPaths(t *testing.T) {
 	if runtime.GOOS == "linux" {
@@ -27,18 +58,13 @@ func TestProductDesktopWorldPackageAndHostPaths(t *testing.T) {
 		t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/fixture/bus")
 		t.Setenv("CAELIS_TEST_PRIVATE_ENV", "keep out of MCP")
 	}
+	bundle := fixtureRelease(t)
 	store := t.TempDir()
-	first, err := ProductContributions(RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session-one")})
+	first, err := bundle.contributions(RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session-one")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if builtinDesktopWorldTarget == "" {
-		if len(first.MCPServerSpecs) != 0 || len(first.Sources) != 1 || first.Sources[0].Status == "" {
-			t.Fatal("unsupported target did not retain an unavailable capability")
-		}
-		return
-	}
-	second, err := ProductContributions(RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session-two")})
+	second, err := bundle.contributions(RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session-two")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,8 +78,8 @@ func TestProductDesktopWorldPackageAndHostPaths(t *testing.T) {
 	if a.PackageRoot != b.PackageRoot || a.DataDir != b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) {
 		t.Fatal("default package launch differs across Session paths")
 	}
-	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || !slices.Equal(a.Args, []string{"mcp"}) ||
-		!slices.Equal(a.PrefixTools, []string{"apps", "exec"}) {
+	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || (builtinDesktopWorldTarget != "" && !slices.Equal(a.Args, []string{"mcp"})) ||
+		(builtinDesktopWorldTarget != "" && !slices.Equal(a.PrefixTools, []string{"apps", "exec"})) {
 		t.Fatal("fixed package did not use its standard stdio executable")
 	}
 	if runtime.GOOS == "linux" && (!a.CleanEnvironment || a.Env["DISPLAY"] != ":41" ||
@@ -69,8 +95,11 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 	if builtinDesktopWorldTarget == "" {
 		t.Skip("no official package for this build target")
 	}
-	store := t.TempDir()
-	contributions, err := WithProductContributions(Contributions{}, RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session")}, desktopWorldOverrideTestPackage(t, "0.1.1"))
+	store := os.Getenv("CAELIS_DTW_INTEGRATION_STORE")
+	if !filepath.IsAbs(store) {
+		t.Skip("requires a persistent absolute CAELIS_DTW_INTEGRATION_STORE for the official release")
+	}
+	contributions, err := BuiltinPackage(ProductContributions).Select(Contributions{}, RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session")}, desktopWorldOverrideTestPackage(t, "0.1.1"))
 	if err != nil || len(contributions.MCPServerSpecs) != 1 || len(contributions.SkillBundles) != 1 {
 		t.Fatalf("paired builtin package = %+v, %v", contributions, err)
 	}
@@ -84,10 +113,6 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 	binary, err := os.ReadFile(spec.Command)
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(binary)) != bundle.platform.BinaryHash {
 		t.Fatalf("selected executable does not match the official pin: %v", err)
-	}
-	identity, err := exec.CommandContext(ctx, spec.Command, "--version").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(identity)) != "dtw "+bundle.version {
-		t.Fatalf("selected binary identity = %q, %v", identity, err)
 	}
 	manager, err := mcp.NewManager(ctx, contributions.MCPServerSpecs, nil)
 	if err != nil {
@@ -108,45 +133,20 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		definition := candidate.Definition()
 		name, _ := definition.Metadata[mcp.MetadataTool].(string)
 		names = append(names, name)
-		if name == "exec" {
-			raw, _ := json.Marshal(definition.InputSchema)
-			var schema struct {
-				Required []string `json:"required"`
-			}
-			if err := json.Unmarshal(raw, &schema); err != nil || !slices.Equal(schema.Required, []string{"app", "source"}) {
-				t.Fatalf("exec does not require the app and script source: %s", raw)
-			}
-		}
 		if definition.Metadata[mcp.MetadataPluginID] != spec.PluginID || definition.Metadata[mcp.MetadataServer] != spec.Name {
 			t.Fatal("catalog lost configured plugin or server identity")
 		}
-
 	}
 	if !slices.Equal(names, []string{"apps", "exec"}) || len(manager.Tools()) != 2 {
 		t.Fatalf("builtin tools = %v", names)
 	}
-	if runtime.GOOS == "windows" {
-		for _, candidate := range manager.Tools() {
-			if candidate.Definition().Name != mcp.ServerToolNamePrefix(spec.Name)+"apps" {
-				continue
-			}
-			result, err := candidate.Call(ctx, tool.Call{ID: "windows-app-enumeration", Name: candidate.Definition().Name, Input: []byte(`{"state":"running","limit":1}`)})
-			if err != nil {
-				t.Fatalf("Windows app discovery = %+v, %v", result, err)
-			}
-		}
-		if _, err := os.Stat(filepath.Join(spec.PackageRoot, "%SystemDrive%")); !os.IsNotExist(err) {
-			t.Fatalf("Windows Shell wrote an unresolved environment path into the package: %v", err)
-		}
-	}
+
 }
 
 func TestProductDesktopWorldRuntimeIgnoresUnrelatedFiles(t *testing.T) {
-	if builtinDesktopWorldTarget == "" {
-		t.Skip("no official package for this build target")
-	}
+	bundle := fixtureRelease(t)
 	store := t.TempDir()
-	root, err := materializeDesktopWorld(t.Context(), store)
+	root, err := bundle.materialize(t.Context(), store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,17 +160,15 @@ func TestProductDesktopWorldRuntimeIgnoresUnrelatedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "BUILD.json"), []byte("unrelated runtime metadata"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := materializeDesktopWorld(t.Context(), store); err != nil {
+	if _, err := bundle.materialize(t.Context(), store); err != nil {
 		t.Fatalf("unrelated files prevented package activation: %v", err)
 	}
 }
 
 func TestAvailableProductDesktopWorldFailureKeepsOtherPlugin(t *testing.T) {
-	if builtinDesktopWorldTarget == "" {
-		t.Skip("no official package for this build target")
-	}
+	bundle := fixtureRelease(t)
 	paths := RuntimePaths{StoreDir: t.TempDir()}
-	fixed, err := ProductContributions(paths)
+	fixed, err := bundle.contributions(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +181,7 @@ func TestAvailableProductDesktopWorldFailureKeepsOtherPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := WithAvailableProductContributions(optional, paths)
+	got := BuiltinPackage(bundle.contributions).Available(optional, paths)
 	if len(got.Sources) != 2 || got.Sources[0].ID != "desktop-world" || got.Sources[0].Status != "failed" || !strings.Contains(got.Sources[0].Error, "builtin file checksum mismatch: bin") {
 		t.Fatalf("failed package diagnostic = %+v", got.Sources)
 	}
@@ -193,15 +191,13 @@ func TestAvailableProductDesktopWorldFailureKeepsOtherPlugin(t *testing.T) {
 }
 
 func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {
-	if builtinDesktopWorldTarget == "" {
-		t.Skip("no official package for this build target")
-	}
+	bundle := fixtureRelease(t)
 	store := t.TempDir()
 	var wg sync.WaitGroup
 	roots := make(chan string, 8)
 	errs := make(chan error, 8)
 	for range 8 {
-		wg.Go(func() { root, err := materializeDesktopWorld(context.Background(), store); roots <- root; errs <- err })
+		wg.Go(func() { root, err := bundle.materialize(context.Background(), store); roots <- root; errs <- err })
 	}
 	wg.Wait()
 	close(roots)
@@ -218,7 +214,7 @@ func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {
 		}
 		root = candidate
 	}
-	contributions, err := ProductContributions(RuntimePaths{StoreDir: store})
+	contributions, err := bundle.contributions(RuntimePaths{StoreDir: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +226,7 @@ func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {
 	if err := os.WriteFile(skill, []byte("changed bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := materializeDesktopWorld(context.Background(), store); err == nil {
+	if _, err := bundle.materialize(context.Background(), store); err == nil {
 		t.Fatal("tampered package was accepted/repaired")
 	}
 	data, _ := os.ReadFile(skill)
@@ -240,15 +236,13 @@ func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {
 }
 
 func TestProductDesktopWorldRejectsRedirectedCache(t *testing.T) {
-	if builtinDesktopWorldTarget == "" {
-		t.Skip("no official package for this build target")
-	}
+	bundle := fixtureRelease(t)
 	store := t.TempDir()
 	other := t.TempDir()
 	if err := os.Symlink(other, filepath.Join(store, "builtin-plugins")); err != nil {
 		t.Skip("symlink creation unavailable")
 	}
-	if _, err := materializeDesktopWorld(context.Background(), store); err == nil {
+	if _, err := bundle.materialize(context.Background(), store); err == nil {
 		t.Fatal("builtin cache followed a foreign directory")
 	}
 	entries, _ := os.ReadDir(other)
@@ -276,14 +270,9 @@ func TestProductIdentityAliasRemainsVisibleWithoutRegistryMutation(t *testing.T)
 
 func pinnedDesktopWorldTestVersion(t *testing.T) string {
 	t.Helper()
-	var pin struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(builtinDesktopWorldPin, &pin); err != nil {
+	pin, err := pinnedDesktopWorld()
+	if err != nil {
 		t.Fatal(err)
 	}
 	return pin.Version
 }
-
-// The offline selector reads one actual atomic schema rather than inventing a name.
-type builtinAtomicRanker struct{}

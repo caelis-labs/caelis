@@ -143,16 +143,6 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effo
 		t.Fatalf("wrong model/profile-instructions prefix: %#v", body)
 	}
 	before, after, hasGuidance := strings.Cut(remainder, codemode.Guidance)
-	// A Session may freeze a DTW hint alongside its Code Mode guidance.
-	const hintHeader = "\n\nPartial tool hint snapshot; use tools.search for other capabilities.\n"
-	if snapshot, ok := strings.CutPrefix(after, hintHeader); ok {
-		raw, rest, _ := strings.Cut(snapshot, "\n")
-		var hints []struct{ Name string }
-		if err := json.Unmarshal([]byte(raw), &hints); err != nil || len(hints) != 1 || hints[0].Name != "dtw__apps" {
-			t.Fatalf("unexpected Desktop World hint snapshot: %q (%v)", raw, err)
-		}
-		after = rest
-	}
 	isSkillSection := func(text string) bool {
 		text = strings.TrimSpace(text)
 		return text == "" || strings.HasPrefix(text, "## Skills\n")
@@ -178,11 +168,6 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, actual, model, effo
 	}
 	slices.Sort(names)
 	want := []string{"ListThreads", "ReadMessages", "ReadThread", "SendMessage", "Skill", "StartThread", "Task", "WaitThread", "js_exec"}
-	// The first request may race catalog startup. Once ready, the entire
-	// Desktop World pair belongs in the prefix, including on continuation.
-	if builtinComputerUseSupported() && slices.Contains(names, "dtw__apps") {
-		want = slices.Insert(want, len(want)-1, "dtw__apps", "dtw__exec")
-	}
 	if !slices.Equal(names, want) {
 		t.Fatalf("model-facing tools = %v, want %v", names, want)
 	}

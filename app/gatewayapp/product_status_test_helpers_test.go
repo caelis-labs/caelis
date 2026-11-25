@@ -1,55 +1,16 @@
 package gatewayapp_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"runtime"
 	"testing"
-
-	"github.com/caelis-labs/caelis/control/appserver/httpclient"
-	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func builtinComputerUseSupported() bool {
 	return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" ||
 		runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") ||
 		runtime.GOOS == "windows" && runtime.GOARCH == "amd64"
-}
-
-func waitBuiltinDesktopWorldMCP(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string) {
-	t.Helper()
-	if !builtinComputerUseSupported() {
-		return
-	}
-	if server := waitAtomicApplicationMCPRunning(t, ctx, client, sessionID, "dtw"); server.PluginID != "desktop-world" {
-		t.Fatalf("unexpected source for built-in Desktop World: %+v", server)
-	}
-}
-
-// Optional capability regressions keep checking their exact source set. Fixed
-// product contributions have their own identity and approval assertions.
-func optionalCapabilityStatus(status sessionprofile.MCPStatus) sessionprofile.MCPStatus {
-	out := status
-	out.Servers = nil
-	out.Skills = nil
-	out.Plugins = nil
-	for _, server := range status.Servers {
-		if server.PluginID != "desktop-world" {
-			out.Servers = append(out.Servers, server)
-		}
-	}
-	for _, skill := range status.Skills {
-		if skill.Name != "desktop-world:dtw" && skill.Name != "desktop-world:desktop-world" {
-			out.Skills = append(out.Skills, skill)
-		}
-	}
-	for _, p := range status.Plugins {
-		if p.ID != "desktop-world" {
-			out.Plugins = append(out.Plugins, p)
-		}
-	}
-	return out
 }
 
 func builtinComputerUseVersion(t *testing.T) string {

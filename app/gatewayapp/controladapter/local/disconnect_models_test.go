@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 )
 
 func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
@@ -24,7 +25,7 @@ func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: filepath.Join(root, "store"),
 		WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
@@ -114,7 +115,7 @@ func TestSavedRetiredConnectionCanBeSelectedAndDeletedOverHTTP(t *testing.T) {
 	if err := configstore.New(storeDir).Save(doc); err != nil {
 		t.Fatal(err)
 	}
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{AppName: "caelis-test", UserID: "local-user", StoreDir: storeDir, WorkspaceCWD: root, SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"}})
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{AppName: "caelis-test", UserID: "local-user", StoreDir: storeDir, WorkspaceCWD: root, SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -53,53 +53,64 @@ type builtinRuntimeFile struct {
 // digests are reused; every activation still verifies its on-disk files.
 var desktopWorldBundle = sync.OnceValues(loadDesktopWorldRelease)
 
+type desktopWorldPin struct {
+	Schema    int               `json:"schema"`
+	Version   string            `json:"version"`
+	Platforms []builtinPlatform `json:"platforms"`
+}
+
+// Version selection only needs the pin. Decode the official archive when the
+// embedded package is actually selected.
+var pinnedDesktopWorld = sync.OnceValues(func() (desktopWorldPin, error) {
+	var pin desktopWorldPin
+	if err := json.Unmarshal(builtinDesktopWorldPin, &pin); err != nil || pin.Schema != 1 || pin.Version == "" {
+		return desktopWorldPin{}, fmt.Errorf("invalid builtin desktop-world release manifest")
+	}
+	return pin, nil
+})
+
 func loadDesktopWorldRelease() (desktopWorldRelease, error) {
 	if builtinDesktopWorldTarget == "" {
 		return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	var release struct {
-		Schema    int               `json:"schema"`
-		Version   string            `json:"version"`
-		Platforms []builtinPlatform `json:"platforms"`
+	pin, err := pinnedDesktopWorld()
+	if err != nil {
+		return desktopWorldRelease{}, err
 	}
-	if err := json.Unmarshal(builtinDesktopWorldPin, &release); err != nil || release.Schema != 1 || release.Version == "" {
-		return desktopWorldRelease{}, fmt.Errorf("invalid builtin desktop-world release manifest")
-	}
-	for _, platform := range release.Platforms {
-		if platform.Target != builtinDesktopWorldTarget {
-			continue
+	for _, platform := range pin.Platforms {
+		if platform.Target == builtinDesktopWorldTarget {
+			return readDesktopWorldRelease(platform, pin.Version, builtinDesktopWorldArchive)
 		}
-		sum := sha256.Sum256(builtinDesktopWorldArchive)
-		if hex.EncodeToString(sum[:]) != platform.ArchiveHash {
-			return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world archive checksum mismatch")
-		}
-		bundle := desktopWorldRelease{
-			archive:  builtinArchive{name: platform.Archive, data: builtinDesktopWorldArchive},
-			platform: platform, version: release.Version,
-		}
-		if err := bundle.archive.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
-			if mode.IsDir() || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
-				return nil
-			}
-			hash, err := builtinFileHash(src)
-			if err != nil {
-				return err
-			}
-			bundle.files = append(bundle.files, builtinRuntimeFile{path: rel, mode: mode, hash: hash})
-			return nil
-		}); err != nil {
-			return desktopWorldRelease{}, err
-		}
-		return bundle, nil
 	}
 	return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world platform missing from release manifest")
 }
 
-func materializeDesktopWorld(ctx context.Context, storeDir string) (string, error) {
-	bundle, err := desktopWorldBundle()
-	if err != nil {
-		return "", err
+func readDesktopWorldRelease(platform builtinPlatform, version string, archive []byte) (desktopWorldRelease, error) {
+	sum := sha256.Sum256(archive)
+	if hex.EncodeToString(sum[:]) != platform.ArchiveHash {
+		return desktopWorldRelease{}, fmt.Errorf("builtin desktop-world archive checksum mismatch")
 	}
+	bundle := desktopWorldRelease{
+		archive:  builtinArchive{name: platform.Archive, data: archive},
+		platform: platform, version: version,
+	}
+	if err := bundle.archive.walk(func(rel string, mode fs.FileMode, src io.Reader) error {
+		if mode.IsDir() || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
+			return nil
+		}
+		hash, err := builtinFileHash(src)
+		if err != nil {
+			return err
+		}
+		bundle.files = append(bundle.files, builtinRuntimeFile{path: rel, mode: mode, hash: hash})
+		return nil
+	}); err != nil {
+		return desktopWorldRelease{}, err
+	}
+	return bundle, nil
+}
+
+func (bundle desktopWorldRelease) materialize(ctx context.Context, storeDir string) (string, error) {
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
 		return "", err
 	}
@@ -237,6 +248,14 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if builtinDesktopWorldTarget == "" {
 		return Contributions{Sources: []Source{{ID: "desktop-world", Status: "unsupported on " + runtime.GOOS + "/" + runtime.GOARCH}}}, nil
 	}
+	bundle, err := desktopWorldBundle()
+	if err != nil {
+		return Contributions{}, fmt.Errorf("builtin desktop-world: %w", err)
+	}
+	return bundle.contributions(paths)
+}
+
+func (bundle desktopWorldRelease) contributions(paths RuntimePaths) (Contributions, error) {
 	cacheDir := paths.ProductStoreDir
 	if cacheDir == "" {
 		cacheDir = paths.StoreDir
@@ -244,7 +263,7 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	if cacheDir == "" {
 		return Contributions{}, fmt.Errorf("builtin desktop-world requires the Core Store")
 	}
-	root, err := materializeDesktopWorld(context.Background(), cacheDir)
+	root, err := bundle.materialize(context.Background(), cacheDir)
 	if err != nil {
 		return Contributions{}, fmt.Errorf("builtin desktop-world: %w", err)
 	}
@@ -289,11 +308,15 @@ func IsProductPlugin(config Config) bool {
 	return err == nil && localPluginID(installed) == "desktop-world"
 }
 
-// WithProductContributions selects one paired MCP/Skill package. Explicit Session
+// BuiltinPackage loads the fixed package selected by the platform release pin.
+// A nil loader uses the official embedded archive.
+type BuiltinPackage func(RuntimePaths) (Contributions, error)
+
+// Select selects one paired MCP/Skill package. Explicit Session
 // packages win; otherwise comparable Host and embedded versions use the newer
 // package, with ties and opaque versions retaining the Host override. Defaults
 // come from the same activation snapshot as other Host configuration.
-func WithProductContributions(optional Contributions, paths RuntimePaths, defaults ...Config) (Contributions, error) {
+func (load BuiltinPackage) Select(optional Contributions, paths RuntimePaths, defaults ...Config) (Contributions, error) {
 	for _, source := range optional.Sources {
 		if source.ID == "desktop-world" {
 			if err := validateProductPair(optional); err != nil {
@@ -304,7 +327,10 @@ func WithProductContributions(optional Contributions, paths RuntimePaths, defaul
 	}
 	fixed, selected, err := productOverride(defaults, paths)
 	if !selected && err == nil {
-		fixed, err = ProductContributions(paths)
+		if load == nil {
+			load = ProductContributions
+		}
+		fixed, err = load(paths)
 	}
 	if err != nil {
 		return Contributions{}, err

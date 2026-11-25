@@ -24,7 +24,7 @@ func New(ctx context.Context, storeDir, workspace, providerURL string, httpClien
 // for tests that must observe final output before deliberately losing transport.
 // The concrete Host and Runtime remain private to test assembly.
 func NewWithLifecycle(ctx context.Context, storeDir, workspace, providerURL string, httpClient *http.Client) (appserver.AppServerClients, func(context.Context) error, func() error, error) {
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "client-test", UserID: "local-user", StoreDir: storeDir,
 		WorkspaceKey: "workspace", WorkspaceCWD: workspace, SkillDirs: []string{},
 		Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"}, SandboxHostAuthorityDir: filepath.Join(storeDir, "sandbox-authority"),

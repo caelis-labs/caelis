@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
@@ -32,7 +33,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 		}
 	}
 
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: storeDir,
 		WorkspaceKey: "workspace-a", WorkspaceCWD: workspaceA,
 		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
@@ -195,7 +196,7 @@ func TestControlHostTwoClientsTwoSessionsInjectedTransport(t *testing.T) {
 	if err := host.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	restarted, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "local-user", StoreDir: storeDir,
 		WorkspaceKey: "workspace-a", WorkspaceCWD: workspaceA,
 		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},

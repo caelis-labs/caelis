@@ -209,7 +209,6 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		t.Fatal("child provider did not start")
 	}
 	health, err := client.SessionMCPStatus(ctx, child)
-	health = optionalCapabilityStatus(health)
 	childSkillReady := func(status sessionprofile.MCPStatus) bool {
 		return slices.ContainsFunc(status.Skills, func(item sessionprofile.SkillStatus) bool {
 			return item.Name == "profile-child-skill" && item.Status == "ready"
@@ -224,7 +223,6 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	}
 	for {
 		health, err = client.SessionMCPStatus(ctx, child)
-		health = optionalCapabilityStatus(health)
 		if err != nil || health.SessionID != child || health.ConfigurationRevision != healthRevision || len(health.Servers) != 1 || health.Servers[0].Name != "documents" {
 			t.Fatalf("child MCP health lost its exact owner: %+v %v", health, err)
 		}

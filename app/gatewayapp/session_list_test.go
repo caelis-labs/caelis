@@ -17,7 +17,7 @@ func TestSessionListIncludesRecentCWDSpellings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: t.TempDir(), WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -57,7 +57,7 @@ func TestSessionListDoesNotReadColdHistoryOrActivateRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: storeDir, WorkspaceKey: "workspace", WorkspaceCWD: workspace,
 		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
 	})

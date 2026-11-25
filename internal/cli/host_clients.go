@@ -257,7 +257,7 @@ func openEmbeddedProductClients(cfg gatewayapp.Config, options productClientOpti
 		cfg.ChildControlURL = endpoint.BaseURL()
 		cfg.ChildControlTokenFile = childTokenFile
 	}
-	stack, err := gatewayapp.NewLocalStack(cfg)
+	stack, err := newLocalStack(cfg)
 	if err != nil {
 		cleanupChildCredentialOnError()
 		closeEndpoint()

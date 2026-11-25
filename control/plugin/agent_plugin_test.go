@@ -413,8 +413,8 @@ func TestClaudePluginCommandStaysWithinRootThroughContributions(t *testing.T) {
 func TestAgentPluginHostExecutablePathIsExplicit(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "lite")
 	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"lite"}`)
-	writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/dtw","args":["plugin-node","--data-dir","${PLUGIN_DATA}"],"cwd":"${PLUGIN_DATA}"}}}`)
-	writeAgentPluginFile(t, root, "bin/dtw", "launcher")
+	writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/launcher.txt","args":["plugin-node","--data-dir","${PLUGIN_DATA}"],"cwd":"${PLUGIN_DATA}"}}}`)
+	writeAgentPluginFile(t, root, "bin/launcher.txt", "launcher")
 	nodePath := filepath.Join(t.TempDir(), "node")
 	writeAgentPluginFile(t, filepath.Dir(nodePath), filepath.Base(nodePath), "binary")
 	got, err := ResolveContributions([]Config{{ID: "lite", Root: root, Enabled: true, ExecutableEnv: map[string]string{"DTW_NODE_PATH": nodePath}}}, RuntimePaths{StoreDir: t.TempDir()})
@@ -434,8 +434,8 @@ func TestAgentPluginHostExecutablePathIsExplicit(t *testing.T) {
 func TestAgentPluginHostExecutableEnvTargetOSPriority(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "lite")
 	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"lite"}`)
-	writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/dtw","env":{"dtw_node_path":"/package-choice"}}}}`)
-	writeAgentPluginFile(t, root, "bin/dtw", "launcher")
+	writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/launcher.txt","env":{"dtw_node_path":"/package-choice"}}}}`)
+	writeAgentPluginFile(t, root, "bin/launcher.txt", "launcher")
 	trusted := filepath.Join(t.TempDir(), "node")
 	writeAgentPluginFile(t, filepath.Dir(trusted), filepath.Base(trusted), "host executable")
 	realTrusted, err := filepath.EvalSymlinks(trusted)

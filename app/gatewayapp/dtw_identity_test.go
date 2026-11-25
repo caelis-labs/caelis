@@ -12,11 +12,13 @@ import (
 	"testing"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
-	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/caelis-labs/caelis/internal/testenv/plugintest"
 )
 
 func dtwIdentityFixture(t *testing.T, name string) string {
@@ -57,7 +59,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 					t.Fatalf("Skill identity/root = %+v, %v", metas, err)
 				}
 			}
-			selected, err := applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, profile, paths, defaults...)
+			selected, err := applicationRuntimePluginContributions(plugintest.EmptyPackage, profile, paths, defaults...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,7 +76,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 				t.Fatalf("Host proxy launch was not isolated: %+v", spec)
 			}
 			for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
-				got, err := applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, sessionprofile.Profile{Plugins: optional}, paths, defaults...)
+				got, err := applicationRuntimePluginContributions(plugintest.EmptyPackage, sessionprofile.Profile{Plugins: optional}, paths, defaults...)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -83,7 +85,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 					t.Fatal("default assembly inherited the explicit profile proxy")
 				}
 			}
-			ordinary, err := resolveGatewayPluginContributions(plugin.WithAvailableProductContributions, defaults, paths.ProductStoreDir, paths.WorkspaceDir)
+			ordinary, err := resolveGatewayPluginContributions(plugintest.EmptyPackage, defaults, paths.ProductStoreDir, paths.WorkspaceDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +96,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 			}
 			for _, proxyName := range []string{otherName, "desktop_world", "dtw-extra"} {
 				changed := sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: root, MCPServers: []sessionprofile.MCPServer{{Name: proxyName, Transport: "stdio", Command: "verified-host-proxy", Args: []string{"generation"}, WorkDir: root}}}}}
-				if _, err := applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, changed, paths); err == nil {
+				if _, err := applicationRuntimePluginContributions(plugintest.EmptyPackage, changed, paths); err == nil {
 					t.Fatalf("undeclared proxy %q matched service %q", proxyName, name)
 				}
 			}
@@ -133,7 +135,7 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 		endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 		t.Cleanup(endpoint.Close)
 		root := dtwIdentityFixture(t, name)
-		assembled, err := applicationRuntimePluginContributions(plugin.WithAvailableProductContributions, sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: root}}}, applicationPluginPaths(t.TempDir(), name, t.TempDir()))
+		assembled, err := applicationRuntimePluginContributions(plugintest.EmptyPackage, sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: root}}}, applicationPluginPaths(t.TempDir(), name, t.TempDir()))
 		if err != nil {
 			t.Fatal(err)
 		}

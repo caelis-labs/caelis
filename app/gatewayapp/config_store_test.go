@@ -40,7 +40,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	root := t.TempDir()
 	secret := "startup-secret"
 	workspace := t.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := newTestLocalStack(Config{
 		StoreDir: root, WorkspaceKey: "credential-test", WorkspaceCWD: workspace,
 		Sandbox: SandboxConfig{RequestedType: "host"},
 	})
@@ -89,7 +89,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 		t.Fatal(err)
 	}
 
-	child, err := NewLocalStack(Config{
+	child, err := newTestLocalStack(Config{
 		StoreDir: root, WorkspaceKey: "credential-child", WorkspaceCWD: workspace,
 		ModelProfileID: profile.ID, ModelProfileEffort: "high",
 		Sandbox: SandboxConfig{RequestedType: "host"},
@@ -174,7 +174,7 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 
 func TestNewLocalStackRejectsRuntimeModelOverrideBeforeStateMutation(t *testing.T) {
 	root := t.TempDir()
-	_, err := NewLocalStack(Config{
+	_, err := newTestLocalStack(Config{
 		StoreDir: root, WorkspaceKey: "rejected-runtime-model", WorkspaceCWD: t.TempDir(),
 		Model: ModelConfig{
 			Provider: "deepseek", API: model.APIDeepSeek, Model: "deepseek-v4-pro", Token: "must-not-write",

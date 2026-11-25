@@ -68,7 +68,7 @@ func TestBrokenUnusedProviderCredentialDoesNotBlockObservationOrStartup(t *testi
 	}
 	stack = nil
 
-	restarted, err := NewLocalStack(Config{
+	restarted, err := newTestLocalStack(Config{
 		AppName:      appName,
 		UserID:       userID,
 		StoreDir:     storeDir,

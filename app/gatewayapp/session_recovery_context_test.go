@@ -207,7 +207,7 @@ func TestSessionRecoveryNextModelRequestUsesCanonicalToolResultsWithoutSpool(t *
 	if native {
 		cfg.Sandbox = SandboxConfig{}
 	}
-	stack, err = NewLocalStack(cfg)
+	stack, err = newTestLocalStack(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

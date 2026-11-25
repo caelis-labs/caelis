@@ -100,7 +100,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	}))
 
 	workspace := t.TempDir()
-	host, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	host, err := gatewayapptest.NewStack(gatewayapp.Config{
 		AppName:                   "caelis-headless-test",
 		UserID:                    "headless-test",
 		StoreDir:                  filepath.Join(t.TempDir(), "store"),

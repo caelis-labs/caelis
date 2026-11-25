@@ -12,9 +12,14 @@ python3 scripts/prepare_builtin_dtw.py
 The normal Make build, test and lint targets run this step. `--all` prepares all
 supported packages for cross builds, as GoReleaser does. The script reuses verified
 cache bytes, downloads only missing pinned assets, and writes ignored go:embed
-archives. Native acceptance uses `TestBuiltinDesktopWorldLiveAgentTask` with an
-explicit private model profile and artifact directory; ordinary tests never use
-live accounts. Fixture approval tests do not establish desktop effects.
+archives. Ordinary Host tests use an empty fixed package. Tests of Desktop World
+routing use a loopback MCP fixture, and cache tests extract a text-only archive.
+The CLI process-lifecycle fixture launches the current test executable in place.
+
+To check the official stdio package, run `TestProductDesktopWorldMCPStartup` with
+`CAELIS_DTW_INTEGRATION_STORE` set to an absolute, persistent test Store. Native
+desktop acceptance uses `TestBuiltinDesktopWorldLiveAgentTask` with a private
+model profile and an explicit artifact directory.
 
 ## Default gate
 
@@ -257,7 +262,7 @@ adds cost without improving unrelated changes:
 | SDK dependencies or supported imports | `make sdk-boundary-check` |
 | Runtime, Control, projection, or physical TUI contracts | `make product-acceptance` |
 | Broad TUI, command, or ACP integration | `make regression` |
-| In-process Host composition | `make startup-performance` |
+| In-process Host composition across Session history sizes, with the fixed plugin omitted | `make startup-performance` |
 | Managed Host lifecycle or process ownership | `go test -race ./internal/servicelifecycle ./internal/cli` |
 | Maintained documentation links | `make docs-links` |
 | npm launcher or package handoff | `npm --prefix npm test` |

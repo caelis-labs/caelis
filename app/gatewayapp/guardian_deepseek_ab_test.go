@@ -176,7 +176,7 @@ func runGuardianAB(t *testing.T, c guardianABCase, repeat int, out string) {
 		t.Fatal(err)
 	}
 	profile, _ := copyGuardianABConfiguration(t, ctx, filepath.Join(home, ".caelis"), store, "provider:deepseek@default/deepseek/deepseek-v4-flash")
-	stack, err := NewLocalStack(Config{AppName: "caelis", UserID: "guardian-ab", StoreDir: store, WorkspaceKey: workspace, WorkspaceCWD: workspace, ApprovalMode: "auto-review", ModelProfileID: profile.ID, ModelProfileEffort: profile.Effort.DefaultEffort, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
+	stack, err := newTestLocalStack(Config{AppName: "caelis", UserID: "guardian-ab", StoreDir: store, WorkspaceKey: workspace, WorkspaceCWD: workspace, ApprovalMode: "auto-review", ModelProfileID: profile.ID, ModelProfileEffort: profile.Effort.DefaultEffort, SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"}})
 	if err != nil {
 		t.Fatal(err)
 	}
