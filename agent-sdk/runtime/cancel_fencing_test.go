@@ -26,7 +26,7 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	}
 	active, err = service.BindController(context.Background(), session.BindControllerRequest{
 		SessionRef:    active.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		Binding: session.ControllerBinding{
 			Kind: session.ControllerKindACP, ControllerID: "external", EpochID: "epoch-1",
 		},

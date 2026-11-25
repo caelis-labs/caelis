@@ -309,7 +309,7 @@ func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T
 		t.Fatal(err)
 	}
 	currentSession, err = runtime.sessions.BindController(context.Background(), session.BindControllerRequest{
-		SessionRef: currentSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		SessionRef: currentSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "main"},
 	})
 	if err != nil {

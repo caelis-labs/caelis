@@ -39,7 +39,7 @@ func TestDormantSessionRuntimeStateHasNoLiveHandleWithoutActivation(t *testing.T
 		if test.terminal == "" {
 			continue
 		}
-		_, err = stack.composition.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: test.terminal}}})
+		_, err = stack.composition.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle), Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: test.terminal}}})
 		if err != nil {
 			t.Fatal(err)
 		}

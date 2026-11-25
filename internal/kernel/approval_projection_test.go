@@ -60,7 +60,7 @@ func appendRuntimeApprovalFixture(t *testing.T, service session.Service, req *ap
 	t.Helper()
 	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(*req))
 	record := session.ApprovalRecord{Schema: session.ApprovalSchemaVersion, RequestID: id, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID, ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Execution.ItemID, Revision: 1, Status: session.ApprovalRecordPending, Input: req.Call.Input, Approval: req.Approval, Presentation: presentation}
-	if _, err := service.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: req.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "approval:" + id, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &record}}); err != nil {
+	if _, err := service.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: req.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: &session.Event{ID: "approval:" + id, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &record}}); err != nil {
 		t.Fatal(err)
 	}
 }

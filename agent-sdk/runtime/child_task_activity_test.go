@@ -446,7 +446,7 @@ func newIdleChildActivityTaskWithRole(t *testing.T, role session.ParticipantRole
 	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	_, err := r.sessions.BindController(t.Context(), session.BindControllerRequest{
-		SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "main"},
 	})
 	if err != nil {

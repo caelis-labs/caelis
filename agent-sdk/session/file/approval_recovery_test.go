@@ -412,7 +412,7 @@ func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplifica
 			if _, err := mutator.UpdateState(context.Background(), session.UpdateStateRequest{
 				SessionRef:    target.SessionRef,
 				Update:        func(map[string]any) (map[string]any, error) { return map[string]any{"reordered": true}, nil },
-				MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+				MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 			}); err != nil {
 				t.Errorf("reorder target Session: %v", err)
 			}

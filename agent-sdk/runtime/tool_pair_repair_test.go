@@ -300,16 +300,16 @@ func TestToolFactsLegacyHalfBatchAndLateRepairRoundTrip(t *testing.T) {
 	calls := []model.ToolCall{{ID: "A", Name: "Write", Args: `{"large":9007199254740993123456789}`}, {ID: "B", Name: "Write", Args: `{}`}, {ID: "C", Name: "Write", Args: `{}`}}
 
 	message := model.MessageFromToolCalls(model.RoleAssistant, calls, "")
-	intent, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "legacy-batch", Type: session.EventTypeToolCall, Scope: &session.EventScope{TurnID: "old-turn"}, Message: &message, Tool: &session.EventTool{ID: "A", Name: "Write"}}})
+	intent, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle), Event: &session.Event{ID: "legacy-batch", Type: session.EventTypeToolCall, Scope: &session.EventScope{TurnID: "old-turn"}, Message: &message, Tool: &session.EventTool{ID: "A", Name: "Write"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"full":9007199254740993123456789}`)}}}
-	original, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "original-A", Type: session.EventTypeToolResult, Scope: intent.Scope, Tool: &session.EventTool{ID: "A", Name: "Write", Result: &result}, Message: &model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "A", Name: "Write", Content: tool.ModelParts(result.Content)}}}}}})
+	original, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle), Event: &session.Event{ID: "original-A", Type: session.EventTypeToolResult, Scope: intent.Scope, Tool: &session.EventTool{ID: "A", Name: "Write", Result: &result}, Message: &model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: "A", Name: "Write", Content: tool.ModelParts(result.Content)}}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "later-user", Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "later input"))}}); err != nil {
+	if _, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle), Event: &session.Event{ID: "later-user", Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "later input"))}}); err != nil {
 		t.Fatal(err)
 	}
 	existing, _ := files.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
@@ -401,7 +401,7 @@ func TestToolFactsRepeatedProviderIDsAcrossBatchesAndTurns(t *testing.T) {
 
 func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 	files, active, root := codeModeStore(t)
-	guard := session.ControlMutationGuard(session.ControlMutationPurposeTest)
+	guard := session.ControlMutationGuard(session.ControlMutationPurposeLifecycle)
 	appendFact := func(event *session.Event) *session.Event {
 		t.Helper()
 		got, err := files.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: guard, Event: event})
@@ -556,7 +556,7 @@ func TestToolFactsRepairRecomputesAfterRevisionConflict(t *testing.T) {
 	store := &conflictingFactRepairStore{Store: base}
 	call := model.ToolCall{ID: "original-protocol-id", Name: "Write", Args: `{}`}
 	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
-	if _, err := base.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{ID: "original-call", Type: session.EventTypeToolCall, Message: &message, Scope: &session.EventScope{TurnID: "old-turn"}, Tool: &session.EventTool{ID: call.ID, Name: call.Name, BatchID: "original-batch", Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "old-turn", ItemID: "original-occurrence"}}}}); err != nil {
+	if _, err := base.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle), Event: &session.Event{ID: "original-call", Type: session.EventTypeToolCall, Message: &message, Scope: &session.EventScope{TurnID: "old-turn"}, Tool: &session.EventTool{ID: call.ID, Name: call.Name, BatchID: "original-batch", Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "old-turn", ItemID: "original-occurrence"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	fence, err := base.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "repair-owner"})

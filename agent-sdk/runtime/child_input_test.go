@@ -58,12 +58,17 @@ func TestSubmitChildInputRejectsStaleControllerAfterHandoff(t *testing.T) {
 	stale := session.ControllerExecutor(session.ControllerBinding{
 		Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "local",
 	})
-	_, err := r.sessions.BindController(t.Context(), session.BindControllerRequest{
-		SessionRef: task.sessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
-		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-2", AgentName: "local"},
-	})
+	handoffCtx, release, err := r.sessions.AcquireWriter(t.Context(), task.sessionRef, "handoff")
 	if err != nil {
 		t.Fatal(err)
+	}
+	_, err = r.sessions.BindController(handoffCtx, session.BindControllerRequest{
+		SessionRef: task.sessionRef, MutationGuard: session.ControlMutationGuardWithRuntimeFence(handoffCtx, session.ControlMutationPurposeHandoff),
+		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-2", AgentName: "local"},
+	})
+	releaseErr := release()
+	if err != nil || releaseErr != nil {
+		t.Fatalf("handoff bind = %v, release = %v", err, releaseErr)
 	}
 	_, err = r.SubmitChildInput(t.Context(), task.sessionRef, agent.ChildInputCommand{
 		Target: task.handle, Source: stale, Input: "must not authenticate after handoff",
@@ -172,7 +177,7 @@ func newLocalControllerChildActivityTask(t *testing.T) (*Runtime, *subagentTask,
 	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	_, err := r.sessions.BindController(t.Context(), session.BindControllerRequest{
-		SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+		SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
 		Binding: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "local"},
 	})
 	if err != nil {

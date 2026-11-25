@@ -58,7 +58,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterAndReaders(t *testing.T)
 			err := measure(func() error {
 				_, appendErr := service.AppendEvent(opCtx, session.AppendEventRequest{
 					SessionRef:    active.SessionRef,
-					MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
+					MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeSubagentCompletion),
 					Event: &session.Event{
 						Type: session.EventTypeLifecycle, Visibility: session.VisibilityCanonical,
 						Lifecycle: &session.EventLifecycle{Status: "completed", Reason: fmt.Sprintf("concurrent-%02d", i)},

@@ -1788,7 +1788,7 @@ func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	if _, err := runtime.sessions.(session.StateWriter).UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	if _, err := runtime.sessions.(session.StateWriter).UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
