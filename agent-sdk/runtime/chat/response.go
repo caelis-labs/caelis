@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/google/uuid"
 )
 
 func reasoningFromMetadata(meta map[string]any) model.ReasoningConfig {
@@ -29,22 +30,30 @@ func reasoningFromMetadata(meta map[string]any) model.ReasoningConfig {
 	return reasoning
 }
 
+type collectedResponse struct {
+	response  *model.Response
+	stream    *textStream
+	messageID string
+}
+
 func collectFinalResponse(
 	ctx context.Context,
 	llm model.LLM,
 	req *model.Request,
-	messageID string,
 	watchdog *generationWatchdog,
 	yieldChunk func(*session.Event) bool,
-) (*model.Response, *textStream, error) {
+) (collectedResponse, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return collectedResponse{}, err
 	}
 	if err := model.ValidateRequestCapabilities(llm, req); err != nil {
-		return nil, nil, err
+		return collectedResponse{}, err
 	}
-	incremental := hookrun.FromContext(ctx).Hooks.StreamMode == hook.StreamIncremental
+	mode := hookrun.FromContext(ctx).Hooks.StreamMode
+	incremental := mode.PublishesIncrementally()
+	irreversible := mode == hook.StreamIncremental
 	ctx = model.WithIrreversibleOutputTracking(ctx)
+	messageID := uuid.NewString()
 	var pipeline *textStream
 	var ordinal uint64
 	ctx = model.WithInvocationStart(ctx, func(ctx context.Context, in model.Invocation, _ *model.Request) error {
@@ -63,7 +72,6 @@ func collectFinalResponse(
 			if !yieldChunk(chunk) {
 				return context.Canceled
 			}
-			model.RecordIrreversibleOutput(ctx)
 		}
 		return nil
 	}
@@ -75,18 +83,29 @@ func collectFinalResponse(
 	}
 	for event, err := range model.Generate(modelinvocation.WithToolRepair(ctx, req), llm, req) {
 		if err != nil {
-			return nil, nil, err
+			return collectedResponse{}, err
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, nil, ctxErr
+			return collectedResponse{}, ctxErr
+		}
+		if err := watchdog.observeStreamEvent(event); err != nil {
+			return collectedResponse{}, err
 		}
 		if event != nil && event.Type == model.StreamEventAttemptReset {
 			pipeline = nil
 			clear(textFilters)
 			textFilterOrder = textFilterOrder[:0]
-		}
-		if err := watchdog.observeStreamEvent(event); err != nil {
-			return nil, nil, err
+			if req != nil && req.Stream && incremental && yieldChunk != nil {
+				reset := model.AttemptReset{}
+				if event.AttemptReset != nil {
+					reset = *event.AttemptReset
+				}
+				if !yieldChunk(session.NewModelAttemptResetForMessage(reset, messageID)) {
+					return collectedResponse{}, context.Canceled
+				}
+			}
+			messageID = uuid.NewString()
+			continue
 		}
 		if req != nil && req.Stream && incremental {
 			visibleEvent := event
@@ -102,21 +121,21 @@ func collectFinalResponse(
 				copyDelta := *event.PartDelta
 				copyDelta.TextDelta = filter.Push(copyDelta.TextDelta)
 				if pipeline == nil {
-					return nil, nil, errors.New("stream has no accounted attempt")
+					return collectedResponse{}, errors.New("stream has no accounted attempt")
 				}
 				var transformErr error
 				copyDelta.TextDelta, transformErr = pipeline.push(ctx, index, copyDelta.TextDelta)
 				if transformErr != nil {
-					return nil, nil, transformErr
+					return collectedResponse{}, transformErr
 				}
 				copyEvent.PartDelta = &copyDelta
 				visibleEvent = &copyEvent
 			}
 			if chunk := chunkEventFromStreamEvent(visibleEvent, messageID); chunk != nil && yieldChunk != nil {
 				if !yieldChunk(chunk) {
-					return nil, nil, context.Canceled
+					return collectedResponse{}, context.Canceled
 				}
-				if visibleEvent.PartDelta != nil {
+				if irreversible {
 					model.RecordIrreversibleOutput(ctx)
 				}
 			}
@@ -126,33 +145,33 @@ func collectFinalResponse(
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return collectedResponse{}, err
 	}
 	if incremental {
 		for _, index := range textFilterOrder {
 			if pending := textFilters[index].Flush(); pending != "" {
 				out, err := pipeline.push(ctx, index, pending)
 				if err != nil {
-					return nil, nil, err
+					return collectedResponse{}, err
 				}
 				if err := publish(index, out); err != nil {
-					return nil, nil, err
+					return collectedResponse{}, err
 				}
 			}
 		}
 	}
 
 	if final == nil {
-		return nil, nil, errors.New("model returned no final response")
+		return collectedResponse{}, errors.New("model returned no final response")
 	}
 	final.Message = normalizeAssistantCitations(final.Message, req.Messages)
 	if pipeline == nil {
-		return nil, nil, errors.New("final response has no accounted attempt")
+		return collectedResponse{}, errors.New("final response has no accounted attempt")
 	}
 	if incremental {
 		transformed, transformErr := pipeline.finish(ctx, final.Message, incremental, publish)
 		if transformErr != nil {
-			return nil, nil, transformErr
+			return collectedResponse{}, transformErr
 		}
 		copyFinal := *final
 		copyFinal.Message = transformed
@@ -160,12 +179,12 @@ func collectFinalResponse(
 	}
 
 	if err := watchdog.finishModelStep(final); err != nil {
-		return nil, nil, err
+		return collectedResponse{}, err
 	}
 	if final.ContextWindowTokens <= 0 {
 		final.ContextWindowTokens = modelContextWindowTokens(llm)
 	}
-	return final, pipeline, nil
+	return collectedResponse{response: final, stream: pipeline, messageID: messageID}, nil
 }
 
 func modelContextWindowTokens(llm model.LLM) int {
@@ -182,13 +201,6 @@ func modelContextWindowTokens(llm model.LLM) int {
 func chunkEventFromStreamEvent(event *model.StreamEvent, messageID string) *session.Event {
 	if event == nil {
 		return nil
-	}
-	if event.Type == model.StreamEventAttemptReset {
-		reset := model.AttemptReset{}
-		if event.AttemptReset != nil {
-			reset = *event.AttemptReset
-		}
-		return session.NewModelAttemptReset(reset)
 	}
 	if event.PartDelta == nil {
 		return nil

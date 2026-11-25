@@ -196,6 +196,10 @@ func (s *draftSession) emitEnvelope(env eventstream.Envelope, replay, task bool,
 	if env.SessionID != "" && env.SessionID != s.id {
 		return errors.New("ACP draft feed crossed Session identity")
 	}
+	main := !task && (env.Scope == "" || env.Scope == eventstream.ScopeMain)
+	if main && env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == session.LifecycleStatusModelAttemptReset {
+		return s.retireModelNarrative(session.ModelAttemptResetMessageID(env.Meta))
+	}
 	replacementID := ""
 	if len(replacementIDs) > 0 {
 		replacementID = replacementIDs[0]
@@ -277,6 +281,9 @@ func (s *draftSession) emitEnvelope(env eventstream.Envelope, replay, task bool,
 			}
 			if err := s.agent.callbacks.SessionUpdate(s.ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: *update}); err != nil {
 				return err
+			}
+			if main && !env.Final {
+				s.modelNarrative.observe(env.Update)
 			}
 		}
 		terminals, err := draftTerminalUpdates(env)
@@ -400,6 +407,61 @@ func (s *draftSession) emitEnvelope(env eventstream.Envelope, replay, task bool,
 			// A permission wake can race a new foreground lifecycle. Refresh the
 			// original FIFO after its identity has reached this projection owner.
 			s.refreshApprovalState()
+		}
+	}
+	return nil
+}
+
+// draftModelNarrative tracks the published kinds for the active model message.
+// A reset can then clear only the draft entities the failed attempt created.
+type draftModelNarrative struct {
+	messageID string
+	answer    bool
+	thought   bool
+}
+
+func (n *draftModelNarrative) observe(update eventstream.Update) {
+	var chunk eventstream.ContentChunk
+	switch update := update.(type) {
+	case eventstream.ContentChunk:
+		chunk = update
+	case *eventstream.ContentChunk:
+		chunk = *update
+	default:
+		return
+	}
+	if chunk.MessageID == "" || (chunk.SessionUpdate != eventstream.UpdateAgentMessage && chunk.SessionUpdate != eventstream.UpdateAgentThought) {
+		return
+	}
+	if n.messageID != chunk.MessageID {
+		*n = draftModelNarrative{messageID: chunk.MessageID}
+	}
+	if chunk.SessionUpdate == eventstream.UpdateAgentMessage {
+		n.answer = true
+	} else {
+		n.thought = true
+	}
+}
+
+func (s *draftSession) retireModelNarrative(messageID string) error {
+	narrative := s.modelNarrative
+	if messageID == "" || messageID != narrative.messageID {
+		return nil
+	}
+	s.modelNarrative = draftModelNarrative{}
+	for _, part := range []struct {
+		kind string
+		seen bool
+	}{{"agent_message", narrative.answer}, {"agent_thought", narrative.thought}} {
+		if !part.seen {
+			continue
+		}
+		update, err := draftNarrativeClear(part.kind, messageID)
+		if err != nil {
+			return err
+		}
+		if err := s.agent.callbacks.SessionUpdate(s.ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: *update}); err != nil {
+			return err
 		}
 	}
 	return nil

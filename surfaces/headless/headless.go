@@ -185,7 +185,7 @@ func runSessionOnce(
 					cancelTurn("headless approval resolution failed")
 					continue
 				}
-			} else if isMainSessionUpdate(env) {
+			} else if isMainScope(env) {
 				if text, ok := assistant.Observe(env); ok {
 					out.Output = text
 				}
@@ -276,7 +276,14 @@ type assistantOutputReducer struct {
 }
 
 func (r *assistantOutputReducer) Observe(env eventstream.Envelope) (string, bool) {
-	if r == nil || env.Update == nil {
+	if r == nil {
+		return "", false
+	}
+	if env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == session.LifecycleStatusModelAttemptReset {
+		messageID := session.ModelAttemptResetMessageID(env.Meta)
+		return "", r.assistant.DiscardMessage(messageID)
+	}
+	if env.Kind != eventstream.KindSessionUpdate || env.Update == nil {
 		return "", false
 	}
 	if env.Final && assistantMessageUpdate(env.Update) {
@@ -298,12 +305,6 @@ func assistantMessageUpdate(update eventstream.Update) bool {
 	default:
 		return false
 	}
-}
-
-func isMainSessionUpdate(env eventstream.Envelope) bool {
-	return env.Kind == eventstream.KindSessionUpdate &&
-		env.Update != nil &&
-		isMainScope(env)
 }
 
 func isMainScope(env eventstream.Envelope) bool {

@@ -325,7 +325,7 @@ func TestAttemptResetRetryNoticeDoesNotFlattenSettledExploration(t *testing.T) {
 	// attempt_reset drops speculative later narrative, then the retry notice is
 	// appended. The completed batch must stay compacted instead of flattening
 	// back into standalone Read/Search rows.
-	block.ClearActiveBuffers()
+	block.ClearActiveBuffers("")
 	block.AddNotice("Retrying model request (1/5, retry in 1s)", time.Time{}, transcript.NoticeKindModelRetry)
 
 	wantRun := []string{"read-1", "search-1"}
@@ -345,6 +345,61 @@ func TestAttemptResetRetryNoticeDoesNotFlattenSettledExploration(t *testing.T) {
 	}
 	if !strings.Contains(plain, "! Retrying model request (1/5, retry in 1s)") {
 		t.Fatalf("retry notice disappeared after attempt reset:\n%s", plain)
+	}
+}
+
+func TestScopedAttemptResetClearsOnlyFailedNarrative(t *testing.T) {
+	h := newLiveExplorationHarness(t, 100, 30)
+	const failedMessageID = " failed-step "
+
+	// An earlier tool step's canonical snapshot can be omitted from the live
+	// feed when its narrative was already streamed under a different identity.
+	h.reason("failed-step", "earlier tool step narrative")
+	h.complete("tool-1", "RunCommand", "execute", "pwd")
+	h.reason(failedMessageID, "failed thought")
+	h.apply(liveExplorationEnvelope(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage,
+		MessageID:     failedMessageID,
+		Content:       eventstream.TextContent{Type: "text", Text: "## Failed stable prefix\n\nFailed active tail"},
+	}))
+	h.drainNarrative()
+	before := ansi.Strip(h.model.View().Content)
+	for _, text := range []string{"earlier tool step narrative", "failed thought", "Failed stable prefix", "Failed active tail", "pwd"} {
+		if !strings.Contains(before, text) {
+			t.Fatalf("before retry missing %q:\n%s", text, before)
+		}
+	}
+
+	reset := liveExplorationAttemptResetEnvelope(1, 2)
+	reset.Meta = testMeta.WithRuntimeSection(reset.Meta, "attempt_reset", map[string]any{"message_id": failedMessageID})
+	h.apply(reset)
+	h.drainNarrative()
+	waiting := ansi.Strip(h.model.View().Content)
+	if !strings.Contains(waiting, "Retrying model request") {
+		t.Fatalf("retry notice missing:\n%s", waiting)
+	}
+	for _, text := range []string{"failed thought", "Failed stable prefix", "Failed active tail"} {
+		if strings.Contains(waiting, text) {
+			t.Fatalf("failed narrative %q survived reset:\n%s", text, waiting)
+		}
+	}
+
+	h.apply(liveExplorationEnvelope(eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage,
+		MessageID:     "retry-step",
+		Content:       eventstream.TextContent{Type: "text", Text: "fresh retry answer"},
+	}))
+	h.drainNarrative()
+	after := ansi.Strip(h.model.View().Content)
+	for _, text := range []string{"earlier tool step narrative", "pwd", "fresh retry answer"} {
+		if got := strings.Count(after, text); got != 1 {
+			t.Fatalf("after retry contains %d copies of %q, want one:\n%s", got, text, after)
+		}
+	}
+	for _, text := range []string{"failed thought", "Failed stable prefix", "Failed active tail", "Retrying model request"} {
+		if strings.Contains(after, text) {
+			t.Fatalf("%q survived the fresh retry:\n%s", text, after)
+		}
 	}
 }
 

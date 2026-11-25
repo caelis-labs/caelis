@@ -197,11 +197,15 @@ func draftNarrativeReplayReset(update v2.SessionUpdate) (string, *v2.SessionUpda
 		// A genuine full-content record already supplies the replay boundary.
 		return key, nil, nil
 	}
-	reset, err := draftValidatedUpdate(map[string]json.RawMessage{
-		"sessionUpdate": draftRaw(kind), "messageId": draftRaw(fields.ID),
+	reset, err := draftNarrativeClear(kind, fields.ID)
+	return key, reset, err
+}
+
+func draftNarrativeClear(kind, messageID string) (*v2.SessionUpdate, error) {
+	return draftValidatedUpdate(map[string]json.RawMessage{
+		"sessionUpdate": draftRaw(kind), "messageId": draftRaw(messageID),
 		"content": draftRaw([]any{}), "_meta": draftRaw(nil),
 	})
-	return key, reset, err
 }
 
 func draftNormalizeTerminalContent(update eventstream.Update) eventstream.Update {

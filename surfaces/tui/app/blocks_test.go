@@ -545,7 +545,7 @@ func TestMainACPClearActiveBuffersClearsPendingPrefix(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
 	block.AppendStreamEvent(SEAssistant, "    ", narrativeTestSource())
-	block.ClearActiveBuffers()
+	block.ClearActiveBuffers("")
 	block.AppendStreamEvent(SEAssistant, "answer", narrativeTestSource())
 
 	if len(block.Events) != 1 {
@@ -598,7 +598,7 @@ func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
 	block.AppendStreamEvent(SEReasoning, "failed thought", narrativeTestSource())
 	block.AppendStreamEvent(SEAssistant, "failed answer", narrativeTestSource())
 
-	block.ClearActiveBuffers()
+	block.ClearActiveBuffers("")
 	block.AppendStreamEvent(SEAssistant, "retry answer", narrativeTestSource())
 
 	if len(block.Events) != 1 {
@@ -613,7 +613,7 @@ func TestMainACPClearActiveBuffersPreservesCanonicalFinalNarrative(t *testing.T)
 	block := NewMainACPTurnBlock("session-1")
 	block.ReplaceFinalStreamEvent(SEAssistant, "final answer", narrativeTestSource())
 
-	block.ClearActiveBuffers()
+	block.ClearActiveBuffers("")
 
 	if len(block.Events) != 1 || block.Events[0].Text != "final answer" {
 		t.Fatalf("events = %#v, want canonical final narrative preserved", block.Events)

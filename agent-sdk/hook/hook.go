@@ -188,14 +188,23 @@ type CompletionDecision struct {
 	Feedback []model.Part
 }
 
-// StreamMode selects irreversible incremental publication or buffered final
-// publication. Buffered is the default and supports arbitrary final replacement.
+// StreamMode controls when model output becomes visible to observers.
+// Buffered publication is the default and supports final response replacement.
 type StreamMode string
 
 const (
 	StreamBuffered    StreamMode = "buffered"
 	StreamIncremental StreamMode = "incremental"
+	// StreamIncrementalRetry publishes each attempt under its own message ID.
+	// An eligible retry retires that attempt's live output. Observers can remove
+	// it on the attempt reset or keep it as a separate message.
+	StreamIncrementalRetry StreamMode = "incremental_retry"
 )
+
+// PublishesIncrementally reports whether a mode publishes live model output.
+func (m StreamMode) PublishesIncrementally() bool {
+	return m == StreamIncremental || m == StreamIncrementalRetry
+}
 
 // StreamTransformer owns text state for one actual attempt or synthetic candidate. Transform
 // and Finish run in order; they never see media, signatures, identity or usage.

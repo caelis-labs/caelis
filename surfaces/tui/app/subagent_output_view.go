@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
 const subagentOutputRenderInterval = 50 * time.Millisecond
@@ -23,6 +24,11 @@ type subagentOutputNarrativeKey struct {
 	block     *ParticipantTurnBlock
 	kind      TranscriptNarrativeKind
 	messageID string
+}
+
+type childProjectionKey struct {
+	id   string
+	kind transcript.EventKind
 }
 
 type subagentOutputView struct {
@@ -58,7 +64,7 @@ type subagentOutputView struct {
 	// Surface's attached content follower.
 	liveActivityID  string
 	renderCache     subagentOutputRenderCache
-	seenProjections map[string]struct{}
+	seenProjections map[childProjectionKey]struct{}
 	approvalReviews childApprovalReviews
 	// liveNarratives records typed messages that entered this detached view as
 	// live deltas. A later final snapshot with the same message identity replaces
@@ -268,13 +274,15 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		}
 	}
 	if projectionID := strings.TrimSpace(event.SourceProjectionID); projectionID != "" {
-		if _, seen := v.seenProjections[projectionID]; seen {
+		// An attempt reset and its retry notice have the same source projection.
+		key := childProjectionKey{id: projectionID, kind: event.Kind}
+		if _, seen := v.seenProjections[key]; seen {
 			return
 		}
 		if v.seenProjections == nil {
-			v.seenProjections = make(map[string]struct{})
+			v.seenProjections = make(map[childProjectionKey]struct{})
 		}
-		v.seenProjections[projectionID] = struct{}{}
+		v.seenProjections[key] = struct{}{}
 	}
 	if event.Kind == TranscriptEventNarrative && event.NarrativeKind == TranscriptNarrativeUser {
 		v.appendInput(event)

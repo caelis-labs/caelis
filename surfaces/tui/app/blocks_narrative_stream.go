@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -70,15 +71,36 @@ func (b *MainACPTurnBlock) ReplaceStreamEvent(kind SubagentEventKind, text strin
 	}
 }
 
-func (b *MainACPTurnBlock) ClearActiveBuffers() {
+// ClearActiveBuffers removes speculative narrative belonging to messageID.
+// An empty message ID clears all speculative narrative for legacy resets.
+func (b *MainACPTurnBlock) ClearActiveBuffers(messageID string) {
 	if b == nil {
 		return
 	}
-	// attempt_reset removes speculative narrative before the next render may run.
-	// Preserve any exploration container that the narrative had already settled
-	// so a batched reset followed by running cannot flatten it on first paint.
+	// Preserve exploration containers the narrative already settled, even if
+	// the reset arrives before their first render.
 	b.explorationProjection.preserveBeforeEventRemoval(b.Events, b.Status)
-	clearNarrativeStream(&b.Events, &b.narrativeStream)
+	b.Events = b.narrativeStream.clearAttempt(b.Events, messageID)
+}
+
+func (s *narrativeStreamState) clearAttempt(events []SubagentEvent, messageID string) []SubagentEvent {
+	identity := newNarrativeSourceIdentity(messageID, "", "").stableKey()
+	if identity == "" {
+		s.reset()
+	} else if s.activeIdentity == identity {
+		// Close the failed append route and its pending prefix while keeping
+		// earlier message identities available for canonical snapshot repairs.
+		s.advanceBoundary()
+	}
+	return slices.DeleteFunc(events, func(event SubagentEvent) bool {
+		if !activeNarrativeEventKind(event.Kind) || event.narrativeFinal {
+			return false
+		}
+		if identity == "" {
+			return event.ActiveBuffer != nil
+		}
+		return event.narrativeTarget.identity == identity
+	})
 }
 
 // advanceNarrativeBoundary closes live append routing for every identity.
@@ -178,11 +200,6 @@ func replaceFinalNarrativeStreamEvent(
 ) {
 	clearModelRetryNotices(events)
 	*events = stream.replaceFinal(*events, kind, chunk, source, at)
-}
-
-func clearNarrativeStream(events *[]SubagentEvent, stream *narrativeStreamState) {
-	stream.reset()
-	*events = clearActiveNarrativeBuffers(*events)
 }
 
 func appendNarrativeSemanticBoundary(events *[]SubagentEvent, stream *narrativeStreamState) {
@@ -426,21 +443,6 @@ func (s *narrativeStreamState) reset() {
 		return
 	}
 	*s = narrativeStreamState{epoch: s.epoch + 1, segment: s.segment + 1}
-}
-
-func clearActiveNarrativeBuffers(events []SubagentEvent) []SubagentEvent {
-	out := events[:0]
-	for _, ev := range events {
-		if ev.ActiveBuffer != nil && activeNarrativeEventKind(ev.Kind) && !ev.narrativeFinal {
-			continue
-		}
-		if !ev.narrativeFinal {
-			ev.ActiveBuffer = nil
-		}
-		out = append(out, ev)
-	}
-	clear(events[len(out):])
-	return out
 }
 
 func sealNarrativeBuffers(events []SubagentEvent) bool {

@@ -9,6 +9,7 @@ import (
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -50,6 +51,54 @@ func TestDraftProjectionPreservesExplicitNarrativeAndToolReplacement(t *testing.
 		}
 		if _, ok := fields["replacement"]; ok {
 			t.Fatal("native narrative replacement extension leaked to standard v2")
+		}
+	}
+}
+
+func TestDraftAttemptResetClearsOnlyPublishedNarrative(t *testing.T) {
+	peer := &draftNativePeer{}
+	s := &draftSession{agent: &DraftAgent{callbacks: peer}, id: "session", ctx: t.Context()}
+	emit := func(env eventstream.Envelope) {
+		t.Helper()
+		env.SessionID = s.id
+		if err := s.emitEnvelope(env, false, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset := func(id string) {
+		t.Helper()
+		event := session.NewModelAttemptResetForMessage(model.AttemptReset{Attempt: 1, Retrying: true}, id)
+		emit(eventstream.Envelope{Kind: eventstream.KindLifecycle, Lifecycle: &eventstream.Lifecycle{State: event.Lifecycle.Status}, Meta: event.Meta})
+	}
+	chunk := func(kind, id string) {
+		t.Helper()
+		emit(eventstream.Envelope{Kind: eventstream.KindSessionUpdate, Update: eventstream.ContentChunk{
+			SessionUpdate: kind, MessageID: id, Content: eventstream.TextContent{Type: "text", Text: "partial"},
+		}})
+	}
+	reset("unseen")
+	if len(peer.updates) != 0 {
+		t.Fatalf("unseen reset emitted %d updates", len(peer.updates))
+	}
+	chunk(eventstream.UpdateAgentThought, "earlier")
+	chunk(eventstream.UpdateAgentThought, "failed")
+	chunk(eventstream.UpdateAgentMessage, "failed")
+	reset(" failed ")
+	if len(peer.updates) != 3 {
+		t.Fatalf("unrelated message reset emitted an update: %d", len(peer.updates))
+	}
+	reset("failed")
+	reset("failed")
+	if len(peer.updates) != 5 {
+		t.Fatalf("reset emitted %d updates, want two replacements after three chunks", len(peer.updates))
+	}
+	for i, kind := range []string{"agent_message", "agent_thought"} {
+		var wire map[string]json.RawMessage
+		if err := draftJSONConvert(peer.updates[3+i].Update, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if string(wire["sessionUpdate"]) != `"`+kind+`"` || string(wire["messageId"]) != `"failed"` || string(wire["content"]) != `[]` {
+			t.Fatalf("%s retirement = %#v, want an empty replacement for failed", kind, wire)
 		}
 	}
 }

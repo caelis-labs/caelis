@@ -192,10 +192,13 @@ func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent,
 	}
 }
 
-func isRetryingAttemptReset(event TranscriptEvent) bool {
+func isAttemptReset(event TranscriptEvent) bool {
 	return event.Kind == TranscriptEventLifecycle &&
-		strings.EqualFold(strings.TrimSpace(event.State), "attempt_reset") &&
-		transcript.MetaBool(event.Meta, "caelis", "runtime", "attempt_reset", "retrying")
+		strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusModelAttemptReset)
+}
+
+func isRetryingAttemptReset(event TranscriptEvent) bool {
+	return isAttemptReset(event) && transcript.MetaBool(event.Meta, "caelis", "runtime", "attempt_reset", "retrying")
 }
 
 func isForegroundRunningActivityScope(scope ACPProjectionScope) bool {

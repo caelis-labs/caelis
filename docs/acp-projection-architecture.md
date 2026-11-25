@@ -386,6 +386,11 @@ remain correlation values resolved through Control. Child output is observation;
 the parent receives one canonical tool result, and child messages, reasoning,
 tools, plans, and terminal bytes never become parent model context.
 
+A model attempt reset retires the matching provisional narrative while the
+child Turn stays active. The ACP bridge uses empty message replacements for
+narrative already published on a draft connection. The Spawn result projection
+forgets the retired candidate and waits for the child Turn's terminal event.
+
 Agent communication is not Task input. `Task write` and Task cancel apply only
 to command Tasks that advertise those capabilities. Agents use
 `SendMessage {to, message}`, which binds trusted source identity and queues

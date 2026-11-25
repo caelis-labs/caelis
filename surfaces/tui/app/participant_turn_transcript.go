@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -65,6 +66,14 @@ func applyTranscriptEventToParticipantTurn(
 ) participantTurnTranscriptResult {
 	if block == nil {
 		return participantTurnTranscriptResult{}
+	}
+	if isAttemptReset(event) {
+		block.explorationProjection.preserveBeforeEventRemoval(block.Events, block.Status)
+		block.Events = block.narrativeStream.clearAttempt(block.Events, session.ModelAttemptResetMessageID(event.Meta))
+		if !isRetryingAttemptReset(event) {
+			block.clearTransientRetryNotice()
+		}
+		return participantTurnTranscriptResult{changed: true}
 	}
 	if actor := strings.TrimSpace(policy.actor); actor != "" {
 		block.Actor = participantActorDisplayName(actor)

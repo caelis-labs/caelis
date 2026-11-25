@@ -295,6 +295,10 @@ func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd
 	if eventTargetsParentToolPanel(event) {
 		return m, nil
 	}
+	if event.NoticeKind == transcript.NoticeKindModelRetry &&
+		(event.Scope == ACPProjectionParticipant || event.Scope == ACPProjectionSubagent) {
+		return m.applyParticipantTurnTranscriptEvent(event)
+	}
 	if m.shouldAnchorMainNotice(event) {
 		block := m.ensureMainTimelineBlock(event)
 		if block != nil {
@@ -460,12 +464,12 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	switch event.Scope {
 	case ACPProjectionParticipant:
-		return m.applyTranscriptApprovalReviewToParticipantTurn(event)
+		return m.applyParticipantTurnTranscriptEvent(event)
 	case ACPProjectionSubagent:
 		if eventTargetsParentToolPanel(event) {
 			return m, nil
 		}
-		return m.applyTranscriptApprovalReviewToParticipantTurn(event)
+		return m.applyParticipantTurnTranscriptEvent(event)
 	default:
 		block := m.mainBlockForAnchor(event, mainApprovalAnchor(event.ToolCallID))
 		if block == nil {
@@ -546,8 +550,8 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent, reconnectReplay 
 		if block == nil {
 			return m, nil
 		}
-		if event.State == "attempt_reset" {
-			block.ClearActiveBuffers()
+		if isAttemptReset(event) {
+			block.ClearActiveBuffers(session.ModelAttemptResetMessageID(event.Meta))
 			if !isRetryingAttemptReset(event) {
 				block.clearTransientRetryNotice()
 			}
@@ -662,30 +666,18 @@ func (m *Model) applyTranscriptPlanToParticipantTurn(event TranscriptEvent, reop
 }
 
 func (m *Model) applyTranscriptStatusToParticipantTurn(event TranscriptEvent, stateName, approvalTool, approvalCommand string) (tea.Model, tea.Cmd) {
-	block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), participantTurnTranscriptActor(event))
-	if block == nil {
-		return m, nil
-	}
-	statusEvent := event
-	statusEvent.State = stateName
+	event.State = stateName
 	if strings.TrimSpace(approvalTool) != "" || strings.TrimSpace(approvalCommand) != "" {
-		statusEvent.Kind = TranscriptEventApproval
-		statusEvent.ApprovalTool = approvalTool
-		statusEvent.ApprovalCommand = approvalCommand
+		event.Kind = TranscriptEventApproval
+		event.ApprovalTool = approvalTool
+		event.ApprovalCommand = approvalCommand
 	} else {
-		statusEvent.Kind = TranscriptEventLifecycle
+		event.Kind = TranscriptEventLifecycle
 	}
-	result := applyTranscriptEventToParticipantTurn(block, statusEvent, participantTurnTranscriptPolicy{
-		actor: participantTurnTranscriptActor(event),
-	})
-	if !result.changed {
-		return m, nil
-	}
-	m.markViewportBlockDirty(block.BlockID())
-	return m, m.requestStreamViewportSync()
+	return m.applyParticipantTurnTranscriptEvent(event)
 }
 
-func (m *Model) applyTranscriptApprovalReviewToParticipantTurn(event TranscriptEvent) (tea.Model, tea.Cmd) {
+func (m *Model) applyParticipantTurnTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), participantTurnTranscriptActor(event))
 	if block == nil {
 		return m, nil

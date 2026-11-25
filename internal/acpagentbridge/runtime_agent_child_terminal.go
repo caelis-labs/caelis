@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
@@ -106,7 +107,7 @@ func (p *acpChildTerminalProjector) childTurnStateLocked(
 		return &acpChildTerminalState{closed: true}, key
 	}
 	state := p.turns[key]
-	if state == nil {
+	if state == nil && selectCurrent {
 		state = &acpChildTerminalState{}
 		p.turns[key] = state
 	}
@@ -206,13 +207,15 @@ func (p *acpChildTerminalProjector) project(env eventstream.Envelope, fallbackSe
 	return eventstream.SessionNotification{}, true
 }
 
-// projectLifecycle emits the one standard parent Spawn result for a child Turn.
-// The terminal status is normalized to ACP v1's completed/failed vocabulary;
-// the FinalResponse is ordinary tool result content, never an agent message or
-// Caelis terminal-stream extension.
+// projectLifecycle retires failed message attempts and emits the standard
+// parent Spawn result at the child Turn's terminal boundary.
 func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, fallbackSessionID string) (eventstream.SessionNotification, bool) {
 	if p == nil || env.Kind != eventstream.KindLifecycle || env.Scope != eventstream.ScopeSubagent ||
-		env.ParentTool == nil || env.Lifecycle == nil || !eventstream.IsTerminalLifecycleState(env.Lifecycle.State) {
+		env.ParentTool == nil || env.Lifecycle == nil {
+		return eventstream.SessionNotification{}, false
+	}
+	reset := env.Lifecycle.State == session.LifecycleStatusModelAttemptReset
+	if !reset && !eventstream.IsTerminalLifecycleState(env.Lifecycle.State) {
 		return eventstream.SessionNotification{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
@@ -221,13 +224,17 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 	}
 	sessionID := childTerminalSessionID(env.SessionID, fallbackSessionID)
 
-	status := observedSpawnStatus(nil, map[string]any{"state": env.Lifecycle.State})
 	p.mu.Lock()
-	state, key := p.childTurnStateLocked(sessionID, parentCallID, env.TurnID, true)
-	if state.closed {
-		p.mu.Unlock()
+	defer p.mu.Unlock()
+	state, key := p.childTurnStateLocked(sessionID, parentCallID, env.TurnID, !reset)
+	if state == nil || state.closed {
 		return eventstream.SessionNotification{}, true
 	}
+	if reset {
+		state.finalResponse.DiscardMessage(session.ModelAttemptResetMessageID(env.Meta))
+		return eventstream.SessionNotification{}, true
+	}
+	status := observedSpawnStatus(nil, map[string]any{"state": env.Lifecycle.State})
 	text := state.finalResponse.FinalText()
 	if status == eventstream.ToolStatusFailed {
 		text = strings.TrimSpace(env.Lifecycle.Reason)
@@ -235,8 +242,6 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 		text = strings.TrimSpace(env.Lifecycle.Reason)
 	}
 	p.closeChildTurnLocked(key, state)
-	p.mu.Unlock()
-
 	return childTerminalResultNotification(sessionID, parentCallID, status, text, nil), true
 }
 

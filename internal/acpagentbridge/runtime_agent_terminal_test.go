@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
@@ -68,6 +70,54 @@ func TestACPChildTerminalProjectorEmitsOnlyFinalResponseContent(t *testing.T) {
 		t.Fatal("child lifecycle was not handled")
 	}
 	assertACPChildFinalResult(t, notification, eventstream.ToolStatusCompleted, "final answer")
+}
+
+func TestACPChildTerminalProjectorRetiresFailedAttempt(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name, resetID, nextText, wantText string
+	}{
+		{name: "empty retry", resetID: "partial"},
+		{name: "streamed retry", resetID: "partial", nextText: "recovered", wantText: "recovered"},
+		{name: "unrelated message", resetID: " partial ", wantText: "failed partial"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			projector := newACPChildTerminalProjector()
+			base := eventstream.Envelope{
+				SessionID: "session-1", Scope: eventstream.ScopeSubagent, ScopeID: "task-1", TurnID: "task-1:1",
+				ParentTool: &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "StartThread"},
+			}
+			assistant := func(messageID, text string) {
+				progress := base
+				progress.Kind = eventstream.KindSessionUpdate
+				progress.Update = eventstream.ContentChunk{
+					SessionUpdate: eventstream.UpdateAgentMessage, MessageID: messageID,
+					Content: eventstream.TextContent{Type: "text", Text: text},
+				}
+				projector.project(progress, "")
+			}
+			assistant("partial", "failed partial")
+			reset := session.NewModelAttemptResetForMessage(model.AttemptReset{Attempt: 1, Retrying: true}, test.resetID)
+			lifecycle := base
+			lifecycle.Kind = eventstream.KindLifecycle
+			lifecycle.Lifecycle = &eventstream.Lifecycle{State: reset.Lifecycle.Status, Reason: reset.Lifecycle.Reason}
+			lifecycle.Meta = reset.Meta
+			if got, handled := projector.projectLifecycle(lifecycle, ""); !handled || got.Update != nil {
+				t.Fatalf("reset projection = %#v, handled = %t, want no wire update", got, handled)
+			}
+			if test.nextText != "" {
+				assistant("retry", test.nextText)
+			}
+			lifecycle.Lifecycle = &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted}
+			lifecycle.Meta = nil
+			got, handled := projector.projectLifecycle(lifecycle, "")
+			if !handled {
+				t.Fatal("child completion was not handled")
+			}
+			assertACPChildFinalResult(t, got, eventstream.ToolStatusCompleted, test.wantText)
+		})
+	}
 }
 
 func TestACPChildTerminalProjectorGatesEachTurnAndParentIndependently(t *testing.T) {

@@ -192,6 +192,15 @@ func (a *FinalAssistantAccumulator) ResetActivity() {
 	}
 }
 
+// DiscardMessage clears the current answer when its attempt is retired.
+func (a *FinalAssistantAccumulator) DiscardMessage(messageID string) bool {
+	if a == nil || messageID == "" || a.messageID != messageID {
+		return false
+	}
+	a.resetMessage()
+	return true
+}
+
 // AdvanceBoundary makes the latest message ineligible as the final answer until
 // it receives more content. Its one snapshot remains available for identified
 // continuation; known older identities remain display repairs in this Session.
