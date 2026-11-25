@@ -6,7 +6,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -14,8 +13,8 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 	mode := strings.TrimSpace(r.defaultPolicyMode)
 	// When the Host injects the dangerous default policy, Agent metadata cannot
 	// override it with another profile.
-	if presets.NormalizeModeName(mode) == presets.ModeDangerFullAccess {
-		return presets.ModeDangerFullAccess
+	if policy.NormalizeModeName(mode) == policy.ProfileDangerFullAccess {
+		return policy.ProfileDangerFullAccess
 	}
 	if raw, ok := spec.Metadata[policy.MetadataPolicyProfile].(string); ok {
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
@@ -25,7 +24,7 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 	if mode == "" {
 		return ""
 	}
-	return presets.NormalizeModeName(mode)
+	return policy.NormalizeModeName(mode)
 }
 
 func modeOptionsFromSession(activeSession session.Session, spec agent.AgentSpec) policy.ModeOptions {

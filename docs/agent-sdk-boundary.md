@@ -635,7 +635,9 @@ that the entire model request prefix is unchanged.
 The host installs Policy through `runtime.Config.Hooks.ToolPolicy`. Without a
 registry or requested profile, Runtime dispatches the host's tools directly
 after argument preparation. A named profile requires a matching registered
-mode. With Policy installed, direct calls and Code Mode targets share its
+mode. The Host explicitly registers `danger-full-access` when it authorizes
+that mode. Agent metadata selects among the Host’s registered modes. With
+Policy installed, direct calls and Code Mode targets share its
 Allow/Deny/Ask decision on the effective arguments. An approval resumes the same guarded dispatch, including its final revocation check. A synthetic reply consumes the same admission. The Caelis Gateway explicitly installs its product
 policy. MCP discovery and server annotations only describe available tools.
 

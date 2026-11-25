@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -39,8 +39,8 @@ func (r *Runtime) resolveEndpointApprovalByPolicy(
 	modeName string,
 	request approval.Request,
 ) (approval.Response, bool, error) {
-	modeName = presets.NormalizeModeName(modeName)
-	if modeName != presets.ModeDangerFullAccess {
+	modeName = policy.NormalizeModeName(modeName)
+	if modeName != policy.ProfileDangerFullAccess {
 		return approval.Response{}, false, nil
 	}
 	// The profile name can originate from Agent metadata, but only the

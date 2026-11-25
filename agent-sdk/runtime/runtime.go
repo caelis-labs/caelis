@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -168,7 +168,7 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, errors.New("agent-sdk/runtime: default policy mode requires a policy registry")
 	}
 	if r.hooks.ToolPolicy != nil {
-		r.defaultPolicyMode = presets.NormalizeModeName(r.defaultPolicyMode)
+		r.defaultPolicyMode = policy.NormalizeModeName(r.defaultPolicyMode)
 	}
 	r.participantBindings, _ = cfg.Sessions.(session.ParticipantBindingStore)
 	if err := validateControllerForwarder(cfg); err != nil {

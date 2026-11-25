@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // The policy owner uses the same interpreted arguments and constraints it
@@ -90,29 +89,4 @@ func executionApprovalScope(constraints sandbox.Constraints) session.ApprovalFie
 		return session.ApprovalField{State: session.ApprovalFieldUnavailable}
 	}
 	return session.KnownApprovalField("route: " + string(constraints.Route) + "; permission: " + string(constraints.Permission) + "; network: " + string(constraints.Network))
-}
-
-func mcpApprovalSubject(input policy.ToolContext) *session.ApprovalSubject {
-	metadata := func(key string) string {
-		value, _ := input.Tool.Metadata[key].(string)
-		return strings.TrimSpace(value)
-	}
-	server, remote := metadata(mcp.MetadataServer), metadata(mcp.MetadataTool)
-	target := session.ApprovalField{State: session.ApprovalFieldUnavailable}
-	if server != "" && remote != "" {
-		target = session.KnownApprovalField(strings.Trim(strings.Join([]string{metadata(mcp.MetadataPluginID), server, remote}, "/"), "/"))
-	}
-	return session.CloneApprovalSubject(&session.ApprovalSubject{
-		Kind: "app_access", Tool: session.KnownApprovalField(input.Tool.Name),
-		Operation: session.KnownApprovalField("call app tool"),
-		Targets:   []session.ApprovalField{target, session.KnownApprovalField(input.Session.CWD)},
-		Effect:    session.ApprovalField{State: session.ApprovalFieldUnavailable},
-		Scope:     session.KnownApprovalField("this ready MCP tool, workspace and configuration"),
-		Grants: []session.ApprovalGrant{
-			{OptionID: "allow_once", Scope: session.KnownApprovalField("this invocation")},
-			{OptionID: "allow_session", Scope: session.KnownApprovalField("this session")},
-			{OptionID: "allow_always", Scope: session.KnownApprovalField("this workspace and configuration (persistent)")},
-			{OptionID: "cancel", Scope: session.KnownApprovalField("no grant")},
-		},
-	})
 }

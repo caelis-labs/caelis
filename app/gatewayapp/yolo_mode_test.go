@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -19,7 +19,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 		StoreDir:                   storeDir,
 		WorkspaceKey:               "yolo-workspace",
 		WorkspaceCWD:               workspace,
-		PolicyProfile:              presets.ModeWorkspaceWrite,
+		PolicyProfile:              policy.ProfileWorkspaceWrite,
 		DangerouslySkipPermissions: true,
 		Sandbox:                    SandboxConfig{RequestedType: "auto"},
 	})
@@ -28,7 +28,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = stack.Close() })
 
-	if !stack.composition.activeRuntime.DangerouslySkipPermissions || stack.composition.activeRuntime.PolicyProfile != presets.ModeWorkspaceWrite {
+	if !stack.composition.activeRuntime.DangerouslySkipPermissions || stack.composition.activeRuntime.PolicyProfile != policy.ProfileWorkspaceWrite {
 		t.Fatalf("runtime config = %#v, want user policy preserved beside process YOLO flag", stack.composition.activeRuntime)
 	}
 	if stack.composition.sandbox.RequestedType != "host" {
@@ -43,7 +43,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !report.FullAccessMode || !report.HostExecution || report.PolicyProfile != presets.ModeDangerFullAccess {
+	if !report.FullAccessMode || !report.HostExecution || report.PolicyProfile != policy.ProfileDangerFullAccess {
 		t.Fatalf("Doctor() = %#v, want visible YOLO policy and Host execution", report)
 	}
 	if warnings := strings.Join(report.Warnings, "\n"); !strings.Contains(warnings, "YOLO host escape is active") {
@@ -59,7 +59,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 			next = map[string]any{}
 		}
 		next[kernel.StateCurrentApprovalMode] = "manual"
-		next[kernel.StateCurrentPolicyProfile] = presets.ModeWorkspaceWrite
+		next[kernel.StateCurrentPolicyProfile] = policy.ProfileWorkspaceWrite
 		return next, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -68,14 +68,14 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtimeState.SessionMode != dangerouslySkipPermissionsModeLabel || runtimeState.PolicyProfile != presets.ModeDangerFullAccess {
+	if runtimeState.SessionMode != dangerouslySkipPermissionsModeLabel || runtimeState.PolicyProfile != policy.ProfileDangerFullAccess {
 		t.Fatalf("SessionRuntimeState() = %#v, want process-owned YOLO display", runtimeState)
 	}
 	report, err = stack.ControlStatus().Doctor(context.Background(), DoctorRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.SessionMode != dangerouslySkipPermissionsModeLabel || report.PolicyProfile != presets.ModeDangerFullAccess {
+	if report.SessionMode != dangerouslySkipPermissionsModeLabel || report.PolicyProfile != policy.ProfileDangerFullAccess {
 		t.Fatalf("Doctor(active Session) = %#v, want process-owned YOLO display", report)
 	}
 	current := mustCurrentSession(t, stack, active.SessionID)
@@ -106,7 +106,7 @@ func TestDangerouslySkipPermissionsForcesProcessHostMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtimeState.SessionMode != dangerouslySkipPermissionsModeLabel || runtimeState.PolicyProfile != presets.ModeDangerFullAccess {
+	if runtimeState.SessionMode != dangerouslySkipPermissionsModeLabel || runtimeState.PolicyProfile != policy.ProfileDangerFullAccess {
 		t.Fatalf("SessionRuntimeState() after rejected mode changes = %#v, want YOLO", runtimeState)
 	}
 
@@ -181,7 +181,7 @@ func TestDangerouslySkipPermissionsIsNotPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reloaded.Close() })
-	if reloaded.composition.activeRuntime.DangerouslySkipPermissions || reloaded.composition.activeRuntime.PolicyProfile != presets.ModeWorkspaceWrite || reloaded.ControlStatus().Sandbox().FullAccessMode {
+	if reloaded.composition.activeRuntime.DangerouslySkipPermissions || reloaded.composition.activeRuntime.PolicyProfile != policy.ProfileWorkspaceWrite || reloaded.ControlStatus().Sandbox().FullAccessMode {
 		t.Fatalf("reloaded runtime retained process-only YOLO mode: runtime=%#v status=%#v", reloaded.composition.activeRuntime, reloaded.ControlStatus().Sandbox())
 	}
 }

@@ -116,7 +116,7 @@ func TestCodeModeSourceReadPolicyUsesConcreteSemanticsAndExistingGrants(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: presets.ModeWorkspaceWrite})
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: registry}, DefaultPolicyMode: policy.ProfileWorkspaceWrite})
 			if err != nil {
 				t.Fatal(err)
 			}

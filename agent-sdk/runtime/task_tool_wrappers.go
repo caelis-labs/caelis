@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/sandboxmeta"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -514,7 +514,7 @@ func newSubagentApprovalRequester(
 	if requester == nil && runtime != nil {
 		requester = runtime.childApprovalRequester
 	}
-	if requester == nil && (runtime == nil || presets.NormalizeModeName(mode) != presets.ModeDangerFullAccess) {
+	if requester == nil && (runtime == nil || policy.NormalizeModeName(mode) != policy.ProfileDangerFullAccess) {
 		return nil
 	}
 	return subagentApprovalRequester{

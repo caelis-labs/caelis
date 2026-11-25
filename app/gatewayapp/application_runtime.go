@@ -373,7 +373,7 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 	var native policy.Mode
 	if mode != "application-tools-only" {
 		native = presets.WorkspaceWriteMode()
-		if mode == presets.ModeDangerFullAccess {
+		if mode == policy.ProfileDangerFullAccess {
 			native = presets.DangerFullAccessMode()
 		}
 	}

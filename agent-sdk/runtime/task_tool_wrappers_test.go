@@ -11,6 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -190,7 +191,7 @@ func TestRuntimeExplicitSDKSendMessageSurvivesWorkspaceWritePolicy(t *testing.T)
 		CWD:        "/workspace",
 		Controller: session.ControllerBinding{ControllerID: "child-controller"},
 	}
-	runtime := &Runtime{hooks: hook.Set{ToolPolicy: registry}, defaultPolicyMode: presets.ModeWorkspaceWrite}
+	runtime := &Runtime{hooks: hook.Set{ToolPolicy: registry}, defaultPolicyMode: policy.ProfileWorkspaceWrite}
 	runtimeTools := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{Tools: []tool.Tool{sendmessage.New()}}, runtimeToolContext{inputSender: sender})
 	wrapped := runtime.bindToolDispatch(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{Tools: runtimeTools}, approvalContext{
 		ctx: context.Background(),

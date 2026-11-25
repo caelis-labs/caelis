@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
@@ -29,7 +29,7 @@ func resolveProcessSecurityPosture(config stackRuntimeConfig) processSecurityPos
 	}
 	posture.FullAccessMode = true
 	posture.DisplayMode = dangerouslySkipPermissionsModeLabel
-	posture.PolicyMode = presets.ModeDangerFullAccess
+	posture.PolicyMode = policy.ProfileDangerFullAccess
 	posture.RequiredSandboxBackend = sandbox.BackendHost
 	return posture
 }

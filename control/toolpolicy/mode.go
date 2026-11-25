@@ -13,7 +13,6 @@ import (
 	"unicode"
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -170,18 +169,16 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		// A remembered source cannot waive a fresh per-call Ask.
 		return m.withRuleValidation(decision, a, ruleID), nil
 	}
-	combined, err := presets.MCPApprovalDecision(input, decision.Constraints)
+	permission, err := mcpApproval(input)
 	if err != nil {
 		return policy.Decision{}, err
 	}
-	if a.PerCall {
-		combined.Reason += "; " + decision.Reason
+	combined := policy.Decision{
+		Action: policy.ActionAskApproval, Reason: "MCP tool call requires approval",
+		Constraints: decision.Constraints, Approval: permission,
 	}
 	if desktop {
 		combined.Reason = "Application access requires approval for this Session"
-		if a.PerCall {
-			combined.Reason += "; " + decision.Reason
-		}
 		combined.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_session", Name: "Allow this app for this Session", Kind: "allow_once"}, {ID: "cancel", Name: "Cancel", Kind: "reject_once"}}
 		combined.Approval.ToolCall.Title += " · " + scope.Resource
 		combined.Approval.Subject.Targets = append(combined.Approval.Subject.Targets, session.KnownApprovalField(scope.Resource))
@@ -190,6 +187,9 @@ func (m Mode) DecideTool(ctx context.Context, input policy.ToolContext) (policy.
 		a.Choices = []session.AuthorizationChoice{{OptionID: "allow_session", Persistence: session.AuthorizationSession}}
 	} else {
 		a.Choices = []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}, {OptionID: "allow_session", Persistence: session.AuthorizationSession}, {OptionID: "allow_always", Persistence: session.AuthorizationPolicy}}
+	}
+	if a.PerCall {
+		combined.Reason += "; " + decision.Reason
 	}
 	description := session.KnownApprovalField(combined.Reason)
 	combined.Approval.Subject.Description = &description

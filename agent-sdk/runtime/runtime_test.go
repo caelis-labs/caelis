@@ -2795,7 +2795,7 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 			SystemPrompt: "Use tools when necessary.",
 		},
 		Hooks:             hook.Set{ToolPolicy: registry},
-		DefaultPolicyMode: presets.ModeDangerFullAccess,
+		DefaultPolicyMode: policy.ProfileDangerFullAccess,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2819,7 +2819,7 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 			Model: &writePathRuntimeModel{path: target, content: "yolo\n"},
 			Tools: []tool.Tool{writeTool},
 			Metadata: map[string]any{
-				policy.MetadataPolicyProfile: presets.ModeWorkspaceWrite,
+				policy.MetadataPolicyProfile: policy.ProfileWorkspaceWrite,
 			},
 		},
 	})
@@ -2960,7 +2960,7 @@ func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	}
 	runtime := &Runtime{
 		hooks:             hook.Set{ToolPolicy: registry},
-		defaultPolicyMode: presets.ModeWorkspaceWrite,
+		defaultPolicyMode: policy.ProfileWorkspaceWrite,
 	}
 	targetTool := tool.NamedTool{
 		Def: tool.Definition{Name: "Write"},

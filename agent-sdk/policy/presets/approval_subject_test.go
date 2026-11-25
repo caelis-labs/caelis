@@ -10,41 +10,28 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestNativeApprovalSubjectsUsePolicyTargetsAndScopes(t *testing.T) {
 	command := commandCtx("git fetch", true)
 	command.Session.CWD = "/workspace"
 	file := writeCtx("../outside.txt")
-	mcp := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", Metadata: map[string]any{mcp.MetadataPluginID: "docs-plugin", mcp.MetadataServer: "docs", mcp.MetadataTool: "read"}}, Session: session.Session{CWD: "/workspace"}}
 	for _, tc := range []struct {
 		name                string
 		input               policy.ToolContext
-		mcp                 bool
 		kind, target, scope string
 	}{
-		{"command", command, false, "command", "git fetch", "route: host; permission: danger_full_access"},
-		{"file", file, false, "file", "outside.txt", "exact target paths for this invocation"},
-		{"app access", mcp, true, "app_access", "docs-plugin/docs/read", "ready MCP tool"},
+		{"command", command, "command", "git fetch", "route: host; permission: danger_full_access"},
+		{"file", file, "file", "outside.txt", "exact target paths for this invocation"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var decision policy.Decision
-			var err error
-			if tc.mcp {
-				decision, err = MCPApprovalDecision(tc.input, sandbox.Constraints{})
-			} else {
-				decision, err = WorkspaceWriteMode().DecideTool(t.Context(), tc.input)
-			}
+			decision, err := WorkspaceWriteMode().DecideTool(t.Context(), tc.input)
 			if err != nil || decision.Approval == nil {
 				t.Fatalf("approval = %+v, %v", decision, err)
 			}
 			subject := session.ApprovalSubjectOf(decision.Approval)
 			if subject.Kind != tc.kind || len(subject.Targets) == 0 || !strings.Contains(subject.Targets[0].Text, tc.target) || !strings.Contains(subject.Scope.Text, tc.scope) || len(subject.Grants) != len(decision.Approval.Options) {
 				t.Fatalf("policy facts = %+v", subject)
-			}
-			if tc.mcp && (subject.Grants[1].Scope.Text != "this session" || subject.Grants[2].Scope.Text != "this workspace and configuration (persistent)") {
-				t.Fatalf("MCP scope = %+v", subject.Grants)
 			}
 		})
 	}

@@ -10,8 +10,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
@@ -45,18 +43,16 @@ func mcpFixturePolicy() policy.Registry {
 	}}}
 }
 
-// mcpAskFixturePolicy supplies an explicit SDK per-call Ask. It proves native
-// dispatch/approval behavior without relying on a removed MCP source gate.
+// mcpAskFixturePolicy supplies an explicit SDK per-call Ask.
 func mcpAskFixturePolicy() policy.Registry {
 	return staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 		if !mcp.IsDefinition(input.Tool) {
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
-		decision, err := presets.MCPApprovalDecision(input, sandbox.Constraints{})
+		decision, err := mcpFixtureApproval(input, "allow_once")
 		if err != nil {
 			return policy.Decision{}, err
 		}
-		decision.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}}
 		binding := mcp.BindingForDefinition(input.Tool)
 		raw, err := json.Marshal(input.Call)
 		if err != nil {
@@ -66,4 +62,19 @@ func mcpAskFixturePolicy() policy.Registry {
 		decision.Authorization = &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Scope: session.AuthorizationScope{Authority: "fixture", Workspace: input.Session.CWD, SessionID: input.Session.SessionID, SessionIncarnation: input.Session.CreatedAt.UTC().Format(time.RFC3339Nano), SourceID: binding.Identity, SourceRevision: binding.Version, PolicyRevision: "fixture-ask-v1", Tool: input.Tool.Name}, CallDigest: hex.EncodeToString(digest[:]), PerCall: true, Choices: []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}}}
 		return decision, nil
 	}}}
+}
+
+func mcpFixtureApproval(input policy.ToolContext, allowID string) (policy.Decision, error) {
+	args, err := policy.CallArgs(input.Call)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	return policy.Decision{
+		Action: policy.ActionAskApproval,
+		Reason: "MCP fixture requires approval",
+		Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name, Kind: "other", Status: "pending", RawInput: args},
+			Options:  []session.ProtocolApprovalOption{{ID: allowID, Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}},
+		},
+	}, nil
 }

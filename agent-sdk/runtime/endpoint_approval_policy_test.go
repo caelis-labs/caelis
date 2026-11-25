@@ -33,7 +33,7 @@ func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t 
 
 	for i, name := range []string{shell.RunCommandToolName, "Read", "external.custom.tool"} {
 		response, err := bridge.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
-			Mode: presets.ModeDangerFullAccess,
+			Mode: policy.ProfileDangerFullAccess,
 			ToolCall: controller.ApprovalToolCall{
 				ID:       "call-display-name-" + name,
 				Name:     name,
@@ -71,7 +71,7 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 		participantSessionID: "remote-side-1",
 	}
 	response, err := bridge.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
-		Mode: presets.ModeDangerFullAccess,
+		Mode: policy.ProfileDangerFullAccess,
 		ToolCall: controller.ApprovalToolCall{
 			ID:       "call-participant",
 			Name:     "external.custom.tool",
@@ -123,7 +123,7 @@ func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
 				startParent()
 			}
 			var requestID string
-			bridge := newSubagentApprovalRequester(rt, presets.ModeWorkspaceWrite, approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+			bridge := newSubagentApprovalRequester(rt, policy.ProfileWorkspaceWrite, approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
 				requestID = req.ApprovalRequestID
 				if cancelApproval {
 					return approval.Response{}, context.Canceled
@@ -156,9 +156,9 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 		requesterCalls++
 		return approval.Response{}, nil
 	})
-	bridge := newSubagentApprovalRequester(runtime, presets.ModeDangerFullAccess, requester, activeSession, activeSession.SessionRef)
+	bridge := newSubagentApprovalRequester(runtime, policy.ProfileDangerFullAccess, requester, activeSession, activeSession.SessionRef)
 	response, err := bridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
-		Mode: presets.ModeDangerFullAccess,
+		Mode: policy.ProfileDangerFullAccess,
 		ToolCall: subagent.ApprovalToolCall{
 			ID:       "call-subagent",
 			Name:     "external.custom.tool",
@@ -204,7 +204,7 @@ func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T)
 	for name, options := range tests {
 		t.Run(name, func(t *testing.T) {
 			response, err := bridge.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
-				Mode: presets.ModeDangerFullAccess,
+				Mode: policy.ProfileDangerFullAccess,
 				ToolCall: controller.ApprovalToolCall{
 					ID: "call-malformed", Name: "external.custom.tool", Kind: "execute",
 				},
@@ -230,12 +230,12 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 	}
 	runtime := &Runtime{
 		hooks:             hook.Set{ToolPolicy: registry},
-		defaultPolicyMode: presets.ModeWorkspaceWrite,
+		defaultPolicyMode: policy.ProfileWorkspaceWrite,
 	}
 	mode := runtime.policyMode(agent.AgentSpec{Metadata: map[string]any{
-		policy.MetadataPolicyProfile: presets.ModeDangerFullAccess,
+		policy.MetadataPolicyProfile: policy.ProfileDangerFullAccess,
 	}})
-	if mode != presets.ModeDangerFullAccess {
+	if mode != policy.ProfileDangerFullAccess {
 		t.Fatalf("policyMode() = %q, want metadata-selected danger profile", mode)
 	}
 	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "sess-unregistered-danger"}}
@@ -289,7 +289,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 func TestDangerFullAccessEndpointPolicyRegistryFailureFailsClosed(t *testing.T) {
 	wantErr := errors.New("registry unavailable")
 	runtime := &Runtime{hooks: hook.Set{ToolPolicy: errorPolicyRegistry{err: wantErr}}}
-	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), presets.ModeDangerFullAccess, approval.Request{
+	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), policy.ProfileDangerFullAccess, approval.Request{
 		Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "allow_once", Kind: "allow_once"}}},
 	})
 	if !handled {
@@ -310,7 +310,7 @@ func assertUnknownDangerProfile(t *testing.T, err error) {
 	if !errors.As(err, &profileErr) {
 		t.Fatalf("error = %v, want *policy.ProfileError", err)
 	}
-	if profileErr.Profile != presets.ModeDangerFullAccess || profileErr.Detail != "unknown policy profile" {
+	if profileErr.Profile != policy.ProfileDangerFullAccess || profileErr.Detail != "unknown policy profile" {
 		t.Fatalf("profile error = %#v, want unknown danger profile", profileErr)
 	}
 }
@@ -329,7 +329,7 @@ func newDangerFullAccessEndpointTestRuntime(t *testing.T, suffix string) (*Runti
 		Sessions:          sessions,
 		AgentFactory:      chat.Factory{},
 		Hooks:             hook.Set{ToolPolicy: registry},
-		DefaultPolicyMode: presets.ModeDangerFullAccess,
+		DefaultPolicyMode: policy.ProfileDangerFullAccess,
 	})
 	if err != nil {
 		t.Fatal(err)
