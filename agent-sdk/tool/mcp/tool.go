@@ -80,16 +80,15 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 			})
 			blocks = append(blocks, structured)
 			if t.def.OutputSchema != nil && !resp.IsError {
-				if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: t.def.OutputSchema}, structured.Value); err != nil {
+				if err := tool.ValidateOutput(t.def.OutputSchema, structured.Value); err != nil {
 					contentErr = errors.Join(contentErr, fmt.Errorf("structuredContent does not match outputSchema: %w", err))
 				}
 			}
 		}
-	}
-	result := tool.Result{Content: blocks}
-	if _, ok := result.Structured(); t.def.OutputSchema != nil && !ok && !resp.IsError {
+	} else if t.def.OutputSchema != nil && !resp.IsError {
 		contentErr = errors.Join(contentErr, errors.New("outputSchema requires structuredContent"))
 	}
+	result := tool.Result{Content: blocks}
 	var contentMessage string
 	if contentErr != nil {
 		contentMessage = "MCP content not delivered: " + contentErr.Error()

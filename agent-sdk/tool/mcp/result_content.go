@@ -126,5 +126,8 @@ func structuredContentBlock(value any) (tool.StructuredContent, error) {
 	if err != nil || len(raw) > maxMCPStructuredBytes {
 		return tool.StructuredContent{}, fmt.Errorf("invalid or oversized structuredContent")
 	}
+	if raw[0] != '{' {
+		return tool.StructuredContent{}, fmt.Errorf("structuredContent must be a JSON object")
+	}
 	return tool.StructuredContent{Value: raw}, nil
 }

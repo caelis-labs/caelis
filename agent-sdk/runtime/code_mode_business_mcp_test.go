@@ -79,8 +79,13 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 		{"copied_fallback_references", `return {...await live.fallback({})};`, "media", true},
 		{"selected_after_delete", `const response=await live.value({});const r=response.data;r.content=response.media;delete r.content;return {record:r,image:response.media[0]};`, "record", true},
 		{"schema", `const s=await tools.search({name:'live__value'});if(s.output_format!=='body'||!s.output_schema.properties.name)throw Error('output contract missing');return await live.value({});`, "9223372036854775807", true},
-		{"invalid_schema", `try{await live.invalid({});throw Error('resolved invalid output');}catch(e){if(!e.result||e.result!==e.reply||typeof e.result.text!=='function'||!e.result.text().includes('outputSchema'))throw Error('invalid diagnostic contract');let rejected=false;try{e.result.json()}catch(parseError){rejected=true}if(!rejected)throw Error('promoted unverified structured content');return {caught:true,diagnostic:e.result.text()};}`, "unverified", false},
-		{"failed_schema", `try{await live.failed({});throw Error('resolved failed output');}catch(e){if(!e.result||!e.result.text().includes('business'))throw Error('failed diagnostic contract');return {caught:true,diagnostic:e.result.text()};}`, "caught", false},
+		{"invalid_schema", `try{await live.invalid({});throw Error('resolved invalid output');}catch(e){if(!e.result||e.result!==e.reply||typeof e.result.text!=='function'||!e.result.text().includes('outputSchema')||e.result.text().includes('MCP arguments'))throw Error('invalid diagnostic contract');let rejected=false;try{e.result.json()}catch(parseError){rejected=true}if(!rejected)throw Error('promoted unverified structured content');return {caught:true,diagnostic:e.result.text()};}`, "unverified", false},
+		{"missing_schema_result", `return await live.missing({});`, "outputSchema requires structuredContent", false},
+		{"null_schema_result", `return await live.null_result({});`, "structuredContent must be a JSON object", false},
+		{"non_object_result", `return await live.non_object({});`, "structuredContent must be a JSON object", false},
+		{"exact_echo_only", `const r=await live.echo({});if(Object.keys(r.data).length!==0||r.text!=="before\n{ }\nafter")throw Error('changed content: '+r.text);return r;`, "before", false},
+		{"failed_schema", `return await live.failed({});`, "business failure", false},
+		{"failed_missing_schema_result", `return await live.failed_missing({});`, "business failure", false},
 		{"raw_json_collision", `const r=await live.collision({});if(r.data.raw_json!=='business-raw')throw Error('lost business field');return r;`, "business-raw", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,9 +105,13 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 			}
 			var effects atomic.Int32
 			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "business", Version: "1"}, nil)
-			for _, name := range []string{"value", "fallback", "invalid", "failed", "collision", "no_schema"} {
+			for _, name := range []string{"value", "fallback", "invalid", "failed", "collision", "no_schema", "missing", "null_result", "non_object", "echo", "failed_missing"} {
 				def := &mcpsdk.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}
-				if name != "fallback" && name != "no_schema" {
+				switch name {
+				case "fallback", "no_schema", "non_object":
+				case "echo":
+					def.OutputSchema = map[string]any{"type": "object"}
+				default:
 					def.OutputSchema = map[string]any{"type": "object", "required": []string{"name", "n"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "n": map[string]any{"type": "integer"}}}
 				}
 				server.AddTool(def, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -124,9 +133,24 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 					case "chain_mixed", "direct_resource":
 						content = append(content, &mcpsdk.ResourceLink{URI: "https://example.invalid/report", Name: "report"})
 					}
-					result := &mcpsdk.CallToolResult{IsError: name == "failed", Content: content}
-					if name != "fallback" {
-						result.StructuredContent = structured
+					result := &mcpsdk.CallToolResult{Content: content, StructuredContent: structured}
+					switch name {
+					case "fallback", "missing":
+						result.StructuredContent = nil
+					case "null_result":
+						result.StructuredContent = json.RawMessage(`null`)
+					case "non_object":
+						result.StructuredContent = []any{"not an object"}
+					case "echo":
+						result.StructuredContent = map[string]any{}
+						result.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: "before"}, &mcpsdk.TextContent{Text: "{}"}, &mcpsdk.TextContent{Text: "{ }"}, &mcpsdk.TextContent{Text: "after"}}
+					case "failed", "failed_missing":
+						result.IsError = true
+						result.Content = []mcpsdk.Content{&mcpsdk.TextContent{Text: "business failure"}}
+						result.StructuredContent = nil
+						if name == "failed" {
+							result.StructuredContent = map[string]any{"reason": "failure payload"}
+						}
 					}
 					return result, nil
 				})
@@ -201,12 +225,19 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				t.Fatalf("effects=%d requests=%d", effects.Load(), len(driver.requests))
 			}
 			visible := errorDeliveryModelResult(t, driver.requests[len(stages)], "business")
-			if visible.IsError != (tc.name == "invalid_schema" || tc.name == "failed_schema") {
+			wantError := strings.HasSuffix(tc.name, "_result") || tc.name == "invalid_schema" || tc.name == "failed_schema"
+			if visible.IsError != wantError {
 				t.Fatalf("unexpected script disposition: %s", errorDeliveryJSON(t, visible.Content))
 			}
 			raw, _ := json.Marshal(visible.Content)
 			if !strings.Contains(string(raw), tc.want) {
 				t.Fatalf("missing %s: %s", tc.want, raw)
+			}
+			if strings.HasPrefix(tc.name, "failed_") && bytes.Contains(raw, []byte("outputSchema")) {
+				t.Fatalf("MCP error received success-output validation: %s", raw)
+			}
+			if tc.name == "failed_schema" && !bytes.Contains(raw, []byte("failure payload")) {
+				t.Fatalf("MCP error lost its structured diagnostic: %s", raw)
 			}
 			images := 0
 			for _, p := range visible.Content {
@@ -247,6 +278,9 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 					continue
 				}
 				found = true
+				if !bytes.Contains(input.Output, []byte(tc.want)) {
+					t.Fatalf("provider HTTP output lacks %q: %s", tc.want, input.Output)
+				}
 				// Text-only tool output is a string; multimodal output is an array.
 				if len(input.Output) > 0 && input.Output[0] == '"' {
 					continue

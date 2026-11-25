@@ -70,6 +70,12 @@ dispatch-admission wrappers. It is never dispatched directly through Manager.
 Policy, approvals, display events and the canonical ToolCall/ToolResult use the real name
 and arguments. Code Mode records each nested invocation under its `js_exec` parent.
 Model history pairs each result with the tool name and call ID seen by the model.
+MCP `structuredContent` is a JSON object, including when a tool declares no
+output schema. A successful reply with a declared `outputSchema` must include
+an object that matches it. Server-reported errors retain their failure payloads
+and skip output schema validation. The adapter drops text blocks that exactly
+repeat the serialized object and retains the other content in server order.
+
 Recovery never replays an unknown MCP
 effect or invents a recoverer. At borrow, the Manager checks that the selected
 callable still matches the exact published entry and that its client and catalog
