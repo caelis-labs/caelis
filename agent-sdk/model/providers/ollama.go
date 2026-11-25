@@ -161,11 +161,15 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		}
 
 		runCtx := ctx
-		cancel := func() {}
-		if !req.Stream && l.requestTimeout > 0 {
+		var cancelStream context.CancelCauseFunc
+		if req.Stream {
+			runCtx, cancelStream = context.WithCancelCause(ctx)
+			defer cancelStream(nil)
+		} else if l.requestTimeout > 0 {
+			var cancel context.CancelFunc
 			runCtx, cancel = context.WithTimeout(ctx, l.requestTimeout)
+			defer cancel()
 		}
-		defer cancel()
 
 		httpReq, err := http.NewRequestWithContext(runCtx, http.MethodPost, l.baseURL+"/api/chat", bytes.NewReader(raw))
 		if err != nil {
@@ -184,13 +188,14 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(nil, err)
 			return
 		}
-		defer resp.Body.Close()
 		if resp.StatusCode >= 300 {
+			defer resp.Body.Close()
 			yield(nil, statusError(resp))
 			return
 		}
 
 		if !req.Stream {
+			defer resp.Body.Close()
 			var out ollamaChatResponse
 			if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 				yield(nil, err)
@@ -235,7 +240,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			done       bool
 			doneReason string
 		)
-		if err := readOllamaStreamWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(chunk ollamaChatResponse) error {
+		if err := readOllamaStream(runCtx, cancelStream, resp.Body, l.firstEventTimeout, func(chunk ollamaChatResponse) error {
 			if chunk.Done {
 				done = true
 				doneReason = chunk.DoneReason
@@ -335,54 +340,44 @@ type ollamaAccumulator struct {
 	toolCalls []model.ToolCall
 }
 
-func readOllamaStreamWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onChunk func(ollamaChatResponse) error) error {
-	if timeout <= 0 {
-		return readOllamaStream(reader, onChunk)
-	}
-	errCh := make(chan error, 1)
-	firstEventCh := make(chan struct{}, 1)
-	seenFirstEvent := false
-	go func() {
-		errCh <- readOllamaStream(reader, func(chunk ollamaChatResponse) error {
-			if !seenFirstEvent {
-				seenFirstEvent = true
-				select {
-				case firstEventCh <- struct{}{}:
-				default:
-				}
-			}
-			return onChunk(chunk)
-		})
+// readOllamaStream owns the response body. Decode and callbacks stay on the
+// iterator's goroutine. On cancellation, closing the HTTP body interrupts Read.
+func readOllamaStream(ctx context.Context, cancel context.CancelCauseFunc, body io.ReadCloser, timeout time.Duration, onChunk func(ollamaChatResponse) error) error {
+	closed := make(chan struct{})
+	stopClose := context.AfterFunc(ctx, func() {
+		_ = body.Close()
+		close(closed)
+	})
+	defer func() {
+		if stopClose() {
+			_ = body.Close()
+		} else {
+			<-closed
+		}
 	}()
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	for {
-		select {
-		case err := <-errCh:
-			return err
-		case <-firstEventCh:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return <-errCh
-		case <-timer.C:
-			if closer, ok := reader.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-			return newStreamFirstEventTimeoutError(timeout)
-		}
+	var firstEvent *time.Timer
+	timedOut := make(chan struct{})
+	if timeout > 0 {
+		firstEvent = time.AfterFunc(timeout, func() {
+			cancel(newStreamFirstEventTimeoutError(timeout))
+			close(timedOut)
+		})
 	}
-}
-
-func readOllamaStream(reader io.Reader, onChunk func(ollamaChatResponse) error) error {
-	dec := json.NewDecoder(reader)
+	dec := json.NewDecoder(body)
 	for {
 		var chunk ollamaChatResponse
-		if err := dec.Decode(&chunk); err != nil {
+		err := dec.Decode(&chunk)
+		if firstEvent != nil {
+			if !firstEvent.Stop() {
+				<-timedOut
+			}
+			firstEvent = nil
+		}
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		if err != nil {
 			if err == io.EOF {
 				return nil
 			}
