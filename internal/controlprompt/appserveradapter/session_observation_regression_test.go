@@ -40,7 +40,7 @@ func TestSessionInterruptDoesNotCancelAnotherSessionsAdmission(t *testing.T) {
 				t.Fatal(err)
 			}
 			if fresh {
-				if err := adapter.ResetSession(context.Background()); err != nil {
+				if err := adapter.ResetSession(context.Background(), session.WorkspaceRef{}); err != nil {
 					t.Fatal(err)
 				}
 			} else if _, err := adapter.ResumeSession(context.Background(), "b"); err != nil {

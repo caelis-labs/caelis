@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -845,7 +846,7 @@ func (s *fakeService) Submit(_ context.Context, sub Submission) (Turn, error) {
 	return s.turn, nil
 }
 func (s *fakeService) Interrupt(context.Context) error { return nil }
-func (s *fakeService) ResetSession(context.Context) error {
+func (s *fakeService) ResetSession(context.Context, session.WorkspaceRef) error {
 	s.resetCalls++
 	return nil
 }

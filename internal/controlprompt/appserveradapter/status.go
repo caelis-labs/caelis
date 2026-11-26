@@ -53,8 +53,8 @@ func (a *SessionClientAdapter) addressedStatus(
 }
 
 // WorkspaceDir returns the workspace selected by Session lifecycle operations.
-// ResetSession retains that workspace. Read-only status and inspection calls
-// must not change the active Session.
+// A reset with an empty workspace retains the current address. Read-only status
+// and inspection calls must not change the active Session.
 func (a *SessionClientAdapter) WorkspaceDir() string {
 	return a.workspaceAddress().CWD
 }
@@ -93,9 +93,8 @@ func (a *SessionClientAdapter) clientSessionID() string {
 
 // setClientSession commits one Session selection. A selection that reports a
 // workspace replaces the whole address pair - key and CWD together - so Host
-// reads keep describing one workspace. Clearing the selection leaves the
-// current workspace, which stays the address subsequent reads and Session
-// creation use.
+// reads keep describing one workspace. Clearing the selection with an empty
+// address retains the workspace used for subsequent reads and Session creation.
 func (a *SessionClientAdapter) setClientSession(sessionID string, workspace session.WorkspaceRef) {
 	if a == nil {
 		return

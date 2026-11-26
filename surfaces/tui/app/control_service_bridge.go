@@ -579,12 +579,15 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("control prompt router factory returned nil")}}
 	}
 	displayText := strings.TrimSpace(firstNonEmpty(sub.DisplayText, sub.Text))
-	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: controlprompt.Submission{
-		Text:        sub.Text,
-		DisplayText: displayText,
-		Mode:        sub.Mode,
-		Attachments: convertAttachments(sub.Attachments),
-	}})
+	promptResult, err := router.Route(ctx, controlprompt.Request{
+		Submission: controlprompt.Submission{
+			Text:        sub.Text,
+			DisplayText: displayText,
+			Mode:        sub.Mode,
+			Attachments: convertAttachments(sub.Attachments),
+		},
+		NewSessionWorkspace: sub.newSessionWorkspace,
+	})
 	if err != nil {
 		if sender != nil {
 			sender.markRunAdmitted(ctx)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -40,17 +41,20 @@ func TestSessionHistoryReusesActiveTheme(t *testing.T) {
 
 type newSessionControlService struct {
 	observingControlService
-	resetCalls int
+	resetCalls     int
+	resetWorkspace session.WorkspaceRef
 }
 
-func (s *newSessionControlService) ResetSession(context.Context) error {
+func (s *newSessionControlService) ResetSession(_ context.Context, workspace session.WorkspaceRef) error {
 	s.resetCalls++
+	s.resetWorkspace = workspace
 	s.selected.Store(false)
 	return nil
 }
 
 func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	feed := newObservationTestFeed("session-old")
+	target := session.WorkspaceRef{Key: "selected-workspace", CWD: t.TempDir()}
 	service := &newSessionControlService{observingControlService: observingControlService{feed: feed}}
 	messages := make(chan tea.Msg, 32)
 	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
@@ -58,6 +62,12 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	cfg := ConfigFromControlService(service, sender, Config{
 		Context: t.Context(), PromptRouterFactory: controlprompt.New,
 		NoColor: true, NoAnimation: true, ShowWelcomeCard: true,
+		SessionWorkbench: func(context.Context, appserver.SessionWorkbenchRequest) (appserver.SessionWorkbenchPage, error) {
+			return appserver.SessionWorkbenchPage{Sessions: []appserver.SessionWorkbenchRow{
+				{SessionID: "session-old", WorkspaceKey: "current-workspace", CWD: feed.state.CWD},
+				{SessionID: "highlighted", WorkspaceKey: target.Key, CWD: target.CWD},
+			}}, nil
+		},
 	})
 	m := NewModel(cfg)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -87,10 +97,8 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	m.taskStreamSubscriptions["task-old"] = subscription
 	m.pendingQueue.enqueue(pendingPromptEnqueueOptions{execLine: "old queued input", deferUntilIdle: true})
 
-	m.Update(keyPress("ctrl+o"))
-	if m.sessionPicker == nil {
-		t.Fatal("Session workbench did not open")
-	}
+	openSessionPickerForTest(t, m)
+	m.Update(keyPress("down"))
 	_, cmd := m.Update(keyPress("n"))
 	if cmd == nil || m.sessionPicker != nil {
 		t.Fatal("n did not close the Session workbench and dispatch /new")
@@ -99,6 +107,9 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	applyMessages()
 	if service.resetCalls != 1 || service.SessionID() != "" {
 		t.Fatal("/new did not reset the Control selection")
+	}
+	if service.resetWorkspace != target {
+		t.Fatalf("n reset in %#v, want highlighted workspace %#v", service.resetWorkspace, target)
 	}
 	// The command bridge must commit the empty view before command completion;
 	// there is no reconnect feed to provide a later history-ready message.

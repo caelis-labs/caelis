@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/collaboration"
@@ -75,7 +76,7 @@ type RunningPromptAdmissionProvider interface {
 }
 
 type SessionService interface {
-	ResetSession(context.Context) error
+	ResetSession(context.Context, session.WorkspaceRef) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
 	Compact(context.Context) (CompactResult, error)
@@ -144,7 +145,7 @@ type PluginService interface {
 type RouterService interface {
 	Status(context.Context) (controlstatus.StatusSnapshot, error)
 	Submit(context.Context, Submission) (Turn, error)
-	ResetSession(context.Context) error
+	ResetSession(context.Context, session.WorkspaceRef) error
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
 	Compact(context.Context) (CompactResult, error)

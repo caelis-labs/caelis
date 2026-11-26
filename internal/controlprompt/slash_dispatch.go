@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/display"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
-func (r router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []Attachment) (Result, error) {
+func (r router) dispatchSlash(ctx context.Context, cmd, args string, argsStart int, fullText string, req Request) (Result, error) {
+	attachments := req.Submission.Attachments
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
 	case "help":
 		names := r.helpCommandNames(ctx)
@@ -20,7 +22,7 @@ func (r router) dispatchSlash(ctx context.Context, cmd string, args string, args
 	case "review":
 		return r.dispatchReview(ctx, args, argsStart, fullText, attachments)
 	case "new":
-		return r.dispatchNew(ctx)
+		return r.dispatchNew(ctx, req.NewSessionWorkspace)
 	case "resume":
 		return r.dispatchResume(ctx, args)
 	case "status":
@@ -44,8 +46,8 @@ func (r router) dispatchReview(ctx context.Context, args string, argsStart int, 
 	return Result{Handled: true, ParticipantTask: &result, RefreshCommands: true, SuppressTurnDivider: true}, nil
 }
 
-func (r router) dispatchNew(ctx context.Context) (Result, error) {
-	if err := r.service.ResetSession(ctx); err != nil {
+func (r router) dispatchNew(ctx context.Context, workspace session.WorkspaceRef) (Result, error) {
+	if err := r.service.ResetSession(ctx, workspace); err != nil {
 		return Result{}, FriendlyCommandError("new session", err)
 	}
 	return Result{

@@ -19,9 +19,9 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-// ResetSession clears the presentation facade's selected Session. A durable
-// Session is created only when a subsequent work-bearing request needs one.
-func (a *SessionClientAdapter) ResetSession(ctx context.Context) error {
+// ResetSession clears the selected Session and retains the supplied workspace
+// for the next work-bearing request. An empty address keeps the current one.
+func (a *SessionClientAdapter) ResetSession(ctx context.Context, workspace session.WorkspaceRef) error {
 	if a == nil || a.sessionClient == nil {
 		return errors.New("app/gatewayapp/controladapter: Session client is unavailable")
 	}
@@ -30,13 +30,23 @@ func (a *SessionClientAdapter) ResetSession(ctx context.Context) error {
 			return err
 		}
 	}
+	workspace.Key, workspace.CWD = strings.TrimSpace(workspace.Key), strings.TrimSpace(workspace.CWD)
+	if workspace.Key != "" && workspace.CWD == "" {
+		return errors.New("the selected workspace has no working directory")
+	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
+	if workspace.Key == "" && workspace.CWD != "" {
+		// Older directory responses may only carry the current workspace's CWD.
+		if current := a.workspaceAddress(); workspace.CWD == current.CWD {
+			workspace.Key = current.Key
+		}
+	}
 	// Reset changes only this presentation's selected Session. Closing the
 	// active view detaches its feed; it does not cancel durable Host work.
 	a.closeActiveTurn()
 	a.preferredID = ""
-	a.setClientSession("", session.WorkspaceRef{})
+	a.setClientSession("", workspace)
 	return nil
 }
 

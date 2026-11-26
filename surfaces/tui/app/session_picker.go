@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -354,8 +355,13 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 		if m.cfg.executeLineCmd == nil && m.cfg.ExecuteLine == nil {
 			return nil
 		}
+		submission := Submission{Text: "/new"}
+		if state.index < len(state.rows) {
+			row := state.rows[state.index]
+			submission.newSessionWorkspace = session.WorkspaceRef{Key: row.WorkspaceKey, CWD: row.Workspace}
+		}
 		m.closeSessionPicker()
-		return m.executeLineCmd(Submission{Text: "/new"})
+		return m.executeLineCmd(submission)
 	case "r":
 		return m.loadSessionPicker(state.failedCursor)
 	default:

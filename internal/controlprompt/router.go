@@ -53,7 +53,7 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 			if err := req.beforeCommand(ctx); err != nil {
 				return Result{}, err
 			}
-			return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
+			return r.dispatchSlash(ctx, cmd, args, argsStart, text, req)
 		}
 		if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req); handled || err != nil {
 			return result, err
