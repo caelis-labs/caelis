@@ -5,20 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"iter"
+	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 const asyncFixtureSummary = "CONTEXT CHECKPOINT\n\nUser objective: complete the synthetic fixture. Approval is still required for external effects. Preserve unknown outcomes and the unanswered question; closing it grants no permission. First tool completed. Continue from the raw tail."
@@ -950,5 +952,378 @@ func TestAsyncCompactionActualDrainPrecedesCanonicalFinal(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("accepted final absent after actual drain")
+	}
+}
+
+func TestAsyncCompactionStartsWithNormalizedToolHistory(t *testing.T) {
+	h := newAsyncHarness(t, "")
+	call := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "invalid", Name: "work", Args: `{"input":`}}, "")
+	result := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("invalid", "work", map[string]any{"error": "invalid arguments"}, true))
+	for _, event := range []*session.Event{
+		{Type: session.EventTypeToolCall, Message: &call, Tool: &session.EventTool{ID: "invalid", Name: "work", Status: "pending"}},
+		{Type: session.EventTypeToolResult, Message: &result, Tool: &session.EventTool{ID: "invalid", Name: "work", Status: "error"}},
+	} {
+		if _, err := h.store.AppendEvent(h.ctx, session.AppendEventRequest{
+			SessionRef: h.active.SessionRef, MutationGuard: session.RuntimeMutationGuard(h.ctx), Event: event,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := h.run(t)
+	foreground := receiveSnapshotValue(t, h.llm.foreground)
+	if len(foreground.request.Messages) != 2 {
+		t.Fatalf("messages = %#v, want history and current user input without the invalid tool batch", foreground.request.Messages)
+	}
+	if foreground.request.Source == nil {
+		t.Fatal("normalized request has no source binding")
+	}
+	// Speculation requires model/tool progress after the current user input.
+	h.llm.responses <- asyncToolResponse("first")
+	foreground = receiveSnapshotValue(t, h.llm.foreground)
+	if foreground.request.Source == nil {
+		t.Fatal("normalized history lost its source binding after tool progress")
+	}
+	background := receiveSnapshotValue(t, h.llm.background)
+	want := model.CloneRequest(foreground.request)
+	want.Messages = append(want.Messages, model.NewTextMessage(model.RoleUser, inContextCompactionPrompt))
+	if !reflect.DeepEqual(background, want) {
+		t.Fatal("candidate did not reuse the normalized foreground request")
+	}
+	h.completeCandidate(t, foreground.scope)
+	h.llm.responses <- asyncTextResponse("done", 500)
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type asyncMeasurement struct {
+	Evidence         string             `json:"evidence"`
+	Mode             string             `json:"mode"`
+	ForegroundWaitMS int64              `json:"foreground_wait_ms"`
+	GenerationMS     int64              `json:"generation_ms"`
+	AdoptionMS       int64              `json:"adoption_ms"`
+	Usage            model.Usage        `json:"usage"`
+	Attempts         []model.Invocation `json:"attempts,omitempty"`
+	Answer           string             `json:"answer,omitempty"`
+}
+
+func writeAsyncMeasurements(t *testing.T, measurements []asyncMeasurement) {
+	t.Helper()
+	data, err := json.MarshalIndent(measurements, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(string(data))
+	if path := os.Getenv("CAELIS_ASYNC_POC_REPORT"); path != "" {
+		if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// This measures controlled scheduling, not provider performance. A 300 ms
+// summary delay is inserted in both runs; input/output usage is synthetic.
+func TestAsyncCompactionFixtureMeasurement(t *testing.T) {
+	var measurements []asyncMeasurement
+	for _, mode := range []string{"synchronous", "async"} {
+		h := newAsyncHarness(t, "")
+		if mode == "synchronous" {
+			h.rt.compaction.Async.Enabled = false
+			h.rt.compaction.WatermarkRatio = .1
+		}
+		run := h.run(t)
+		receiveSnapshotValue(t, h.llm.foreground)
+		start := time.Now()
+		h.llm.responses <- asyncToolResponse("first")
+		receiveSnapshotValue(t, h.llm.background)
+		generationStart := time.Now()
+		var next asyncProbeRequest
+		if mode == "async" {
+			next = receiveSnapshotValue(t, h.llm.foreground)
+		}
+		foregroundWait := time.Since(start)
+		// Only the test's response scheduler sleeps; production never waits for
+		// speculative readiness at an ordinary model request boundary.
+		time.Sleep(300 * time.Millisecond)
+		h.llm.summaries <- asyncTextResponse(asyncFixtureSummary, 2100)
+		if mode == "async" {
+			receiveSnapshotValue(t, next.scope.job.done)
+		} else {
+			next = receiveSnapshotValue(t, h.llm.foreground)
+			foregroundWait = time.Since(start)
+		}
+		generation := time.Since(generationStart)
+		h.llm.responses <- asyncToolResponse("second")
+		receiveSnapshotValue(t, h.secondTool)
+		adoptionStart := time.Now()
+		close(h.releaseSecond)
+		receiveSnapshotValue(t, h.llm.foreground)
+		adoption := time.Since(adoptionStart)
+		h.llm.responses <- asyncTextResponse("done", 500)
+		if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		measurements = append(measurements, asyncMeasurement{
+			Evidence: "fixture; 300ms injected generation delay; synthetic usage", Mode: mode,
+			ForegroundWaitMS: foregroundWait.Milliseconds(), GenerationMS: generation.Milliseconds(), AdoptionMS: adoption.Milliseconds(),
+			Usage: model.Usage{Reported: true, PromptTokens: 2100, CompletionTokens: 16, TotalTokens: 2116},
+		})
+	}
+	writeAsyncMeasurements(t, measurements)
+}
+
+// asyncLiveModel uses a real provider only for candidate generation. Foreground
+// steps remain controlled so timing and fault interleavings are reproducible.
+// Its 10k window is a test trigger, not a claim about the provider's capacity.
+type asyncLiveModel struct {
+	*asyncProbeModel
+	provider model.LLM
+	started  chan struct{}
+}
+
+func (m *asyncLiveModel) Name() string { return m.provider.Name() }
+func (m *asyncLiveModel) ProviderName() string {
+	return m.provider.(interface{ ProviderName() string }).ProviderName()
+}
+func (*asyncLiveModel) TracksInvocations() {}
+func (m *asyncLiveModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if isRuntimeCompactionRequest(req) {
+		select {
+		case m.started <- struct{}{}:
+		default:
+		}
+		return model.Generate(ctx, m.provider, req)
+	}
+	return model.Generate(ctx, m.asyncProbeModel, req)
+}
+
+// Run explicitly with CAELIS_ASYNC_LIVE=1 and DEEPSEEK_API_KEY. No Host, user
+// configuration or production Session is opened. All transmitted text is the
+// synthetic fixture below, the fixed compaction prompt, and inert tool specs.
+func TestAsyncCompactionLiveProvider(t *testing.T) {
+	if os.Getenv("CAELIS_ASYNC_LIVE") != "1" {
+		t.Skip("opt-in provider experiment")
+	}
+	key := os.Getenv("DEEPSEEK_API_KEY")
+	if key == "" {
+		t.Skip("DEEPSEEK_API_KEY is unavailable")
+	}
+	provider, err := providers.New(providers.Config{
+		Provider: "deepseek", API: model.APIDeepSeek, Model: "deepseek-flash",
+		BaseURL: "https://api.deepseek.com/anthropic", Auth: providers.AuthConfig{Type: model.AuthAPIKey, Token: key},
+		Timeout: 45 * time.Second, MaxOutputTok: 1200, ContextWindowTokens: 10000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newAsyncHarness(t, "")
+	h.rt.compaction.Async.GenerationTimeout = 45 * time.Second
+	semantic := `Synthetic audit case. User goal: prepare an ORBIT deployment draft. Preserve the exact code COBALT-731 and budget cap 17 units. Earlier permission to publish is revoked; do not publish or send anything. The question about target region remains unanswered: a host closure notice is not an answer or approval. A remote write with receipt action-42 has unknown outcome; reconcile only that original receipt, never retry under a new ID. Local verification completed, but the report has not yet been delivered. A later note asking for a concise answer does not replace these requirements.`
+	if _, err := h.store.AppendEvent(h.ctx, session.AppendEventRequest{SessionRef: h.active.SessionRef, MutationGuard: session.RuntimeMutationGuard(h.ctx), Event: userTextEvent(semantic)}); err != nil {
+		t.Fatal(err)
+	}
+	live := &asyncLiveModel{asyncProbeModel: h.llm, provider: provider, started: make(chan struct{}, 4)}
+	h.source.set(agent.ModelRequestSnapshot{Revision: "live-epoch", Model: live, Tools: []tool.Tool{h.tool}, Reasoning: model.ReasoningConfig{Effort: "none"}})
+	run := h.run(t)
+	receiveSnapshotValue(t, h.llm.foreground)
+	start := time.Now()
+	h.llm.responses <- asyncToolResponse("first")
+	next := receiveSnapshotValue(t, h.llm.foreground)
+	foregroundWait := time.Since(start)
+	receiveSnapshotValue(t, live.started)
+	h.llm.responses <- asyncToolResponse("second")
+	receiveSnapshotValue(t, h.secondTool)
+	wait, cancel := context.WithTimeout(t.Context(), 55*time.Second)
+	defer cancel()
+	select {
+	case <-next.scope.job.done:
+	case <-wait.Done():
+		t.Fatal(wait.Err())
+	}
+	if next.scope.job.err != nil || next.scope.job.receiptErr != nil {
+		t.Fatalf("provider generation=%v receipt=%v", next.scope.job.err, next.scope.job.receiptErr)
+	}
+	generation := time.Since(start)
+	adoptionStart := time.Now()
+	close(h.releaseSecond)
+	after := receiveSnapshotValue(t, h.llm.foreground).request
+	adoption := time.Since(adoptionStart)
+	h.llm.responses <- asyncTextResponse("fixture foreground complete", 500)
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, _, ok := compact.LatestCompactEvent(h.load(t).Events)
+	if !ok {
+		t.Fatal("real candidate was not adopted")
+	}
+	var measurements []asyncMeasurement
+	for _, event := range h.load(t).Events {
+		if session.IsModelInvocationReceipt(event) && event.Invocation.Provider == "deepseek" {
+			measurements = append(measurements, asyncMeasurement{Evidence: "real provider candidate; scripted foreground; synthetic 10k window", Mode: "async", ForegroundWaitMS: foregroundWait.Milliseconds(), GenerationMS: generation.Milliseconds(), AdoptionMS: adoption.Milliseconds(), Answer: session.EventText(checkpoint), Usage: usageFromAsyncReceipt(event)})
+		}
+	}
+	question := `Return a JSON object with keys objective, code, budget, publish_allowed, region_answered, receipt_id, receipt_status, retry_new_id_allowed, report_delivered. Answer from the conversation evidence; do not invent approval or success.`
+	for _, input := range []struct {
+		name    string
+		request *model.Request
+	}{{"original", next.request}, {"compacted", after}} {
+		request := model.CloneRequest(input.request)
+		request.Tools = nil
+		request.DisableTools = true
+		request.Messages = append(request.Messages, model.NewTextMessage(model.RoleUser, question))
+		measurement := asyncMeasurement{Evidence: "real provider semantic probe; synthetic evidence; manual comparison required", Mode: input.name}
+		ctx := model.WithInvocationObserver(t.Context(), func(in model.Invocation) { measurement.Attempts = append(measurement.Attempts, in) })
+		probeStart := time.Now()
+		for event, err := range model.Generate(ctx, provider, request) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if event != nil && event.Response != nil && event.TurnComplete {
+				measurement.Answer = event.Message.TextContent()
+				measurement.Usage = event.Usage
+			}
+		}
+		measurement.GenerationMS = time.Since(probeStart).Milliseconds()
+		if strings.TrimSpace(measurement.Answer) == "" {
+			t.Fatal("empty semantic probe")
+		}
+		measurements = append(measurements, measurement)
+	}
+	writeAsyncMeasurements(t, measurements)
+}
+
+func usageFromAsyncReceipt(event *session.Event) model.Usage {
+	usage := event.Meta["caelis"].(map[string]any)["sdk"].(map[string]any)["usage"]
+	data, err := json.Marshal(usage)
+	if err != nil {
+		panic(fmt.Sprintf("fixture receipt encoding: %v", err))
+	}
+	var out model.Usage
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic(err)
+	}
+	out.Reported = true
+	return out
+}
+
+// Hook the assembled chat request before the Runtime gate can load the Store.
+type asyncAssemblyFactory struct {
+	hook func(*model.Request)
+}
+
+func (f asyncAssemblyFactory) NewAgent(ctx context.Context, spec agent.AgentSpec) (agent.Agent, error) {
+	resolve := spec.ResolveModelRequest
+	spec.ResolveModelRequest = func(ctx context.Context) (agent.ModelRequestSnapshot, error) {
+		snapshot, err := resolve(ctx)
+		if err == nil {
+			snapshot.Model = &asyncAssemblyModel{LLM: snapshot.Model, hook: f.hook}
+		}
+		return snapshot, err
+	}
+	return (chat.Factory{}).NewAgent(ctx, spec)
+}
+
+type asyncAssemblyModel struct {
+	model.LLM
+	hook func(*model.Request)
+}
+
+func (*asyncAssemblyModel) TracksInvocations()                 {}
+func (m *asyncAssemblyModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (m *asyncAssemblyModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.hook(req)
+	return model.Generate(ctx, m.LLM, req)
+}
+
+func TestAsyncCompactionFailedInContextNeverGeneratesColdCheckpoint(t *testing.T) {
+	for _, failure := range []string{"empty", "length", "tools"} {
+		t.Run(failure, func(t *testing.T) {
+			h := newAsyncHarness(t, "")
+			run := h.run(t)
+			next := h.startCandidate(t)
+			response := asyncTextResponse("", 2000)
+			switch failure {
+			case "length":
+				response = asyncTextResponse(asyncFixtureSummary, 2000)
+				response.response.FinishReason = model.FinishReasonLength
+				response.response.FinishReasonReported = true
+			case "tools":
+				response = asyncToolResponse("forbidden")
+			}
+			h.llm.summaries <- response
+			receiveSnapshotValue(t, next.scope.job.done)
+			if next.scope.job.err == nil {
+				t.Fatal("failed generation accepted")
+			}
+			h.llm.responses <- asyncToolResponse("second")
+			receiveSnapshotValue(t, h.secondTool)
+			close(h.releaseSecond)
+			receiveSnapshotValue(t, h.llm.foreground)
+			h.llm.responses <- asyncTextResponse("done", 500)
+			if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-h.llm.background:
+				t.Fatal("strict generation issued another request")
+			default:
+			}
+			if _, _, ok := compact.LatestCompactEvent(h.load(t).Events); ok {
+				t.Fatal("failed generation wrote checkpoint")
+			}
+		})
+	}
+}
+
+func TestAsyncCompactionRejectsUnboundOrChangedRequest(t *testing.T) {
+	for _, scenario := range []string{"unbound", "source_hash", "messages_hash", "open_call", "parallel_open_call"} {
+		t.Run(scenario, func(t *testing.T) {
+			h := newAsyncHarness(t, "")
+			calls := 0
+			h.rt.agentFactory = asyncAssemblyFactory{hook: func(req *model.Request) {
+				calls++
+				if calls != 2 {
+					return
+				}
+				if req.Source == nil {
+					t.Error("second request has no assembly binding")
+					return
+				}
+				switch scenario {
+				case "unbound":
+					req.Source = nil
+				case "source_hash":
+					req.Source.SourcePrefixHash = "mismatch"
+				case "messages_hash":
+					req.Source.MessagesHash = "mismatch"
+				default:
+					calls := []model.ToolCall{{ID: "open-a", Name: "work", Args: "{}"}}
+					if scenario == "parallel_open_call" {
+						calls = append(calls, model.ToolCall{ID: "open-b", Name: "work", Args: "{}"})
+					}
+					req.Messages = append(req.Messages, model.MessageFromToolCalls(model.RoleAssistant, calls, ""))
+					req.Source.MessagesHash, _ = requestsource.Fingerprint(req.Messages)
+				}
+			}}
+			run := h.run(t)
+			receiveSnapshotValue(t, h.llm.foreground)
+			h.llm.responses <- asyncToolResponse("first")
+			next := receiveSnapshotValue(t, h.llm.foreground)
+			if next.scope.job != nil {
+				t.Error("ineligible request launched a candidate")
+			}
+			h.llm.responses <- asyncTextResponse("done", 500)
+			if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-h.llm.background:
+				t.Fatal("ineligible request generated a summary")
+			default:
+			}
+			if _, _, ok := compact.LatestCompactEvent(h.load(t).Events); ok {
+				t.Fatal("ineligible request wrote checkpoint")
+			}
+		})
 	}
 }

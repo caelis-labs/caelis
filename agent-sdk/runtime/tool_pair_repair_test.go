@@ -6,14 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
@@ -26,6 +18,14 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"iter"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
 )
 
 type factResultFault struct {
@@ -863,4 +863,62 @@ func TestResumeLegacyGroupedResults(t *testing.T) {
 			}
 		})
 	}
+}
+
+func toolResultJSON(result *tool.Result) []byte { raw, _ := json.Marshal(result); return raw }
+func missingToolPairs(t interface {
+	Helper()
+	Fatal(...any)
+}, events []*session.Event) int {
+	t.Helper()
+	pairs, err := session.PairToolFacts(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := 0
+	for _, pair := range pairs {
+		if pair.Result == nil {
+			missing++
+		}
+	}
+	return missing
+}
+func newToolFactTestSession(t *testing.T, id string) (*inmemory.Store, session.Session) {
+	t.Helper()
+	service := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return id }})
+	active, err := service.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, active
+}
+
+func factJSON(value any) []byte { raw, _ := json.Marshal(value); return raw }
+
+type recoveryCaptureModel struct{ messages []model.Message }
+
+func (*recoveryCaptureModel) Name() string { return "recovery-capture" }
+
+func (*recoveryCaptureModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, ImageInput: true}
+}
+
+func (m *recoveryCaptureModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.messages = model.CloneMessages(req.Messages)
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(model.StreamEventFromResponse(&model.Response{Message: model.NewTextMessage(model.RoleAssistant, "done"), TurnComplete: true, StepComplete: true, Status: model.ResponseStatusCompleted}), nil)
+	}
+}
+
+func canonicalMessages(events []*session.Event) []model.Message {
+	var messages []model.Message
+	for _, event := range events {
+		if !session.IsMainInvocationVisibleEvent(event) {
+			continue
+		}
+		if message, ok := session.ModelMessageOf(event); ok {
+			messages = append(messages, message)
+		}
+	}
+	return messages
 }

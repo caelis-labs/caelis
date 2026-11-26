@@ -40,7 +40,7 @@ Use a Caelis module tag and import only the capabilities your host needs:
 go get github.com/caelis-labs/caelis@<version>
 ```
 
-[`runtime/quickstart_external_test.go`](runtime/quickstart_external_test.go)
+[`quickstart_external_test.go`](quickstart_external_test.go)
 shows a minimal external consumer. Only paths listed in
 [`supported-packages.txt`](supported-packages.txt) are supported external imports;
 other non-`internal` packages are bundled implementations or experimental

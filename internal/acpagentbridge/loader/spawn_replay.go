@@ -5,7 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -96,7 +96,7 @@ func sessionEventOwnsSpawnCall(event *session.Event, toolCallID string) bool {
 		return false
 	}
 	if event.Tool != nil && strings.TrimSpace(event.Tool.ID) == toolCallID &&
-		event.Tool.Name == spawn.ToolName {
+		event.Tool.Name == names.StartThread {
 		return true
 	}
 	message := event.Message
@@ -109,13 +109,13 @@ func sessionEventOwnsSpawnCall(event *session.Event, toolCallID string) bool {
 		return false
 	}
 	for _, call := range message.ToolCalls() {
-		if strings.TrimSpace(call.ID) == toolCallID && call.Name == spawn.ToolName {
+		if strings.TrimSpace(call.ID) == toolCallID && call.Name == names.StartThread {
 			return true
 		}
 	}
 	response := message.ToolResponse()
 	return response != nil && strings.TrimSpace(response.ID) == toolCallID &&
-		response.Name == spawn.ToolName
+		response.Name == names.StartThread
 }
 
 func spawnReplayStatus(status string, rawOutput map[string]any) string {

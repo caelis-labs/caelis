@@ -3,21 +3,25 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"reflect"
-	"sync/atomic"
-	"testing"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"iter"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sync/atomic"
+	"testing"
+	"time"
 )
 
 func TestLegacyMCPSearchReceiptAfterStoreReopen(t *testing.T) {
@@ -154,4 +158,77 @@ func writeLegacyMCPSearchReceipt(t *testing.T, root string, marked bool) {
 	if err := os.WriteFile(paths[0], bytes.Join(lines, []byte{'\n'}), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func fixtureMCPDefinition(source string) tool.Definition {
+	return tool.Definition{Name: "docs__read", InputSchema: map[string]any{"type": "object"}, Metadata: map[string]any{
+		mcp.MetadataKind: mcp.KindTool, mcp.MetadataPluginID: "fixture",
+		mcp.MetadataServer: "docs", mcp.MetadataTool: "read",
+		mcp.MetadataSourceFingerprint: source,
+	}}
+}
+
+type mcpScriptModel struct {
+	requests []*model.Request
+	steps    func(int, *model.Request) []model.ToolCall
+}
+
+func (*mcpScriptModel) Name() string { return "mcp-script" }
+func (*mcpScriptModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (m *mcpScriptModel) Generate(_ context.Context, request *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.requests = append(m.requests, model.CloneRequest(request))
+	index := len(m.requests) - 1
+	return func(yield func(*model.StreamEvent, error) bool) {
+		calls := m.steps(index, request)
+		message := model.NewTextMessage(model.RoleAssistant, "done")
+		reason := model.FinishReasonStop
+		if len(calls) > 0 {
+			message = model.MessageFromToolCalls(model.RoleAssistant, calls, "")
+			reason = model.FinishReasonToolCalls
+		}
+		yield(model.StreamEventFromResponse(&model.Response{Message: message, Status: model.ResponseStatusCompleted, FinishReason: reason, StepComplete: true, TurnComplete: true}), nil)
+	}
+}
+func mcpFixturePolicy() policy.Registry {
+	return staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+		return policy.Decision{Action: policy.ActionAllow}, nil
+	}}}
+}
+
+// mcpAskFixturePolicy supplies an explicit SDK per-call Ask.
+func mcpAskFixturePolicy() policy.Registry {
+	return staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		if !mcp.IsDefinition(input.Tool) {
+			return policy.Decision{Action: policy.ActionAllow}, nil
+		}
+		decision, err := mcpFixtureApproval(input, "allow_once")
+		if err != nil {
+			return policy.Decision{}, err
+		}
+		binding := mcp.BindingForDefinition(input.Tool)
+		raw, err := json.Marshal(input.Call)
+		if err != nil {
+			return policy.Decision{}, err
+		}
+		digest := sha256.Sum256(raw)
+		decision.Authorization = &session.ApprovalAuthorization{Schema: session.AuthorizationSchemaVersion, Scope: session.AuthorizationScope{Authority: "fixture", Workspace: input.Session.CWD, SessionID: input.Session.SessionID, SessionIncarnation: input.Session.CreatedAt.UTC().Format(time.RFC3339Nano), SourceID: binding.Identity, SourceRevision: binding.Version, PolicyRevision: "fixture-ask-v1", Tool: input.Tool.Name}, CallDigest: hex.EncodeToString(digest[:]), PerCall: true, Choices: []session.AuthorizationChoice{{OptionID: "allow_once", Persistence: session.AuthorizationOnce}}}
+		return decision, nil
+	}}}
+}
+
+func mcpFixtureApproval(input policy.ToolContext, allowID string) (policy.Decision, error) {
+	args, err := policy.CallArgs(input.Call)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	return policy.Decision{
+		Action: policy.ActionAskApproval,
+		Reason: "MCP fixture requires approval",
+		Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name, Kind: "other", Status: "pending", RawInput: args},
+			Options:  []session.ProtocolApprovalOption{{ID: allowID, Kind: "allow_once"}, {ID: "cancel", Kind: "reject_once"}},
+		},
+	}, nil
 }

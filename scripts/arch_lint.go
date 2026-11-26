@@ -553,7 +553,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if !strings.HasSuffix(rel, "_test.go") &&
 		startsWithAny(rel,
 			"control/appserver/projection/", "control/appserver/taskstream/", "control/taskstream/",
-			"surfaces/internal/transcript/", "surfaces/tui/app/") &&
+			"internal/acpagentbridge/", "surfaces/internal/transcript/", "surfaces/tui/app/") &&
 		(target == "agent-sdk/tool/builtin" || strings.HasPrefix(target, "agent-sdk/tool/builtin/")) &&
 		target != "agent-sdk/tool/builtin/names" {
 		return "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names"

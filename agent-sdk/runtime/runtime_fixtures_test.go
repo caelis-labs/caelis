@@ -5,14 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
-	goruntime "runtime"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"testing"
-	"time"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
@@ -30,7 +22,23 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"iter"
+	"os"
+	goruntime "runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
 )
+
+func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == gojaexec.WorkerArgument {
+		os.Exit(gojaexec.WorkerMain())
+	}
+	os.Exit(m.Run())
+}
 
 type stubACPController struct {
 	attach            func(context.Context, controller.AttachRequest) (session.ParticipantBinding, error)
@@ -2370,4 +2378,101 @@ func assertRunningTaskSnapshot(t *testing.T, result structuredResult) {
 func testStringValue(raw any) string {
 	text, _ := raw.(string)
 	return strings.TrimSpace(text)
+}
+
+func runnerError(handle agent.Runner) error {
+	if handle == nil {
+		return nil
+	}
+	return handle.WaitCompletion(context.Background())
+}
+
+type scriptedTestModel struct {
+	generate func(context.Context, *model.Request) *model.Response
+}
+
+func (scriptedTestModel) Name() string { return "scripted-test" }
+
+func (scriptedTestModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, ParallelToolCalls: true}
+}
+
+func (m scriptedTestModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		yield(model.StreamEventFromResponse(m.generate(ctx, req)), nil)
+	}
+}
+
+func toolCallResponse(id, name string) *model.Response {
+	return &model.Response{
+		Message:      model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: id, Name: name, Args: `{}`}}, ""),
+		TurnComplete: true,
+	}
+}
+
+func textResponse(text string, usage model.Usage) *model.Response {
+	return &model.Response{
+		Message:      model.NewTextMessage(model.RoleAssistant, text),
+		TurnComplete: true,
+		Usage:        usage,
+	}
+}
+
+// Runtime fixtures declare the complete fake-provider surface they implement.
+// Individual capability rejection is covered with the undeclared model in
+// capabilities_test.go.
+func runtimeTestModelCapabilities() model.Capabilities {
+	return model.Capabilities{
+		ToolCalls:             true,
+		StructuredOutput:      true,
+		Streaming:             true,
+		ParallelToolCalls:     true,
+		ReasoningContinuation: true,
+		HostedTools:           true,
+	}
+}
+
+func (*gatedStreamingModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+
+func (*steerRuntimeModel) Capabilities() model.Capabilities    { return runtimeTestModelCapabilities() }
+func (*historyReplayModel) Capabilities() model.Capabilities   { return runtimeTestModelCapabilities() }
+func (*toolLoopRuntimeModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*planLoopRuntimeModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*contextProbeModel) Capabilities() model.Capabilities    { return runtimeTestModelCapabilities() }
+func (*modelCheckpointProbe) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*overflowRecoveryModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*denyWriteRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*writePathRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*denyCommandRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*approveEscalatedCommandRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*commandTaskLoopRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*stepWatermarkModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*repeatedWatermarkModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*retryExhaustedHighWaterModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
+func (*compactDeadlineModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*toolListProbeModel) Capabilities() model.Capabilities   { return runtimeTestModelCapabilities() }
+func (searchCapableGateModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
 }

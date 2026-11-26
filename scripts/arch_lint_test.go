@@ -167,6 +167,17 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			importPath: modulePath + "/agent-sdk/tool/builtin/names",
 		},
 		{
+			name:       "ACP bridge rejects built-in implementation",
+			rel:        "internal/acpagentbridge/runtime_agent_child_terminal.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/spawn",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "ACP bridge accepts canonical built-in names",
+			rel:        "internal/acpagentbridge/runtime_agent_child_terminal.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/names",
+		},
+		{
 			name:       "TUI test can exercise a concrete built-in tool",
 			rel:        "surfaces/tui/app/native_approval_title_test.go",
 			importPath: modulePath + "/agent-sdk/tool/builtin/shell",

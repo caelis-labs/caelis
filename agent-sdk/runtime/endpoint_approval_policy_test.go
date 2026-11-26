@@ -2,9 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"testing"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
@@ -15,6 +14,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"reflect"
+	"testing"
 )
 
 func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t *testing.T) {
@@ -341,5 +342,69 @@ func endpointApprovalTestOptions() []approval.Option {
 	return []approval.Option{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+	}
+}
+
+func TestEndpointApprovalRequestersPreserveNamePresence(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{"controller", "subagent"} {
+		for _, tc := range []struct {
+			label, name string
+			present     *bool
+		}{
+			{"native", "Read", nil},
+			{"standard", " read_file ", new(true)},
+			{"empty", "", new(true)},
+			{"fallback", "Read file", new(false)},
+		} {
+			t.Run(source+"/"+tc.label, func(t *testing.T) {
+				var captured approval.Request
+				requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+					captured = req
+					return approval.Response{}, nil
+				})
+				call := session.ProtocolToolCall{ID: "call-1", Name: tc.name, NamePresent: tc.present, Title: "Read file", Kind: "read"}
+				var err error
+				if source == "controller" {
+					_, err = (controllerApprovalRequester{requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{ToolCall: call})
+				} else {
+					_, err = (subagentApprovalRequester{requester: requester}).RequestSubagentApproval(t.Context(), subagent.ApprovalRequest{ToolCall: call})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if captured.Approval == nil {
+					t.Fatal("approval was not forwarded")
+				}
+				approval := session.CloneProtocolApproval(*captured.Approval)
+				if approval.ToolCall.Name != tc.name || !reflect.DeepEqual(approval.ToolCall.NamePresent, tc.present) {
+					t.Fatalf("approval name = %q, presence = %v; want %q, %v", approval.ToolCall.Name, approval.ToolCall.NamePresent, tc.name, tc.present)
+				}
+			})
+		}
+	}
+}
+
+func TestEndpointIndependentPermissionPreservesMachineContextWithoutFakeTool(t *testing.T) {
+	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original title", Description: new("Original description"), RawSubject: json.RawMessage(`{"type":"command","command":"exact command","cwd":"/workspace"}`), NativeRequestID: json.RawMessage(`"original-jsonrpc-id"`)}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: " Allow original ", Kind: "allow_once"}}}
+	for _, child := range []bool{false, true} {
+		var observed approval.Request
+		requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+			observed = req
+			return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
+		})
+		var err error
+		if child {
+			_, err = (subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: requester}).RequestSubagentApproval(t.Context(), approval.SubagentRequest{Origin: approval.Origin{SessionID: "child", Endpoint: approval.EndpointExternalACP}, TaskID: "task", ParentCallID: "spawn", Approval: original})
+		} else {
+			_, err = (controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "owner"}, requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", Approval: original})
+		}
+		if err != nil || !reflect.DeepEqual(observed.Approval, original) || observed.Call.ID != "" || observed.Call.Name != "" || len(observed.Call.Input) != 0 || observed.Tool.Name != "" || observed.Origin.ToolCallID != "" {
+			t.Fatalf("independent request became synthetic tool or lost private evidence: %+v %v", observed, err)
+		}
+		observed.Approval.Context.RawSubject[0] = 'x'
+		if original.Context.RawSubject[0] != '{' {
+			t.Fatal("endpoint evidence not isolated from requester")
+		}
 	}
 }

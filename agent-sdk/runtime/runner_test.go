@@ -3,12 +3,13 @@ package runtime
 import (
 	"context"
 	"errors"
-	"testing"
-	"time"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"sync"
+	"testing"
+	"time"
 )
 
 func TestRunnerPublishesSynchronouslyToInstalledObserver(t *testing.T) {
@@ -94,5 +95,293 @@ func TestRunnerCancelClosesInputBeforeFinish(t *testing.T) {
 	}
 	if got := run.drainSubmissions(); len(got) != 0 {
 		t.Fatalf("cancelled runner accepted input: %+v", got)
+	}
+}
+
+func TestRunnerPublicSubmitRejectsRuntimeModelContext(t *testing.T) {
+	t.Parallel()
+
+	runner := newRunner(t.Context(), "run-1", func() {}, nil)
+	submission := agent.Submission{
+		Kind: runtimeinput.ModelContext, Text: "hidden context",
+		Actor: session.ActorRef{Kind: session.ActorKindParticipant, ID: "participant-1"},
+	}
+	if err := validateRunInput(agent.RunRequest{InputKind: submission.Kind, Input: submission.Text, InputActor: submission.Actor}); err == nil {
+		t.Fatal("public Run accepted reserved model context")
+	}
+	if err := runner.Submit(submission); err == nil {
+		t.Fatal("Runner.Submit(runtime model context) error = nil, want unsupported kind")
+	}
+	if err := runner.SubmitContext(context.Background(), submission); err == nil {
+		t.Fatal("Runner.SubmitContext(runtime model context) error = nil, want unsupported kind")
+	}
+	if drained := runner.drainSubmissions(); len(drained) != 0 {
+		t.Fatalf("public runtime model context reached queue: %#v", drained)
+	}
+}
+
+func TestRunnerFinalDrainLinearizesContinuationAndClosure(t *testing.T) {
+	for range 100 {
+		r := newRunner(t.Context(), "race", func() {}, nil)
+		start := make(chan struct{})
+		sent := make(chan error, 1)
+		go func() {
+			<-start
+			sent <- r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "late input"})
+		}()
+		close(start)
+		drained := r.drainFinalSubmissions()
+		err := <-sent
+		if err == nil {
+			if len(drained) != 1 || drained[0].Text != "late input" {
+				t.Fatalf("accepted input lost at final drain: %#v", drained)
+			}
+		} else if !errors.Is(err, agent.ErrRunInputClosed) || len(drained) != 0 {
+			t.Fatalf("closure = %v, drain = %#v", err, drained)
+		}
+	}
+}
+
+func TestRunnerBatchAdmissionValidatesAllSourcesAndClones(t *testing.T) {
+	r := newRunner(t.Context(), "batch", func() {}, nil)
+	sub := agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: []agent.AgentCommunicationInput{
+		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one"}, Input: "one"},
+		{Input: "two"},
+	}}
+	if err := r.Submit(sub); err == nil {
+		t.Fatal("invalid second source accepted")
+	}
+	if len(r.drainSubmissions()) != 0 {
+		t.Fatal("partial batch admitted")
+	}
+	sub.Inputs[1].Source = session.ActorRef{Kind: session.ActorKindParticipant, ID: "two"}
+	if err := r.Submit(sub); err != nil {
+		t.Fatal(err)
+	}
+	sub.Inputs[0].Input = "changed"
+	drained := r.drainSubmissions()
+	if len(drained) != 1 || len(drained[0].Inputs) != 2 || drained[0].Inputs[0].Input != "one" {
+		t.Fatalf("batch = %#v", drained)
+	}
+	sub.Text = "mixed"
+	if err := r.Submit(sub); err == nil {
+		t.Fatal("mixed admission accepted")
+	}
+}
+
+func TestRunnerSubmissionDispatcherPreservesFIFOAndPerItemResults(t *testing.T) {
+	t.Parallel()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstErr := errors.New("first result")
+	var mu sync.Mutex
+	var calls []string
+	dispatcher := newRunnerSubmissionDispatcher(context.Background(), func(_ context.Context, submission agent.Submission) error {
+		mu.Lock()
+		calls = append(calls, submission.Text)
+		mu.Unlock()
+		if submission.Text == "first" {
+			close(firstStarted)
+			<-releaseFirst
+			return firstErr
+		}
+		return nil
+	})
+	defer dispatcher.close(errors.New("test complete"))
+
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- dispatcher.submit(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation,
+			Text: "first",
+		})
+	}()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first submission did not start")
+	}
+	secondResult := make(chan error, 1)
+	go func() {
+		secondResult <- dispatcher.submit(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation,
+			Text: "second",
+		})
+	}()
+	select {
+	case err := <-secondResult:
+		t.Fatalf("second submission completed before first: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseFirst)
+	if err := <-firstResult; !errors.Is(err, firstErr) {
+		t.Fatalf("first result = %v, want item-specific error", err)
+	}
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second result = %v, want nil", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 2 || calls[0] != "first" || calls[1] != "second" {
+		t.Fatalf("submission calls = %#v, want FIFO", calls)
+	}
+}
+
+func TestRunnerSubmissionDispatcherCloseCancelsActiveAndRejectsQueued(t *testing.T) {
+	t.Parallel()
+
+	activeStarted := make(chan struct{})
+	dispatcher := newRunnerSubmissionDispatcher(context.Background(), func(ctx context.Context, submission agent.Submission) error {
+		if submission.Text == "active" {
+			close(activeStarted)
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return errors.New("queued submission reached handler")
+	})
+	activeResult := make(chan error, 1)
+	go func() {
+		activeResult <- dispatcher.submit(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation,
+			Text: "active",
+		})
+	}()
+	select {
+	case <-activeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("active submission did not start")
+	}
+	queuedResult := make(chan error, 1)
+	go func() {
+		queuedResult <- dispatcher.submit(context.Background(), agent.Submission{
+			Kind: agent.SubmissionKindConversation,
+			Text: "queued",
+		})
+	}()
+	wantErr := errors.New("participant Turn finished")
+	dispatcher.close(wantErr)
+	if err := <-activeResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("active result = %v, want cancellation", err)
+	}
+	if err := <-queuedResult; !errors.Is(err, wantErr) {
+		t.Fatalf("queued result = %v, want close error", err)
+	}
+}
+
+func TestRunnerSubmissionDispatcherSkipsCanceledQueuedRequest(t *testing.T) {
+	t.Parallel()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	called := make(chan string, 2)
+	dispatcher := newRunnerSubmissionDispatcher(context.Background(), func(_ context.Context, submission agent.Submission) error {
+		called <- submission.Text
+		if submission.Text == "first" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil
+	})
+	defer dispatcher.close(errors.New("test complete"))
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- dispatcher.submit(context.Background(), agent.Submission{Kind: agent.SubmissionKindConversation, Text: "first"})
+	}()
+	<-firstStarted
+	ctx, cancel := context.WithCancel(context.Background())
+	queuedResult := make(chan error, 1)
+	go func() {
+		queuedResult <- dispatcher.submit(ctx, agent.Submission{Kind: agent.SubmissionKindConversation, Text: "canceled"})
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(dispatcher.queue) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("canceled request was not queued behind active submission")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if err := <-queuedResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued result = %v, want caller cancellation", err)
+	}
+	close(releaseFirst)
+	if err := <-firstResult; err != nil {
+		t.Fatal(err)
+	}
+	if first := <-called; first != "first" {
+		t.Fatalf("first handler call = %q, want first", first)
+	}
+	select {
+	case next := <-called:
+		t.Fatalf("canceled queued request reached handler as %q", next)
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestRunnerInputReadyTracksAdmissionAndDrain(t *testing.T) {
+	r := newRunner(t.Context(), "input-signal", func() {}, nil)
+	other := newRunner(t.Context(), "other-turn", func() {}, nil)
+	ready := r.inputReadySignal()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := r.SubmitContext(ctx, agent.Submission{Kind: agent.SubmissionKindConversation, Text: "rejected"}); err == nil {
+		t.Fatal("canceled submission accepted")
+	}
+	select {
+	case <-ready:
+		t.Fatal("rejected input signaled readiness")
+	default:
+	}
+
+	var senders sync.WaitGroup
+	for range 16 {
+		senders.Go(func() {
+			if err := r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "queued"}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	senders.Wait()
+	for _, signal := range []<-chan struct{}{ready, r.inputReadySignal()} {
+		select {
+		case <-signal:
+		default:
+			t.Fatal("accepted input not visible to earlier and later observers")
+		}
+	}
+	select {
+	case <-other.inputReadySignal():
+		t.Fatal("input woke another turn")
+	default:
+	}
+	if got := r.drainSubmissions(); len(got) != 16 {
+		t.Fatalf("drained %d submissions, want 16", len(got))
+	}
+	fresh := r.inputReadySignal()
+	select {
+	case <-fresh:
+		t.Fatal("consumed input woke a later wait")
+	default:
+	}
+	if err := r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "next batch"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-fresh:
+	default:
+		t.Fatal("next batch did not wake existing observer")
+	}
+	if got := r.drainFinalSubmissions(); len(got) != 1 {
+		t.Fatalf("final drain = %#v", got)
+	}
+	r.drainFinalSubmissions()
+	if err := r.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "after close"}); !errors.Is(err, agent.ErrRunInputClosed) {
+		t.Fatalf("closed submission = %v", err)
+	}
+	select {
+	case <-r.inputReadySignal():
+		t.Fatal("closed admission signaled pending input")
+	default:
 	}
 }

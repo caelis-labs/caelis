@@ -1988,27 +1988,6 @@ func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 	}
 }
 
-func TestToolMetaCarriesOnlyRuntimeToolName(t *testing.T) {
-	t.Parallel()
-
-	meta := toolbinding.ToolMeta("Task")
-	caelis, ok := meta["caelis"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want caelis wrapper", meta)
-	}
-	if _, ok := caelis["display"]; ok {
-		t.Fatalf("caelis = %#v, should not carry display semantics", caelis)
-	}
-	runtimeMeta, ok := caelis["runtime"].(map[string]any)
-	if !ok {
-		t.Fatalf("caelis = %#v, want runtime map", caelis)
-	}
-	toolRuntime, ok := runtimeMeta["tool"].(map[string]any)
-	if !ok || toolRuntime["name"] != "Task" {
-		t.Fatalf("runtime.tool = %#v, want TASK tool name", runtimeMeta["tool"])
-	}
-}
-
 func TestMessagesFromContextGroupsConsecutiveToolCalls(t *testing.T) {
 	t.Parallel()
 
@@ -2397,206 +2376,159 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 	}
 }
 
-func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
+func TestToolResultEventStatusAndRawOutput(t *testing.T) {
 	t.Parallel()
 
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-wait-1",
-		Name: "Task",
-		Args: `{"action":"wait","task_id":"jack"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"action":         "wait",
-			"running":        true,
-			"state":          "running",
-			"task_id":        "jack",
-			"target_kind":    "subagent",
-			"output_preview": "正在读取 hello_from_spawn.txt\n",
-		})}},
-	}, nil, nil, toolbinding.TaskResultSourceMeta(true))
+	commandKindMeta := map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}
+	commandCancelledMeta := map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command", "state": "cancelled"}}}}
+	rawWhitespace := "  first line  \r\n   \r\nsecond line  \r\n"
 
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
+	tests := []struct {
+		name      string
+		call      model.ToolCall
+		payload   map[string]any
+		callErr   error
+		meta      []map[string]any
+		wantState string
+		checkKey  string
+		wantVal   any
+	}{
+		{
+			name:      "task_wait_running",
+			call:      model.ToolCall{ID: "task-wait-1", Name: "Task", Args: `{"action":"wait","task_id":"jack"}`},
+			payload:   map[string]any{"action": "wait", "running": true, "state": "running", "task_id": "jack", "target_kind": "subagent", "output_preview": "正在读取 hello_from_spawn.txt\n"},
+			meta:      []map[string]any{toolbinding.TaskResultSourceMeta(true)},
+			wantState: "completed",
+			checkKey:  "output_preview",
+			wantVal:   "正在读取 hello_from_spawn.txt\n",
+		},
+		{
+			name:      "task_wait_completed",
+			call:      model.ToolCall{ID: "task-wait-1", Name: "Task", Args: `{"action":"wait","task_id":"jeff"}`},
+			payload:   map[string]any{"task_id": "jeff", "state": "completed", "final_message": "child final answer\n"},
+			meta:      []map[string]any{toolbinding.TaskResultSourceMeta(true)},
+			wantState: "completed",
+			checkKey:  "final_message",
+			wantVal:   "child final answer\n",
+		},
+		{
+			name:      "task_read_running",
+			call:      model.ToolCall{ID: "task-read-1", Name: "Task", Args: `{"action":"read","handle":"command-3"}`},
+			payload:   map[string]any{"action": "read", "handle": "command-3", "state": "running", "target_kind": "command", "latest_output": "step 2\n"},
+			wantState: "completed",
+			checkKey:  "latest_output",
+			wantVal:   "step 2\n",
+		},
+		{
+			name:      "task_write_running",
+			call:      model.ToolCall{ID: "task-write-1", Name: "Task", Args: `{"action":"write","task_id":"jeff","input":"continue"}`},
+			payload:   map[string]any{"task_id": "jeff", "state": "running", "latest_output": "input accepted\n"},
+			wantState: "completed",
+			checkKey:  "latest_output",
+			wantVal:   "input accepted\n",
+		},
+		{
+			name:      "task_wait_failed_command",
+			call:      model.ToolCall{ID: "task-wait-1", Name: "Task", Args: `{"action":"wait","task_id":"command-task"}`},
+			payload:   map[string]any{"action": "wait", "handle": "command-2", "target_kind": "command", "state": "failed", "result": "go: module internal registry: network unreachable\n", "error": "Sandbox permission denied. Use a writable workspace path or request elevated permissions.", "exit_code": 1},
+			meta:      []map[string]any{commandKindMeta, toolbinding.TaskResultSourceMeta(true)},
+			wantState: "completed",
+			checkKey:  "error",
+			wantVal:   "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
+		},
+		{
+			name:      "task_cancel",
+			call:      model.ToolCall{ID: "task-cancel-1", Name: "Task", Args: `{"action":"cancel","task_id":"command-task"}`},
+			payload:   map[string]any{"state": "cancelled", "result": "cancelled command output\n", "error": "context canceled", "exit_code": -1},
+			wantState: "completed",
+		},
+		{
+			name:      "task_invocation_error",
+			call:      model.ToolCall{ID: "task-wait-1", Name: "Task", Args: `{"action":"wait","task_id":"command-task"}`},
+			payload:   map[string]any{"state": "running", "error": "task control transport failed"},
+			callErr:   tool.FailedReply("tool failed"),
+			wantState: "failed",
+		},
+		{
+			name:      "spawn_while_child_runs",
+			call:      model.ToolCall{ID: "spawn-1", Name: "StartThread", Args: `{"agent":"self","prompt":"inspect"}`},
+			payload:   map[string]any{"task_id": "task-1", "state": "running"},
+			wantState: "completed",
+		},
+		{
+			name:      "send_message_while_target_runs",
+			call:      model.ToolCall{ID: "message-1", Name: "SendMessage", Args: `{"to":"bryn","message":"continue"}`},
+			payload:   map[string]any{"accepted": true, "state": "running", "to": "bryn"},
+			wantState: "completed",
+		},
+		{
+			name:      "command_cancelled",
+			call:      model.ToolCall{ID: "command-cancel-1", Name: "RunCommand", Args: `{"command":"sleep 10"}`},
+			payload:   map[string]any{"state": "cancelled"},
+			meta:      []map[string]any{commandCancelledMeta, toolbinding.TaskResultSourceMeta(true)},
+			wantState: "cancelled",
+		},
+		{
+			name:      "command_result_raw_output",
+			call:      model.ToolCall{ID: "command-status-1", Name: "RunCommand", Args: `{"command":"git status"}`},
+			payload:   map[string]any{"result": "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n", "exit_code": 0},
+			wantState: "completed",
+			checkKey:  "result",
+			wantVal:   "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
+		},
+		{
+			name:      "command_raw_output_whitespace",
+			call:      model.ToolCall{ID: "command-output-1", Name: "RunCommand", Args: `{"command":"python test.py"}`},
+			payload:   map[string]any{"result": rawWhitespace, "exit_code": 0},
+			wantState: "completed",
+			checkKey:  "result",
+			wantVal:   rawWhitespace,
+		},
+		{
+			name:      "command_failed_output",
+			call:      model.ToolCall{ID: "command-tidy-1", Name: "RunCommand", Args: `{"command":"go mod tidy"}`},
+			payload:   map[string]any{"result": "go: module internal registry: network unreachable\n", "exit_code": 1},
+			meta:      []map[string]any{commandKindMeta, toolbinding.TaskResultSourceMeta(true)},
+			wantState: "failed",
+			checkKey:  "result",
+			wantVal:   "go: module internal registry: network unreachable\n",
+		},
+		{
+			name:      "command_silent_failure",
+			call:      model.ToolCall{ID: "command-silent-failure-1", Name: "RunCommand", Args: `{"command":"false"}`},
+			payload:   map[string]any{"exit_code": 1},
+			meta:      []map[string]any{commandKindMeta, toolbinding.TaskResultSourceMeta(true)},
+			wantState: "failed",
+			checkKey:  "exit_code",
+			wantVal:   float64(1),
+		},
+		{
+			name:      "command_silent_success",
+			call:      model.ToolCall{ID: "command-silent-success-1", Name: "RunCommand", Args: `{"command":"true"}`},
+			payload:   map[string]any{"state": "completed", "exit_code": 0},
+			wantState: "completed",
+		},
 	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed control invocation", got)
-	}
-	content := event.Tool.Content
-	if len(content) != 0 {
-		t.Fatalf("content = %#v, want no display content for successful TASK wait", content)
-	}
-	if got, _ := event.Tool.Output["output_preview"].(string); got != "正在读取 hello_from_spawn.txt\n" {
-		t.Fatalf("raw output output_preview = %q, want model-visible wait slice preserved", got)
-	}
-}
 
-func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-wait-1",
-		Name: "Task",
-		Args: `{"action":"wait","task_id":"jeff"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"task_id":       "jeff",
-			"state":         "completed",
-			"final_message": "child final answer\n",
-		})}},
-	}, nil, nil, toolbinding.TaskResultSourceMeta(true))
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed control invocation", got)
-	}
-	content := event.Tool.Content
-	if len(content) != 0 {
-		t.Fatalf("content = %#v, want no display content for completed TASK wait", content)
-	}
-	if got, _ := event.Tool.Output["final_message"].(string); got != "child final answer\n" {
-		t.Fatalf("raw output final_message = %q, want model-visible final message preserved", got)
-	}
-}
-
-func TestToolResultEventSuppressesTaskReadACPContent(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-read-1",
-		Name: "Task",
-		Args: `{"action":"read","handle":"command-3"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"action":        "read",
-			"handle":        "command-3",
-			"state":         "running",
-			"target_kind":   "command",
-			"latest_output": "step 2\n",
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want no separate display content for TASK read", content)
-	}
-	if got, _ := event.Tool.Output["latest_output"].(string); got != "step 2\n" {
-		t.Fatalf("raw output latest_output = %q, want model-visible observation preserved", got)
-	}
-}
-
-func TestToolResultEventPreservesTaskWriteRawOutput(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-write-1",
-		Name: "Task",
-		Args: `{"action":"write","task_id":"jeff","input":"continue"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"task_id":       "jeff",
-			"state":         "running",
-			"latest_output": "input accepted\n",
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed control invocation", got)
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
-	}
-	if got, _ := event.Tool.Output["latest_output"].(string); got != "input accepted\n" {
-		t.Fatalf("raw output = %q, want Task write result", got)
-	}
-}
-
-func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-wait-1",
-		Name: "Task",
-		Args: `{"action":"wait","task_id":"command-task"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"action":      "wait",
-			"handle":      "command-2",
-			"target_kind": "command",
-			"state":       "failed",
-			"result":      "go: module internal registry: network unreachable\n",
-			"error":       "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
-			"exit_code":   1,
-		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed control invocation", got)
-	}
-	content := event.Tool.Content
-	if len(content) != 0 {
-		t.Fatalf("content = %#v, want no display content for failed TASK wait", content)
-	}
-	if got, _ := event.Tool.Output["error"].(string); got == "" {
-		t.Fatalf("raw output error = %q, want preserved error for model context", got)
-	}
-}
-
-func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-cancel-1",
-		Name: "Task",
-		Args: `{"action":"cancel","task_id":"command-task"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"state":     "cancelled",
-			"result":    "cancelled command output\n",
-			"error":     "context canceled",
-			"exit_code": -1,
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed control invocation", got)
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want no display content for TASK cancel", content)
-	}
-}
-
-func TestToolResultEventMarksTaskInvocationErrorFailed(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "task-wait-1",
-		Name: "Task",
-		Args: `{"action":"wait","task_id":"command-task"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"state": "running",
-			"error": "task control transport failed",
-		})}},
-	}, tool.FailedReply("tool failed"), nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "failed" {
-		t.Fatalf("status = %q, want failed control invocation", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			event := toolResultEvent(tc.call, tool.Result{
+				Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(tc.payload)}},
+			}, tc.callErr, nil, tc.meta...)
+			if event.Tool == nil {
+				t.Fatalf("event tool = nil, want tool update")
+			}
+			if got := event.Tool.Status; got != tc.wantState {
+				t.Fatalf("status = %q, want %q", got, tc.wantState)
+			}
+			if len(event.Tool.Content) != 0 {
+				t.Fatalf("content = %#v, want empty display content", event.Tool.Content)
+			}
+			if tc.checkKey != "" && event.Tool.Output[tc.checkKey] != tc.wantVal {
+				t.Fatalf("raw output[%q] = %#v, want %#v", tc.checkKey, event.Tool.Output[tc.checkKey], tc.wantVal)
+			}
+		})
 	}
 }
 
@@ -2704,201 +2636,6 @@ func TestCollectFinalResponseRejectsImagesForTextOnlyModel(t *testing.T) {
 				t.Fatalf("Generate() calls = %d, want provider blocked before request", probe.calls)
 			}
 		})
-	}
-}
-
-func TestToolResultEventCompletesSpawnInvocationWhileChildRuns(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "spawn-1",
-		Name: "StartThread",
-		Args: `{"agent":"self","prompt":"inspect"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"task_id": "task-1",
-			"state":   "running",
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed Spawn invocation", got)
-	}
-}
-
-func TestToolResultEventCompletesSendMessageInvocationWhileTargetRuns(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID: "message-1", Name: "SendMessage", Args: `{"to":"bryn","message":"continue"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"accepted": true, "state": "running", "to": "bryn",
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil || event.Tool.Status != "completed" {
-		t.Fatalf("event = %#v, want completed delivery invocation", event)
-	}
-}
-
-func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "command-cancel-1",
-		Name: "RunCommand",
-		Args: `{"command":"sleep 10"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"state": "cancelled",
-		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command", "state": "cancelled"}}}}, toolbinding.TaskResultSourceMeta(true))
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "cancelled" {
-		t.Fatalf("status = %q, want cancelled", got)
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
-	}
-}
-
-func TestToolResultEventPreservesCommandResultAsRawOutput(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "command-status-1",
-		Name: "RunCommand",
-		Args: `{"command":"git status"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"result":    "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
-			"exit_code": 0,
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
-	}
-	got, _ := event.Tool.Output["result"].(string)
-	if got != "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n" {
-		t.Fatalf("content text = %q, want result field", got)
-	}
-}
-
-func TestToolResultEventPreservesRawCommandOutputWhitespace(t *testing.T) {
-	t.Parallel()
-
-	raw := "  first line  \r\n   \r\nsecond line  \r\n"
-	event := toolResultEvent(model.ToolCall{
-		ID:   "command-output-1",
-		Name: "RunCommand",
-		Args: `{"command":"python test.py"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"result":    raw,
-			"exit_code": 0,
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
-	}
-	if got, _ := event.Tool.Output["result"].(string); got != raw {
-		t.Fatalf("content text = %q, want raw command output %q", got, raw)
-	}
-}
-
-func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "command-tidy-1",
-		Name: "RunCommand",
-		Args: `{"command":"go mod tidy"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"result":    "go: module internal registry: network unreachable\n",
-			"exit_code": 1,
-		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "failed" {
-		t.Fatalf("status = %q, want failed", got)
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
-	}
-	got, _ := event.Tool.Output["result"].(string)
-	if got != "go: module internal registry: network unreachable\n" {
-		t.Fatalf("content text = %q, want failed result field", got)
-	}
-}
-
-func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "command-silent-failure-1",
-		Name: "RunCommand",
-		Args: `{"command":"false"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"exit_code": 1,
-		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "failed" {
-		t.Fatalf("status = %q, want failed", got)
-	}
-	if content := event.Tool.Content; len(content) != 0 {
-		t.Fatalf("content = %#v, want Runtime to leave display projection empty", content)
-	}
-	if got, _ := event.Tool.Output["exit_code"].(float64); got != 1 {
-		t.Fatalf("raw exit code = %v, want 1", got)
-	}
-}
-
-func TestToolResultEventOmitsContentForSuccessfulSilentCommand(t *testing.T) {
-	t.Parallel()
-
-	event := toolResultEvent(model.ToolCall{
-		ID:   "command-silent-success-1",
-		Name: "RunCommand",
-		Args: `{"command":"true"}`,
-	}, tool.Result{
-		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
-			"state":     "completed",
-			"exit_code": 0,
-		})}},
-	}, nil, nil)
-
-	if event.Tool == nil {
-		t.Fatalf("event tool = nil, want tool update")
-	}
-	if got := event.Tool.Status; got != "completed" {
-		t.Fatalf("status = %q, want completed", got)
-	}
-	if len(event.Tool.Content) != 0 {
-		t.Fatalf("content = %#v, want no canonical terminal placeholder", event.Tool.Content)
 	}
 }
 
