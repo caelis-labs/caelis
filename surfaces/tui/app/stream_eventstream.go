@@ -49,6 +49,7 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		if next, ok := model.(*Model); ok {
 			m = next
 		}
+		m.trackTerminalSessionResult(env)
 		var finishCmd tea.Cmd
 		if currentActivity {
 			finishCmd, _ = m.finishLiveTurnFromEnvelope(env)

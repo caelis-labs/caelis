@@ -406,15 +406,15 @@ func TestSessionPickerApprovalSettlementPhysicalFrames(t *testing.T) {
 		openSessionPickerForTest(t, m)
 		frames = append(frames, m.View().Content)
 		plain := ansi.Strip(frames[len(frames)-1])
-		if !strings.Contains(plain, "ID session-current") {
-			t.Fatal("selected Session address is unavailable for another terminal to attach")
+		if strings.Contains(plain, "session-current") {
+			t.Fatal("the Session ID leaked into the workbench")
 		}
 		if strings.Contains(plain, "Approval required") || strings.Contains(plain, "Allow once") {
 			t.Fatal("underlying approval dialog leaked through the standalone Session list")
 		}
 		oneRow := false
 		for _, line := range strings.Split(plain, "\n") {
-			if strings.Contains(line, "优化审批") && strings.Contains(line, "running · current") {
+			if strings.Contains(line, "优化审批") && strings.Contains(line, "Active") && strings.Contains(line, "(current)") {
 				oneRow = true
 			}
 		}

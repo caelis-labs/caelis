@@ -44,8 +44,17 @@ actions; installation sources are entered in a form. Enable/disable uses the
 shared multi-select prompt. Completed commands leave the composer clear; full
 commands with arguments remain available.
 
-`/resume` searches inside its overlay. Search survives catalog refreshes and
-never changes the composer draft. Up/Down selects, Enter opens, and Esc closes.
+`/resume` and Ctrl+O open the full-screen Sessions workbench, including during
+a running turn. Left Arrow also opens it from the main conversation when the
+composer is empty. The workbench groups visible Sessions by workspace. Up/Down
+selects, Enter or Right Arrow opens, and Esc returns to the conversation.
+Switching observation preserves Session drafts and leaves running work on the Host.
+
+Active Sessions have a live Turn, approval wait, or running Task. Ready Sessions
+have unread results. Failed identifies a confirmed failed main Turn. The unread
+dot can also appear on Active or Failed rows. A result clears after it appears
+in a focused conversation at the live end, and the Host shares that read
+position across terminals for the same user.
 
 `/theme` opens a centered local theme picker. Up/Down and clicks update the
 selection immediately; after a short pause, the latest selection is previewed

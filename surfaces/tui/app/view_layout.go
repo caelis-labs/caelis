@@ -70,7 +70,7 @@ func (m *Model) promptModalReservedHeight() int {
 // Both styled and plain text are wrapped independently from RenderedRow,
 // making RenderedRow the single layout truth.
 func (m *Model) syncViewportContent() {
-	if m.viewportSyncDepth > 0 {
+	if m.viewportSyncDepth > 0 || m.sessionPicker != nil {
 		m.viewportDirty = true
 		return
 	}
@@ -372,6 +372,10 @@ func (m *Model) ensureOffscreenViewportTick() tea.Cmd {
 
 func (m *Model) requestStreamViewportSync() tea.Cmd {
 	if m == nil {
+		return nil
+	}
+	if m.sessionPicker != nil {
+		m.viewportDirty = true
 		return nil
 	}
 	if !m.shouldDeferStreamViewportSync() {

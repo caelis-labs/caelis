@@ -43,6 +43,19 @@ requests; producer terminal state is observed separately. The Session remains
 open for later user input. `POST /sessions/{session_id}/cancel` retains its exact
 Turn target requirement.
 
+## Sessions workbench
+
+The optional `session-workbench-v1` capability exposes the authorized
+cross-workspace directory at `GET /session-workbench`. Its opaque cursor pages
+active and unread Sessions before remaining history. A request may refresh
+specific mounted rows by ID. Listing samples activity without creating Session
+observations.
+
+`PUT /sessions/{session_id}/read-position` acknowledges a visible result for
+the authenticated principal. The decimal `through_seq` identifies a durable
+Session position. Repeated or older acknowledgments preserve the highest
+accepted position. Acknowledgments leave Session history and ordering intact.
+
 ## Peer versions
 
 The optional `idle-command-admission-v1` capability enables

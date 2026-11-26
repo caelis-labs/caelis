@@ -380,6 +380,9 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 			block.AppendStreamEvent(SEReasoning, text, source, event.OccurredAt)
 		}
 	} else {
+		if text != "" && event.NarrativeKind == TranscriptNarrativeAssistant {
+			m.trackSessionResult(event, block.BlockID())
+		}
 		if event.Final {
 			closeLatestReasoningTiming(block.Events, event.OccurredAt)
 		}

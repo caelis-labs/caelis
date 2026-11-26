@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"context"
 	"fmt"
-	"slices"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +25,7 @@ func TestSessionPickerOpensWhileTurnRunsAndMarksRunningRows(t *testing.T) {
 	if !model.turnRunning() {
 		t.Fatal("opening Session picker interrupted the running Turn")
 	}
-	if got := ansi.Strip(model.renderSessionPicker()); !strings.Contains(got, "running") {
+	if got := ansi.Strip(model.renderSessionPicker()); !strings.Contains(got, "Active") {
 		t.Fatalf("Session picker omitted running marker:\n%s", got)
 	}
 }
@@ -69,6 +69,11 @@ func TestSessionPickerShortcutPreservesDraft(t *testing.T) {
 	m := newSessionPickerTestModel(t, 80, 24, nil, nil)
 	m.setInputText("unfinished draft")
 	m.syncTextareaFromInput()
+	cursor := m.textareaCursorIndex()
+	m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+	if m.sessionPicker != nil || m.textareaCursorIndex() != cursor-1 {
+		t.Fatal("Left Arrow did not move the cursor in the draft")
+	}
 	openSessionPickerForTest(t, m)
 	m.Update(keyPress("esc"))
 	if m.textarea.Value() != "unfinished draft" {
@@ -97,33 +102,38 @@ func TestSessionPickerEscapeOnlyClosesAndDoesNotInterrupt(t *testing.T) {
 }
 
 func TestSessionPickerKeyboardSelectionAttachesSelectedSession(t *testing.T) {
-	var submitted []Submission
 	rows := []ResumeCandidate{
 		{SessionID: "session-alpha", Title: "Alpha"},
 		{SessionID: "session-bravo", Title: "Bravo"},
 	}
-	model := newSessionPickerTestModel(t, 80, 24, rows, func(submission Submission) TaskResultMsg {
-		submitted = append(submitted, submission)
-		return TaskResultMsg{ContinueRunning: true}
-	})
-	openSessionPickerForTest(t, model)
-
-	updated, cmd := model.Update(keyPress("down"))
-	model = updated.(*Model)
-	if cmd != nil || model.sessionPicker == nil || model.sessionPicker.index != 1 {
-		t.Fatalf("down selection: picker=%v index=%d cmd=%v", model.sessionPicker != nil, model.sessionPicker.index, cmd != nil)
-	}
-	updated, cmd = model.Update(keyPress("enter"))
-	model = updated.(*Model)
-	if model.sessionPicker != nil {
-		t.Fatal("Enter did not close the Session picker")
-	}
-	if cmd == nil {
-		t.Fatal("Enter did not schedule the selected Session attachment")
-	}
-	_ = cmd()
-	if len(submitted) != 1 || submitted[0].Text != "/resume session-bravo" {
-		t.Fatalf("selected Session submission = %#v, want /resume session-bravo", submitted)
+	for _, keys := range []struct {
+		open, selectRow tea.KeyMsg
+	}{
+		{open: keyPress("ctrl+o"), selectRow: keyPress("enter")},
+		{open: tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}), selectRow: tea.KeyPressMsg(tea.Key{Code: tea.KeyRight})},
+	} {
+		t.Run(keys.open.String(), func(t *testing.T) {
+			var submitted []Submission
+			model := newSessionPickerTestModel(t, 80, 24, rows, func(submission Submission) TaskResultMsg {
+				submitted = append(submitted, submission)
+				return TaskResultMsg{ContinueRunning: true}
+			})
+			model.currentSessionID = "session-alpha"
+			_, load := model.Update(keys.open)
+			if load == nil || model.sessionPicker == nil {
+				t.Fatal("shortcut did not open and load the Session picker")
+			}
+			model.Update(load())
+			model.Update(keyPress("down"))
+			_, attach := model.Update(keys.selectRow)
+			if attach == nil || model.sessionPicker != nil {
+				t.Fatal("shortcut did not close the picker and schedule attachment")
+			}
+			_ = attach()
+			if len(submitted) != 1 || submitted[0].Text != "/resume session-bravo" {
+				t.Fatalf("selected Session submission = %#v, want /resume session-bravo", submitted)
+			}
+		})
 	}
 }
 
@@ -139,11 +149,11 @@ func TestSessionPickerMouseSelectionAttachesSelectedSession(t *testing.T) {
 	})
 	openSessionPickerForTest(t, model)
 	model.renderSessionPicker()
-	geometry := model.sessionPicker.geometry
-	if len(geometry.rows) < 2 || geometry.rows[1] < 0 {
-		t.Fatalf("Session picker did not cache second row geometry: %+v", geometry)
+	y := sessionPickerScreenRow(model.sessionPicker, 1)
+	if y < 0 {
+		t.Fatal("Session workbench did not cache the second visible row")
 	}
-	point := tea.Mouse{X: geometry.x + 2, Y: geometry.rows[1], Button: tea.MouseLeft}
+	point := tea.Mouse{X: sessionPickerInset + 1, Y: y, Button: tea.MouseLeft}
 	updated, cmd := model.handleMouse(tea.MouseClickMsg(point))
 	model = updated.(*Model)
 	if cmd != nil || model.sessionPicker == nil || model.sessionPicker.index != 1 {
@@ -176,7 +186,7 @@ func TestSessionPickerNarrowCJKRowsStayInPhysicalFrame(t *testing.T) {
 	frames = append(frames, model.View().Content)
 
 	plain := ansi.Strip(frames[len(frames)-1])
-	for _, want := range []string{"处理窄终端", "请核对工作树", "running"} {
+	for _, want := range []string{"处理窄终端", "请核对工作", "Active"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("narrow Session picker omitted %q:\n%s", want, plain)
 		}
@@ -228,24 +238,24 @@ func TestSessionPickerResponsiveWidthAndRightAlignedAges(t *testing.T) {
 			model.currentSessionID = rows[0].SessionID
 			openSessionPickerForTest(t, model)
 			frame := model.View().Content
-			g := model.sessionPicker.geometry
-			if g.width != min(112, width-4) {
-				t.Fatalf("picker width = %d, want %d", g.width, min(112, width-4))
+			state := model.sessionPicker
+			if width < 118 && state.listWidth != width || width >= 118 && state.listWidth >= width {
+				t.Fatalf("unexpected Session workbench list width %d at %d columns", state.listWidth, width)
 			}
 			lines := strings.Split(ansi.Strip(frame), "\n")
-			inset := model.overlayBorderChromeWidth() / 2
+			inset := sessionPickerInset
 			for i, age := range []string{"1m", "1h", "5d"} {
-				line := sliceByDisplayColumns(lines[g.rows[i]], g.x+inset, g.x+g.width-inset)
+				line := sliceByDisplayColumns(lines[sessionPickerScreenRow(state, i)], inset, state.listWidth-inset)
 				if !strings.HasSuffix(line, "  "+age) {
 					t.Fatalf("row %d age not right aligned: %q", i, line)
 				}
-				if width >= 80 && i == 0 && !strings.Contains(line, "running · current") {
+				if width >= 80 && i == 0 && !strings.Contains(line, "Active") {
 					t.Fatalf("row omitted Session status: %q", line)
 				}
-				if i == 0 && !strings.HasPrefix(line, "> 会话") {
+				if i == 0 && !strings.HasPrefix(line, "›   会") {
 					t.Fatalf("title not left aligned: %q", line)
 				}
-				if i == 1 && width >= 36 && !strings.HasPrefix(line, "  Summary from prompt") {
+				if i == 1 && width >= 36 && !strings.HasPrefix(line, "    Summary") {
 					t.Fatalf("prompt fallback not left aligned: %q", line)
 				}
 			}
@@ -282,28 +292,31 @@ func TestSessionPickerHoverKeepsVisibleRowsStationary(t *testing.T) {
 	frames := []string{model.View().Content}
 	model.Update(keyPress("end"))
 	frames = append(frames, model.View().Content)
-	g := model.sessionPicker.geometry
-	start := model.sessionPicker.offset
+	state := model.sessionPicker
+	start := state.offset
+	visible := state.visible
 	if start == 0 {
 		t.Fatal("End did not scroll the Session list")
 	}
-	for _, row := range []int{start, start + 2, start + 1} {
-		_, cmd := model.Update(tea.MouseMotionMsg{X: g.x + 3, Y: g.rows[row]})
+	first := state.lines[start].row
+	for _, row := range []int{first, first + 2, first + 1} {
+		y := sessionPickerScreenRow(state, row)
+		_, cmd := model.Update(tea.MouseMotionMsg{X: sessionPickerInset + 1, Y: y})
 		if cmd != nil || model.sessionPicker == nil || model.sessionPicker.index != row {
 			t.Fatalf("hover did not select row %d without attaching", row)
 		}
 		frames = append(frames, model.View().Content)
-		if model.sessionPicker.offset != start || !slices.Equal(g.rows, model.sessionPicker.geometry.rows) {
+		if model.sessionPicker.offset != start || !maps.Equal(visible, state.visible) {
 			t.Fatal("hover moved the visible Session rows")
 		}
-		line := strings.Split(ansi.Strip(frames[len(frames)-1]), "\n")[g.rows[row]]
-		if !strings.Contains(line, "> "+rows[row].Title) {
+		line := strings.Split(ansi.Strip(frames[len(frames)-1]), "\n")[y]
+		if !strings.Contains(line, "›   "+rows[row].Title) {
 			t.Fatalf("hover selection was not rendered: %q", line)
 		}
 	}
 	selected := model.sessionPicker.index
-	for _, x := range []int{0, g.x, g.x + 1, g.x + g.width - 1, model.width - 1} {
-		model.Update(tea.MouseMotionMsg{X: x, Y: g.rows[start]})
+	for _, x := range []int{0, sessionPickerInset - 1, state.listWidth - sessionPickerInset, model.width - 1} {
+		model.Update(tea.MouseMotionMsg{X: x, Y: sessionPickerScreenRow(state, first)})
 		if model.sessionPicker.index != selected {
 			t.Fatalf("hover on border/outside at x=%d changed selection", x)
 		}
@@ -332,9 +345,9 @@ func TestSessionPickerScrollKeepsSelectionVisible(t *testing.T) {
 		key   string
 		index int
 	}{
-		{key: "pgdown", index: 7},
-		{key: "pgdown", index: 14},
-		{key: "pgup", index: 7},
+		{key: "pgdown", index: 11},
+		{key: "pgdown", index: 22},
+		{key: "pgup", index: 11},
 		{key: "home", index: 0},
 		{key: "end", index: 29},
 		{key: "up", index: 28},
@@ -342,23 +355,22 @@ func TestSessionPickerScrollKeepsSelectionVisible(t *testing.T) {
 		model.Update(keyPress(tt.key))
 		model.View()
 		state := model.sessionPicker
-		if state.index != tt.index || state.geometry.rows[state.index] < 0 {
+		if state.index != tt.index || sessionPickerScreenRow(state, state.index) < 0 {
 			t.Fatalf("%s: selection = %d, want visible row %d", tt.key, state.index, tt.index)
 		}
 	}
 	model.Update(keyPress("home"))
 	model.View()
 	for i := 1; i <= 10; i++ {
-		g := model.sessionPicker.geometry
-		model.Update(tea.MouseWheelMsg{X: g.x + 3, Y: g.rows[model.sessionPicker.index], Button: tea.MouseWheelDown})
+		model.Update(tea.MouseWheelMsg{X: sessionPickerInset + 1, Y: sessionPickerScreenRow(model.sessionPicker, model.sessionPicker.index), Button: tea.MouseWheelDown})
 		model.View()
-		if model.sessionPicker.index != i || model.sessionPicker.geometry.rows[i] < 0 {
+		if model.sessionPicker.index != i || sessionPickerScreenRow(model.sessionPicker, i) < 0 {
 			t.Fatalf("wheel: row %d not selected and visible", i)
 		}
 	}
 	model.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
 	model.View()
-	if model.sessionPicker.geometry.rows[model.sessionPicker.index] < 0 {
+	if sessionPickerScreenRow(model.sessionPicker, model.sessionPicker.index) < 0 {
 		t.Fatal("resize hid the selected Session")
 	}
 }
@@ -370,16 +382,15 @@ func TestSessionPickerMouseReleaseRequiresSameSession(t *testing.T) {
 			model := newSessionPickerTestModel(t, 100, 24, rows, nil)
 			openSessionPickerForTest(t, model)
 			model.View()
-			g := model.sessionPicker.geometry
-			point := tea.Mouse{X: g.x + 3, Y: g.rows[0], Button: tea.MouseLeft}
+			point := tea.Mouse{X: sessionPickerInset + 1, Y: sessionPickerScreenRow(model.sessionPicker, 0), Button: tea.MouseLeft}
 			model.Update(tea.MouseClickMsg(point))
 			switch target {
 			case "other row":
-				point.Y = g.rows[1]
+				point.Y = sessionPickerScreenRow(model.sessionPicker, 1)
 			case "outside":
 				point.X = 0
 			case "border":
-				point.X = g.x
+				point.X = sessionPickerInset - 1
 			case "reordered row":
 				model.Update(sessionPickerResultMsg{request: model.sessionPicker.request, rows: []ResumeCandidate{rows[1], rows[0]}})
 				model.View()
@@ -394,21 +405,13 @@ func TestSessionPickerMouseReleaseRequiresSameSession(t *testing.T) {
 	}
 }
 
-func TestSessionPickerMouseCloseUsesRenderedTarget(t *testing.T) {
-	for _, width := range []int{36, 100} {
-		model := newSessionPickerTestModel(t, width, 24, nil, nil)
-		openSessionPickerForTest(t, model)
-		frame := ansi.Strip(model.View().Content)
-		g := model.sessionPicker.geometry
-		if got := sliceByDisplayColumns(strings.Split(frame, "\n")[g.closeY], g.closeX, g.closeX+3); got != "[x]" {
-			t.Fatalf("close geometry points at %q, not ×", got)
-		}
-		model.Update(tea.MouseClickMsg{X: g.closeX, Y: g.closeY, Button: tea.MouseLeft})
-		_, cmd := model.Update(tea.MouseReleaseMsg{X: g.closeX, Y: g.closeY, Button: tea.MouseNone})
-		if cmd != nil || model.sessionPicker != nil {
-			t.Fatal("clicking × did not close the picker without attaching")
+func sessionPickerScreenRow(state *sessionPickerState, index int) int {
+	for y, row := range state.visible {
+		if row == index {
+			return y
 		}
 	}
+	return -1
 }
 
 func newSessionPickerTestModel(t *testing.T, width, height int, rows []ResumeCandidate, execute func(Submission) TaskResultMsg) *Model {

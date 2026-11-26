@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 // SessionClient is the principal-bound Control contract consumed by a
@@ -69,7 +70,26 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 			info.Capabilities = append(info.Capabilities, capability)
 		}
 	}
+	if service, ok := c.service.(SessionWorkbenchService); ok && service.HasSessionWorkbench() {
+		info.Capabilities = append(info.Capabilities, CapabilitySessionWorkbench)
+	}
 	return info, nil
+}
+
+func (c *boundSessionClient) ListSessionWorkbench(ctx context.Context, request SessionWorkbenchRequest) (SessionWorkbenchPage, error) {
+	service, ok := c.service.(SessionWorkbenchService)
+	if !ok {
+		return SessionWorkbenchPage{}, errorcode.New(errorcode.Unsupported, "Session workbench unavailable")
+	}
+	return service.ListSessionWorkbench(ctx, c.boundPrincipal(), request)
+}
+
+func (c *boundSessionClient) AcknowledgeSessionRead(ctx context.Context, id string, receipt SessionReadReceipt) error {
+	service, ok := c.service.(SessionWorkbenchService)
+	if !ok {
+		return errorcode.New(errorcode.Unsupported, "Session workbench unavailable")
+	}
+	return service.AcknowledgeSessionRead(ctx, c.boundPrincipal(), id, receipt)
 }
 
 func (c *boundSessionClient) ListSessions(ctx context.Context, request ListSessionsRequest) (SessionList, error) {
@@ -123,3 +143,4 @@ func (c *boundSessionClient) boundPrincipal() Principal {
 }
 
 var _ SessionClient = (*boundSessionClient)(nil)
+var _ SessionWorkbenchClient = (*boundSessionClient)(nil)

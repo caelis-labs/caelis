@@ -2,6 +2,7 @@ package tuikit
 
 import (
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 func (t Theme) FrameStyle() lipgloss.Style {
@@ -77,6 +78,15 @@ func (t Theme) InputSelectionStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(t.InputSelectionFg).
 		Background(t.InputSelectionBg)
+}
+
+// ListSelectionStyle renders a focused row on an inverse, theme-colored surface.
+func (t Theme) ListSelectionStyle() lipgloss.Style {
+	style := lipgloss.NewStyle().Bold(true)
+	if t.TextPrimary == nil || t.NoColor || t.Profile == colorprofile.ANSI {
+		return style.Reverse(true)
+	}
+	return style.Background(t.TextPrimary).Foreground(t.ReadableTextColor(validationBackground(t), t.TextPrimary))
 }
 
 // ---------------------------------------------------------------------------

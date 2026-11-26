@@ -66,7 +66,8 @@ func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn controlpro
 func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent {
 	var out []TranscriptEvent
 	for _, env := range events {
-		out = append(out, transcript.ProjectReplayEvent(env, tuiTranscriptProjector{desktopWorld: desktopWorldProjection(env)})...)
+		projected := transcript.ProjectReplayEvent(env, tuiTranscriptProjector{desktopWorld: desktopWorldProjection(env)})
+		out = append(out, markSessionResultProjection(env, projected)...)
 	}
 	return out
 }

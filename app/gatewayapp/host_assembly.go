@@ -86,6 +86,15 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
+	workbenchDB, _, err := openControlStoreDatabase(storeDir)
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
+	stack.workbenchDB = workbenchDB
+	stack.composition.authorities.sessionWorkbench, err = appserver.NewSessionWorkbenchStore(context.Background(), workbenchDB)
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
 
 	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions, SessionProfiles: stack.composition.authorities.sessionProfiles}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
@@ -103,6 +112,8 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		ParticipantHandles:        participantHandles,
 		Sessions:                  stack.composition.sessions,
 		SessionActivity:           runtimeStateReader,
+		ActiveSessions:            runtimeStateReader,
+		SessionWorkbench:          stack.composition.authorities.sessionWorkbench,
 		ResolveWorkspaceDirectory: workspaceidentity.CanonicalDirectory,
 	})
 	if err != nil {

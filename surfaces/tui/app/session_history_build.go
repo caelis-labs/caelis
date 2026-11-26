@@ -107,6 +107,12 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 		return cmd
 	}
 	b := build.model
+	confirmed := uint64(0)
+	if sameSession && m.sessionRead.sessionID == b.sessionRead.sessionID {
+		confirmed = m.sessionRead.confirmed
+	}
+	m.sessionRead = b.sessionRead
+	m.sessionRead.confirmed = confirmed
 	m.sessionHistoryBefore = build.before
 	m.doc = b.doc
 	m.seenCompactCheckpoints = b.seenCompactCheckpoints

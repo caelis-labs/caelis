@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -443,6 +444,10 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if base.ListSessions == nil {
 		base.ListSessions = sessionListLoader(service)
+	}
+	if workbench, ok := service.(appserver.SessionWorkbenchClient); ok {
+		base.SessionWorkbench = workbench.ListSessionWorkbench
+		base.AcknowledgeSessionRead = workbench.AcknowledgeSessionRead
 	}
 
 	if base.SlashArgComplete == nil {

@@ -57,6 +57,22 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 		clauses = append(clauses, "cwd = ? COLLATE caelis_session_cwd")
 		args = append(args, cwd)
 	}
+	for _, filter := range []struct {
+		ids    []string
+		clause string
+	}{
+		{req.IncludeIDs, "session_id IN (SELECT value FROM json_each(?))"},
+		{req.ExcludeIDs, "session_id NOT IN (SELECT value FROM json_each(?))"},
+	} {
+		if len(filter.ids) != 0 {
+			encoded, err := json.Marshal(filter.ids)
+			if err != nil {
+				return session.SessionList{}, err
+			}
+			clauses = append(clauses, filter.clause)
+			args = append(args, string(encoded))
+		}
+	}
 	if encoded := strings.TrimSpace(req.Cursor); encoded != "" {
 		cursor, err := session.DecodeSessionListCursor(encoded)
 		if err != nil {

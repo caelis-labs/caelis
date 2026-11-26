@@ -674,6 +674,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case msg.String() == "left" && m.textarea.Value() == "" && len(m.inputAttachments) == 0:
+		return m, m.openSessionPicker()
 	case isViewportEndKey(msg) && (!m.isViewportFollowTail() || !m.viewport.AtBottom()):
 		m.setViewportFollowState(viewportFollowTail)
 		if m.offscreenViewportDirty || m.viewportSyncPending {
@@ -1172,7 +1174,6 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, m.handleWizardOverlayPaste(msg)
 	}
 	if m.sessionPicker != nil {
-		m.sessionPicker.setQuery(m.sessionPicker.query + strings.ReplaceAll(normalizeClipboardText(msg.String()), "\n", " "))
 		return m, nil
 	}
 	if m.subagentOverlay != nil {

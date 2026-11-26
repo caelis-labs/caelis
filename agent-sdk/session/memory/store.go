@@ -135,7 +135,17 @@ func (s *Store) ListSessions(
 	defer s.mu.RUnlock()
 
 	rows := make([]session.SessionSummary, 0, len(s.sessions))
+	included, excluded := make(map[string]bool, len(req.IncludeIDs)), make(map[string]bool, len(req.ExcludeIDs))
+	for _, id := range req.IncludeIDs {
+		included[id] = true
+	}
+	for _, id := range req.ExcludeIDs {
+		excluded[id] = true
+	}
 	for _, record := range s.sessions {
+		if id := record.session.SessionID; excluded[id] || len(included) != 0 && !included[id] {
+			continue
+		}
 		if req.AppName != "" && record.session.AppName != strings.TrimSpace(req.AppName) {
 			continue
 		}

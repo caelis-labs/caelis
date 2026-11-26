@@ -487,6 +487,12 @@ type TurnEventObserver interface {
 	ObserveTurnEvent(context.Context, eventstream.Envelope) error
 }
 
+// TurnResultObserver consumes committed visible result positions even when the
+// live feed omits their duplicate narrative. Callbacks are serialized per Turn.
+type TurnResultObserver interface {
+	ObserveTurnResult(context.Context, uint64)
+}
+
 type TurnEventObserverFunc func(context.Context, eventstream.Envelope) error
 
 func (f TurnEventObserverFunc) ObserveTurnEvent(ctx context.Context, envelope eventstream.Envelope) error {

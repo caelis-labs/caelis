@@ -529,6 +529,9 @@ type ListSessionsRequest struct {
 	CWD    string `json:"cwd,omitempty"`
 	Cursor string `json:"cursor,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
+	// IncludeIDs and ExcludeIDs filter the directory before applying the page limit.
+	IncludeIDs []string `json:"include_ids,omitempty"`
+	ExcludeIDs []string `json:"exclude_ids,omitempty"`
 }
 
 // ActorRef identifies the actor associated with one event.

@@ -7,10 +7,8 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-// toolOutputColor derives quieter transcript roles from the selected palette.
-// It never changes syntax colors; terminal conversion and the normal text
-// contrast floor take precedence over the requested visual separation.
-func toolOutputColor(t Theme, strength, contrast float64) color.Color {
+// subduedTextColor quiets secondary text without dropping below its contrast floor.
+func subduedTextColor(t Theme, strength, contrast float64) color.Color {
 	if t.NoColor {
 		return nil
 	}

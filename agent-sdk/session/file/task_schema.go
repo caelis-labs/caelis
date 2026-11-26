@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS tasks_session_updated_idx ON tasks(session_id, updated_at_ns DESC);
 CREATE INDEX IF NOT EXISTS tasks_session_kind_handle_idx ON tasks(session_id, kind, handle);
+CREATE INDEX IF NOT EXISTS tasks_running_session_idx ON tasks(session_id) WHERE running != 0;
 `)
 	if err != nil {
 		return fmt.Errorf("agent-sdk/session/file: initialize task table: %w", err)
