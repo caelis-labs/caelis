@@ -237,7 +237,7 @@ func (s *sessionPickerState) groupRows() {
 		s.lines = append(s.lines, sessionPickerLine{heading: heading, row: -1})
 		for _, row := range groups[key] {
 			s.positions = append(s.positions, len(s.lines))
-			s.lines = append(s.lines, sessionPickerLine{row: len(s.rows)})
+			s.lines = append(s.lines, sessionPickerLine{heading: heading, row: len(s.rows)})
 			s.rows = append(s.rows, row)
 		}
 	}
@@ -253,6 +253,32 @@ func (s *sessionPickerState) groupRows() {
 const sessionPickerMore = "\x00more"
 
 func (s *sessionPickerState) lastIndex() int { return len(s.positions) - 1 }
+
+// scrollList keeps the selection visible and returns the heading to repeat
+// when the list starts inside a workspace group.
+func (s *sessionPickerState) scrollList(height int) string {
+	if len(s.positions) == 0 {
+		return ""
+	}
+	position := s.positions[s.index]
+	lastOffset := max(0, len(s.lines)-height)
+	if height > 1 && s.lines[lastOffset].row >= 0 && s.lines[lastOffset].heading != "" {
+		lastOffset++
+	}
+	s.offset = min(clampInt(s.offset, max(0, position-height+1), position), lastOffset)
+	line := s.lines[s.offset]
+	if height == 1 || line.row < 0 || line.heading == "" {
+		return ""
+	}
+	if position-s.offset == height-1 {
+		s.offset++ // The repeated heading also occupies a terminal row.
+		line = s.lines[s.offset]
+	}
+	if line.row >= 0 {
+		return line.heading
+	}
+	return ""
+}
 
 func (s *sessionPickerState) scrollDetails(delta int) {
 	s.detailsOffset = clampInt(s.detailsOffset+delta, 0, s.detailsOverflow)
@@ -318,6 +344,12 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 		next = state.lastIndex()
 	case "enter", "right":
 		return m.selectSessionPicker()
+	case "n":
+		if m.cfg.executeLineCmd == nil && m.cfg.ExecuteLine == nil {
+			return nil
+		}
+		m.closeSessionPicker()
+		return m.executeLineCmd(Submission{Text: "/new"})
 	case "r":
 		return m.loadSessionPicker("")
 	default:

@@ -52,8 +52,9 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 			previous = index
 		}
 	}
-	inOrder("\n  a ", "近期活跃", "Active", "Confirmed error", "Failed", "\n  b ", "New result", "Ready", "Show more")
-	if strings.Contains(frame, "first-id") || !strings.Contains(frame, "● 近期活跃") || !strings.Contains(frame, "Details") {
+	inOrder("\n a ", "近期活跃", "Active", "Confirmed error", "Failed", "\n b ", "New result", "Ready", "Show more")
+	if strings.Contains(frame, "first-id") || strings.Contains(frame, "Unread") || !strings.Contains(frame, "n New") ||
+		!strings.Contains(frame, "● 近期活跃") || !strings.Contains(frame, "Details") {
 		t.Fatalf("unexpected workbench frame:\n%s", frame)
 	}
 	lines := strings.Split(frame, "\n")
@@ -62,7 +63,7 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 		t.Fatalf("the workspaces should start after the divider: %q", first)
 	}
 	for i, line := range lines[1:] {
-		if strings.HasPrefix(line, "  b ") {
+		if strings.HasPrefix(line, " b ") {
 			list, _, _ := strings.Cut(lines[i], "│")
 			if strings.TrimSpace(list) != "" {
 				t.Fatalf("workspace groups have no blank row:\n%s", frame)
@@ -87,7 +88,7 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 }
 
 func TestSessionWorkbenchSelectionContrast(t *testing.T) {
-	const width, height = 124, 22
+	const width, height = 123, 22
 	rows := []ResumeCandidate{
 		{SessionID: "one", Title: "Review the handoff", Workspace: "/very/long/workspace/path/clients/core", Failed: true, Unread: true},
 		{SessionID: "two", Title: "Check the draft", Workspace: "/other/worktrees/core"},
@@ -130,6 +131,18 @@ func TestSessionWorkbenchSelectionContrast(t *testing.T) {
 					colorInSet(cell.Style.Fg, []color.Color{model.theme.ListSelectionStyle().GetForeground()}) {
 					t.Fatalf("selected %s lost its readable semantic color", text)
 				}
+			}
+			detailLine := lines[sessionPickerTop+2]
+			detailX := strings.LastIndex(detailLine, rows[0].Title)
+			if detailX < 0 {
+				t.Fatalf("selected title is missing from details: %q", detailLine)
+			}
+			detailTitle := screen.CellAt(displayColumns(detailLine[:detailX]), sessionPickerTop+2)
+			otherTitle := screen.CellAt(sessionPickerInset+3, sessionPickerScreenRow(model.sessionPicker, 1))
+			if detailTitle.Style.Fg == nil || otherTitle.Style.Fg == nil ||
+				diffRenderedContrast(detailTitle.Style.Fg, model.theme.AppBg) < 4.5 || diffRenderedContrast(otherTitle.Style.Fg, model.theme.AppBg) < 4.5 ||
+				colorInSet(detailTitle.Style.Fg, []color.Color{otherTitle.Style.Fg}) {
+				t.Fatal("Session titles are missing distinct readable colors")
 			}
 		})
 	}

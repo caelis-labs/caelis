@@ -1,17 +1,19 @@
 package tuiapp
 
 import (
+	"hash/crc32"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 const (
-	sessionPickerInset   = 2
+	sessionPickerInset   = 1
 	sessionPickerTop     = 2
 	sessionPickerBottom  = 2
 	sessionPickerDivider = "   │  "
@@ -57,11 +59,7 @@ func (m *Model) renderSessionPicker() string {
 	titleWidth := max(1, listWidth-statusWidth-ageWidth-2*len(gap))
 
 	state.visible = make(map[int]int, bodyHeight)
-	if len(state.positions) > 0 {
-		position := state.positions[state.index]
-		state.offset = clampInt(state.offset, max(0, position-bodyHeight+1), position)
-		state.offset = min(state.offset, max(0, len(state.lines)-bodyHeight))
-	}
+	stickyHeading := state.scrollList(bodyHeight)
 
 	tokens := m.theme.Tokens()
 	border := m.theme.DiffPanelBorderStyle()
@@ -76,14 +74,18 @@ func (m *Model) renderSessionPicker() string {
 	state.detailsOverflow = max(0, len(details)-(bodyHeight-1))
 	state.scrollDetails(0)
 	now := time.Now()
+	index := state.offset
+	groupStyle := tokens.ListMeta.Bold(true)
 	for i := range bodyHeight {
-		index := state.offset + i
 		left := ""
 		switch {
+		case i == 0 && stickyHeading != "":
+			left = groupStyle.Render(pickerPathTail(stickyHeading, titleWidth))
 		case index < len(state.lines):
 			line := state.lines[index]
+			index++
 			if line.row < 0 {
-				left = tokens.ListMeta.Render(pickerPathTail(line.heading, titleWidth))
+				left = groupStyle.Render(pickerPathTail(line.heading, titleWidth))
 			} else {
 				state.visible[sessionPickerTop+i] = line.row
 				left = m.renderSessionPickerRow(state, line.row, titleWidth, statusWidth, ageWidth, gap, now)
@@ -110,10 +112,11 @@ func (m *Model) renderSessionPicker() string {
 	key := m.theme.TextStyle().Bold(true)
 	hint := tokens.ListMeta
 	footer := key.Render("↑↓") + hint.Render(" Select   ") + key.Render("Enter/→") + hint.Render(" Open   ") +
-		key.Render("Esc") + hint.Render(" Back   ") + tokens.Accent.Render("●") + hint.Render(" Unread")
+		key.Render("Esc") + hint.Render(" Back")
 	if state.err != "" && len(state.rows) != 0 {
 		footer = hint.Render("Refresh failed   r Retry   Esc Back")
 	}
+	footer += "   " + key.Render("n") + hint.Render(" New")
 	if state.detailsOverflow > 0 {
 		footer += "   " + key.Render("⇧↑↓") + hint.Render(" Scroll details")
 	}
@@ -137,7 +140,7 @@ func (m *Model) renderSessionPickerRow(state *sessionPickerState, index, titleWi
 		if state.loading {
 			label = "Loading sessions…"
 		}
-		return style.Render(pickerCell(prefix+"   "+label, titleWidth) + strings.Repeat(" ", statusWidth+ageWidth+2*len(gap)))
+		return style.Render(pickerCell(prefix+"  "+label, titleWidth) + strings.Repeat(" ", statusWidth+ageWidth+2*len(gap)))
 	}
 
 	row := state.rows[index]
@@ -159,6 +162,7 @@ func (m *Model) renderSessionPickerRow(state *sessionPickerState, index, titleWi
 		label, statusStyle = "Ready", style
 	}
 	accent := tokens.Accent
+	titleStyle := style
 	if selected {
 		if style.GetReverse() {
 			accent, statusStyle = style, style
@@ -169,14 +173,21 @@ func (m *Model) renderSessionPickerRow(state *sessionPickerState, index, titleWi
 			}
 			accent = style.Foreground(m.theme.ReadableTextColor(accent.GetForeground(), background))
 		}
+	} else {
+		titleStyle = m.sessionTitleStyle(row.SessionID)
 	}
 	var titleCell string
-	if titleWidth >= 5 {
-		titleCell = style.Render(prefix+" ") + accent.Render(dot) + style.Render(" "+pickerCell(title, titleWidth-4))
+	if titleWidth >= 4 {
+		titleCell = style.Render(prefix) + accent.Render(dot) + titleStyle.Render(" "+pickerCell(title, titleWidth-3))
 	} else {
-		titleCell = style.Render(pickerCell(title, titleWidth))
+		titleCell = titleStyle.Render(pickerCell(title, titleWidth))
 	}
 	return titleCell + style.Render(gap) + statusStyle.Render(pickerCell(label, statusWidth)) + style.Render(gap) + muted.Render(pickerAgeCell(sessionPickerAge(row.UpdatedAt, now), ageWidth))
+}
+
+func (m *Model) sessionTitleStyle(sessionID string) lipgloss.Style {
+	titles := m.theme.Tokens().SessionTitles
+	return titles[crc32.ChecksumIEEE([]byte(sessionID))%uint32(len(titles))]
 }
 
 func pickerCell(text string, width int) string {
@@ -200,8 +211,9 @@ func (m *Model) sessionPickerDetails(width, height int) []string {
 	pathLines := wrapPickerPath(strings.ReplaceAll(tuikit.SanitizeLogText(path), "\n", `\n`), width)
 	details := []string{""}
 	titleLines := graphemeWordWrap(sessionPickerTitle(row), width)
+	titleStyle := m.sessionTitleStyle(row.SessionID).Bold(true)
 	for _, line := range titleLines[:min(len(titleLines), max(1, height-len(pathLines)-6))] {
-		details = append(details, m.theme.TitleStyle().Render(line))
+		details = append(details, titleStyle.Render(line))
 	}
 	details = append(details, "", muted.Render("Workspace"))
 	for _, line := range pathLines {

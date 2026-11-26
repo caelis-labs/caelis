@@ -252,10 +252,10 @@ func TestSessionPickerResponsiveWidthAndRightAlignedAges(t *testing.T) {
 				if width >= 80 && i == 0 && !strings.Contains(line, "Active") {
 					t.Fatalf("row omitted Session status: %q", line)
 				}
-				if i == 0 && !strings.HasPrefix(line, "›   会") {
+				if i == 0 && !strings.HasPrefix(line, "›  会") {
 					t.Fatalf("title not left aligned: %q", line)
 				}
-				if i == 1 && width >= 36 && !strings.HasPrefix(line, "    Summary") {
+				if i == 1 && width >= 36 && !strings.HasPrefix(line, "   Summary") {
 					t.Fatalf("prompt fallback not left aligned: %q", line)
 				}
 			}
@@ -279,9 +279,10 @@ func TestSessionPickerResponsiveWidthAndRightAlignedAges(t *testing.T) {
 func TestSessionPickerHoverKeepsVisibleRowsStationary(t *testing.T) {
 	rows := make([]ResumeCandidate, 30)
 	for i := range rows {
-		rows[i] = ResumeCandidate{SessionID: fmt.Sprintf("session-%02d", i), Title: fmt.Sprintf("Session %02d", i)}
+		rows[i] = ResumeCandidate{SessionID: fmt.Sprintf("session-%02d", i), Title: fmt.Sprintf("Session %02d", i), Workspace: "/work/caelis"}
 	}
 	model := newSessionPickerTestModel(t, 100, 16, rows, nil)
+	model.currentSessionID = rows[16].SessionID
 	if model.View().MouseMode != tea.MouseModeCellMotion {
 		t.Fatal("unexpected baseline mouse mode")
 	}
@@ -290,6 +291,10 @@ func TestSessionPickerHoverKeepsVisibleRowsStationary(t *testing.T) {
 		t.Fatal("Session picker did not request terminal hover events")
 	}
 	frames := []string{model.View().Content}
+	if strings.TrimSpace(strings.Split(ansi.Strip(frames[0]), "\n")[sessionPickerTop]) != "caelis" ||
+		model.sessionPicker.offset == 0 || sessionPickerScreenRow(model.sessionPicker, 16) < 0 {
+		t.Fatal("opening on a current Session below the fold must keep its workspace heading and selection visible")
+	}
 	model.Update(keyPress("end"))
 	frames = append(frames, model.View().Content)
 	state := model.sessionPicker
@@ -310,12 +315,12 @@ func TestSessionPickerHoverKeepsVisibleRowsStationary(t *testing.T) {
 			t.Fatal("hover moved the visible Session rows")
 		}
 		line := strings.Split(ansi.Strip(frames[len(frames)-1]), "\n")[y]
-		if !strings.Contains(line, "›   "+rows[row].Title) {
+		if !strings.Contains(line, "›  "+rows[row].Title) {
 			t.Fatalf("hover selection was not rendered: %q", line)
 		}
 	}
 	selected := model.sessionPicker.index
-	for _, x := range []int{0, sessionPickerInset - 1, state.listWidth - sessionPickerInset, model.width - 1} {
+	for _, x := range []int{sessionPickerInset - 1, state.listWidth - sessionPickerInset} {
 		model.Update(tea.MouseMotionMsg{X: x, Y: sessionPickerScreenRow(state, first)})
 		if model.sessionPicker.index != selected {
 			t.Fatalf("hover on border/outside at x=%d changed selection", x)

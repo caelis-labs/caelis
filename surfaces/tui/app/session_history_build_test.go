@@ -87,9 +87,13 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	m.taskStreamSubscriptions["task-old"] = subscription
 	m.pendingQueue.enqueue(pendingPromptEnqueueOptions{execLine: "old queued input", deferUntilIdle: true})
 
-	cmd := m.executeLineCmd(Submission{Text: "/new"})
-	if cmd == nil {
-		t.Fatal("/new did not dispatch")
+	m.Update(keyPress("ctrl+o"))
+	if m.sessionPicker == nil {
+		t.Fatal("Session workbench did not open")
+	}
+	_, cmd := m.Update(keyPress("n"))
+	if cmd == nil || m.sessionPicker != nil {
+		t.Fatal("n did not close the Session workbench and dispatch /new")
 	}
 	completion := cmd()
 	applyMessages()
@@ -110,6 +114,9 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	}
 	if !dismissed || m.activePrompt != nil || len(responses) != 0 || len(m.pendingQueue) != 0 || m.textarea.Value() != "" {
 		t.Fatal("/new retained old interaction or answered an approval")
+	}
+	if m.sessionDrafts["session-old"].text != "previous session draft" {
+		t.Fatal("/new did not preserve the previous Session's draft")
 	}
 	if subscription.closeCalls.Load() != 1 || len(m.taskStreamSubscriptions) != 0 {
 		t.Fatal("/new left old Task subscriptions open")

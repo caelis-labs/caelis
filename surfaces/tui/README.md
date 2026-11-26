@@ -48,7 +48,8 @@ commands with arguments remain available.
 a running turn. Left Arrow also opens it from the main conversation when the
 composer is empty. The workbench groups visible Sessions by workspace. Up/Down
 selects, Enter or Right Arrow opens, and Esc returns to the conversation.
-Switching observation preserves Session drafts and leaves running work on the Host.
+`n` starts a fresh conversation in the current workspace. Switching observation
+preserves Session drafts and leaves running work on the Host.
 
 Active Sessions have a live Turn, approval wait, or running Task. Ready Sessions
 have unread results. Failed identifies a confirmed failed main Turn. The unread
