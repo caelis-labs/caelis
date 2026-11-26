@@ -161,6 +161,8 @@ type Config struct {
 	FileComplete           func(context.Context, string, int) ([]CompletionCandidate, error)
 	SkillComplete          func(string, int) ([]CompletionCandidate, error)
 	ListSessions           func(context.Context) ([]ResumeCandidate, error)
+	SessionWorkbench       func(context.Context, appserver.SessionWorkbenchRequest) (appserver.SessionWorkbenchPage, error)
+	AcknowledgeSessionRead func(context.Context, string, appserver.SessionReadReceipt) error
 	SlashArgComplete       func(context.Context, string, string, int) ([]SlashArgCandidate, error)
 	ReadClipboardText      func() (string, error)
 	WriteClipboardText     func(string) error
@@ -195,14 +197,17 @@ type CompletionCandidate struct {
 }
 
 type ResumeCandidate struct {
-	Running   bool
-	SessionID string
-	Title     string
-	Prompt    string
-	Model     string
-	Workspace string
-	Age       string
-	UpdatedAt time.Time
+	Running      bool
+	SessionID    string
+	Title        string
+	Prompt       string
+	Model        string
+	Workspace    string
+	WorkspaceKey string
+	Unread       bool
+	Failed       bool
+	Age          string
+	UpdatedAt    time.Time
 }
 
 type SlashArgCandidate struct {
@@ -351,6 +356,7 @@ type Model struct {
 	width                   int
 	height                  int
 	focused                 bool
+	sessionRead             sessionReadState
 	clipboardImageAvailable bool
 	clipboardProbeInFlight  bool
 	nextClipboardProbe      time.Time

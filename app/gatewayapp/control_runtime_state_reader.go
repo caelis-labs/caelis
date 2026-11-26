@@ -62,6 +62,41 @@ func (r *controlRuntimeStateReader) SessionRunning(sessionID string) bool {
 	return composition.currentGateway().SessionRunning(sessionID)
 }
 
+// ActiveSessionIDs samples admitted live Turns, approvals and owned running
+// Tasks. Dormant Sessions cannot acquire activity from stale task records.
+func (r *controlRuntimeStateReader) ActiveSessionIDs(ctx context.Context) ([]string, error) {
+	r.mu.RLock()
+	registry := r.registry
+	r.mu.RUnlock()
+	if registry == nil {
+		return nil, nil
+	}
+	var active, others []string
+	for _, runtime := range registry.snapshot() {
+		if r.SessionRunning(runtime.sessionID) {
+			active = append(active, runtime.sessionID)
+		} else {
+			others = append(others, runtime.sessionID)
+		}
+	}
+	if tasks, ok := registry.tasks.(interface {
+		RunningSessionIDs(context.Context, []string) ([]string, error)
+	}); ok {
+		ids, err := tasks.RunningSessionIDs(ctx, others)
+		return append(active, ids...), err
+	}
+	for _, id := range others {
+		running, err := registry.hasRunningTasks(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if running {
+			active = append(active, id)
+		}
+	}
+	return active, nil
+}
+
 // ControlClientRuntimeState reads an activated Runtime or recovers the last
 // canonical outcome through the Host Runtime's existing journal reader.
 // Observation never assembles or retains a Session Runtime.

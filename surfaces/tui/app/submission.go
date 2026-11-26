@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
@@ -24,10 +25,11 @@ type Attachment struct {
 
 // Submission is the structured payload emitted by the composer.
 type Submission struct {
-	Text        string
-	DisplayText string
-	Attachments []Attachment
-	Mode        SubmissionMode
+	Text                string
+	DisplayText         string
+	Attachments         []Attachment
+	Mode                SubmissionMode
+	newSessionWorkspace session.WorkspaceRef
 	// localID correlates asynchronous TUI completion with the exact pending
 	// composer entry. It is presentation-local and never crosses into Control.
 	localID        uint64

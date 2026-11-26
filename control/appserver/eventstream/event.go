@@ -296,6 +296,8 @@ type Lifecycle struct {
 	State      string `json:"state,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 	StopReason string `json:"stopReason,omitempty"`
+	// ResultThroughSeq identifies the durable reply represented by the Turn's narrative.
+	ResultThroughSeq uint64 `json:"result_through_seq,omitempty,string"`
 }
 
 // ActorIdentity is the typed sender identity attached to an Agent

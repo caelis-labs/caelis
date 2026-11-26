@@ -13,6 +13,8 @@ type ClientConfig struct {
 	// unavailable directory can still be queried using its stored CWD.
 	ResolveWorkspaceDirectory func(string) (string, error)
 	SessionActivity           SessionActivityReader
+	ActiveSessions            ActiveSessionsReader
+	SessionWorkbench          *SessionWorkbenchStore
 	Commands                  CommandClient
 	State                     StateReader
 	Feeds                     FeedRegistry

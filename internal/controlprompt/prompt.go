@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
@@ -39,6 +40,9 @@ type RouterConfig struct {
 // Request carries one prompt submission into a control prompt router.
 type Request struct {
 	Submission Submission
+	// NewSessionWorkspace overrides the retained workspace when routing /new.
+	// The zero address keeps the current workspace.
+	NewSessionWorkspace session.WorkspaceRef
 	// BeforeCommand lets the submitting surface present a recognized command
 	// before dispatch. Returning an error prevents its effects.
 	BeforeCommand func(context.Context) error

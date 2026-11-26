@@ -22,7 +22,7 @@ type hostControlAssembly struct {
 	subagentHistory    *subagentHistoryService
 }
 
-func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, cursorSecret []byte) (hostControlAssembly, error) {
+func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, cursorSecret []byte, events appserver.SessionWorkbenchEvents) (hostControlAssembly, error) {
 	taskOutput := controltaskstream.NewRecorder(
 		stack.composition.authorities.streamSpool,
 		stack.composition.authorities.diagnostics,
@@ -86,6 +86,19 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
+	workbenchDB, _, err := openControlStoreDatabase(storeDir)
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
+	stack.workbenchDB = workbenchDB
+	workbench, err := appserver.NewSessionWorkbenchStore(context.Background(), workbenchDB, events)
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
+	if err := workbench.RecoverPending(context.Background()); err != nil {
+		return hostControlAssembly{}, err
+	}
+	stack.composition.authorities.sessionWorkbench = workbench
 
 	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions, SessionProfiles: stack.composition.authorities.sessionProfiles}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
@@ -103,6 +116,8 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		ParticipantHandles:        participantHandles,
 		Sessions:                  stack.composition.sessions,
 		SessionActivity:           runtimeStateReader,
+		ActiveSessions:            runtimeStateReader,
+		SessionWorkbench:          stack.composition.authorities.sessionWorkbench,
 		ResolveWorkspaceDirectory: workspaceidentity.CanonicalDirectory,
 	})
 	if err != nil {

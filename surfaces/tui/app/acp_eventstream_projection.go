@@ -9,7 +9,20 @@ import (
 )
 
 func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEvent {
-	return transcript.ProjectACPEventToEvents(env, tuiTranscriptProjector{desktopWorld: desktopWorldProjection(env)})
+	return markSessionResultProjection(env, transcript.ProjectACPEventToEvents(env, tuiTranscriptProjector{desktopWorld: desktopWorldProjection(env)}))
+}
+
+func markSessionResultProjection(env eventstream.Envelope, events []TranscriptEvent) []TranscriptEvent {
+	for i := range events {
+		event := &events[i]
+		switch {
+		case event.Kind == TranscriptEventNarrative && event.NarrativeKind == TranscriptNarrativeAssistant:
+			event.ResultSequence = eventstream.SessionResultSequence(env)
+		case event.Kind == TranscriptEventLifecycle:
+			event.ResultSequence = eventstream.TerminalSessionResultSequence(env)
+		}
+	}
+	return events
 }
 
 // projectACPEventToTranscriptEvents resolves display handles without changing

@@ -37,6 +37,7 @@ type runtimeHostAuthorities struct {
 	mcp                     *hostMCP
 	policyRuleCommands      appserver.PolicyRuleCommandService
 	sessionProfiles         *sessionprofile.Store
+	sessionWorkbench        *appserver.SessionWorkbenchStore
 	applicationChildClients *applicationChildClientFactory
 	collaboration           *collaboration.Service
 	collaborationDone       <-chan struct{}

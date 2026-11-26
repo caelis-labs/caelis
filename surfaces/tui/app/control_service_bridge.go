@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -444,6 +445,10 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 	if base.ListSessions == nil {
 		base.ListSessions = sessionListLoader(service)
 	}
+	if workbench, ok := service.(appserver.SessionWorkbenchClient); ok {
+		base.SessionWorkbench = workbench.ListSessionWorkbench
+		base.AcknowledgeSessionRead = workbench.AcknowledgeSessionRead
+	}
 
 	if base.SlashArgComplete == nil {
 		base.SlashArgComplete = func(requestCtx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
@@ -574,12 +579,15 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("control prompt router factory returned nil")}}
 	}
 	displayText := strings.TrimSpace(firstNonEmpty(sub.DisplayText, sub.Text))
-	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: controlprompt.Submission{
-		Text:        sub.Text,
-		DisplayText: displayText,
-		Mode:        sub.Mode,
-		Attachments: convertAttachments(sub.Attachments),
-	}})
+	promptResult, err := router.Route(ctx, controlprompt.Request{
+		Submission: controlprompt.Submission{
+			Text:        sub.Text,
+			DisplayText: displayText,
+			Mode:        sub.Mode,
+			Attachments: convertAttachments(sub.Attachments),
+		},
+		NewSessionWorkspace: sub.newSessionWorkspace,
+	})
 	if err != nil {
 		if sender != nil {
 			sender.markRunAdmitted(ctx)

@@ -435,7 +435,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		observer, releaseTurn := s.controlTurnObserver(active.SessionRef, req.OperationID)
+		observer, releaseTurn := s.controlMainTurnObserver(active.SessionRef, req.OperationID)
 		turn := kernelimpl.BeginTurnRequest{
 			SessionRef: active.SessionRef, RuntimeContext: s.controlRuntimeContext(ctx, active),
 			Input: req.Input, DisplayInput: req.DisplayInput, ContentParts: req.ContentParts,

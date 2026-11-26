@@ -780,7 +780,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = adapter.Close() })
-	if err := adapter.ResetSession(context.Background()); err != nil {
+	if err := adapter.ResetSession(context.Background(), session.WorkspaceRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if client.create.OperationID != "" || adapter.clientSessionID() != "" {
@@ -809,7 +809,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	if !replay.closed {
 		t.Fatal("closing reconnect retained observation")
 	}
-	if err := adapter.ResetSession(context.Background()); err != nil {
+	if err := adapter.ResetSession(context.Background(), session.WorkspaceRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if adapter.clientSessionID() != "" {
@@ -952,7 +952,7 @@ func TestResetSessionDetachesActiveTurnWithoutCancellingHostWork(t *testing.T) {
 	)
 	adapter.setActiveTurn(&sessionClientTurn{turn: target})
 
-	if err := adapter.ResetSession(context.Background()); err != nil {
+	if err := adapter.ResetSession(context.Background(), session.WorkspaceRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if target.closeCalls != 1 || target.cancelCalls != 0 {

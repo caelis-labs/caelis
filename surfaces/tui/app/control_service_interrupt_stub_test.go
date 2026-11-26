@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
@@ -58,7 +59,7 @@ func (s *interruptBridgeStub) Interrupt(context.Context) error {
 	s.mu.Unlock()
 	return err
 }
-func (*interruptBridgeStub) ResetSession(context.Context) error { return nil }
+func (*interruptBridgeStub) ResetSession(context.Context, session.WorkspaceRef) error { return nil }
 func (*interruptBridgeStub) ResumeSession(context.Context, string) (controlprompt.SessionSnapshot, error) {
 	return controlprompt.SessionSnapshot{}, nil
 }

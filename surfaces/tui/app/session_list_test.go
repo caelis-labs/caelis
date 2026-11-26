@@ -23,7 +23,7 @@ func TestSessionPickerListsWithoutInspectingSessions(t *testing.T) {
 		t.Fatalf("listed %d rows, want 200", len(m.sessionPicker.rows))
 	}
 	frame := m.View().Content
-	if plain := ansi.Strip(frame); strings.Contains(plain, "Loading sessions") || !strings.Contains(plain, "Earlier work 000") || !strings.Contains(plain, "running") {
+	if plain := ansi.Strip(frame); strings.Contains(plain, "Loading sessions") || !strings.Contains(plain, "Earlier work 000") || !strings.Contains(plain, "Active") {
 		t.Fatalf("directory result was not rendered:\n%s", plain)
 	}
 	updates := renderFullscreenFramesForTest(t, m.width, m.height, frame)

@@ -10,6 +10,9 @@ import (
 
 func sessionServerInfo(info appserver.ServerInfo, services appserver.AppServerServices) appserver.ServerInfo {
 	info = normalizeServerInfo(info)
+	if workbench, ok := services.Sessions.(appserver.SessionWorkbenchService); ok && workbench.HasSessionWorkbench() && !slices.Contains(info.Capabilities, appserver.CapabilitySessionWorkbench) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilitySessionWorkbench)
+	}
 	if !slices.Contains(info.Capabilities, appserver.CapabilityIdleCommandAdmission) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityIdleCommandAdmission)
 	}

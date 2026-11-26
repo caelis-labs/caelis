@@ -37,9 +37,11 @@ type Tokens struct {
 	Surface2 lipgloss.Style // raised / hover / active background
 
 	// ── Text hierarchy ─────────────────────────────────────────────
-	TextPrimary   lipgloss.Style // main body text
-	TextSecondary lipgloss.Style // secondary labels, meta
-	TextMuted     lipgloss.Style // placeholders, disabled
+	TextPrimary   lipgloss.Style    // main body text
+	TextSecondary lipgloss.Style    // secondary labels, meta
+	TextMuted     lipgloss.Style    // placeholders, disabled
+	ListMeta      lipgloss.Style    // directory headings and row metadata
+	SessionTitles [6]lipgloss.Style // stable, non-semantic title accents
 
 	// ── Semantic signals ───────────────────────────────────────────
 	Accent  lipgloss.Style // brand / interactive accent
@@ -123,6 +125,11 @@ func (t *Theme) ToolActionStyle(role ToolActionRole) lipgloss.Style {
 
 // resolveTokens derives Tokens from a fully populated Theme.
 func resolveTokens(t Theme) Tokens {
+	metadata := quietStyle(t, subduedTextColor(t, .68, normalTextContrast))
+	var sessionTitles [6]lipgloss.Style
+	for i, foreground := range [...]color.Color{t.Accent, t.Success, t.AgentMessageReceivedFg, t.Warning, t.UserPrefixFg, t.Error} {
+		sessionTitles[i] = fgStyle(t.ReadableTextColor(foreground, t.AppBg))
+	}
 	return Tokens{
 		// Surfaces
 		Surface0: bgStyle(t.AppBg),
@@ -133,6 +140,8 @@ func resolveTokens(t Theme) Tokens {
 		TextPrimary:   fgStyle(t.TextPrimary),
 		TextSecondary: quietStyle(t, t.TextSecondary),
 		TextMuted:     quietStyle(t, t.MutedText),
+		ListMeta:      metadata,
+		SessionTitles: sessionTitles,
 
 		// Signals
 		Accent:  fgStyle(t.Accent),
@@ -187,8 +196,8 @@ func resolveTokens(t Theme) Tokens {
 		ToolResult:     quietStyle(t, t.SecondaryText),
 		ToolErrorMark:  fgStyle(t.Error).Bold(true),
 		ToolError:      quietStyle(t, firstColor(t.TextSecondary, t.SecondaryText, t.MutedText)),
-		ToolOutput:     quietStyle(t, toolOutputColor(t, .86, 6)),
-		ToolOutputMeta: quietStyle(t, toolOutputColor(t, .68, normalTextContrast)),
+		ToolOutput:     quietStyle(t, subduedTextColor(t, .86, 6)),
+		ToolOutputMeta: metadata,
 
 		// Markdown / prose
 		MarkdownHeading:    fgStyle(t.TextPrimary).Bold(true),

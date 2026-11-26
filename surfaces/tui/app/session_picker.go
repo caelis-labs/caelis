@@ -7,42 +7,65 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
+const sessionPickerPageSize = 40
+
+type sessionPickerLine struct {
+	heading string
+	row     int // -1 for a heading or spacer.
+}
+
 type sessionPickerState struct {
-	closeButton overlayCloseButton
-	rows        []ResumeCandidate
-	allRows     []ResumeCandidate
-	query       string
-	index       int
-	offset      int
-	loading     bool
-	err         string
-	request     uint64
-	cancel      context.CancelFunc
-	geometry    subagentOverlayGeometry
-	pressed     string
+	rows             []ResumeCandidate
+	lines            []sessionPickerLine
+	positions        []int
+	index            int
+	offset           int
+	loading          bool
+	loadingCursor    string
+	morePending      bool
+	paged            bool
+	err              string
+	failedCursor     string
+	headCursor       string // First continuation of the current traversal.
+	nextCursor       string
+	request          uint64
+	refresh          uint64
+	cancel           context.CancelFunc
+	listWidth        int
+	visible          map[int]int // physical terminal row -> selectable row index
+	pressed          string
+	detailsSessionID string
+	detailsOffset    int
+	detailsOverflow  int
 }
 
 type sessionPickerResultMsg struct {
-	request uint64
-	rows    []ResumeCandidate
-	err     error
+	request   uint64
+	rows      []ResumeCandidate
+	refreshed []ResumeCandidate
+	checked   []string
+	cursor    string
+	next      string
+	err       error
 }
 
-type sessionPickerRefreshMsg struct{ request uint64 }
+type sessionPickerRefreshMsg struct{ request, refresh uint64 }
 
 func (m *Model) openSessionPicker() tea.Cmd {
-	if m.sessionPicker != nil {
+	if m.sessionPicker != nil || m.sessionSwitchPending {
 		return nil
 	}
 	m.clearInputOverlays()
 	m.sessionPickerSeq++
 	m.sessionPicker = &sessionPickerState{request: m.sessionPickerSeq}
-	return m.loadSessionPicker()
+	return m.loadSessionPicker("")
 }
 
 func (m *Model) closeSessionPicker() {
@@ -50,24 +73,57 @@ func (m *Model) closeSessionPicker() {
 		m.sessionPicker.cancel()
 	}
 	m.sessionPicker = nil
+	if m.viewportDirty {
+		m.viewportDirty = false
+		m.syncViewportContent()
+	}
 }
 
-func (m *Model) loadSessionPicker() tea.Cmd {
+func (m *Model) loadSessionPicker(cursor string) tea.Cmd {
 	state := m.sessionPicker
-	if state == nil || state.loading {
-		return nil
-	}
-	if m.cfg.ListSessions == nil {
+	if state == nil || state.loading || m.cfg.SessionWorkbench == nil && m.cfg.ListSessions == nil {
 		return nil
 	}
 	state.loading = true
+	state.loadingCursor = cursor
+	state.refresh++
 	ctx, cancel := context.WithCancel(contextOrBackground(m.cfg.Context))
 	state.cancel = cancel
-	request, list := state.request, m.cfg.ListSessions
+	request, workbench, list := state.request, m.cfg.SessionWorkbench, m.cfg.ListSessions
+	params := appserver.SessionWorkbenchRequest{Cursor: cursor, Limit: sessionPickerPageSize}
+	if cursor == "" && len(state.visible) != 0 {
+		for y := sessionPickerTop; y < m.height && len(params.RefreshIDs) < 100; y++ {
+			if index, ok := state.visible[y]; ok && index < len(state.rows) {
+				params.RefreshIDs = append(params.RefreshIDs, state.rows[index].SessionID)
+			}
+		}
+	}
 	return func() tea.Msg {
+		if workbench != nil {
+			page, err := workbench(ctx, params)
+			var checked []string
+			if page.Refreshed != nil {
+				checked = params.RefreshIDs
+			}
+			return sessionPickerResultMsg{
+				request: request, cursor: cursor, next: page.NextCursor, err: err,
+				rows: pickerRows(page.Sessions), refreshed: pickerRows(page.Refreshed), checked: checked,
+			}
+		}
 		rows, err := list(ctx)
 		return sessionPickerResultMsg{request: request, rows: rows, err: err}
 	}
+}
+
+func pickerRows(rows []appserver.SessionWorkbenchRow) []ResumeCandidate {
+	out := make([]ResumeCandidate, len(rows))
+	for i, row := range rows {
+		out[i] = ResumeCandidate{
+			SessionID: row.SessionID, Workspace: row.CWD, WorkspaceKey: row.WorkspaceKey,
+			Title: row.Title, UpdatedAt: row.UpdatedAt, Running: row.Active, Unread: row.Unread, Failed: row.Failed,
+		}
+	}
+	return out
 }
 
 func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
@@ -76,39 +132,204 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 		return nil
 	}
 	state.loading = false
+	state.loadingCursor = ""
+	morePending := state.morePending
+	state.morePending = false
 	if state.cancel != nil {
 		state.cancel()
 		state.cancel = nil
 	}
+	if msg.cursor != "" && errorcode.Is(msg.err, errorcode.Conflict) {
+		// Keep the mounted rows and selection while replacing the stale traversal.
+		state.headCursor = ""
+		state.nextCursor = ""
+		state.paged = false
+		state.err = ""
+		state.failedCursor = ""
+		return m.loadSessionPicker("")
+	}
 	if msg.err != nil {
 		state.err = msg.err.Error()
+		state.failedCursor = msg.cursor
 	} else {
-		selected := m.currentSessionID
-		if state.index < len(state.rows) {
-			selected = state.rows[state.index].SessionID
+		state.err = ""
+		state.failedCursor = ""
+		selected := state.selectionID()
+		if len(state.rows) == 0 {
+			selected = m.currentSessionID
 		}
-		state.allRows, state.err = msg.rows, ""
-		state.filterRows()
-		state.geometry = subagentOverlayGeometry{}
-		state.index = clampInt(state.index, 0, maxInt(0, len(state.rows)-1))
+		if msg.cursor != "" {
+			state.nextCursor = msg.next
+			state.paged = true
+		} else if !state.paged || msg.next == "" || appserver.SessionWorkbenchPriorityChanged(state.headCursor, msg.next) {
+			state.headCursor = msg.next
+			state.nextCursor = msg.next
+			state.paged = false
+		}
+		if m.cfg.SessionWorkbench == nil {
+			state.rows = msg.rows
+		} else {
+			state.mergeRows(msg.rows, msg.refreshed, msg.checked)
+		}
+		state.groupRows()
+		state.index = clampInt(state.index, 0, max(0, state.lastIndex()))
 		for i, row := range state.rows {
 			if row.SessionID == selected {
 				state.index = i
 				break
 			}
 		}
+		state.visible = nil
+		if morePending && state.index == state.lastIndex() && state.nextCursor != "" {
+			return m.loadSessionPicker(state.nextCursor)
+		}
 	}
-	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return sessionPickerRefreshMsg{request: msg.request} })
+	refresh := sessionPickerRefreshMsg{request: msg.request, refresh: state.refresh}
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return refresh })
+}
+
+func (s *sessionPickerState) mergeRows(rows, refreshed []ResumeCandidate, checked []string) {
+	missing := make(map[string]bool, len(checked))
+	for _, id := range checked {
+		missing[id] = true
+	}
+	for _, row := range refreshed {
+		delete(missing, row.SessionID)
+	}
+	for _, row := range rows {
+		delete(missing, row.SessionID)
+	}
+	index := make(map[string]int, len(s.rows)+len(rows))
+	kept := s.rows[:0]
+	for _, row := range s.rows {
+		if !missing[row.SessionID] {
+			index[row.SessionID] = len(kept)
+			kept = append(kept, row)
+		}
+	}
+	s.rows = kept
+	for _, row := range rows {
+		if i, ok := index[row.SessionID]; ok {
+			s.rows[i] = row
+		} else {
+			index[row.SessionID] = len(s.rows)
+			s.rows = append(s.rows, row)
+		}
+	}
+	for _, row := range refreshed {
+		if i, ok := index[row.SessionID]; ok {
+			s.rows[i] = row
+		}
+	}
+}
+
+func (s *sessionPickerState) groupRows() {
+	type workspace struct{ key, cwd string }
+	var order []workspace
+	groups := make(map[workspace][]ResumeCandidate)
+	names := make(map[workspace]string)
+	nameCount := make(map[string]int)
+	for _, row := range s.rows {
+		key := workspace{row.WorkspaceKey, row.Workspace}
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+			name := sessionPickerLabel(firstNonEmpty(displayPathBase(key.cwd), key.key, "Workspace"))
+			names[key] = name
+			nameCount[name]++
+		}
+		groups[key] = append(groups[key], row)
+	}
+	s.rows = s.rows[:0]
+	s.lines, s.positions = s.lines[:0], s.positions[:0]
+	for i, key := range order {
+		if i != 0 {
+			s.lines = append(s.lines, sessionPickerLine{row: -1})
+		}
+		heading := names[key]
+		if nameCount[heading] > 1 && key.cwd != "" {
+			heading = sessionPickerLabel(key.cwd)
+		}
+		s.lines = append(s.lines, sessionPickerLine{heading: heading, row: -1})
+		for _, row := range groups[key] {
+			s.positions = append(s.positions, len(s.lines))
+			s.lines = append(s.lines, sessionPickerLine{heading: heading, row: len(s.rows)})
+			s.rows = append(s.rows, row)
+		}
+	}
+}
+
+func (s *sessionPickerState) lastIndex() int { return len(s.positions) - 1 }
+
+// scrollList keeps the selection visible and returns the heading to repeat
+// when the list starts inside a workspace group.
+func (s *sessionPickerState) scrollList(height int) string {
+	if len(s.positions) == 0 {
+		return ""
+	}
+	position := s.positions[s.index]
+	lastOffset := max(0, len(s.lines)-height)
+	if height > 1 && s.lines[lastOffset].row >= 0 && s.lines[lastOffset].heading != "" {
+		lastOffset++
+	}
+	s.offset = min(clampInt(s.offset, max(0, position-height+1), position), lastOffset)
+	line := s.lines[s.offset]
+	if height == 1 || line.row < 0 || line.heading == "" {
+		return ""
+	}
+	if position-s.offset == height-1 {
+		s.offset++ // The repeated heading also occupies a terminal row.
+		line = s.lines[s.offset]
+	}
+	if line.row >= 0 {
+		return line.heading
+	}
+	return ""
+}
+
+func (s *sessionPickerState) scrollDetails(delta int) {
+	s.detailsOffset = clampInt(s.detailsOffset+delta, 0, s.detailsOverflow)
+}
+
+func (s *sessionPickerState) selectionID() string {
+	if s.index < len(s.rows) {
+		return s.rows[s.index].SessionID
+	}
+	return ""
+}
+
+func (m *Model) moveSessionPicker(next int) tea.Cmd {
+	state := m.sessionPicker
+	forward := next > state.index
+	last := state.lastIndex()
+	state.index = clampInt(next, 0, max(0, last))
+	if state.index != last {
+		state.morePending = false
+		return nil
+	}
+	if !forward || state.nextCursor == "" {
+		return nil
+	}
+	if state.loading {
+		state.morePending = state.loadingCursor == ""
+		return nil
+	}
+	return m.loadSessionPicker(state.nextCursor)
 }
 
 func (m *Model) selectSessionPicker() tea.Cmd {
 	state := m.sessionPicker
-	if state == nil || len(state.rows) == 0 {
+	switch id := state.selectionID(); {
+	case id == "" && state.err != "":
+		return m.loadSessionPicker("")
+	case id == "":
 		return nil
+	case id == m.currentSessionID && !m.sessionHistoryFailed && !m.sessionObservationRecovering:
+		m.closeSessionPicker()
+		return m.scheduleSessionRead()
+	default:
+		m.closeSessionPicker()
+		return m.executeLineCmd(Submission{Text: "/resume " + id})
 	}
-	id := state.rows[state.index].SessionID
-	m.closeSessionPicker()
-	return m.executeLineCmd(Submission{Text: "/resume " + id})
 }
 
 func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
@@ -117,128 +338,49 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	state := m.sessionPicker
 	state.pressed = ""
+	page := max(1, m.height-sessionPickerTop-sessionPickerBottom-1)
+	var next int
 	switch msg.String() {
 	case "esc", "ctrl+o":
 		m.closeSessionPicker()
+		return m.scheduleSessionRead()
 	case "up":
-		state.index = maxInt(0, state.index-1)
+		next = state.index - 1
 	case "down":
-		state.index = minInt(maxInt(0, len(state.rows)-1), state.index+1)
+		next = state.index + 1
+	case "shift+up":
+		state.scrollDetails(-1)
+		return nil
+	case "shift+down":
+		state.scrollDetails(1)
+		return nil
 	case "pgup":
-		state.index = maxInt(0, state.index-maxInt(1, m.height-9))
+		next = state.index - page
 	case "pgdown":
-		state.index = minInt(maxInt(0, len(state.rows)-1), state.index+maxInt(1, m.height-9))
+		next = state.index + page
 	case "home":
-		state.index = 0
+		next = 0
 	case "end":
-		state.index = maxInt(0, len(state.rows)-1)
-	case "enter":
-		if state.err != "" {
-			return m.loadSessionPicker()
-		}
+		next = state.lastIndex() + 1
+	case "enter", "right":
 		return m.selectSessionPicker()
-	case "backspace":
-		state.setQuery(trimLastRune(state.query))
-	case "ctrl+u", "ctrl+w":
-		state.setQuery("")
+	case "n":
+		if m.cfg.executeLineCmd == nil && m.cfg.ExecuteLine == nil {
+			return nil
+		}
+		submission := Submission{Text: "/new"}
+		if state.index < len(state.rows) {
+			row := state.rows[state.index]
+			submission.newSessionWorkspace = session.WorkspaceRef{Key: row.WorkspaceKey, CWD: row.Workspace}
+		}
+		m.closeSessionPicker()
+		return m.executeLineCmd(submission)
+	case "r":
+		return m.loadSessionPicker(state.failedCursor)
 	default:
-		if k := msg.Key(); k.Text != "" && !k.Mod.Contains(tea.ModCtrl) && !k.Mod.Contains(tea.ModAlt) {
-			state.setQuery(state.query + k.Text)
-		}
+		return nil
 	}
-	return nil
-}
-
-func (m *Model) renderSessionPicker() string {
-	state := m.sessionPicker
-	if state == nil {
-		return ""
-	}
-	width := min(112, maxInt(20, m.width-4))
-	inner := maxInt(1, width-m.overlayBorderChromeWidth())
-	body := []string{m.overlayHeader(inner, []string{"/resume"}, "Sessions", state.closeButton, true)}
-	if state.query != "" {
-		body = append(body, m.theme.HelpHintTextStyle().Render("/ "+truncateDisplayCellsFromEnd(state.query, inner-3)+"▏"))
-	}
-	count := minInt(len(state.rows), maxInt(1, m.height-9))
-	// Keep visible rows stationary while hovering; scroll only when selection
-	// leaves the window or a resize/refresh changes its bounds.
-	start := maxInt(state.index-count+1, minInt(state.offset, state.index))
-	start = clampInt(start, 0, maxInt(0, len(state.rows)-count))
-	state.offset = start
-	now := time.Now()
-	rowOffsets := make([]int, len(state.rows))
-	for i := range rowOffsets {
-		rowOffsets[i] = -1
-	}
-	for i := start; i < start+count; i++ {
-		row := state.rows[i]
-		label := strings.Join(strings.Fields(firstNonEmpty(row.Title, row.Prompt, row.SessionID)), " ")
-		status := ""
-		if row.Running {
-			status = "running"
-		}
-		if row.SessionID == m.currentSessionID {
-			if status != "" {
-				status += " · "
-			}
-			status += "current"
-		}
-		prefix := "  "
-		if i == state.index {
-			prefix = "> "
-		}
-		age := sessionPickerAge(row.UpdatedAt, now)
-		// Reserve the age and some title even when status must be shortened.
-		statusBudget := maxInt(0, inner-displayColumns(prefix)-displayColumns(age)-minInt(12, inner/2)-4)
-		if statusBudget == 0 {
-			status = ""
-		} else {
-			status = truncateTailDisplay(status, statusBudget)
-		}
-		suffix := age
-		if status != "" {
-			suffix = status + "  " + age
-		}
-		budget := maxInt(1, inner-displayColumns(prefix)-displayColumns(suffix)-2)
-		label = truncateTailDisplay(label, budget)
-		line := prefix + label
-		line += strings.Repeat(" ", maxInt(1, inner-displayColumns(line)-displayColumns(suffix))) + suffix
-		if i == state.index {
-			line = m.theme.CommandActiveStyle().Padding(0).Render(line)
-		}
-		rowOffsets[i] = len(body)
-		body = append(body, line)
-	}
-	if len(state.rows) == 0 {
-		label := "No sessions"
-		if state.loading {
-			label = "Loading sessions…"
-		}
-		body = append(body, m.theme.MutedTextStyle().Render(label))
-	}
-	if state.err != "" {
-		body = append(body, m.theme.ErrorStyle().Render(truncateTailDisplay(state.err, inner)))
-	}
-	body = append(body, "")
-	if len(state.rows) > 0 {
-		body = append(body, m.theme.MutedTextStyle().Render(truncateTailDisplay("ID "+state.rows[state.index].SessionID, inner)))
-	}
-	body = append(body, m.theme.HelpHintTextStyle().Render(truncateTailDisplay("↑↓ select  enter open  esc close", inner)))
-	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{Body: body, Width: width, UseBorder: m.overlayUsesBorder()})
-	w, h := lipgloss.Width(frame), lipgloss.Height(frame)
-	x, y := maxInt(0, (m.width-w)/2), maxInt(0, (m.height-h)/2)
-	inset := 0
-	if m.overlayUsesBorder() {
-		inset = 1
-	}
-	for i, offset := range rowOffsets {
-		if offset >= 0 {
-			rowOffsets[i] = y + inset + offset
-		}
-	}
-	state.geometry = subagentOverlayGeometry{x: x, y: y, width: w, height: h, rows: rowOffsets, closeX: overlayCloseX(x+2*inset, inner), closeY: y + inset}
-	return frame
+	return m.moveSessionPicker(next)
 }
 
 func sessionPickerAge(updatedAt, now time.Time) string {
@@ -260,72 +402,53 @@ func sessionPickerAge(updatedAt, now time.Time) string {
 
 func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 	state, mouse := m.sessionPicker, msg.Mouse()
-	g := state.geometry
-	inside := mouse.X >= g.x && mouse.X < g.x+g.width && mouse.Y >= g.y && mouse.Y < g.y+g.height
-	row := -1
-	inset := m.overlayBorderChromeWidth() / 2
-	if inside && mouse.X >= g.x+inset && mouse.X < g.x+g.width-inset {
-		row = subagentRowAtY(g.rows, mouse.Y)
-	}
-	if handled, close := state.closeButton.mouse(msg, g.closeX, g.closeY); handled {
-		state.pressed = ""
-		if close {
-			m.closeSessionPicker()
-		}
-		return nil
-	}
+	row, visible := state.visible[mouse.Y]
+	inside := mouse.X >= sessionPickerInset && mouse.X < state.listWidth-sessionPickerInset
 	switch msg.(type) {
 	case tea.MouseMotionMsg:
-		if row >= 0 {
+		if visible && inside {
 			state.index = row
 		}
 	case tea.MouseWheelMsg:
 		state.pressed = ""
-		if !inside {
+		if mouse.Y < sessionPickerTop || mouse.Y >= m.height-sessionPickerBottom {
 			return nil
 		}
-		if mouse.Button == tea.MouseWheelUp {
-			state.index = maxInt(0, state.index-1)
+		delta := 0
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			delta = -1
+		case tea.MouseWheelDown:
+			delta = 1
 		}
-		if mouse.Button == tea.MouseWheelDown {
-			state.index = minInt(maxInt(0, len(state.rows)-1), state.index+1)
+		if inside {
+			return m.moveSessionPicker(state.index + delta)
+		} else if mouse.X >= state.listWidth-sessionPickerInset {
+			state.scrollDetails(delta)
 		}
 	case tea.MouseClickMsg:
 		state.pressed = ""
-		if !inside || mouse.Button != tea.MouseLeft {
-			return nil
-		}
-		if row >= 0 {
+		if visible && inside && mouse.Button == tea.MouseLeft {
 			state.index = row
-			state.pressed = "session:" + state.rows[row].SessionID
+			state.pressed = state.selectionID()
 		}
 	case tea.MouseReleaseMsg:
 		pressed := state.pressed
 		state.pressed = ""
-		if !inside || (mouse.Button != tea.MouseLeft && mouse.Button != tea.MouseNone) {
-			return nil
-		}
-		if row >= 0 && pressed == "session:"+state.rows[row].SessionID {
+		if visible && inside && pressed != "" && (mouse.Button == tea.MouseLeft || mouse.Button == tea.MouseNone) {
 			state.index = row
-			return m.selectSessionPicker()
+			if state.selectionID() == pressed {
+				return m.selectSessionPicker()
+			}
 		}
 	}
 	return nil
 }
 
-func (s *sessionPickerState) setQuery(query string) {
-	s.query = truncateRunes(query, 160)
-	s.index, s.offset = 0, 0
-	s.filterRows()
+func sessionPickerTitle(row ResumeCandidate) string {
+	return firstNonEmpty(sessionPickerLabel(firstNonEmpty(row.Title, row.Prompt)), "Untitled session")
 }
 
-func (s *sessionPickerState) filterRows() {
-	s.rows = nil
-	query := strings.ToLower(strings.TrimSpace(s.query))
-	for _, row := range s.allRows {
-		if query == "" || strings.Contains(strings.ToLower(row.Title+" "+row.Prompt+" "+row.SessionID), query) {
-			s.rows = append(s.rows, row)
-		}
-	}
-	s.index = clampInt(s.index, 0, max(0, len(s.rows)-1))
+func sessionPickerLabel(text string) string {
+	return strings.Join(strings.Fields(tuikit.SanitizeLogText(text)), " ")
 }

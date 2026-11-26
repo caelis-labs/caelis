@@ -380,6 +380,9 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 			block.AppendStreamEvent(SEReasoning, text, source, event.OccurredAt)
 		}
 	} else {
+		if text != "" && event.NarrativeKind == TranscriptNarrativeAssistant {
+			m.trackSessionResult(event, block.BlockID())
+		}
 		if event.Final {
 			closeLatestReasoningTiming(block.Events, event.OccurredAt)
 		}
@@ -529,6 +532,9 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent, reconnectReplay 
 		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
 	default:
 		terminal := eventstream.IsTerminalLifecycleState(event.State)
+		if terminal {
+			m.trackTerminalSessionResult(event.TurnID, event.ResultSequence)
+		}
 		// A terminal-only main lifecycle can close a participant-owned Side ACP
 		// turn without carrying any main transcript content. Do not manufacture
 		// an invisible MainACPTurnBlock after the participant footer: it would

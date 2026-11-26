@@ -238,6 +238,45 @@ func (s *TaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]
 	return out, nil
 }
 
+// RunningSessionIDs samples only running Tasks in the supplied Sessions, without
+// decoding task payloads. The caller supplies IDs of current activations.
+func (s *TaskStore) RunningSessionIDs(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.mu.LockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer s.store.mu.Unlock()
+	var running []string
+	err = s.store.withRootLockContext(ctx, func() error {
+		db, err := s.store.openTaskIndex()
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		rows, err := db.QueryContext(ctx, `SELECT DISTINCT session_id FROM tasks
+WHERE running != 0 AND session_id IN (SELECT value FROM json_each(?))`, string(encoded))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			running = append(running, id)
+		}
+		return rows.Err()
+	})
+	return running, err
+}
+
 func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task handle %q not found", strings.TrimSpace(handle))

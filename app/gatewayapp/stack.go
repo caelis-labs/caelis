@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -138,6 +139,7 @@ type Stack struct {
 	agentCommands             appserver.AgentCommandService
 	pluginCommands            appserver.PluginCommandService
 	sessionProfiles           *appserver.SessionProfileService
+	workbenchDB               *sql.DB
 	taskStreams               acptaskstream.Service
 	terminalStreams           task.TerminalController
 	operations                appserver.DurableOperationStore
@@ -599,7 +601,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.composition.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.composition.invalidateOwnPlacementSnapshot
-	controlAssembly, err := assembleHostControlServices(stack, cfg, storeDir, cursorSecret)
+	controlAssembly, err := assembleHostControlServices(stack, cfg, storeDir, cursorSecret, sessionStore)
 	if err != nil {
 		_ = stack.Close()
 		return nil, err
@@ -790,6 +792,12 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	s.composition.mu.Unlock()
 
 	var errs []error
+	if s.workbenchDB != nil {
+		if err := s.workbenchDB.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.workbenchDB = nil
+	}
 	if store := s.composition.authorities.sessionProfiles; store != nil {
 		if err := store.Close(); err != nil {
 			errs = append(errs, err)

@@ -13,18 +13,18 @@ import (
 // observeSourceEvent is the synchronous Control boundary between an SDK
 // producer and the Session spool. It projects one raw source value and retains
 // no replayable payload state.
-func (g *Gateway) observeSourceEvent(_ context.Context, activeSession session.Session, handle *turnHandle, event agent.SourceEvent) error {
+func (g *Gateway) observeSourceEvent(ctx context.Context, activeSession session.Session, handle *turnHandle, event agent.SourceEvent) error {
 	if handle == nil {
 		return nil
 	}
 	if event.Err == nil {
-		return g.observeSourceValue(activeSession, handle, event)
+		return g.observeSourceValue(ctx, activeSession, handle, event)
 	}
 	handle.publishError(event.Err)
 	return nil
 }
 
-func (g *Gateway) observeSourceValue(activeSession session.Session, handle *turnHandle, event agent.SourceEvent) error {
+func (g *Gateway) observeSourceValue(ctx context.Context, activeSession session.Session, handle *turnHandle, event agent.SourceEvent) error {
 	sourceEvent := acpbridge.SourceEventFromAgent(event)
 	if sourceEvent.ACP != nil {
 		// Native live content/state owns a paired source event and is published
@@ -34,6 +34,7 @@ func (g *Gateway) observeSourceValue(activeSession session.Session, handle *turn
 	if sourceEvent.Canonical == nil {
 		return nil
 	}
+	handle.observeSessionResult(ctx, sourceEvent.Canonical)
 	project := acpprojector.ProjectSessionEventEnvelope
 	switch {
 	case sourceEvent.ACP != nil && eventstream.UpdateType(sourceEvent.ACP.Update) == eventstream.UpdateUsage:
@@ -58,6 +59,18 @@ func (g *Gateway) observeSourceValue(activeSession session.Session, handle *turn
 	}
 	g.noteSessionCursor(activeSession.SessionID, sourceEvent.Canonical.ID)
 	return nil
+}
+
+func (h *turnHandle) observeSessionResult(ctx context.Context, event *session.Event) {
+	observer, ok := h.observer.(TurnResultObserver)
+	if !ok || h.activeKind != ActiveTurnKindKernel {
+		return
+	}
+	if seq := acpprojector.DurableSessionResultSequence(h.sessionRef, event); seq != 0 {
+		h.observerMu.Lock()
+		observer.ObserveTurnResult(ctx, seq)
+		h.observerMu.Unlock()
+	}
 }
 
 // projectSessionEventUsageEnvelope keeps canonical accounting when the paired

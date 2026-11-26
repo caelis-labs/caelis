@@ -1007,9 +1007,10 @@ type LifecycleEnvelope struct {
 }
 
 type LifecycleEvent struct {
-	Reason     *string `json:"reason,omitempty"`
-	State      string  `json:"state"`
-	StopReason *string `json:"stopReason,omitempty"`
+	Reason           *string        `json:"reason,omitempty"`
+	ResultThroughSeq *Uint64Decimal `json:"result_through_seq,omitempty"`
+	State            string         `json:"state"`
+	StopReason       *string        `json:"stopReason,omitempty"`
 }
 
 type MCPServerSnapshot struct {
@@ -1841,6 +1842,10 @@ type SessionProfile struct {
 	Workspace       *SessionWorkspace       `json:"workspace,omitempty"`
 }
 
+type SessionReadReceipt struct {
+	ThroughSeq Uint64Decimal `json:"through_seq"`
+}
+
 type SessionRef struct {
 	AppName      *string `json:"app_name,omitempty"`
 	SessionId    *string `json:"session_id,omitempty"`
@@ -2026,6 +2031,23 @@ type SessionUpdateEnvelope struct {
 	TurnId                   *string             `json:"turn_id,omitempty"`
 	Update                   ACPUpdate           `json:"update"`
 	UsageSemantics           UsageSemantics      `json:"usage_semantics,omitempty"`
+}
+
+type SessionWorkbenchPage struct {
+	NextCursor *string               `json:"next_cursor,omitempty"`
+	Refreshed  []SessionWorkbenchRow `json:"refreshed,omitempty"`
+	Sessions   []SessionWorkbenchRow `json:"sessions"`
+}
+
+type SessionWorkbenchRow struct {
+	Active       *bool     `json:"active,omitempty"`
+	Cwd          *string   `json:"cwd,omitempty"`
+	Failed       *bool     `json:"failed,omitempty"`
+	SessionId    string    `json:"session_id"`
+	Title        *string   `json:"title,omitempty"`
+	Unread       *bool     `json:"unread,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	WorkspaceKey *string   `json:"workspace_key,omitempty"`
 }
 
 type SessionWorkspace struct {
@@ -2473,4 +2495,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "createSessionBackgroundGrant", "createSessionResource", "experimentalFeatures", "getAgentStatus", "getHostStatus", "getIdleSessionState", "getOperation", "getPresentationCapabilities", "getSessionBackgroundGrant", "getSessionConfiguration", "getSessionMCPStatus", "getSessionModelCapabilities", "getSessionPresentation", "getSessionProfile", "getSessionResource", "getSessionReviewerState", "getSessionState", "getSessionStatus", "getSessionToolCall", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDeleteModels", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "interruptSession", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionBackgroundGrants", "listSessionTasks", "listSessionToolCalls", "listSessions", "loadUIPreferences", "prepareSandbox", "promptParticipant", "promptSession", "readSessionResource", "readTaskEvents", "reconnectSession", "refreshMCPTools", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "revokeSessionBackgroundGrant", "saveUIPreferences", "setExperimentalFeatures", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitModelAuthenticationInput", "submitSubagentInput", "subscribeTaskEvents", "updateSessionConfiguration", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}
+var OperationIDs = []string{"acknowledgeSessionRead", "cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "createSessionBackgroundGrant", "createSessionResource", "experimentalFeatures", "getAgentStatus", "getHostStatus", "getIdleSessionState", "getOperation", "getPresentationCapabilities", "getSessionBackgroundGrant", "getSessionConfiguration", "getSessionMCPStatus", "getSessionModelCapabilities", "getSessionPresentation", "getSessionProfile", "getSessionResource", "getSessionReviewerState", "getSessionState", "getSessionStatus", "getSessionToolCall", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDeleteModels", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "interruptSession", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionBackgroundGrants", "listSessionTasks", "listSessionToolCalls", "listSessionWorkbench", "listSessions", "loadUIPreferences", "prepareSandbox", "promptParticipant", "promptSession", "readSessionResource", "readTaskEvents", "reconnectSession", "refreshMCPTools", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "revokeSessionBackgroundGrant", "saveUIPreferences", "setExperimentalFeatures", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitModelAuthenticationInput", "submitSubagentInput", "subscribeTaskEvents", "updateSessionConfiguration", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}

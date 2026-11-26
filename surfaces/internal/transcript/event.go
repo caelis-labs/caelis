@@ -76,6 +76,8 @@ type Event struct {
 	// inputs only: Surfaces must not persist them as a second transcript.
 	SourceEventID      string
 	SourceProjectionID string
+	// ResultSequence is the durable position of a visible main Assistant result.
+	ResultSequence uint64
 	// DeliveryMode distinguishes parent Session summaries from the Task-owned
 	// child stream without inferring ownership from narrative text or IDs.
 	DeliveryMode  eventstream.DeliveryMode

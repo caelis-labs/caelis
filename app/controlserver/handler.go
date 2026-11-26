@@ -129,6 +129,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/operations/{operation_id}", s.operation)
 	s.mux.HandleFunc("POST "+apiPrefix+"/host/shutdown", s.shutdown)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions", s.listSessions)
+	s.sessionWorkbenchRoutes()
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/compact", s.compactSession)

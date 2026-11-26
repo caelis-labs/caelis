@@ -233,7 +233,14 @@ func (m *Model) appendWelcomeCard() {
 	m.lastCommittedStyle = tuikit.LineStyleDefault
 }
 
-func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) Update(msg tea.Msg) (model tea.Model, command tea.Cmd) {
+	defer func() {
+		if next, ok := model.(*Model); ok {
+			if read := next.scheduleSessionRead(); read != nil {
+				command = tea.Batch(command, read)
+			}
+		}
+	}()
 	if page, ok := msg.(earlierHistoryMsg); ok {
 		return m, m.handleEarlierHistory(page)
 	}
@@ -332,6 +339,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.flushPendingDeferredBatches()
 
 	switch typed := msg.(type) {
+	case sessionReadCheckMsg:
+		return m, m.acknowledgeRenderedSessionResult(typed)
+	case sessionReadResultMsg:
+		m.finishSessionRead(typed)
+		return m, nil
 	case sessionHistoryReadyMsg:
 		recovery := m.sessionHistory != nil && m.sessionHistory.start.recovery
 		commitCmd := m.commitSessionHistory()
@@ -345,8 +357,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionPickerResultMsg:
 		return m, m.applySessionPickerResult(typed)
 	case sessionPickerRefreshMsg:
-		if m.sessionPicker != nil && m.sessionPicker.request == typed.request {
-			return m, m.loadSessionPicker()
+		if m.sessionPicker != nil && m.sessionPicker.request == typed.request && m.sessionPicker.refresh == typed.refresh {
+			return m, m.loadSessionPicker("")
 		}
 		return m, nil
 	case taskStreamOpenedMsg:

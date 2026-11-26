@@ -82,7 +82,7 @@ func defaultSharedSpecs() []CommandSpec {
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info"},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
-		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", DynamicCompleter: true, AvailableWhileRunning: true},
+		{Name: "resume", Usage: "/resume [session-id]", Description: "Open the Sessions workbench", DynamicCompleter: true, AvailableWhileRunning: true},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
 	}
 	return specs

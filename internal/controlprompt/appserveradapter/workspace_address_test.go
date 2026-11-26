@@ -73,9 +73,11 @@ func TestSessionClientAdapterWorkspaceAddressFollowsSelectedSession(t *testing.T
 		t.Fatalf("WorkspaceDir() after attach = %q, want %q", got, botDir)
 	}
 
-	// Clearing the selection keeps the current workspace, so an unbound read
-	// still describes the workspace the Session lifecycle last selected.
-	if err := adapter.ResetSession(context.Background()); err != nil {
+	if err := adapter.ResetSession(context.Background(), session.WorkspaceRef{Key: "missing-cwd"}); err == nil || adapter.clientSessionID() != "bot-conversation" {
+		t.Fatal("a reset without the target CWD must keep the selected Session")
+	}
+	// A legacy row with the current CWD must retain that workspace's key.
+	if err := adapter.ResetSession(context.Background(), session.WorkspaceRef{CWD: botDir}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := adapter.LightweightStatus(context.Background()); err != nil {
@@ -136,6 +138,7 @@ func TestSessionClientAdapterFailedResumeKeepsSelectedWorkspaceAddress(t *testin
 
 func TestSessionClientAdapterRetainsWorkspaceAddressAcrossResetAndSessionCreation(t *testing.T) {
 	resumedDir := t.TempDir()
+	target := session.WorkspaceRef{Key: "workspace-other", CWD: t.TempDir()}
 	createdDir := t.TempDir()
 	sessions := &sessionClientAdapterTestClient{
 		state: appserver.SessionState{
@@ -166,7 +169,7 @@ func TestSessionClientAdapterRetainsWorkspaceAddressAcrossResetAndSessionCreatio
 	}
 	// Clearing the selection keeps the workspace the Session lifecycle selected,
 	// matching the navigation semantics an ordinary /new relies on.
-	if err := adapter.ResetSession(ctx); err != nil {
+	if err := adapter.ResetSession(ctx, session.WorkspaceRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := adapter.LightweightStatus(ctx); err != nil {
@@ -176,8 +179,16 @@ func TestSessionClientAdapterRetainsWorkspaceAddressAcrossResetAndSessionCreatio
 		t.Fatalf("status after reset = %#v", status.request)
 	}
 
-	// The next ordinary Session is created in that same workspace, never as a
-	// mixed pair with the launching workspace key.
+	if err := adapter.ResetSession(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.LightweightStatus(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status.request.SessionID != "" || status.request.WorkspaceKey != target.Key || status.request.CWD != target.CWD {
+		t.Fatalf("status after targeted reset = %#v", status.request)
+	}
+	// The first work-bearing request in the empty view uses the target pair.
 	sessions.state = appserver.SessionState{
 		SessionID: "session-created", WorkspaceKey: "workspace-created", CWD: createdDir, Revision: 5,
 		Controller: session.ControllerBinding{EpochID: "epoch-2"},
@@ -185,8 +196,8 @@ func TestSessionClientAdapterRetainsWorkspaceAddressAcrossResetAndSessionCreatio
 	if _, err := adapter.ensureSessionForMainPrompt(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if sessions.create.WorkspaceKey != "workspace-resumed" || sessions.create.CWD != resumedDir {
-		t.Fatalf("CreateSession workspace = %#v, want workspace-resumed at %q", sessions.create, resumedDir)
+	if sessions.create.WorkspaceKey != target.Key || sessions.create.CWD != target.CWD {
+		t.Fatalf("CreateSession workspace = %#v, want %#v", sessions.create, target)
 	}
 	if _, err := adapter.LightweightStatus(ctx); err != nil {
 		t.Fatal(err)
@@ -247,7 +258,7 @@ func TestSessionClientAdapterWorkspaceAddressStaysCoherentUnderSessionTransition
 				return
 			}
 			if i%4 == 3 {
-				if err := adapter.ResetSession(ctx); err != nil {
+				if err := adapter.ResetSession(ctx, session.WorkspaceRef{}); err != nil {
 					t.Errorf("ResetSession: %v", err)
 					return
 				}

@@ -35,14 +35,18 @@ func (c *Client) ListSessions(ctx context.Context, principal Principal, req List
 }
 
 func (c *Client) listSessions(ctx context.Context, principal Principal, req ListSessionsRequest) (session.SessionList, error) {
-	if err := c.config.Authorizer.Authorize(ctx, principal, ActionSessionList, ""); err != nil {
-		return session.SessionList{}, err
-	}
 	listReq := session.ListSessionsRequest{
 		WorkspaceKey: strings.TrimSpace(req.WorkspaceKey),
 		CWD:          strings.TrimSpace(req.CWD),
 		Cursor:       strings.TrimSpace(req.Cursor),
 		Limit:        req.Limit,
+	}
+	return c.listSessionDirectory(ctx, principal, listReq)
+}
+
+func (c *Client) listSessionDirectory(ctx context.Context, principal Principal, listReq session.ListSessionsRequest) (session.SessionList, error) {
+	if err := c.config.Authorizer.Authorize(ctx, principal, ActionSessionList, ""); err != nil {
+		return session.SessionList{}, err
 	}
 	if listReq.WorkspaceKey != "" && listReq.CWD != "" && c.config.ResolveWorkspaceDirectory != nil {
 		// Live workspace addresses use the Host's physical path. A directory
@@ -54,7 +58,8 @@ func (c *Client) listSessions(ctx context.Context, principal Principal, req List
 	if !principal.HasRole("admin") {
 		listReq.UserID = strings.TrimSpace(principal.ID)
 	}
-	if req.Limit <= 0 {
+	limit := listReq.Limit
+	if limit <= 0 {
 		list, err := c.config.Sessions.ListSessions(ctx, listReq)
 		if err != nil {
 			return session.SessionList{}, err
@@ -63,12 +68,12 @@ func (c *Client) listSessions(ctx context.Context, principal Principal, req List
 		return list, nil
 	}
 
-	visible := make([]session.SessionSummary, 0, req.Limit)
-	seen := make(map[string]struct{}, req.Limit)
+	visible := make([]session.SessionSummary, 0, limit)
+	seen := make(map[string]struct{}, limit)
 	cursor := listReq.Cursor
-	for len(visible) < req.Limit {
+	for len(visible) < limit {
 		listReq.Cursor = cursor
-		listReq.Limit = req.Limit - len(visible)
+		listReq.Limit = limit - len(visible)
 		page, err := c.config.Sessions.ListSessions(ctx, listReq)
 		if err != nil {
 			return session.SessionList{}, err
@@ -82,9 +87,9 @@ func (c *Client) listSessions(ctx context.Context, principal Principal, req List
 			visible = append(visible, summary)
 		}
 		next := strings.TrimSpace(page.NextCursor)
-		if len(visible) >= req.Limit {
+		if len(visible) >= limit {
 			return session.SessionList{
-				Sessions:   session.CloneSessionSummaries(visible[:req.Limit]),
+				Sessions:   session.CloneSessionSummaries(visible[:limit]),
 				NextCursor: next,
 			}, nil
 		}

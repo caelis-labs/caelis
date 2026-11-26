@@ -19,6 +19,21 @@ func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event
 	return projectSessionEventEnvelope(base, event)
 }
 
+// DurableSessionResultSequence returns the position of a committed main reply
+// that projects as visible assistant content.
+func DurableSessionResultSequence(ref session.SessionRef, event *session.Event) uint64 {
+	if event == nil || event.Seq == 0 || session.EventTypeOf(event) != session.EventTypeAssistant {
+		return 0
+	}
+	base := EnvelopeBaseFromSessionEvent(ref, event, SessionEventTransport{})
+	for _, env := range ProjectSessionEventEnvelope(base, event) {
+		if seq := eventstream.SessionResultSequence(env); seq != 0 {
+			return seq
+		}
+	}
+	return 0
+}
+
 // ProjectSessionEventLiveSupplementEnvelope projects a canonical final while
 // omitting only the content streams with a separate live incremental owner.
 // Final state, usage, and unowned content streams still flow.

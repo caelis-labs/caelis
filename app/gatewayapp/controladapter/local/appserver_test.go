@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
@@ -59,10 +60,10 @@ func TestAppServerFacadeResetDoesNotCreateWorkspaceSessions(t *testing.T) {
 		return facade
 	}
 
-	if err := newFacade("workspace-a", workspaceA).ResetSession(ctx); err != nil {
+	if err := newFacade("workspace-a", workspaceA).ResetSession(ctx, session.WorkspaceRef{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := newFacade("workspace-b", workspaceB).ResetSession(ctx); err != nil {
+	if err := newFacade("workspace-b", workspaceB).ResetSession(ctx, session.WorkspaceRef{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, workspaceKey := range []string{"workspace-a", "workspace-b"} {

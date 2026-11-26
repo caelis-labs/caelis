@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -40,17 +41,20 @@ func TestSessionHistoryReusesActiveTheme(t *testing.T) {
 
 type newSessionControlService struct {
 	observingControlService
-	resetCalls int
+	resetCalls     int
+	resetWorkspace session.WorkspaceRef
 }
 
-func (s *newSessionControlService) ResetSession(context.Context) error {
+func (s *newSessionControlService) ResetSession(_ context.Context, workspace session.WorkspaceRef) error {
 	s.resetCalls++
+	s.resetWorkspace = workspace
 	s.selected.Store(false)
 	return nil
 }
 
 func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	feed := newObservationTestFeed("session-old")
+	target := session.WorkspaceRef{Key: "selected-workspace", CWD: t.TempDir()}
 	service := &newSessionControlService{observingControlService: observingControlService{feed: feed}}
 	messages := make(chan tea.Msg, 32)
 	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
@@ -58,6 +62,12 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	cfg := ConfigFromControlService(service, sender, Config{
 		Context: t.Context(), PromptRouterFactory: controlprompt.New,
 		NoColor: true, NoAnimation: true, ShowWelcomeCard: true,
+		SessionWorkbench: func(context.Context, appserver.SessionWorkbenchRequest) (appserver.SessionWorkbenchPage, error) {
+			return appserver.SessionWorkbenchPage{Sessions: []appserver.SessionWorkbenchRow{
+				{SessionID: "session-old", WorkspaceKey: "current-workspace", CWD: feed.state.CWD},
+				{SessionID: "highlighted", WorkspaceKey: target.Key, CWD: target.CWD},
+			}}, nil
+		},
 	})
 	m := NewModel(cfg)
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -87,14 +97,19 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	m.taskStreamSubscriptions["task-old"] = subscription
 	m.pendingQueue.enqueue(pendingPromptEnqueueOptions{execLine: "old queued input", deferUntilIdle: true})
 
-	cmd := m.executeLineCmd(Submission{Text: "/new"})
-	if cmd == nil {
-		t.Fatal("/new did not dispatch")
+	openSessionPickerForTest(t, m)
+	m.Update(keyPress("down"))
+	_, cmd := m.Update(keyPress("n"))
+	if cmd == nil || m.sessionPicker != nil {
+		t.Fatal("n did not close the Session workbench and dispatch /new")
 	}
 	completion := cmd()
 	applyMessages()
 	if service.resetCalls != 1 || service.SessionID() != "" {
 		t.Fatal("/new did not reset the Control selection")
+	}
+	if service.resetWorkspace != target {
+		t.Fatalf("n reset in %#v, want highlighted workspace %#v", service.resetWorkspace, target)
 	}
 	// The command bridge must commit the empty view before command completion;
 	// there is no reconnect feed to provide a later history-ready message.
@@ -110,6 +125,9 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	}
 	if !dismissed || m.activePrompt != nil || len(responses) != 0 || len(m.pendingQueue) != 0 || m.textarea.Value() != "" {
 		t.Fatal("/new retained old interaction or answered an approval")
+	}
+	if m.sessionDrafts["session-old"].text != "previous session draft" {
+		t.Fatal("/new did not preserve the previous Session's draft")
 	}
 	if subscription.closeCalls.Load() != 1 || len(m.taskStreamSubscriptions) != 0 {
 		t.Fatal("/new left old Task subscriptions open")
@@ -129,8 +147,18 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	assertPhysicalFullscreenFrame(t, m.width, m.height, frames[1], updates)
 }
 
-func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
-	m := NewModel(Config{NoColor: true, NoAnimation: true})
+func TestSessionHistoryAcknowledgesExactNarrativeOnlyWhenReady(t *testing.T) {
+	var receipts []appserver.SessionReadReceipt
+	m := NewModel(Config{
+		NoColor: true, NoAnimation: true,
+		AcknowledgeSessionRead: func(_ context.Context, id string, receipt appserver.SessionReadReceipt) error {
+			if id != "restored" {
+				t.Fatalf("acknowledgement targeted Session %q, want restored", id)
+			}
+			receipts = append(receipts, receipt)
+			return nil
+		},
+	})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 32})
 	m.handleUserMessageMsg(UserMessageMsg{Text: "previous view"})
 	previous := m.doc
@@ -144,7 +172,13 @@ func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 		want += chunk
 		feed.publish(eventstream.Envelope{Kind: eventstream.KindSessionUpdate, SessionID: "restored", TurnID: "turn", Scope: eventstream.ScopeMain, Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}, Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "final", Content: eventstream.TextContent{Type: "text", Text: chunk}}})
 	}
-	feed.publish(eventstream.Envelope{Kind: eventstream.KindLifecycle, SessionID: "restored", TurnID: "turn", Scope: eventstream.ScopeMain, Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}, Lifecycle: &eventstream.Lifecycle{State: "completed"}, OccurredAt: started.Add(time.Second)})
+	terminal := eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "restored", TurnID: "turn", Scope: eventstream.ScopeMain,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted}, OccurredAt: started.Add(time.Second),
+	}
+	eventstream.SetSessionResultSequence(&terminal, 17)
+	feed.publish(terminal)
 	feed.feed <- appserver.FeedDelivery{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact}
 	batches := 0
 	sender := &ProgramSender{Send: func(msg tea.Msg) {
@@ -153,6 +187,9 @@ func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 			batches++
 			if m.doc != previous || !strings.Contains(ansi.Strip(m.View().Content), "previous view") {
 				t.Fatal("history was exposed before sync")
+			}
+			if m.acknowledgeRenderedSessionResult(sessionReadCheckMsg{generation: m.viewGeneration}) != nil {
+				t.Fatal("history was acknowledged before sync")
 			}
 		}
 	}}
@@ -176,6 +213,17 @@ func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.View().Content), "139") {
 		t.Fatal("final response is not in the physical viewport")
+	}
+	if !m.sessionRead.scheduled {
+		t.Fatal("committing the exact-history response did not schedule an acknowledgement")
+	}
+	_, cmd := m.Update(sessionReadCheckMsg{generation: m.viewGeneration})
+	if cmd == nil {
+		t.Fatal("rendering the exact-history response did not permit an acknowledgement")
+	}
+	m.Update(cmd())
+	if len(receipts) != 1 || receipts[0].ThroughSeq != 17 {
+		t.Fatalf("read receipts = %+v, want one receipt through sequence 17", receipts)
 	}
 }
 
