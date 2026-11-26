@@ -77,7 +77,7 @@ func (Tool) Definition() tool.Definition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "write", "cancel"},
-					"description": "wait returns state and available output on completion or yield expiry. write sends supported input. cancel requests cancellation when supported.",
+					"description": "wait observes the original Task and returns state and available output on completion or yield expiry. write sends supported input. cancel requests cancellation when supported.",
 				},
 				"handle": map[string]any{
 					"type":        "string",

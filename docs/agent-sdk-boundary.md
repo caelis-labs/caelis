@@ -218,13 +218,15 @@ participant handles for every action. Input and cancellation follow the Job
 producer capabilities; command execution is the current built-in producer.
 
 For built-in `RunCommand`, one Task owns approval and command execution. Runtime
-persists the execution specification before requesting approval. After Control
-acknowledges queue admission, the invocation may return `waiting_approval` with
-the same handle later used for execution. The default ten-second observation
-budget covers submission, approval and execution; process timeout starts only
-when the process starts. Control's automatic approval deadline includes queue
-time and is not renewed by Task observation. External ACP permission requests
-retain their synchronous contract.
+persists the execution specification before requesting approval. Once admitted,
+an approval-pending or running command is `in_progress` in model-visible `RunCommand`
+and `Task.wait` results. The original handle identifies work that advances
+automatically. The model can continue independent work and wait on that handle
+when it needs to use or report the result. Runtime Task state still records
+approval and execution separately. The default ten-second observation budget
+covers submission, approval and execution. The process timeout begins at
+launch. Control's automatic approval deadline includes queue time and Task
+observation does not renew it. External ACP permission requests remain synchronous.
 
 Each pending approval belongs to one Session and request ID. The first valid
 decision committed through its live owner settles the request. Repeating that

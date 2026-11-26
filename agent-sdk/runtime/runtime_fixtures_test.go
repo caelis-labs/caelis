@@ -1415,7 +1415,7 @@ func (m *approveEscalatedCommandRuntimeModel) Generate(ctx context.Context, req 
 				})),
 			}}, "")
 		case 2:
-			handle, err := latestApprovalTaskHandle(req, commandID, taskapi.StateWaitingApproval)
+			handle, err := latestApprovalTaskHandle(req, commandID, "in_progress")
 			if err != nil {
 				yield(nil, err)
 				return
@@ -1594,8 +1594,8 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 	if callIndex == 2 {
 		m.handle = mustFindTaskHandle(m.t, req)
 	}
-	state := taskapi.StateRunning
-	if callIndex > 2 {
+	var state taskapi.State
+	if callIndex >= 2 {
 		state = mustFindTaskState(m.t, req, m.handle)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
@@ -1619,7 +1619,7 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 					FinishReason: model.FinishReasonToolCalls,
 				},
 			}, nil)
-		case taskStateRunning(state):
+		case state == "in_progress":
 			args := map[string]any{"action": "wait", "handle": m.handle}
 			if callIndex == 2 {
 				args["yield_time_ms"] = 0
@@ -1650,7 +1650,7 @@ func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Req
 				},
 			}, nil)
 		default:
-			m.t.Fatalf("command Task state = %q, want running or completed", state)
+			m.t.Fatalf("command Task state = %q, want in_progress or completed", state)
 		}
 	}
 }
@@ -2359,8 +2359,8 @@ func assertRunningTaskSnapshot(t *testing.T, result structuredResult) {
 	t.Helper()
 
 	payload := testToolResultPayload(t, result)
-	if got, _ := payload["state"].(string); got != string(taskapi.StateRunning) {
-		t.Fatalf("snapshot state = %q, want %q", got, taskapi.StateRunning)
+	if got, _ := payload["state"].(string); got != "in_progress" {
+		t.Fatalf("snapshot state = %q, want in_progress", got)
 	}
 	if strings.TrimSpace(testStringValue(payload["handle"])) == "" {
 		t.Fatalf("snapshot handle missing: %#v", payload)

@@ -24,7 +24,7 @@ func TestCommandApprovalTaskKeepsOneLiveRowWhileModelContinues(t *testing.T) {
 	m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "command-1", Status: stringPtr(eventstream.ToolStatusInProgress),
-			RawOutput: map[string]any{"handle": "command", "state": "waiting_approval", "supports_input": false}, Meta: acpToolNameMeta("RunCommand")},
+			RawOutput: map[string]any{"handle": "command", "state": "in_progress", "supports_input": false}, Meta: acpToolNameMeta("RunCommand")},
 	})
 	block := requireMainACPTurnBlockForTest(t, m)
 	physical := physicalTranscriptEventsForTest(block.Events)

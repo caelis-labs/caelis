@@ -119,15 +119,23 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			var observed []string
+			type observationState struct {
+				model string
+				task  taskapi.State
+			}
+			var observed []observationState
 			for _, event := range events {
 				if session.EventTypeOf(event) == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tasktool.ToolName {
-					observed = append(observed, taskStringValue(event.Tool.Output["state"]))
+					observed = append(observed, observationState{
+						model: taskStringValue(event.Tool.Output["state"]),
+						task:  taskapi.State(taskRuntimeMetaString(event.Meta, "task", "state")),
+					})
 				}
 			}
-			wantStates := []string{string(taskapi.StateCompleted), string(taskapi.StateRunning)}
+			completed := observationState{model: "completed", task: taskapi.StateCompleted}
+			wantStates := []observationState{completed, {model: "in_progress", task: taskapi.StateRunning}}
 			if afterWait {
-				wantStates[1] = string(taskapi.StateCompleted)
+				wantStates[1] = completed
 			}
 			if !reflect.DeepEqual(observed, wantStates) {
 				t.Fatalf("canonical observations = %v, want %v", observed, wantStates)
