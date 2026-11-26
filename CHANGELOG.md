@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.87.0](https://github.com/caelis-labs/caelis/compare/v0.86.2...v0.87.0) (2026-11-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **agent-sdk:** Agent SDK import paths and task, session, and tool contracts have changed. Update callers to the consolidated packages and the supported import list.
+
+### Features
+
+* **tui:** add a cross-workspace Sessions workbench ([#301](https://github.com/caelis-labs/caelis/issues/301)) ([bcc01cb](https://github.com/caelis-labs/caelis/commit/bcc01cbbef8126d0b66b73dfcef9f330c43fb6d0))
+* **tui:** streamline team configuration ([#302](https://github.com/caelis-labs/caelis/issues/302)) ([6ab64ae](https://github.com/caelis-labs/caelis/commit/6ab64ae2d25584b7155be001abff46adf86577c7))
+
+
+### Bug Fixes
+
+* **runtime:** unify yielded command progress for models ([#298](https://github.com/caelis-labs/caelis/issues/298)) ([cd2bc84](https://github.com/caelis-labs/caelis/commit/cd2bc848b50b216faa0106f88a055ae217ae2343))
+
+
+### Code Refactoring
+
+* **agent-sdk:** slim SDK packages, decouple product dependencies, and accelerate tests ([#300](https://github.com/caelis-labs/caelis/issues/300)) ([10b55d3](https://github.com/caelis-labs/caelis/commit/10b55d3825e48fd686f30a08afdef975cf510e5b))
+
 ## [0.86.2](https://github.com/caelis-labs/caelis/compare/v0.86.1...v0.86.2) (2026-11-25)
 
 
