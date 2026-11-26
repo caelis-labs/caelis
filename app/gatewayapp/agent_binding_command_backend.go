@@ -90,6 +90,9 @@ func agentBindingMutation(
 			break
 		}
 		return expectedConfigurationRevision(req.ExpectedRevision), func(doc AppConfig) (agentbinding.Configuration, error) {
+			if len(req.GuardianBindings) > 0 {
+				return agentbinding.BindGuardian(doc.AgentBindings, req.GuardianBindings, doc.ModelProfiles)
+			}
 			return agentbinding.Bind(doc.AgentBindings, req.Binding, doc.ModelProfiles)
 		}, nil
 	case appserver.ResetAgentBindingRequest:

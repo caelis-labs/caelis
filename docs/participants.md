@@ -23,42 +23,34 @@ The key uses the same managed credential store as other providers. Judgment
 profiles appear in `/team` and `/disconnect`; they cannot become the main
 Session model, a participant, or Reviewer.
 
-Open `/team` to configure the profiles available for collaboration:
+Open `/team` to configure `breeze`, `orbit`, `zenith`, Guardian, and Reviewer.
+Select a role and press Enter to choose its model. The three participant profiles
+accept provider models and ACP agents. Their descriptions help the controller
+select a fit for the work.
 
-- `self` uses the current Session controller's model, reasoning effort, Fast selection,
-  and approval mode. With auto-review, the child's own Guardian handles its
-  approvals. Full access is inherited from the shared Host. Manual approval
-  continues through the ACP permission bridge.
-- `breeze`, `orbit`, and `zenith` are named profiles that you bind to a provider
-  model or ACP agent. Their descriptions help the controller select a fit for
-  the work; the name itself does not select a model.
-- Custom roles give another profile a stable handle and capability description.
-- Binding sets save named snapshots of explicit profile bindings.
+The `self` participant inherits the current Session controller's model, reasoning
+effort, Fast selection, and approval mode. With auto-review, the child's own
+Guardian handles its approvals. Full access is inherited from the shared Host.
+Manual approval continues through the ACP permission bridge.
 
-In the model picker, Tab and Shift+Tab cycle through the selected model's
-Model, Effort, and Fast cells. Up/down selects a model and retains the focused
-field when supported. Left/right adjusts effort (or speed while Fast is focused);
-F toggles Fast. Fixed effort and unsupported Fast controls are skipped. Click a
-model once or press Enter to apply; clicking effort or Fast edits the draft.
-Escape discards the draft. Fast off is explicit standard speed. Binding sets
-preserve independent profile Fast choices.
-
-On the main list, Tab switches between a role's model and its auxiliary field.
-A single click opens either selector. Left/right and F also update effort and
-Fast directly on an explicitly bound model. Only the focused cell is highlighted;
-the filled dot in the picker marks the currently applied model.
+In the picker, up/down selects a model and left/right adjusts its effort when
+the model supports a choice. Enter applies the selection and Esc discards the
+draft. The filled dot marks the currently applied model. For a role with a
+single picker, clicking the model applies it and clicking effort edits the draft.
+Changing effort on the current model preserves its configured speed.
 
 The same overlay includes fixed system roles; configuring a binding does not
 start a conversation:
 
 | Role | Binding behavior |
 | --- | --- |
-| Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
+| Guardian | Uses a provider model, or the Main Agent model when unbound. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
 
-On Guardian's row, use Tab or click the main model or auxiliary classifier to
-configure it. A selected classifier runs first, choosing only among the original
-approval options. Direct approval requires a decisive approve distribution and
+When a judgment model is connected, Guardian's picker lists the classifier
+below the review models. Use up/down to move across both lists and Enter to
+apply both drafts. A selected classifier runs first, choosing only among the
+original approval options. Direct approval requires a decisive approve distribution and
 low probabilities of both missing decision-relevant facts and visible violations.
 Direct refusal requires a decisive deny distribution and a concrete visible
 violation; it has no generated explanation and can settle despite other missing
@@ -72,14 +64,14 @@ action. It receives no historical tool observations and never waits for Tasks.
 Diagnostics distinguish input-budget, option-eligibility, provider, and
 inconclusive-judgment fallbacks without recording request content. Changing or disabling screening preserves the Agent model selection. See [Guardian's evidence contract](agent-sdk-boundary.md#guardian-evidence-and-context).
 
-`/team` takes no arguments and opens the configuration overlay. The TUI accepts
-`/subagent` as an alias; completion shows one `/team (subagent)` entry. Likewise,
+`/team` takes no arguments and opens the configuration picker above the composer.
+The TUI accepts `/subagent` as an alias and shows one `/team (subagent)` entry.
 `/quit` accepts `/exit` and appears as `/quit (exit)`. Built-in commands take
-precedence over same-name Skills and custom roles. A conflicting role stays in
-configuration with a name-conflict warning; rename it to use its slash command.
-The role name `experimental` is reserved for new role creation. Existing roles,
-bindings and sets with that name remain valid; `/experimental` opens the feature
-editor and the role remains addressable through participant APIs.
+precedence over same-name Skills and custom roles. Custom roles and named binding
+snapshots are managed through Control. The role name `experimental` is reserved
+for new role creation. Existing roles, bindings and sets with that name remain
+valid; `/experimental` opens the feature editor and the role remains addressable
+through participant APIs.
 
 The product term **participant** describes the collaboration role; `subagent`
 still names native execution contracts, SDK packages, and existing wire or

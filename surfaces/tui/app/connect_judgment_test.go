@@ -108,7 +108,7 @@ func TestTeamOffersJudgmentOnlyForEvaluationScenes(t *testing.T) {
 	for _, handle := range []agentbinding.Handle{agentbinding.HandleToolSearch, agentbinding.HandleGuardian, agentbinding.HandleGuardianScreen, agentbinding.HandleReviewer, agentbinding.HandleOrbit} {
 		m.subagentOverlay.bindingHandle = handle
 		found := false
-		for _, row := range m.subagentBindingRows() {
+		for _, row := range m.subagentBindingRows(handle) {
 			if row.binding.ProfileID == profile.ID {
 				found = true
 			}

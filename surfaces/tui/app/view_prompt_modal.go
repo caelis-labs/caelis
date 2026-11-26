@@ -322,6 +322,14 @@ func sanitizePromptModalText(value string) string {
 }
 
 func (m *Model) renderCompletionOverlay(geometry completionOverlayGeometry, lines []string) string {
+	frame := m.renderCompletionFrame(geometry, lines)
+	if frame == "" {
+		return ""
+	}
+	return m.attachCompletionFooter(frame, m.renderCompletionOverlayFooter(geometry))
+}
+
+func (m *Model) renderCompletionFrame(geometry completionOverlayGeometry, lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
@@ -357,12 +365,11 @@ func (m *Model) renderCompletionOverlay(geometry completionOverlayGeometry, line
 		blank := strings.Repeat(" ", contentLimit)
 		filtered = append(filtered, blank)
 	}
-	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
+	return tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
 		Body:      filtered,
 		Width:     innerWidth,
 		UseBorder: hasBorder,
 	})
-	return m.attachCompletionOverlayFooter(frame, geometry)
 }
 
 func (m *Model) completionOverlayInnerWidth() int {
@@ -377,7 +384,7 @@ func (m *Model) completionOverlayWidth() int {
 	}
 	if m.width > 0 {
 		switch {
-		case m.isModelPicker():
+		case m.isModelPicker() || m.subagentOverlay != nil:
 			width = min(width, max(1, m.mainColumnWidth()-2*inputHorizontalInset-chrome))
 		case m.activeCompletionKind() == completionSlashCommand && !m.slashSkillOnly:
 			width = min(width, max(1, m.mainColumnWidth()-inputHorizontalInset-chrome))

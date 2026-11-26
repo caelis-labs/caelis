@@ -11,7 +11,7 @@ import (
 )
 
 func (s *CommandService) BindAgentBinding(ctx context.Context, principal Principal, req BindAgentBindingRequest) (CommandResult, error) {
-	target := "host/configuration/agent-bindings/handle/" + string(agentbinding.NormalizeHandle(req.Binding.Handle))
+	target := "host/configuration/agent-bindings/handle/" + string(req.targetHandle())
 	return s.execute(ctx, principal, ActionAgentBindingBind, req.WriteBase, target, req)
 }
 

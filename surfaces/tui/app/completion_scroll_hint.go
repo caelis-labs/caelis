@@ -50,8 +50,7 @@ func (m *Model) renderCompletionOverlayFooter(geometry completionOverlayGeometry
 		sep + keyStyle.Render("tab") + descStyle.Render(" ") + descStyle.Render("fill")
 }
 
-func (m *Model) attachCompletionOverlayFooter(frame string, geometry completionOverlayGeometry) string {
-	footer := m.renderCompletionOverlayFooter(geometry)
+func (m *Model) attachCompletionFooter(frame, footer string) string {
 	if footer == "" {
 		return frame
 	}

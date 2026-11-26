@@ -302,6 +302,38 @@ func Reset(current Configuration, handle Handle) (Configuration, error) {
 	return next, nil
 }
 
+// BindGuardian validates one change to each Guardian handle and returns the
+// complete candidate for a single configuration write. An empty profile resets
+// the handle.
+func BindGuardian(current Configuration, changes []Binding, profiles modelprofile.Configuration) (Configuration, error) {
+	if len(changes) != 2 {
+		return Configuration{}, fmt.Errorf("control/agentbinding: Guardian update requires both handles")
+	}
+	first, second := Normalize(changes[0]), Normalize(changes[1])
+	if first.Handle == HandleGuardianScreen {
+		first, second = second, first
+	}
+	if first.Handle != HandleGuardian || second.Handle != HandleGuardianScreen {
+		return Configuration{}, fmt.Errorf("control/agentbinding: Guardian update requires the review and classifier handles")
+	}
+	next := Configuration{Roles: current.Roles, Sets: current.Sets}
+	for _, binding := range current.Bindings {
+		handle := NormalizeHandle(binding.Handle)
+		if handle != HandleGuardian && handle != HandleGuardianScreen {
+			next.Bindings = append(next.Bindings, binding)
+		}
+	}
+	for _, binding := range []Binding{first, second} {
+		if binding.ProfileID != "" || binding.Effort != "" || binding.Speed != "" {
+			next.Bindings = append(next.Bindings, binding)
+		}
+	}
+	if err := ValidateConfiguration(next, profiles); err != nil {
+		return Configuration{}, err
+	}
+	return NormalizeConfiguration(next), nil
+}
+
 // Lookup returns one explicit binding.
 func Lookup(in Configuration, handle Handle) (Binding, bool) {
 	handle = NormalizeHandle(handle)

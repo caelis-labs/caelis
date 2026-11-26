@@ -471,6 +471,7 @@ export interface BindAgentBindingRequest {
   binding: AgentBinding;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
+  guardian_bindings?: Array<AgentBinding>;
   operation_id?: string;
   session_id?: string;
   [key: string]: JSONValue;

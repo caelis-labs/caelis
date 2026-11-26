@@ -108,6 +108,13 @@ func (a *SessionClientAdapter) BindAgentBinding(ctx context.Context, binding age
 	})
 }
 
+// BindGuardian applies both draft bindings in one Host configuration revision.
+func (a *SessionClientAdapter) BindGuardian(ctx context.Context, bindings []agentbinding.Binding) (agentbinding.Status, error) {
+	return a.runAgentBindingMutation(ctx, "Guardian configuration", "guardian-binding", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+		return a.agentClient.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{WriteBase: base, GuardianBindings: bindings})
+	})
+}
+
 func (a *SessionClientAdapter) ResetAgentBinding(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
 	return a.runAgentBindingMutation(ctx, "Agent binding reset", "agent-binding-reset", func(base appserver.WriteBase) (appserver.CommandResult, error) {
 		return a.agentClient.ResetAgentBinding(ctx, appserver.ResetAgentBindingRequest{WriteBase: base, Handle: handle})

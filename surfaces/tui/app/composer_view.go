@@ -160,7 +160,16 @@ func (m *Model) buildComposeInputLayout() composerInputLayout {
 	}
 	totalWidth := m.composerContentWidth()
 	contentWidth := maxInt(1, totalWidth-promptWidth)
-	displayValue, displayCursor, displayToValue := composeInputDisplayWithMap(value, cursorIndex, m.inputAttachments)
+	attachments := m.inputAttachments
+	if state := m.subagentOverlay; state != nil {
+		// The picker owns its filter. Opening it must not overwrite the
+		// Session's composer draft or attachments.
+		const prefix = "/team "
+		value = prefix + truncateDisplayCellsFromEnd(state.query, max(0, contentWidth-len(prefix)-1))
+		cursorIndex = len([]rune(value))
+		attachments = nil
+	}
+	displayValue, displayCursor, displayToValue := composeInputDisplayWithMap(value, cursorIndex, attachments)
 	layout := layoutComposerDisplay(displayValue, displayCursor, contentWidth)
 	rows := layout.rows
 	if len(rows) == 0 {
@@ -172,8 +181,11 @@ func (m *Model) buildComposeInputLayout() composerInputLayout {
 		layout.totalRows = 1
 	}
 
-	start := clampComposerRowOffset(m.composerRowOffset, len(rows), maxInputBarRows)
-	m.composerRowOffset = start
+	start := 0
+	if m.subagentOverlay == nil {
+		start = clampComposerRowOffset(m.composerRowOffset, len(rows), maxInputBarRows)
+		m.composerRowOffset = start
+	}
 	end := minInt(len(rows), start+maxInputBarRows)
 
 	return composerInputLayout{

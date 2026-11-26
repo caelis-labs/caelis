@@ -474,6 +474,7 @@ type BindAgentBindingRequest struct {
 	Binding                 AgentBinding   `json:"binding"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	GuardianBindings        []AgentBinding `json:"guardian_bindings,omitempty"`
 	OperationId             *string        `json:"operation_id,omitempty"`
 	SessionId               *string        `json:"session_id,omitempty"`
 }

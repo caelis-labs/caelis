@@ -169,6 +169,9 @@ func (m *Model) renderCompletion(geometry completionOverlayGeometry) string {
 }
 
 func (m *Model) renderInputOverlay() string {
+	if m.subagentOverlay != nil {
+		return m.renderSubagentOverlay()
+	}
 	_, geometry, ok := m.activeCompletionGeometry()
 	if !ok {
 		return ""

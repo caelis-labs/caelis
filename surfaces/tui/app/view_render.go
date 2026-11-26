@@ -355,6 +355,8 @@ func (m *Model) renderInputBar() string {
 	var rendered string
 	if m.activePrompt != nil {
 		rendered = m.renderPromptInputBar()
+	} else if m.subagentOverlay != nil {
+		rendered = m.composeInputRenderFrom(m.composeInputLayout()).styledText()
 	} else {
 		snapshot := m.composeInputLayout()
 		allLines := snapshot.allPlainLines()
@@ -427,6 +429,15 @@ func (m *Model) currentInputGhostHint() string {
 	}
 	if m == nil || m.activePrompt != nil || m.runningIndicatorActive() {
 		return ""
+	}
+	if state := m.subagentOverlay; state != nil {
+		if state.query != "" {
+			return ""
+		}
+		if state.page == subagentPageBinding {
+			return "Type to search models"
+		}
+		return "Type to search roles"
 	}
 	if m.isModelPicker() {
 		if m.cursor == len(m.input) && strings.TrimSpace(m.slashArgQuery) == "" {

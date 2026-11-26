@@ -15,16 +15,8 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	frame := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"/team", "Team Configuration", "[x]",
-		"Binding set",
-		"Participant profiles",
-		"orbit",
-		"openai-codex/gpt-5.6-sol",
-		"System Agents",
-		"Guardian",
-		"Reviewer",
-		"Save binding set…",
-		"esc close",
+		"/team", "[x]", "breeze", "orbit", "zenith",
+		"openai-codex/gpt-5.6-sol", "Guardian", "Reviewer", "esc close",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("overlay frame omitted %q\n%s", want, frame)
@@ -39,29 +31,17 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 			t.Fatalf("frame row %d width = %d, want 100: %q", index, got, line)
 		}
 	}
-	if strings.Contains(frame, "provider:sol") {
-		t.Fatalf("overlay exposed internal profile ID\n%s", frame)
-	}
-	foundParticipants := false
-	foundSystem := false
-	for _, row := range model.subagentOverlay.rows {
-		switch row.section {
-		case "Participant profiles":
-			foundParticipants = true
-		case "System Agents":
-			foundSystem = true
-		case "Delegation Profiles":
-			t.Fatalf("overlay retained delegation section: %#v", row)
+	for _, unwanted := range []string{"provider:sol", "self", "Participant profiles", "System Agents",
+		"Custom roles", "Binding set", "ctrl+n", "ctrl+p", "ctrl+s"} {
+		if strings.Contains(frame, unwanted) {
+			t.Fatalf("overlay retained %q:\n%s", unwanted, frame)
 		}
-	}
-	if !foundParticipants || !foundSystem {
-		t.Fatalf("overlay sections missing participants=%v system=%v rows=%#v", foundParticipants, foundSystem, model.subagentOverlay.rows)
 	}
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 32})
 	model = updated.(*Model)
 	_ = model.View()
-	if geometry := model.subagentOverlay.geometry; geometry.width <= 96 || geometry.width > 160 {
-		t.Fatalf("wide-screen overlay geometry = %#v, want wider than 96 columns within viewport", geometry)
+	if geometry := model.subagentOverlay.geometry; geometry.width != model.completionOverlayInnerWidth() {
+		t.Fatalf("wide-screen team picker did not use the main-pane model picker width: %#v", geometry)
 	}
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 60, Height: 18})
 	model = updated.(*Model)
@@ -71,33 +51,33 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	}
 }
 
-func TestTeamOverlayShowsConflictingRoleWithoutDroppingIt(t *testing.T) {
-	for _, width := range []int{100, 60} {
-		model, service := newSubagentOverlayTestModel(t)
-		service.status.Handles = append(service.status.Handles, agentbinding.HandleStatus{
-			Definition: agentbinding.Definition{Handle: "team", Class: agentbinding.HandleClassDelegation, Custom: true, Configurable: true},
-			Binding:    agentbinding.Binding{Handle: "team", ProfileID: "provider:sol", Effort: "high"},
-			Profile:    testProviderModelProfile(),
-		})
-		model.subagentOverlay.status = service.status
-		updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 32})
-		model = updated.(*Model)
-		selectSubagentTestRow(t, model, "handle:team")
-		frame := ansi.Strip(model.View().Content)
-		if !strings.Contains(frame, "Name conflicts with /team") {
-			t.Fatalf("%d-column frame omitted role conflict:\n%s", width, frame)
-		}
-		row := model.currentSubagentRow()
-		if !row.nameConflict || !row.custom || !row.enabled || row.handle != "team" {
-			t.Fatalf("conflicting role is not available for user configuration: %#v", row)
-		}
-		for _, row := range model.subagentOverlay.rows {
-			if row.handle == "orbit" && row.nameConflict {
-				t.Fatal("built-in profile was marked as a custom-name conflict")
-			}
-		}
-		if service.reset != "" || service.bindRequest.Handle != "" {
-			t.Fatal("displaying a conflict mutated the role")
+func TestTeamOverlayOnlyShowsFixedConfigurableRoles(t *testing.T) {
+	model, service := newSubagentOverlayTestModel(t)
+	service.status.Handles = append(service.status.Handles, agentbinding.HandleStatus{
+		Definition: agentbinding.Definition{Handle: "research", Class: agentbinding.HandleClassDelegation, Custom: true, Configurable: true},
+		Binding:    agentbinding.Binding{Handle: "research", ProfileID: "provider:sol", Effort: "high"},
+		Profile:    testProviderModelProfile(),
+	})
+	service.status.Sets = []agentbinding.BindingSetStatus{{Name: "deep-work", Available: true, Active: true}}
+	model.subagentOverlay.status = service.status
+	frame := ansi.Strip(model.renderSubagentOverlay())
+	var handles []string
+	for _, row := range model.subagentOverlay.rows {
+		handles = append(handles, string(row.handle))
+	}
+	if got, want := strings.Join(handles, ","), "breeze,orbit,zenith,guardian,reviewer"; got != want {
+		t.Fatalf("configurable rows = %s, want %s:\n%s", got, want, frame)
+	}
+	if strings.Contains(frame, "research") || strings.Contains(frame, "deep-work") {
+		t.Fatalf("overlay displayed a custom role or preset:\n%s", frame)
+	}
+	for _, key := range []tea.Key{
+		{Code: 'n', Mod: tea.ModCtrl}, {Code: 'p', Mod: tea.ModCtrl},
+		{Code: 's', Mod: tea.ModCtrl}, {Code: tea.KeyDelete},
+	} {
+		_, cmd := model.Update(tea.KeyPressMsg(key))
+		if cmd != nil || model.subagentOverlay.page != subagentPageMain || len(model.subagentOverlay.rows) != 5 {
+			t.Fatalf("retired key %v changed the overlay", key)
 		}
 	}
 }
@@ -150,8 +130,8 @@ func TestSubagentOverlayBindingPickerUsesModelFirstLabels(t *testing.T) {
 		"openai-codex/gpt-5.6-sol",
 		"openai-codex/gpt-5.6-terra",
 		"Claude — Opus",
-		"■■■□□□  ‹ high ›",
-		"(ACP)",
+		"‹ high ›",
+		"ACP",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("binding picker omitted %q\n%s", want, frame)
@@ -189,7 +169,7 @@ func TestSubagentOverlayReviewerPickerAllowsACPButGuardianDoesNot(t *testing.T) 
 	selectSubagentTestRow(t, reviewer, "handle:reviewer")
 	_ = reviewer.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	reviewerFrame := ansi.Strip(reviewer.renderSubagentOverlay())
-	if !strings.Contains(reviewerFrame, "Claude — Opus") || !strings.Contains(reviewerFrame, "(ACP)") {
+	if !strings.Contains(reviewerFrame, "Claude — Opus") || !strings.Contains(reviewerFrame, "ACP") {
 		t.Fatalf("Reviewer binding picker omitted ACP profile\n%s", reviewerFrame)
 	}
 
@@ -197,7 +177,7 @@ func TestSubagentOverlayReviewerPickerAllowsACPButGuardianDoesNot(t *testing.T) 
 	selectSubagentTestRow(t, guardian, "handle:guardian")
 	_ = guardian.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	guardianFrame := ansi.Strip(guardian.renderSubagentOverlay())
-	if strings.Contains(guardianFrame, "Claude — Opus") || strings.Contains(guardianFrame, "(ACP)") {
+	if strings.Contains(guardianFrame, "Claude — Opus") || strings.Contains(guardianFrame, "ACP") {
 		t.Fatalf("Guardian binding picker exposed ACP profile\n%s", guardianFrame)
 	}
 }
@@ -227,7 +207,7 @@ func TestSubagentOverlayDisambiguatesDuplicateModelNamesWithoutProfileIDs(t *tes
 	}
 }
 
-func TestSubagentOverlayKeyboardBindsAndCreatesRole(t *testing.T) {
+func TestSubagentOverlayKeyboardBinds(t *testing.T) {
 	model, service := newSubagentOverlayTestModel(t)
 	selectSubagentTestRow(t, model, "handle:orbit")
 	if cmd := model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter)); cmd != nil {
@@ -252,36 +232,10 @@ func TestSubagentOverlayKeyboardBindsAndCreatesRole(t *testing.T) {
 		t.Fatalf("binding request = %#v", service.bindRequest)
 	}
 
-	model.openSubagentPage(subagentPageMain, 0)
-	model.renderSubagentOverlay()
-	_ = model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
-	model.renderSubagentOverlay()
-	_ = model.handleSubagentOverlayPaste(tea.PasteMsg{Content: "research"})
-	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyDown))
-	_ = model.handleSubagentOverlayPaste(tea.PasteMsg{Content: "Investigate unfamiliar systems"})
-	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyDown))
-	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	model.renderSubagentOverlay()
-	selectSubagentTestRow(t, model, "binding:acp:claude:opus")
-	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	model.renderSubagentOverlay()
-	bindingRow := model.subagentOverlay.rows[2]
-	if bindingRow.key != "field:binding" ||
-		bindingRow.detail != "Claude — Opus [none]" {
-		t.Fatalf("selected role binding row = %#v", bindingRow)
+	if model.subagentOverlay.page != subagentPageMain || model.currentSubagentRow().handle != agentbinding.HandleOrbit {
+		t.Fatal("binding picker did not return to the selected role")
 	}
-	selectSubagentTestRow(t, model, "create")
-	cmd = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	if cmd == nil {
-		t.Fatal("create role returned nil command")
-	}
-	_ = cmd()
-	if service.createdRole.Handle != "research" ||
-		service.createdRole.Description != "Investigate unfamiliar systems" ||
-		service.bindRequest.ProfileID != "acp:claude:opus" ||
-		service.bindRequest.Effort != "none" {
-		t.Fatalf("created role = %#v binding=%#v", service.createdRole, service.bindRequest)
-	}
+
 }
 
 func TestSubagentOverlayIgnoresResultFromEarlierRequest(t *testing.T) {
@@ -297,7 +251,6 @@ func TestSubagentOverlayIgnoresResultFromEarlierRequest(t *testing.T) {
 		t.Fatalf("reopened overlay request = %d, want a new generation", current.request)
 	}
 	current.pending = true
-	current.afterMutation = &subagentOverlayNav{page: subagentPageSets}
 
 	if cmd := model.handleSubagentOverlayResult(subagentOverlayResultMsg{
 		request: staleRequest,
@@ -305,79 +258,8 @@ func TestSubagentOverlayIgnoresResultFromEarlierRequest(t *testing.T) {
 	}); cmd != nil {
 		t.Fatal("stale result returned a follow-up command")
 	}
-	if !current.loading || !current.pending || current.afterMutation == nil || len(current.status.Sets) != 0 {
+	if !current.loading || !current.pending || len(current.status.Sets) != 0 {
 		t.Fatalf("stale result mutated current overlay: %#v", current)
-	}
-}
-
-func TestSubagentOverlayNewRoleBindingStartsOnEnabledProfile(t *testing.T) {
-	model, _ := newSubagentOverlayTestModel(t)
-	model.openNewSubagentRole()
-	model.subagentOverlay.roleHandle = "research"
-	selectSubagentTestRow(t, model, "field:binding")
-	if cmd := model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter)); cmd != nil {
-		t.Fatal("opening new-role binding picker returned a command")
-	}
-	model.renderSubagentOverlay()
-
-	row := model.currentSubagentRow()
-	if !row.enabled || row.reset || row.key == "binding:reset" {
-		t.Fatalf("initial new-role binding row = %#v, want an enabled profile", row)
-	}
-	for _, candidate := range model.subagentOverlay.rows {
-		if candidate.key == "binding:reset" {
-			t.Fatalf("new-role binding picker retained unavailable reset row: %#v", model.subagentOverlay.rows)
-		}
-	}
-}
-
-func TestSubagentOverlayMouseAndBindingSetShortcuts(t *testing.T) {
-	model, service := newSubagentOverlayTestModel(t)
-	model.subagentOverlay.status.Sets = []agentbinding.BindingSetStatus{{
-		Name: "default", Available: true,
-	}}
-	_ = model.View()
-	geometry := model.subagentOverlay.geometry
-	rowY := geometry.rows[0]
-	x := geometry.x + 4
-	_, _ = model.handleMouse(tea.MouseClickMsg(tea.Mouse{X: x, Y: rowY, Button: tea.MouseLeft}))
-	_, _ = model.handleMouse(tea.MouseReleaseMsg(tea.Mouse{X: x, Y: rowY, Button: tea.MouseNone}))
-	if model.subagentOverlay.page != subagentPageSets {
-		t.Fatalf("mouse click page = %v, want binding sets", model.subagentOverlay.page)
-	}
-	model.renderSubagentOverlay()
-	before := model.subagentOverlay.index
-	_, _ = model.handleMouse(tea.MouseWheelMsg(tea.Mouse{
-		X: x, Y: model.subagentOverlay.geometry.rows[0], Button: tea.MouseWheelDown,
-	}))
-	if model.subagentOverlay.index == before {
-		t.Fatal("mouse wheel did not move binding-set selection")
-	}
-
-	_ = model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
-	model.renderSubagentOverlay()
-	_ = model.handleSubagentOverlayPaste(tea.PasteMsg{Content: "deep-work"})
-	selectSubagentTestRow(t, model, "save")
-	cmd := model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	if cmd == nil {
-		t.Fatal("save binding set returned nil command")
-	}
-	msg := cmd()
-	if service.savedSet != "deep-work" {
-		t.Fatalf("saved binding set = %q, want deep-work", service.savedSet)
-	}
-	updated, _ := model.Update(msg)
-	model = updated.(*Model)
-	_ = model.View()
-	geometry = model.subagentOverlay.geometry
-	_, _ = model.handleMouse(tea.MouseClickMsg(tea.Mouse{
-		X: geometry.closeX, Y: geometry.closeY, Button: tea.MouseLeft,
-	}))
-	_, _ = model.handleMouse(tea.MouseReleaseMsg(tea.Mouse{
-		X: geometry.closeX, Y: geometry.closeY, Button: tea.MouseNone,
-	}))
-	if model.subagentOverlay != nil {
-		t.Fatal("mouse close did not dismiss subagent overlay")
 	}
 }
 

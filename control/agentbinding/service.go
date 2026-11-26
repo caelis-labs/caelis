@@ -154,6 +154,12 @@ type Service interface {
 	ResetAgentBinding(context.Context, Handle) (Status, error)
 }
 
+// GuardianBindingService commits the two Guardian bindings in one configuration write.
+// A binding with an empty profile resets its handle.
+type GuardianBindingService interface {
+	BindGuardian(context.Context, []Binding) (Status, error)
+}
+
 // ConfigurationService extends binding mutation with user-created roles and
 // named binding snapshots. It remains Control-owned; presentation surfaces
 // render Status and submit explicit operations.

@@ -1,231 +1,139 @@
 package tuiapp
 
 import (
-	"slices"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
-type subagentField uint8
+const subagentLabelStart = 4
 
-const (
-	subagentFieldModel subagentField = iota
-	subagentFieldAuxiliary
-	subagentFieldEffort
-	subagentFieldFast
-)
-
-type subagentCompanion struct {
-	handle agentbinding.Handle
-	label  string
-	value  string
+func subagentPurpose(handle agentbinding.Handle) string {
+	switch handle {
+	case agentbinding.HandleBreeze:
+		return "Quick checks and edits"
+	case agentbinding.HandleOrbit:
+		return "General work and analysis"
+	case agentbinding.HandleZenith:
+		return "Design and hard problems"
+	case agentbinding.HandleGuardian:
+		return "Tool approvals"
+	case agentbinding.HandleReviewer:
+		return "Review workspace changes"
+	}
+	return ""
 }
 
-func (c *subagentCompanion) searchText() string {
-	if c == nil {
+type subagentOverviewWidths struct {
+	name, model, purpose int
+}
+
+func subagentOverviewColumns(width int, rows []subagentOverlayRow) subagentOverviewWidths {
+	name := subagentLabelStart + 8
+	model := max(1, width-name-2)
+	if width < 46 {
+		return subagentOverviewWidths{name: name, model: model}
+	}
+	longest := 0
+	for _, row := range rows {
+		longest = max(longest, displayColumns(row.detail+subagentOverviewEffort(row)))
+	}
+	model = min(max(23, longest), model-14, 41)
+	return subagentOverviewWidths{name: name, model: model, purpose: width - name - model - 4}
+}
+
+func subagentOverviewEffort(row subagentOverlayRow) string {
+	if effort := subagentEffort(row); effort != "" {
+		return " [" + effort + "]"
+	}
+	return ""
+}
+
+func subagentEffort(row subagentOverlayRow) string {
+	effort := strings.TrimSpace(row.binding.Effort)
+	if row.binding.ProfileID == "" || effort == "none" {
 		return ""
 	}
-	return c.label + " " + c.value + " " + string(c.handle)
+	return effort
 }
 
-func (s *subagentOverlayState) subagentCompanion(handle agentbinding.Handle) *subagentCompanion {
-	c := &subagentCompanion{value: "Disabled"}
-	switch handle {
-	case agentbinding.HandleGuardian:
-		c.handle, c.label = agentbinding.HandleGuardianScreen, "Classifier"
-		if !slices.ContainsFunc(s.status.Targets, func(p modelprofile.ModelProfile) bool {
-			return agentbinding.SupportsProfile(c.handle, p)
-		}) {
-			return nil
-		}
-	default:
-		return nil
+func (m *Model) renderSubagentOverviewRow(row subagentOverlayRow, selected bool, width int, cols subagentOverviewWidths) string {
+	style, label := m.theme.TextStyle(), m.theme.TextStyle()
+	purpose, effort, accent := m.theme.MutedTextStyle(), m.theme.SecondaryTextStyle(), m.theme.Tokens().Accent
+	if selected {
+		style = m.theme.SelectionStyle()
+		label = style.Bold(true)
+		purpose, effort, accent = m.subagentSelectedDetail(purpose), m.subagentSelectedDetail(effort), m.subagentSelectedDetail(accent)
 	}
-	for _, item := range s.status.Handles {
-		if item.Definition.Handle == c.handle && agentbinding.IsBound(item) {
-			c.value = subagentProfileDisplayName(item.Profile)
-		}
+	model, effortValue := subagentFitModel(row.detail, subagentOverviewEffort(row), cols.model)
+	modelPad := cols.model - displayColumns(model+effortValue)
+	line := subagentRowPrefix(style, accent, selected, " ") +
+		label.Render(subagentCellText(row.label, cols.name-subagentLabelStart)) +
+		style.Render("  "+model) + effort.Render(effortValue) + style.Render(strings.Repeat(" ", modelPad))
+	if cols.purpose > 0 {
+		line += style.Render("  ") + purpose.Render(subagentCellText(subagentPurpose(row.handle), cols.purpose))
 	}
-	return c
+	return subagentPadRow(line, width, style)
 }
 
-// Cell offsets are relative to row content. Rendering and mouse hit testing use
-// the same layout, including clipped cells in narrow terminals.
-type subagentCell struct {
-	field    subagentField
-	x, width int
-	text     string
-	muted    bool
+func (m *Model) subagentSelectedDetail(detail lipgloss.Style) lipgloss.Style {
+	style := m.theme.SelectionStyle()
+	if style.GetReverse() || m.theme.NoColor {
+		return style
+	}
+	return style.Foreground(m.theme.ReadableTextColor(detail.GetForeground(), style.GetBackground()))
 }
 
-func subagentLabelWidth(width int) int {
-	return min(20, max(6, width/4), max(1, width-10))
+type subagentEffortSpan struct {
+	x, width, midpoint int
 }
 
-func (m *Model) subagentCells(row subagentOverlayRow, width int) []subagentCell {
-	state := m.subagentOverlay
-	if state.page == subagentPageBinding {
-		label := row.label
-		if row.reset {
-			label += " · " + row.detail
-		}
-		if row.binding.ProfileID != "" && row.detail != "" {
-			label += " (" + row.detail + ")"
-		}
-		marker := "  "
-		if row.current {
-			marker = "● "
-		}
-		modelWidth, effortWidth, fastWidth := m.subagentBindingColumns(width)
-		if row.reset {
-			modelWidth = width
-		}
-
-		cells := []subagentCell{{field: subagentFieldModel, width: modelWidth, text: marker + label}}
-		if effortWidth > 0 && row.binding.ProfileID != "" && (row.binding.Effort != "none" || len(row.efforts) > 1) {
-			value := pickerEffortControl(row.efforts, row.binding.Effort, len(row.efforts) > 1, width)
-			cells = append(cells, subagentCell{field: subagentFieldEffort, x: modelWidth + 1, width: effortWidth, text: value, muted: true})
-		}
-		if fastWidth > 0 && row.fastSupported {
-			cells = append(cells, subagentCell{field: subagentFieldFast, x: modelWidth + effortWidth + 1 + min(1, effortWidth), width: fastWidth, text: subagentFastLabel(row.fastMode), muted: true})
-		}
-		return cells
+func subagentFitModel(label, effort string, width int) (string, string) {
+	budget := width - displayColumns(effort)
+	if budget < 7 {
+		effort, budget = "", width
 	}
-	start := subagentLabelWidth(width) + 2
-	available := max(1, width-start)
-	mainWidth, auxiliaryWidth := 1, 0
-	for _, item := range state.rows {
-		mainWidth = max(mainWidth, displayColumns(item.detail))
-		if item.companion != nil {
-			auxiliaryWidth = max(auxiliaryWidth, displayColumns(item.companion.label)+displayColumns(item.companion.value)+3)
+	if displayColumns(label) > budget && budget < 22 {
+		if _, short, ok := strings.Cut(label, "/"); ok {
+			label = short
 		}
 	}
-	mainWidth = min(56, mainWidth, available)
-	if auxiliaryWidth > 0 {
-		auxiliaryWidth = min(40, auxiliaryWidth, max(1, available/2))
-		mainWidth = min(mainWidth, max(1, available-auxiliaryWidth-2))
-	}
-	if row.companion != nil {
-		return []subagentCell{
-			{field: subagentFieldModel, x: start, width: mainWidth, text: row.detail},
-			{field: subagentFieldAuxiliary, x: start + mainWidth + 2, width: auxiliaryWidth, text: row.companion.label + " " + row.companion.value + " ▾"},
-		}
-	}
-	return []subagentCell{{field: subagentFieldModel, x: start, width: mainWidth, text: row.detail}}
+	return ansi.Truncate(label, budget, "…"), effort
 }
 
-// Every model shares the same column boundaries, including models without
-// optional controls. Spare terminal width stays outside the cells.
-func (m *Model) subagentBindingColumns(width int) (int, int, int) {
-	modelWidth, effortWidth, fastWidth := 24, 0, 0
-	for _, row := range m.subagentOverlay.rows {
-		if row.binding.ProfileID == "" {
-			continue
-		}
-		labelWidth := displayColumns(row.label) + 4
-		if row.detail != "" {
-			labelWidth += displayColumns(row.detail) + 3
-		}
-		modelWidth = max(modelWidth, labelWidth)
-		if row.binding.Effort != "none" || len(row.efforts) > 1 {
-			effortWidth = 12
-			if width >= 90 {
-				effortWidth = 22
-			}
-		}
-		if row.fastSupported {
-			fastWidth = 8
-		}
+func subagentRowPrefix(style, accent lipgloss.Style, focused bool, mark string) string {
+	cursor := " "
+	if focused {
+		cursor = "›"
 	}
-	// Reserve visible controls and at least a short model label on small screens.
-	minimumModel := min(10, max(3, width/3))
-	fastWidth = min(fastWidth, max(0, width/3))
-	gaps := min(1, effortWidth) + min(1, fastWidth)
-	effortWidth = min(effortWidth, max(0, width-minimumModel-fastWidth-gaps))
-	gaps = min(1, effortWidth) + min(1, fastWidth)
-	modelWidth = min(52, modelWidth, max(1, width-effortWidth-fastWidth-gaps))
-	return modelWidth, effortWidth, fastWidth
+	return style.Render(" ") + accent.Render(cursor+mark) + style.Render(" ")
 }
 
-func subagentFastLabel(fast bool) string {
-	if fast {
-		return "Fast on"
-	}
-	return "Fast off"
+func subagentPadRow(line string, width int, style lipgloss.Style) string {
+	return line + style.Render(strings.Repeat(" ", max(0, width-displayColumns(line))))
 }
 
-func (m *Model) subagentFields() []subagentField {
-	row := m.currentSubagentRow()
-	fields := []subagentField{subagentFieldModel}
-	if m.subagentOverlay.page == subagentPageMain && row.companion != nil {
-		fields = append(fields, subagentFieldAuxiliary)
+func subagentCellText(text string, width int) string {
+	if width <= 0 {
+		return ""
 	}
-	if m.subagentOverlay.page == subagentPageBinding {
-		if len(row.efforts) > 1 {
-			fields = append(fields, subagentFieldEffort)
-		}
-		if row.fastSupported {
-			fields = append(fields, subagentFieldFast)
-		}
-	}
-	return fields
+	return padRightDisplay(ansi.Truncate(strings.TrimSpace(text), width, "…"), width)
 }
 
-func (m *Model) normalizeSubagentField() {
-	if !slices.Contains(m.subagentFields(), m.subagentOverlay.field) {
-		m.subagentOverlay.field = subagentFieldModel
-	}
+func (m *Model) subagentPaneTitle(title string, width int) string {
+	return " " + m.theme.MutedTextStyle().Render(truncateTailDisplay(title, width))
 }
 
-func (m *Model) moveSubagentField(delta int) {
-	fields := m.subagentFields()
-	index := max(0, slices.Index(fields, m.subagentOverlay.field))
-	m.subagentOverlay.field = fields[(index+delta+len(fields))%len(fields)]
-	m.subagentOverlay.pressedKey = ""
-}
-
-func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width int) string {
-	state := m.subagentOverlay
-	innerWidth := max(1, width-2)
-	line := ""
-	if state.page != subagentPageBinding {
-		marker := "· "
-		if selected {
-			marker = "› "
-		}
-		style := m.theme.TextStyle()
-		if !row.enabled {
-			style = m.theme.HelpHintTextStyle()
-		}
-		line = style.Render(padRightDisplay(truncateTailDisplay(marker+row.label, subagentLabelWidth(innerWidth)), subagentLabelWidth(innerWidth)))
+func subagentViewport(list *subagentList, budget int) (int, int, []int) {
+	offsets := make([]int, len(list.rows))
+	for i := range offsets {
+		offsets[i] = -1
 	}
-	for _, cell := range m.subagentCells(row, innerWidth) {
-		line += strings.Repeat(" ", max(0, cell.x-displayColumns(line)))
-		value := cell.text
-		if selected && m.editingSubagentField() {
-			value = truncateDisplayCellsFromEnd(value, max(1, cell.width-1)) + "▏"
-		}
-		value = padRightDisplay(ansi.Truncate(value, cell.width, "…"), cell.width)
-		style := m.theme.TextStyle()
-		if cell.muted || !row.enabled {
-			style = m.theme.HelpHintTextStyle()
-		} else if cell.field == subagentFieldAuxiliary {
-			style = m.theme.KeyLabelStyle()
-		}
-		if selected && state.field == cell.field {
-			style = m.theme.SelectionStyle()
-		}
-		if !selected || state.field != cell.field {
-			if suffix := strings.Index(value, " ["); suffix > 0 {
-				line += style.Render(value[:suffix]) + m.theme.HelpHintTextStyle().Render(value[suffix:])
-				continue
-			}
-		}
-		line += style.Render(value)
-	}
-	return m.renderCompletionUnselectedLine(innerWidth, line)
+	// Keep the window fixed until the selected row leaves it.
+	start := clampInt(list.windowStart, max(0, list.index-budget+1), list.index)
+	list.windowStart = start
+	return start, min(start+budget, len(list.rows)), offsets
 }

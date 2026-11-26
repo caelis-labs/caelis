@@ -15,11 +15,10 @@ import (
 
 type subagentDelegationStub struct {
 	ControlServices
-	status      agentbinding.Status
-	bindRequest agentbinding.Binding
-	reset       agentbinding.Handle
-	createdRole agentbinding.Role
-	savedSet    string
+	status           agentbinding.Status
+	bindRequest      agentbinding.Binding
+	reset            agentbinding.Handle
+	guardianBindings []agentbinding.Binding
 }
 
 func (s *subagentDelegationStub) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
@@ -40,29 +39,8 @@ func (s *subagentDelegationStub) ResetAgentBinding(_ context.Context, handle age
 	return s.status, nil
 }
 
-func (s *subagentDelegationStub) CreateAgentRole(_ context.Context, role agentbinding.Role, binding agentbinding.Binding) (agentbinding.Status, error) {
-	s.createdRole = role
-	s.bindRequest = binding
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) DeleteAgentRole(_ context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
-	s.reset = handle
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) SaveAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
-	s.savedSet = name
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) ApplyAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
-	s.savedSet = name
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) DeleteAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
-	s.savedSet = name
+func (s *subagentDelegationStub) BindGuardian(_ context.Context, bindings []agentbinding.Binding) (agentbinding.Status, error) {
+	s.guardianBindings = bindings
 	return s.status, nil
 }
 

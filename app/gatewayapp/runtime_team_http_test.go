@@ -10,8 +10,97 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/modelconfig/typesafe"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
+
+func TestRuntimeTeamHTTPCommitsGuardianPairAtomically(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, &applicationHTTPModel{})
+	defer host.close(t)
+	connectApplicationChildModel(t, ctx, host, "guardian-review")
+	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-classifier", ExpectedRevision: &status.Configuration.Revision},
+		Config:    appserver.ConnectConfig{Provider: "custom-judgment", Model: typesafe.DefaultModel, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("connect classifier: %+v, %v", connected, err)
+	}
+	catalog, err := host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var review, classifier agentbinding.Binding
+	for _, profile := range catalog.Targets {
+		if profile.Judgment {
+			classifier = agentbinding.Binding{Handle: agentbinding.HandleGuardianScreen, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort}
+		} else if strings.HasSuffix(profile.ID, "/guardian-review") {
+			review = agentbinding.Binding{Handle: agentbinding.HandleGuardian, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort}
+		}
+	}
+	if review.ProfileID == "" || classifier.ProfileID == "" {
+		t.Fatalf("missing fixture profiles: %+v", catalog.Targets)
+	}
+	revision := connected.Revision
+	invalid := classifier
+	invalid.ProfileID = review.ProfileID
+	rejected, err := host.host.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{
+		WriteBase:        appserver.WriteBase{OperationID: "guardian-pair-invalid", ExpectedRevision: &revision},
+		GuardianBindings: []agentbinding.Binding{review, invalid},
+	})
+	if err == nil || rejected.Outcome != appserver.OutcomeRejected {
+		t.Fatalf("invalid pair: %+v, %v", rejected, err)
+	}
+	after, err := host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
+	if err != nil || !reflect.DeepEqual(after.Handles, catalog.Handles) {
+		t.Fatalf("invalid pair changed bindings: %+v, %v", after.Handles, err)
+	}
+	req := appserver.BindAgentBindingRequest{
+		WriteBase:        appserver.WriteBase{OperationID: "guardian-pair", ExpectedRevision: &revision},
+		GuardianBindings: []agentbinding.Binding{review, classifier},
+	}
+	result, err := host.host.BindAgentBinding(ctx, req)
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != revision+1 {
+		t.Fatalf("apply pair: %+v, %v", result, err)
+	}
+	after, err = host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range after.Handles {
+		switch item.Definition.Handle {
+		case review.Handle:
+			if item.Binding != review {
+				t.Fatalf("review binding = %+v, want %+v", item.Binding, review)
+			}
+		case classifier.Handle:
+			if item.Binding != classifier {
+				t.Fatalf("classifier binding = %+v, want %+v", item.Binding, classifier)
+			}
+		}
+	}
+	replayed, err := host.host.BindAgentBinding(ctx, req)
+	if err != nil || replayed != result {
+		t.Fatalf("replayed pair: %+v, %v", replayed, err)
+	}
+	cleared, err := host.host.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{
+		WriteBase:        appserver.WriteBase{OperationID: "guardian-pair-reset", ExpectedRevision: &result.Revision},
+		GuardianBindings: []agentbinding.Binding{{Handle: review.Handle}, {Handle: classifier.Handle}},
+	})
+	if err != nil || cleared.Outcome != appserver.OutcomeCommitted || cleared.Revision != result.Revision+1 {
+		t.Fatalf("reset pair: %+v, %v", cleared, err)
+	}
+	after, err = host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
+	if err != nil || !reflect.DeepEqual(after.Handles, catalog.Handles) {
+		t.Fatalf("reset pair did not restore defaults: %+v, %v", after.Handles, err)
+	}
+}
 
 func bindRuntimeTeamHTTP(t *testing.T, ctx context.Context, host *applicationHTTPHost, handle agentbinding.Handle, name, operation string) {
 	t.Helper()
