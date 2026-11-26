@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -38,7 +37,7 @@ func TestNormalizeTurnRequestTrimsAndClones(t *testing.T) {
 		},
 		TurnID:       " turn-1 ",
 		ContentParts: []model.ContentPart{part},
-		Context: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+		Context: session.ContextTransfer{Turns: []session.ContextTurn{{
 			Executor: session.ActorRef{Name: " helper "}, UserMessages: []string{" prior "}, AssistantSummary: " done ",
 		}}},
 		ContextSyncSeq: 3,
@@ -109,8 +108,8 @@ func TestNormalizeAttachDetachHandoffRequests(t *testing.T) {
 		SessionRef:     session.SessionRef{SessionID: " sid "},
 		Agent:          " agent ",
 		Source:         " source ",
-		Context:        agent.ContextTransfer{Summary: " summary "},
-		FreshContext:   agent.ContextTransfer{Summary: " full summary "},
+		Context:        session.ContextTransfer{Summary: " summary "},
+		FreshContext:   session.ContextTransfer{Summary: " full summary "},
 		ContextSyncSeq: 9,
 	})
 	if handoff.SessionRef.SessionID != "sid" || handoff.Agent != "agent" || handoff.Source != "source" || handoff.Context.Summary != "summary" || handoff.FreshContext.Summary != "full summary" || handoff.ContextSyncSeq != 9 {

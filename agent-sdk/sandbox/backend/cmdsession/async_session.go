@@ -14,8 +14,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
 	"github.com/google/uuid"
 )
 
@@ -171,7 +170,7 @@ func (s *AsyncSession) Start() error {
 		return err
 	}
 	if !s.tty {
-		procutil.SetProcessGroup(cmd)
+		executil.SetProcessGroup(cmd)
 	}
 	if s.Dir != "" && strings.TrimSpace(cmd.Dir) == "" {
 		cmd.Dir = s.Dir
@@ -182,7 +181,7 @@ func (s *AsyncSession) Start() error {
 		cmd.Env = slices.Clone(cfg.Env)
 	}
 	if cmd.Env == nil {
-		cmd.Env = append(os.Environ(), procutil.DefaultCommandEnvVars...)
+		cmd.Env = append(os.Environ(), executil.DefaultCommandEnvVars...)
 	}
 
 	if s.tty {
@@ -351,7 +350,7 @@ func (s *AsyncSession) cleanupProcessGroupAfterExit() {
 	if s == nil || s.cmd == nil || s.cmd.Process == nil {
 		return
 	}
-	_ = procutil.KillProcessGroup(s.cmd.Process.Pid)
+	_ = executil.KillProcessGroup(s.cmd.Process.Pid)
 }
 
 // enforceTimeouts monitors the session for absolute and idle timeouts and
@@ -436,7 +435,7 @@ type OutputObservation struct {
 // fully exited. It does not consume output and caller cancellation does not
 // affect the process.
 func (s *AsyncSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (OutputObservation, error) {
-	observation, err := outputwait.Await(ctx, cursor, func() outputwait.Snapshot[SessionStatus] {
+	observation, err := executil.AwaitOutput(ctx, cursor, func() executil.OutputSnapshot[SessionStatus] {
 		s.mu.RLock()
 		signal := s.outputSignal
 		available := sandbox.OutputCursor{Stdout: s.stdoutCursor, Stderr: s.stderrCursor}
@@ -451,9 +450,9 @@ func (s *AsyncSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCur
 		// lock. Retry if it raced this snapshot so terminal observations
 		// always carry the final published cursor.
 		if !exited && s.exited.Load() {
-			return outputwait.Snapshot[SessionStatus]{Retry: true}
+			return executil.OutputSnapshot[SessionStatus]{Retry: true}
 		}
-		return outputwait.Snapshot[SessionStatus]{
+		return executil.OutputSnapshot[SessionStatus]{
 			Signal:    signal,
 			Published: available,
 			Available: current,
@@ -565,7 +564,7 @@ func (s *AsyncSession) Terminate() error {
 	s.cancel()
 
 	if s.cmd != nil && s.cmd.Process != nil {
-		return procutil.KillProcess(s.cmd)
+		return executil.KillProcess(s.cmd)
 	}
 
 	return nil

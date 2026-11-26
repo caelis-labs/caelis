@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 )
@@ -46,13 +46,13 @@ func (b *runtimeReceiptBackend) Deliver(ctx context.Context, _ string, messages 
 
 type admissionSubagent struct{}
 
-func (admissionSubagent) Spawn(_ context.Context, spawn agent.SubagentSpawnContext, _ delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	return delegation.Anchor{TaskID: spawn.TaskID, AgentID: spawn.TaskID, SessionID: "child-" + spawn.TaskID}, delegation.Result{State: delegation.StateCompleted}, nil
+func (admissionSubagent) Spawn(_ context.Context, spawn task.SpawnContext, _ task.DelegationRequest) (task.Anchor, task.DelegationResult, error) {
+	return task.Anchor{TaskID: spawn.TaskID, AgentID: spawn.TaskID, SessionID: "child-" + spawn.TaskID}, task.DelegationResult{State: task.StateCompleted}, nil
 }
-func (admissionSubagent) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{State: delegation.StateCompleted}, nil
+func (admissionSubagent) Wait(context.Context, task.Anchor, int) (task.DelegationResult, error) {
+	return task.DelegationResult{State: task.StateCompleted}, nil
 }
-func (admissionSubagent) Cancel(context.Context, delegation.Anchor) error { return nil }
+func (admissionSubagent) Cancel(context.Context, task.Anchor) error { return nil }
 
 func TestMailboxReceiptWaitDoesNotBlockRuntimeStartThread(t *testing.T) {
 	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})

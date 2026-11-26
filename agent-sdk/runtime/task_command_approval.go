@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -339,6 +338,6 @@ func (t *commandTask) emitApprovalState() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.outputObserver != nil {
-		_ = t.outputObserver.ObserveTaskOutput(context.Background(), output.Event{State: string(t.state), Running: true, OccurredAt: time.Now()})
+		_ = t.outputObserver.ObserveTaskOutput(context.Background(), taskapi.OutputEvent{State: string(t.state), Running: true, OccurredAt: time.Now()})
 	}
 }

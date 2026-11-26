@@ -12,9 +12,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -38,16 +36,16 @@ func TestACPChildFailureReachesStoreLogsWithoutEnteringTaskResult(t *testing.T) 
 			t.Error(err)
 		}
 	}()
-	anchor, _, err := plane.Subagents.Spawn(ctx, subagent.SpawnContext{
+	anchor, _, err := plane.Subagents.Spawn(ctx, task.SpawnContext{
 		SessionRef: session.SessionRef{SessionID: "parent-diagnostics"},
 		TaskID:     "task-diagnostics", ActivityID: "activity-diagnostics", ParentCallID: "call-diagnostics",
 		CWD: root, Output: discardDiagnosticOutput{},
-	}, delegation.Request{Agent: "diagnostic-helper", Prompt: "prompt body must not be logged"})
+	}, task.DelegationRequest{Agent: "diagnostic-helper", Prompt: "prompt body must not be logged"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := plane.Subagents.Wait(ctx, anchor, 5000)
-	if err != nil || result.State != delegation.StateUnknownOutcome {
+	if err != nil || result.State != task.StateUnknownOutcome {
 		t.Fatalf("result = %#v, %v", result, err)
 	}
 	public, err := json.Marshal(result)
@@ -91,7 +89,7 @@ func TestACPChildFailureReachesStoreLogsWithoutEnteringTaskResult(t *testing.T) 
 
 type discardDiagnosticOutput struct{}
 
-func (discardDiagnosticOutput) ObserveTaskOutput(context.Context, output.Event) error { return nil }
+func (discardDiagnosticOutput) ObserveTaskOutput(context.Context, task.OutputEvent) error { return nil }
 
 type diagnosticsACPAgent struct{}
 

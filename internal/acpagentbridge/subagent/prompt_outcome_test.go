@@ -11,8 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -21,17 +20,17 @@ func TestCancellationSettlementRequiresPromptResponse(t *testing.T) {
 		name string
 		stop string
 		err  error
-		want delegation.State
+		want task.State
 	}{
-		{"confirmed cancellation", "cancelled", nil, delegation.StateCancelled},
-		{"completion won cancellation race", "end_turn", nil, delegation.StateCompleted},
-		{"cancelled observation", "", joinChildInputUnknown("unconfirmed prompt", context.Canceled), delegation.StateUnknownOutcome},
-		{"rejected authentication", "", errors.New("configured authentication method unavailable"), delegation.StateFailed},
-		{"cancelled before dispatch", "", context.Canceled, delegation.StateInterrupted},
+		{"confirmed cancellation", "cancelled", nil, task.StateCancelled},
+		{"completion won cancellation race", "end_turn", nil, task.StateCompleted},
+		{"cancelled observation", "", joinChildInputUnknown("unconfirmed prompt", context.Canceled), task.StateUnknownOutcome},
+		{"rejected authentication", "", errors.New("configured authentication method unavailable"), task.StateFailed},
+		{"cancelled before dispatch", "", context.Canceled, task.StateInterrupted},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &Runner{clock: time.Now}
-			run := &childRun{running: true, cancelRequested: true, state: delegation.StateRunning}
+			run := &childRun{running: true, cancelRequested: true, state: task.StateRunning}
 			runner.finishDrive(t.Context(), run, test.stop, test.err)
 			if got := childResultLocked(run); got.State != test.want || got.Running {
 				t.Fatalf("settlement = %#v, want %s", got, test.want)
@@ -54,18 +53,18 @@ func TestInternalPromptErrorQuarantinesSubprocessActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completions := make(chan delegation.Result, 1)
-	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+	completions := make(chan task.DelegationResult, 1)
+	anchor, _, err := runner.Spawn(ctx, task.SpawnContext{
 		ActivityID: "activity-internal-error", TaskID: "task-internal-error", CWD: t.TempDir(),
 		Output:     &recordingStreams{},
-		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
-	}, delegation.Request{Agent: "helper", Prompt: "work"})
+		Completion: completionSinkFunc(func(result task.DelegationResult) { completions <- result }),
+	}, task.DelegationRequest{Agent: "helper", Prompt: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case result := <-completions:
-		if result.State != delegation.StateUnknownOutcome {
+		if result.State != task.StateUnknownOutcome {
 			t.Fatalf("internal RPC error = %#v, want unresolved execution", result)
 		}
 		if !strings.Contains(result.Error, "ACP response code -32603") {
@@ -109,9 +108,9 @@ func TestConfirmedCancellationSurvivesConnectionCleanupFailure(t *testing.T) {
 	}
 	_ = peer.Close()
 	runner := &Runner{clock: time.Now}
-	run := &childRun{running: true, cancelRequested: true, state: delegation.StateRunning, client: remote}
+	run := &childRun{running: true, cancelRequested: true, state: task.StateRunning, client: remote}
 	runner.finishDrive(t.Context(), run, "cancelled", nil)
-	if got := childResultLocked(run); got.State != delegation.StateCancelled || got.Running {
+	if got := childResultLocked(run); got.State != task.StateCancelled || got.Running {
 		t.Fatalf("confirmed cancellation changed after cleanup: %#v", got)
 	}
 	if err := remote.Close(t.Context()); err == nil {

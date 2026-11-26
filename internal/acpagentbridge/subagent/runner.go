@@ -18,9 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -39,7 +37,7 @@ type PermissionHandler func(context.Context, client.RequestPermissionRequest) (c
 // PlacementResolver materializes a durable model placement at the external
 // effect boundary. The product host owns model configuration and must reject a
 // placement whose recorded configuration no longer matches current state.
-type PlacementResolver func(context.Context, subagent.SpawnContext, delegation.TargetRequest) (AgentConfig, error)
+type PlacementResolver func(context.Context, taskapi.SpawnContext, taskapi.TargetRequest) (AgentConfig, error)
 
 // SessionPreparer lets the owning Control Host apply process-local preparation
 // after the child has created or resumed its durable Session and before generic
@@ -52,8 +50,8 @@ type PermissionBridge interface {
 }
 
 type PermissionRequest struct {
-	Spawn   subagent.SpawnContext
-	Agent   delegation.Agent
+	Spawn   taskapi.SpawnContext
+	Agent   taskapi.DelegationAgent
 	AgentID string
 	Request client.RequestPermissionRequest
 }
@@ -97,24 +95,24 @@ type childRun struct {
 	observationOnly       bool
 	replay                *historyCollector
 	pendingConfiguration  *childPendingConfiguration
-	anchor                delegation.Anchor
+	anchor                taskapi.Anchor
 	agentName             string
 	invocation            session.EventInvocation
 	client                *client.Client
 	configuredAuth        controlagents.Authentication
 	authenticationMethods []controlagents.AuthenticationMethod
-	spawn                 subagent.SpawnContext
+	spawn                 taskapi.SpawnContext
 	supportsSteering      bool
 	promptCapabilities    acpsdk.PromptCapabilities
 	taskID                string
-	output                output.Observer
-	completion            delegation.CompletionSink
+	output                taskapi.OutputObserver
+	completion            taskapi.CompletionSink
 	ctx                   context.Context
 	cancel                context.CancelFunc
 	slot                  *childSlot
 
 	mu             sync.RWMutex
-	state          delegation.State
+	state          taskapi.State
 	outputPreview  string
 	actionSummary  subagentActionSummary
 	failureDetail  string
@@ -178,24 +176,24 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	}, nil
 }
 
-func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	req = delegation.CloneRequest(req)
-	return r.SpawnTarget(ctx, spawn, delegation.TargetRequest{Target: delegation.AgentTarget(req.Agent), Prompt: req.Prompt})
+func (r *Runner) Spawn(ctx context.Context, spawn taskapi.SpawnContext, req taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
+	req = taskapi.CloneDelegationRequest(req)
+	return r.SpawnTarget(ctx, spawn, taskapi.TargetRequest{Target: taskapi.AgentTarget(req.Agent), Prompt: req.Prompt})
 }
 
-func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
-	req = delegation.CloneTargetRequest(req)
+func (r *Runner) SpawnTarget(ctx context.Context, spawn taskapi.SpawnContext, req taskapi.TargetRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
+	req = taskapi.CloneTargetRequest(req)
 	if strings.TrimSpace(spawn.ActivityID) == "" || spawn.Output == nil {
-		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, taskapi.MarkSpawnNotStarted(
 			errors.New("subagent output activity binding is required"),
 		)
 	}
-	if err := delegation.ValidateTarget(req.Target); err != nil {
-		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
+	if err := taskapi.ValidateTarget(req.Target); err != nil {
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, taskapi.MarkSpawnNotStarted(err)
 	}
 	cfg, err := r.resolveSpawnConfig(ctx, spawn, req)
 	if err != nil {
-		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, taskapi.MarkSpawnNotStarted(err)
 	}
 	agentID := r.stableAgentID(cfg.Name, spawn.TaskID)
 	role := spawn.Role
@@ -203,10 +201,10 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		role = session.ParticipantRoleDelegated
 	}
 	run := &childRun{
-		anchor: delegation.Anchor{
+		anchor: taskapi.Anchor{
 			TaskID: strings.TrimSpace(spawn.TaskID), AgentID: agentID,
 		},
-		state:          delegation.StateRunning,
+		state:          taskapi.StateRunning,
 		running:        true,
 		taskID:         strings.TrimSpace(spawn.TaskID),
 		output:         spawn.Output,
@@ -257,7 +255,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	})
 	if err != nil {
 		childCancel()
-		return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(err)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, taskapi.MarkSpawnNotStarted(err)
 	}
 	run.mu.Lock()
 	run.client = acpClient
@@ -267,19 +265,19 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		setupErr := spawnedACPSetupError("initialize", cfg, err)
 		childCancel()
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
-		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
 	}
 	supportsSteering, err := client.SupportsSessionSteering(initialize)
 	if err != nil {
 		setupErr := spawnedACPSetupError("negotiate steering with", cfg, err)
 		childCancel()
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
-		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
 	}
 	if acputil.ContentPartsContainImage(spawn.ContentParts) && !initialize.AgentCapabilities.PromptCapabilities.Image {
 		childCancel()
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
-		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input."), closeErr)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, markSpawnNotStartedAfterCleanup(errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input."), closeErr)
 	}
 	authenticationMethods := authentication.Methods(initialize)
 	recovered, err := authentication.OpenNewSession(ctx, authentication.RecoveryConfig{
@@ -295,9 +293,9 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		childCancel()
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
 		if client.SubmissionProvenNotStarted(err) && closeErr == nil {
-			setupErr = subagent.MarkSpawnNotStarted(setupErr)
+			setupErr = taskapi.MarkSpawnNotStarted(setupErr)
 		}
-		return delegation.Anchor{}, delegation.Result{}, errors.Join(setupErr, closeErr)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, errors.Join(setupErr, closeErr)
 	}
 	sessionResp := recovered.Value
 	sessionID := strings.TrimSpace(sessionResp.SessionID)
@@ -310,7 +308,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 				_ = acpcleanup.CloseSession(ctx, acpClient, sessionID)
 			}
 			_ = acpcleanup.CloseClient(ctx, acpClient)
-			return delegation.Anchor{}, delegation.Result{}, spawnedACPSetupError("prepare Session for", cfg, err)
+			return taskapi.Anchor{}, taskapi.DelegationResult{}, spawnedACPSetupError("prepare Session for", cfg, err)
 		}
 	}
 	if _, err := sessionconfig.Apply(ctx, acpClient, sessionID, sessionconfig.State{
@@ -322,9 +320,9 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 			_ = acpcleanup.CloseSession(ctx, acpClient, sessionID)
 		}
 		_ = acpcleanup.CloseClient(ctx, acpClient)
-		return delegation.Anchor{}, delegation.Result{}, spawnedACPSetupError("configure Session for", cfg, err)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, spawnedACPSetupError("configure Session for", cfg, err)
 	}
-	anchor := delegation.Anchor{
+	anchor := taskapi.Anchor{
 		TaskID:    strings.TrimSpace(spawn.TaskID),
 		SessionID: sessionID,
 		AgentID:   agentID,
@@ -339,7 +337,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	if err != nil {
 		childCancel()
 		_ = acpClient.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, err
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, err
 	}
 	target = agent.ChildEndpointRef{
 		ParticipantID: anchor.AgentID,
@@ -353,7 +351,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		r.mu.Unlock()
 		childCancel()
 		_ = acpClient.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, fmt.Errorf("subagent run %q is already registered", runKey)
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, fmt.Errorf("subagent run %q is already registered", runKey)
 	}
 	r.runs[runKey] = run
 	r.slots[runKey] = slot
@@ -369,7 +367,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		r.mu.Unlock()
 		childCancel()
 		_ = acpClient.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, err
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, err
 	}
 	activityID := strings.TrimSpace(spawn.ActivityID)
 	slot.beginInitialActivity(activityID, run)
@@ -479,10 +477,10 @@ func markSpawnNotStartedAfterCleanup(setupErr error, cleanupErr error) error {
 	if cleanupErr != nil {
 		return errors.Join(setupErr, cleanupErr)
 	}
-	return subagent.MarkSpawnNotStarted(setupErr)
+	return taskapi.MarkSpawnNotStarted(setupErr)
 }
 
-func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (AgentConfig, error) {
+func (r *Runner) resolveSpawnConfig(ctx context.Context, spawn taskapi.SpawnContext, req taskapi.TargetRequest) (AgentConfig, error) {
 	frozen := placement.Normalize(req.Target.Placement)
 	switch frozen.Kind {
 	case placement.KindModel:
@@ -529,20 +527,20 @@ func hasACPSessionCapability(resp client.InitializeResponse, name string) bool {
 	return ok
 }
 
-func (r *Runner) Wait(ctx context.Context, anchor delegation.Anchor, yieldTimeMS int) (delegation.Result, error) {
+func (r *Runner) Wait(ctx context.Context, anchor taskapi.Anchor, yieldTimeMS int) (taskapi.DelegationResult, error) {
 	run, err := r.lookup(anchor)
 	if err != nil {
-		return delegation.Result{}, err
+		return taskapi.DelegationResult{}, err
 	}
 	return r.waitRun(ctx, run, yieldTimeMS), nil
 }
 
-func delegationStateCanStartTurn(state delegation.State) bool {
+func delegationStateCanStartTurn(state taskapi.State) bool {
 	switch state {
-	case delegation.StateCompleted,
-		delegation.StateFailed,
-		delegation.StateCancelled,
-		delegation.StateInterrupted:
+	case taskapi.StateCompleted,
+		taskapi.StateFailed,
+		taskapi.StateCancelled,
+		taskapi.StateInterrupted:
 		return true
 	default:
 		return false
@@ -553,11 +551,11 @@ func detachedChildContext(ctx context.Context) context.Context {
 	return session.ContextWithoutRuntimeFence(context.WithoutCancel(ctx))
 }
 
-func subagentSessionMeta(spawn subagent.SpawnContext) map[string]any {
+func subagentSessionMeta(spawn taskapi.SpawnContext) map[string]any {
 	return acputil.NewSubagentSessionMeta(spawn.SessionRef.SessionID, spawn.TaskID)
 }
 
-func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
+func (r *Runner) Cancel(ctx context.Context, anchor taskapi.Anchor) error {
 	run, err := r.lookup(anchor)
 	if err != nil {
 		return err
@@ -667,7 +665,7 @@ func (r *Runner) Quiesce(ctx context.Context) error {
 	var errs []error
 	for _, run := range runs {
 		run.mu.RLock()
-		anchor := delegation.CloneAnchor(run.anchor)
+		anchor := taskapi.CloneAnchor(run.anchor)
 		done := run.done
 		run.mu.RUnlock()
 		if done != nil {
@@ -727,34 +725,34 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	// Cancellation requests and connection cleanup cannot weaken that evidence.
 	if err != nil {
 		if errorcode.Is(err, errorcode.UnknownOutcome) {
-			run.state = delegation.StateUnknownOutcome
+			run.state = taskapi.StateUnknownOutcome
 			run.failureDetail = strings.TrimSpace(err.Error())
 			run.outputPreview = run.failureDetail
 			run.result = ""
 			closeClient = true
 		} else if errors.Is(err, context.Canceled) {
-			if run.state != delegation.StateCancelled {
-				run.state = delegation.StateInterrupted
+			if run.state != taskapi.StateCancelled {
+				run.state = taskapi.StateInterrupted
 				run.outputPreview = "interrupted"
 				run.failureDetail = "interrupted"
 			}
 			run.result = ""
 			closeClient = true
 		} else {
-			run.state = delegation.StateFailed
+			run.state = taskapi.StateFailed
 			run.failureDetail = subagentPromptFailureDetail(err)
 			run.outputPreview = run.failureDetail
 			run.result = ""
 			closeClient = true
 		}
 	} else if strings.EqualFold(strings.TrimSpace(stopReason), "cancelled") {
-		run.state = delegation.StateCancelled
+		run.state = taskapi.StateCancelled
 		run.outputPreview = "cancelled"
 		run.failureDetail = ""
 		run.result = ""
 		closeClient = true
 	} else {
-		run.state = delegation.StateCompleted
+		run.state = taskapi.StateCompleted
 		run.outputPreview = truncateMiddleUTF8(run.outputPreview, maxSubagentPreviewBytes)
 		run.failureDetail = ""
 	}
@@ -805,9 +803,9 @@ func (r *Runner) finishDriveLocked(ctx context.Context, run *childRun, stopReaso
 	return done
 }
 
-func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) delegation.Result {
+func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) taskapi.DelegationResult {
 	if run == nil {
-		return delegation.Result{}
+		return taskapi.DelegationResult{}
 	}
 	wait := time.Duration(yieldTimeMS) * time.Millisecond
 	if wait < 0 {
@@ -828,11 +826,11 @@ func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) de
 	return childResultLocked(run)
 }
 
-func childResultLocked(run *childRun) delegation.Result {
+func childResultLocked(run *childRun) taskapi.DelegationResult {
 	if run == nil {
-		return delegation.Result{}
+		return taskapi.DelegationResult{}
 	}
-	out := delegation.Result{
+	out := taskapi.DelegationResult{
 		TaskID:           strings.TrimSpace(run.taskID),
 		State:            run.state,
 		Running:          run.running,
@@ -846,10 +844,10 @@ func childResultLocked(run *childRun) delegation.Result {
 	if !run.running {
 		out.Result = strings.TrimSpace(run.result)
 	}
-	return delegation.CloneResult(out)
+	return taskapi.CloneDelegationResult(out)
 }
 
-func (r *Runner) lookup(anchor delegation.Anchor) (*childRun, error) {
+func (r *Runner) lookup(anchor taskapi.Anchor) (*childRun, error) {
 	key, err := childRunKey(anchor)
 	if err != nil {
 		return nil, err
@@ -873,7 +871,7 @@ func (r *Runner) lookup(anchor delegation.Anchor) (*childRun, error) {
 // childRunKey isolates process-local child runs by durable TaskID so two remote
 // endpoints that both return a common session id (for example "session-1") cannot
 // overwrite each other.
-func childRunKey(anchor delegation.Anchor) (string, error) {
+func childRunKey(anchor taskapi.Anchor) (string, error) {
 	taskID := strings.TrimSpace(anchor.TaskID)
 	if taskID == "" {
 		return "", fmt.Errorf("subagent task identity is required")
@@ -899,12 +897,12 @@ func (r *Runner) nextAgentID(name string) string {
 	return fmt.Sprintf("%s-%03d", name, r.counter.Add(1))
 }
 
-func (r *Runner) permissionCallback(spawn subagent.SpawnContext, cfg AgentConfig, agentID string) PermissionHandler {
+func (r *Runner) permissionCallback(spawn taskapi.SpawnContext, cfg AgentConfig, agentID string) PermissionHandler {
 	if r.permissionBridge != nil {
 		return func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			resp, err := r.permissionBridge.RequestPermission(ctx, PermissionRequest{
 				Spawn: spawn,
-				Agent: delegation.Agent{
+				Agent: taskapi.DelegationAgent{
 					Name:        strings.TrimSpace(cfg.Name),
 					Description: strings.TrimSpace(cfg.Description),
 				},
@@ -939,22 +937,22 @@ func (r *Runner) permissionCallback(spawn subagent.SpawnContext, cfg AgentConfig
 }
 
 func translateApprovalRequest(
-	spawn subagent.SpawnContext,
+	spawn taskapi.SpawnContext,
 	cfg AgentConfig,
 	agentID string,
 	req client.RequestPermissionRequest,
-) (subagent.ApprovalRequest, error) {
+) (approval.SubagentRequest, error) {
 	wire, err := acpingress.PermissionRequest(req)
 	if err != nil {
-		return subagent.ApprovalRequest{}, err
+		return approval.SubagentRequest{}, err
 	}
 	permission, err := acppermission.DecodePermissionRequest(wire)
 	if err != nil {
-		return subagent.ApprovalRequest{}, err
+		return approval.SubagentRequest{}, err
 	}
-	options := make([]subagent.ApprovalOption, 0, len(permission.Options))
+	options := make([]approval.Option, 0, len(permission.Options))
 	for _, item := range permission.Options {
-		options = append(options, subagent.ApprovalOption{
+		options = append(options, approval.Option{
 			ID:   strings.TrimSpace(item.ID),
 			Name: strings.TrimSpace(item.Name),
 			Kind: strings.TrimSpace(item.Kind),
@@ -964,7 +962,7 @@ func translateApprovalRequest(
 	if cfg.BuiltinRuntime {
 		endpoint = approval.EndpointBuiltin
 	}
-	return subagent.ApprovalRequest{
+	return approval.SubagentRequest{
 		Origin:       approval.Origin{Role: approval.RoleSubagent, Endpoint: endpoint, SessionID: string(req.SessionId), ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: permission.ToolCall.ID, Agent: agentID},
 		SessionRef:   session.NormalizeSessionRef(spawn.SessionRef),
 		Session:      session.CloneSession(spawn.Session),
@@ -972,7 +970,7 @@ func translateApprovalRequest(
 		ParentCallID: strings.TrimSpace(spawn.ParentCallID),
 		Agent:        firstNonEmpty(strings.TrimSpace(cfg.Name), strings.TrimSpace(agentID)),
 		Mode:         strings.TrimSpace(spawn.Mode),
-		ToolCall: subagent.ApprovalToolCall{
+		ToolCall: session.ProtocolToolCall{
 			ID:          strings.TrimSpace(permission.ToolCall.ID),
 			Name:        permission.ToolCall.Name,
 			NamePresent: permission.ToolCall.NamePresent,
@@ -1033,7 +1031,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	setupOutput := slot != nil && slot.acceptsSetupOutput(run)
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	var event *session.Event
-	var outputEvent *output.Event
+	var outputEvent *taskapi.OutputEvent
 	run.mu.Lock()
 	acceptOutput := run.running || setupOutput
 	if !acceptOutput {
@@ -1113,10 +1111,10 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		frameState := run.state
 		frameRunning := run.running
 		if setupOutput {
-			frameState = delegation.StateRunning
+			frameState = taskapi.StateRunning
 			frameRunning = true
 		}
-		next := output.Event{
+		next := taskapi.OutputEvent{
 			State: string(frameState), Running: frameRunning,
 			Event: event, OccurredAt: run.updatedAt,
 		}

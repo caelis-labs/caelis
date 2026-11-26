@@ -5,10 +5,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/display"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 )
 
@@ -57,7 +57,7 @@ func newACPChildTerminalProjector() *acpChildTerminalProjector {
 func isACPChildTerminalEnvelope(env eventstream.Envelope) bool {
 	return env.Scope == eventstream.ScopeSubagent && env.ParentTool != nil &&
 		strings.TrimSpace(env.ParentTool.ToolCallID) != "" &&
-		env.ParentTool.ToolName == spawn.ToolName && env.Update != nil
+		env.ParentTool.ToolName == names.StartThread && env.Update != nil
 }
 
 func (p *acpChildTerminalProjector) track(env eventstream.Envelope, fallbackSessionID string) {
@@ -219,7 +219,7 @@ func (p *acpChildTerminalProjector) projectLifecycle(env eventstream.Envelope, f
 		return eventstream.SessionNotification{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
-	if parentCallID == "" || env.ParentTool.ToolName != spawn.ToolName {
+	if parentCallID == "" || env.ParentTool.ToolName != names.StartThread {
 		return eventstream.SessionNotification{}, false
 	}
 	sessionID := childTerminalSessionID(env.SessionID, fallbackSessionID)
@@ -252,7 +252,7 @@ func (p *acpChildTerminalProjector) projectNotice(env eventstream.Envelope, fall
 		return eventstream.SessionNotification{}, false
 	}
 	parentCallID := strings.TrimSpace(env.ParentTool.ToolCallID)
-	if parentCallID == "" || env.ParentTool.ToolName != spawn.ToolName {
+	if parentCallID == "" || env.ParentTool.ToolName != names.StartThread {
 		return eventstream.SessionNotification{}, false
 	}
 	return eventstream.SessionNotification{}, true

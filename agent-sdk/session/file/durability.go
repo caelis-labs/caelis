@@ -3,7 +3,27 @@ package file
 import (
 	"database/sql"
 	"os"
+
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 )
+
+func init() {
+	sdkctx.RegisterLogicalFileStore(func(target any) bool {
+		store, ok := target.(*Store)
+		if !ok || store == nil {
+			return false
+		}
+		store.durability = durabilityOps{
+			syncFile:      func(*os.File) error { return nil },
+			syncDirectory: func(string) error { return nil },
+			configureSQLite: func(db *sql.DB) error {
+				_, err := db.Exec(`PRAGMA synchronous = OFF`)
+				return err
+			},
+		}
+		return true
+	})
+}
 
 // durabilityOps owns the persistence barriers used by the file store.
 // Its zero value is the production implementation; tests may replace a

@@ -16,8 +16,7 @@ and handoff remain in the product Control layer.
 | --- | --- |
 | `agent-sdk` | Cross-domain Agent, Run, capability, usage, and error contracts |
 | `approval` | Permission requests, decisions, resolution, and review contracts |
-| `display` | Tool and Runtime display helpers |
-| `judgment` | Typed choice, probability and relevance evaluation contracts; `judgment/typesafe` implements System One |
+| `judgment` | Typed choice, probability and relevance evaluation contracts |
 | `model` | Model contracts and provider implementations |
 | `policy` | Policy presets and permission helpers |
 | `runtime` | Local Runtime, Turn mechanics, controller and participant contracts |
@@ -40,7 +39,7 @@ Use a Caelis module tag and import only the capabilities your host needs:
 go get github.com/caelis-labs/caelis@<version>
 ```
 
-[`runtime/quickstart_external_test.go`](runtime/quickstart_external_test.go)
+[`quickstart_external_test.go`](quickstart_external_test.go)
 shows a minimal external consumer. Only paths listed in
 [`supported-packages.txt`](supported-packages.txt) are supported external imports;
 other non-`internal` packages are bundled implementations or experimental

@@ -58,6 +58,7 @@ func (s *planInputStore) AppendEvent(ctx context.Context, req session.AppendEven
 }
 
 func TestTurnPlanFileReopenReconcilesBeforeInputAndContinuity(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"owned", "legacy_fact", "legacy_state_only"} {
 		t.Run(scenario, func(t *testing.T) {
 			files, active, root := codeModeStore(t)
@@ -66,7 +67,7 @@ func TestTurnPlanFileReopenReconcilesBeforeInputAndContinuity(t *testing.T) {
 				owner = "old-turn"
 			}
 			seedOrphanPlan(t, files, active, owner, scenario != "legacy_state_only")
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			rt, err := New(Config{Sessions: &planInputStore{Store: reopened}, AgentFactory: chat.Factory{}})
 			if err != nil {
 				t.Fatal(err)
@@ -94,7 +95,7 @@ func TestTurnPlanFileReopenReconcilesBeforeInputAndContinuity(t *testing.T) {
 					}
 				}
 			}
-			again := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			again := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			assertSubagentSagaModelRoundTrip(t, again, active.SessionRef)
 			state, err = again.SnapshotState(t.Context(), active.SessionRef)
 			if err != nil || state["plan"] != nil {
@@ -134,6 +135,7 @@ func (s *orphanPlanFaultStore) AppendEventsAndUpdateState(ctx context.Context, r
 	return s.Store.AppendEventsAndUpdateState(ctx, req)
 }
 func TestTurnPlanCleanupCASAndFailureRetryOriginalIdentity(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"cas", "failure", "changed_plan"} {
 		t.Run(mode, func(t *testing.T) {
 			files, active, _ := codeModeStore(t)
@@ -212,6 +214,7 @@ func TestTurnPlanCleanupCASAndFailureRetryOriginalIdentity(t *testing.T) {
 type planWithoutFence struct{ session.Service }
 
 func TestTurnPlanCleanupRejectsMissingFence(t *testing.T) {
+	t.Parallel()
 	files, active, _ := codeModeStore(t)
 	original := seedOrphanPlan(t, files, active, "", false)
 	rt, err := New(Config{Sessions: planWithoutFence{Service: files}, AgentFactory: chat.Factory{}})
@@ -228,6 +231,7 @@ func TestTurnPlanCleanupRejectsMissingFence(t *testing.T) {
 }
 
 func TestTurnPlanActiveProducerNeverCleanedByAnotherRuntime(t *testing.T) {
+	t.Parallel()
 	files, active, _ := codeModeStore(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	var released atomic.Bool

@@ -3,12 +3,11 @@ package acpagentbridge
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/display"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 
@@ -45,7 +44,7 @@ func acpTaskStreamAnchorFromEnvelope(envelope eventstream.Envelope) (acpTaskStre
 		// ACP Agents. Task attachment instead requires the typed command target
 		// and terminal relation carried by the producing event.
 		kind = task.KindCommand
-	case display.MapString(output, "parent_tool") == spawn.ToolName &&
+	case display.MapString(output, "parent_tool") == names.StartThread &&
 		strings.EqualFold(targetKind, string(task.KindSubagent)):
 		kind = task.KindSubagent
 	}
@@ -84,7 +83,7 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 		}
 		if envelope.Scope != eventstream.ScopeSubagent || envelope.ParentTool == nil ||
 			strings.TrimSpace(envelope.ParentTool.ToolCallID) != anchor.callID ||
-			envelope.ParentTool.ToolName != spawn.ToolName {
+			envelope.ParentTool.ToolName != names.StartThread {
 			return false
 		}
 		switch envelope.Kind {
@@ -107,9 +106,9 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 func taskStreamParentToolName(kind task.Kind) string {
 	switch kind {
 	case task.KindSubagent:
-		return spawn.ToolName
+		return names.StartThread
 	case task.KindCommand:
-		return shell.RunCommandToolName
+		return names.RunCommand
 	default:
 		return ""
 	}

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -101,7 +101,7 @@ func (j *asyncCompactJob) validSource(current session.LoadedSession) bool {
 	if !reflect.DeepEqual(sourceSession, currentSession) {
 		return false
 	}
-	prefix, err := requestsource.Fingerprint(events[:len(sourceEvents)])
+	prefix, err := requestmeta.Fingerprint(events[:len(sourceEvents)])
 	if err != nil || prefix != j.coverage.SourcePrefixHash {
 		return false
 	}

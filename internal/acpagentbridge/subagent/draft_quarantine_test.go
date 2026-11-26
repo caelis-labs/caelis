@@ -14,8 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpdraft"
 	"github.com/caelis-labs/caelis/internal/acptest/draftpeer"
@@ -27,7 +26,7 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			peer := &draftpeer.Peer{SessionID: "child-remote"}
-			approvals := make(chan tasksubagent.ApprovalRequest, 1)
+			approvals := make(chan approval.SubagentRequest, 1)
 			peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
 				second := peer.Prompts.Load() == 2
 				if second {
@@ -70,16 +69,16 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 			events := make(chan childInputTestEvent, 64)
 			spawn := childInputSpawnContext(t, "original-task", events)
 			spawn.ParentCallID = "original-spawn-call"
-			spawn.ApprovalRequester = subagentApprovalRequesterFunc(func(_ context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+			spawn.ApprovalRequester = subagentApprovalRequesterFunc(func(_ context.Context, req approval.SubagentRequest) (approval.Response, error) {
 				approvals <- req
 				return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
 			})
-			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
+			anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "initial input"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			initial := waitChildActivityTerminalFor(t, ctx, events, spawn.ActivityID)
-			if initial.Result == nil || initial.Result.State != delegation.StateCompleted {
+			if initial.Result == nil || initial.Result.State != taskapi.StateCompleted {
 				t.Fatalf("initial activity failed: %+v", initial)
 			}
 			run, err := runner.lookup(anchor)
@@ -99,10 +98,10 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 				t.Fatalf("idle input admission = %+v, %v", started, err)
 			}
 			terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
-			if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome || terminal.Result.TaskID != anchor.TaskID || terminal.Result.Result != "" {
+			if terminal.Result == nil || terminal.Result.State != taskapi.StateUnknownOutcome || terminal.Result.TaskID != anchor.TaskID || terminal.Result.Result != "" {
 				t.Fatalf("receipt failure falsely settled or lost task: %+v", terminal)
 			}
-			var approval tasksubagent.ApprovalRequest
+			var approval approval.SubagentRequest
 			select {
 			case approval = <-approvals:
 			case <-ctx.Done():
@@ -118,7 +117,7 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 			run.mu.RLock()
 			state, bound, remote := run.state, run.anchor, run.client
 			run.mu.RUnlock()
-			if state != delegation.StateUnknownOutcome || bound != anchor || remote == nil {
+			if state != taskapi.StateUnknownOutcome || bound != anchor || remote == nil {
 				t.Fatalf("quarantine discarded owner: state=%s anchor=%+v client=%v", state, bound, remote != nil)
 			}
 			if !run.slot.activityCheckpoint().outputQuarantined {
@@ -187,7 +186,7 @@ func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testi
 			t.Cleanup(func() { _ = runner.Quiesce(context.Background()) })
 			events := make(chan childInputTestEvent, 64)
 			spawn := childInputSpawnContext(t, "original-task", events)
-			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
+			anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "initial input"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +207,7 @@ func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testi
 			run.mu.RLock()
 			running, state := run.running, run.state
 			run.mu.RUnlock()
-			if !running || state != delegation.StateRunning || run.slot.activityCheckpoint().outputQuarantined {
+			if !running || state != taskapi.StateRunning || run.slot.activityCheckpoint().outputQuarantined {
 				t.Fatalf("message timeout escaped to Activity: running=%v state=%s", running, state)
 			}
 			if failure == "late-receipt" {
@@ -227,7 +226,7 @@ func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testi
 				t.Fatal(err)
 			}
 			terminal := waitChildActivityTerminalFor(t, ctx, events, spawn.ActivityID)
-			if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted || terminal.Result.Result != "continued original Activity" {
+			if terminal.Result == nil || terminal.Result.State != taskapi.StateCompleted || terminal.Result.Result != "continued original Activity" {
 				t.Fatalf("original completion = %+v", terminal.Result)
 			}
 			if peer.Prompts.Load() != 3 || peer.Opens.Load() != 1 || peer.Cancels.Load() != 0 {
@@ -266,7 +265,7 @@ func TestDraftChildTerminalReleasesSteeringWithoutEchoOrInputDeadline(t *testing
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 64)
 	spawn := childInputSpawnContext(t, "original-task", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
+	anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "initial input"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +293,7 @@ func TestDraftChildTerminalReleasesSteeringWithoutEchoOrInputDeadline(t *testing
 	assertion, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	terminal := waitChildActivityTerminalFor(t, assertion, events, spawn.ActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted || terminal.Result.Result != "original completed" {
+	if terminal.Result == nil || terminal.Result.State != taskapi.StateCompleted || terminal.Result.Result != "original completed" {
 		t.Fatalf("terminal = %+v", terminal.Result)
 	}
 	select {

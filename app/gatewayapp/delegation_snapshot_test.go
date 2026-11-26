@@ -13,7 +13,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -112,10 +112,10 @@ func TestNativeSelfSnapshotSurvivesHostCapabilityEdit(t *testing.T) {
 	if err != nil || targets["self"].Placement.ReasoningEffort != "high" {
 		t.Fatalf("self snapshot: %v", err)
 	}
-	if _, err := runtime.instance.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: targets["self"]}, runtime.instance.activeRuntime); err != nil {
+	if _, err := runtime.instance.resolveDelegationPlacement(t.Context(), task.TargetRequest{Target: targets["self"]}, runtime.instance.activeRuntime); err != nil {
 		t.Fatal(err)
 	}
-	team, err := runtime.instance.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: targets["breeze"]}, runtime.instance.activeRuntime)
+	team, err := runtime.instance.resolveDelegationPlacement(t.Context(), task.TargetRequest{Target: targets["breeze"]}, runtime.instance.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestNativeSelfSnapshotSurvivesHostCapabilityEdit(t *testing.T) {
 	if err := stack.deleteTestHostModel(t.Context(), session.SessionRef{}, profile.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.instance.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: targets["self"]}, runtime.instance.activeRuntime); err == nil {
+	if _, err := runtime.instance.resolveDelegationPlacement(t.Context(), task.TargetRequest{Target: targets["self"]}, runtime.instance.activeRuntime); err == nil {
 		t.Fatal("explicit provider deletion did not revoke self")
 	}
 }
@@ -175,7 +175,7 @@ func TestTeamChildPreparationUsesMaterializedCredentials(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					agent, err := runtime.instance.resolveDelegationPlacement(ctx, sdkdelegation.TargetRequest{Target: sdkdelegation.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
+					agent, err := runtime.instance.resolveDelegationPlacement(ctx, task.TargetRequest{Target: task.Target{Selector: string(handle), Placement: placed}}, runtime.instance.activeRuntime)
 					if err != nil {
 						t.Fatal(err)
 					}

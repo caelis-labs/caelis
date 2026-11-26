@@ -46,7 +46,7 @@ func TestTwoRuntimesRejectStaleCompactionAndRebuildWholeModelContext(t *testing.
 	t.Parallel()
 
 	root := t.TempDir()
-	serviceA := sessionfile.NewStore(sessionfile.Config{
+	serviceA := newLogicalFileStore(t, sessionfile.Config{
 		RootDir: root, SessionIDGenerator: func() string { return "sess-two-runtime-compact" },
 	})
 	activeSession, err := serviceA.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
@@ -71,7 +71,7 @@ func TestTwoRuntimesRejectStaleCompactionAndRebuildWholeModelContext(t *testing.
 	if err != nil {
 		t.Fatalf("New(runtimeA) error = %v", err)
 	}
-	serviceB := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	serviceB := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	runtimeB, err := New(Config{Sessions: serviceB, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatalf("New(runtimeB) error = %v", err)

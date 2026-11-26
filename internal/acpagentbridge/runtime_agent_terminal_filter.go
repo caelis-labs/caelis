@@ -6,7 +6,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
@@ -82,7 +82,7 @@ func normalizeACPStdioTerminalExtension(notification eventstream.SessionNotifica
 // do not pass through this normalizer.
 func acpStdioFinalOnlySpawn(meta map[string]any) bool {
 	toolName := acpmeta.ToolName(meta)
-	return toolName == spawn.ToolName
+	return toolName == names.StartThread
 }
 
 func withoutACPStdioTerminalMount(meta map[string]any, content []eventstream.ToolCallContent) (map[string]any, []eventstream.ToolCallContent) {

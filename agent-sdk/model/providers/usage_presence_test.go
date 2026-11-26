@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -85,7 +86,7 @@ func TestOpenAICompatCacheAliasesAndLegacySessionReplay(t *testing.T) {
 			}
 			ctx := t.Context()
 			config := sessionfile.Config{RootDir: t.TempDir()}
-			store := sessionfile.NewStore(config)
+			store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(config))
 			active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "fixture"})
 			if err != nil {
 				t.Fatal(err)
@@ -96,7 +97,7 @@ func TestOpenAICompatCacheAliasesAndLegacySessionReplay(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := sessionfile.NewStore(config).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+			loaded, err := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(config)).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 			if err != nil || len(loaded.Events) != 1 {
 				t.Fatalf("load legacy events: count=%d err=%v", len(loaded.Events), err)
 			}

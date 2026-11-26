@@ -7,8 +7,7 @@ import (
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/acppermission"
 )
 
@@ -20,13 +19,13 @@ type DraftPermissionBridge interface {
 }
 
 type DraftPermissionRequest struct {
-	Spawn   subagent.SpawnContext
-	Agent   delegation.Agent
+	Spawn   task.SpawnContext
+	Agent   task.DelegationAgent
 	AgentID string
 	Request v2.RequestPermissionRequest
 }
 
-func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn subagent.SpawnContext, cfg AgentConfig, agentID string) func(context.Context, v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
+func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn task.SpawnContext, cfg AgentConfig, agentID string) func(context.Context, v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
 	return func(ctx context.Context, req v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
 		if run == nil {
 			return v2.RequestPermissionResponse{}, errACPPermissionSessionMismatchChild
@@ -42,7 +41,7 @@ func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn subagent.Spawn
 		}
 		if r.permissionBridge != nil {
 			if bridge, ok := r.permissionBridge.(DraftPermissionBridge); ok {
-				return bridge.RequestDraftPermission(ctx, DraftPermissionRequest{Spawn: spawn, Agent: delegation.Agent{Name: cfg.Name, Description: cfg.Description}, AgentID: agentID, Request: req})
+				return bridge.RequestDraftPermission(ctx, DraftPermissionRequest{Spawn: spawn, Agent: task.DelegationAgent{Name: cfg.Name, Description: cfg.Description}, AgentID: agentID, Request: req})
 			}
 			return acppermission.ResponseToDraft(req, approval.Response{})
 		}
@@ -62,7 +61,7 @@ func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn subagent.Spawn
 		if cfg.BuiltinRuntime {
 			endpoint = approval.EndpointBuiltin
 		}
-		response, err := spawn.ApprovalRequester.RequestSubagentApproval(ctx, subagent.ApprovalRequest{
+		response, err := spawn.ApprovalRequester.RequestSubagentApproval(ctx, approval.SubagentRequest{
 			Origin:     approval.Origin{Role: approval.RoleSubagent, Endpoint: endpoint, SessionID: bound, ParentSessionID: spawn.SessionRef.SessionID, TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, ToolCallID: permission.ToolCall.ID, Agent: agentID},
 			SessionRef: session.NormalizeSessionRef(spawn.SessionRef), Session: session.CloneSession(spawn.Session), TaskID: spawn.TaskID, ParentCallID: spawn.ParentCallID, Agent: cfg.Name, Mode: spawn.Mode, Approval: permission,
 		})

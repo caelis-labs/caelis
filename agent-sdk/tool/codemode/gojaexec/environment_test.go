@@ -10,6 +10,7 @@ import (
 )
 
 func TestContinuousEnvironmentBindingsAndBody(t *testing.T) {
+	t.Parallel()
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
@@ -45,6 +46,7 @@ func TestContinuousEnvironmentBindingsAndBody(t *testing.T) {
 }
 
 func TestBodyReadsAllTextAndDoesNotGuessFirstJSON(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Parts: []codemode.Part{{Kind: "text", Text: `{"a":1}`}, {Kind: "text", Text: `{"b":2}`}}}, nil
 	}}
@@ -55,6 +57,7 @@ func TestBodyReadsAllTextAndDoesNotGuessFirstJSON(t *testing.T) {
 }
 
 func TestConsoleMethodsAreNoOps(t *testing.T) {
+	t.Parallel()
 	env := (&Executor{}).NewEnvironment()
 	defer env.Close()
 	host := &namedTestHost{names: []codemode.ToolRoute{{Name: "console"}}}
@@ -77,6 +80,7 @@ func TestConsoleMethodsAreNoOps(t *testing.T) {
 }
 
 func TestContinuousEnvironmentClosuresAndScope(t *testing.T) {
+	t.Parallel()
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()
 	for _, code := range []string{`let n=1, advance=()=>++n;function value(){return n;}class Box {get(){return n;}}return advance();`, `n=10;return {next:advance(),value:value(),box:new Box().get()};`} {
@@ -97,6 +101,7 @@ func TestContinuousEnvironmentClosuresAndScope(t *testing.T) {
 }
 
 func TestContinuousEnvironmentFunctionScopedVars(t *testing.T) {
+	t.Parallel()
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()
 	for _, code := range []string{
@@ -114,6 +119,7 @@ func TestContinuousEnvironmentFunctionScopedVars(t *testing.T) {
 }
 
 func TestContinuousEnvironmentIntrinsicBindingsAndFunctionAssignments(t *testing.T) {
+	t.Parallel()
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()
 	for _, code := range []string{
@@ -131,6 +137,7 @@ func TestContinuousEnvironmentIntrinsicBindingsAndFunctionAssignments(t *testing
 }
 
 func TestContinuousEnvironmentDoWhileDeclarations(t *testing.T) {
+	t.Parallel()
 	code := `const seen=new Set();let after;let pages=0;do{const s={next:pages<2?"more":null};after=s.next;if(++pages>37)throw Error("loop");}while(after);return pages;`
 	e := (&Executor{}).NewEnvironment()
 	defer e.Close()
@@ -144,6 +151,7 @@ func TestContinuousEnvironmentDoWhileDeclarations(t *testing.T) {
 }
 
 func TestContinuousEnvironmentRecordsStartupOnce(t *testing.T) {
+	t.Parallel()
 	e := (&Executor{}).NewEnvironment().(*environment)
 	defer e.Close()
 	_, err := e.Execute(t.Context(), fixed(`return 1;`), codemode.Limits{}, testHost{})

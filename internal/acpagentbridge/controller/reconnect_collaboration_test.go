@@ -11,7 +11,6 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -178,7 +177,7 @@ func TestControllerReconnectPublishesBindingBeforeCollaboration(t *testing.T) {
 			ctx = session.ContextWithRuntimeFence(ctx, fence)
 			commitErr := errors.New("binding persistence failed")
 			failCommit := tc.failCommit
-			req := controller.TurnRequest{SessionRef: active.SessionRef, Session: active, TurnID: "turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "continue"}}, Context: agent.ContextTransfer{Summary: "DELTA-CONTEXT"}, FreshContext: agent.ContextTransfer{Summary: "FULL-CONTEXT"}, ContextSyncSeq: 4,
+			req := controller.TurnRequest{SessionRef: active.SessionRef, Session: active, TurnID: "turn", ContentParts: []model.ContentPart{{Type: model.ContentPartText, Text: "continue"}}, Context: session.ContextTransfer{Summary: "DELTA-CONTEXT"}, FreshContext: session.ContextTransfer{Summary: "FULL-CONTEXT"}, ContextSyncSeq: 4,
 				CommitBinding: func(commitCtx context.Context) error {
 					live, _, err := manager.ActiveControllerBinding(commitCtx, active.SessionRef)
 					if err != nil {
@@ -207,8 +206,8 @@ func TestControllerReconnectPublishesBindingBeforeCollaboration(t *testing.T) {
 				failCommit = false
 				// The failed bootstrap must survive even when the next routed
 				// increment is empty; no new remote is created on this retry.
-				req.Context = agent.ContextTransfer{}
-				req.FreshContext = agent.ContextTransfer{}
+				req.Context = session.ContextTransfer{}
+				req.FreshContext = session.ContextTransfer{}
 			}
 			turn, err := manager.RunTurn(ctx, req)
 			if err != nil {

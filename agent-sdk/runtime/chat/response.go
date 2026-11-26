@@ -7,9 +7,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/google/uuid"
@@ -82,7 +82,7 @@ func collectFinalResponse(
 	if watchdog != nil {
 		watchdog.beginModelStep()
 	}
-	for event, err := range model.Generate(modelinvocation.WithToolRepair(ctx, req), llm, req) {
+	for event, err := range model.Generate(sdkctx.WithToolRepair(ctx, req), llm, req) {
 		if err != nil {
 			return collectedResponse{}, err
 		}
@@ -254,7 +254,7 @@ func modelResponseEvent(
 	resp *model.Response,
 	messageID string,
 	invocationModel model.LLM,
-	requestPrefix ...prefixusage.Snapshot,
+	requestPrefix ...requestmeta.Snapshot,
 ) *session.Event {
 	out := &session.Event{
 		Type:       session.EventTypeOf(&session.Event{Message: &message}),
@@ -275,7 +275,7 @@ func modelToolCallEvents(
 	resp *model.Response,
 	messageID string,
 	invocationModel model.LLM,
-	requestPrefix ...prefixusage.Snapshot,
+	requestPrefix ...requestmeta.Snapshot,
 ) []*session.Event {
 	calls := message.ToolCalls()
 	if len(calls) == 0 {

@@ -41,7 +41,7 @@ func (p faultingBindingProvider) ActiveControllerBinding(context.Context, sessio
 func seedBindingCommitSession(t *testing.T, root, sessionID string) (*sessionfile.Store, session.Session, session.ControllerBinding, session.SessionFence) {
 	t.Helper()
 	ctx := context.Background()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "binding-commit",
@@ -84,8 +84,8 @@ func replacementRemoteBinding(durable session.ControllerBinding) session.Control
 	return live
 }
 
-func fullDialogueContext() agent.ContextTransfer {
-	return agent.ContextTransfer{Turns: []agent.ContextTurn{{
+func fullDialogueContext() session.ContextTransfer {
+	return session.ContextTransfer{Turns: []session.ContextTurn{{
 		UserMessages:     []string{"previous request"},
 		AssistantSummary: "previous answer",
 	}}}
@@ -149,14 +149,14 @@ func TestRuntimeCommitBindingPublishesReplacementRemoteBeforePrompt(t *testing.T
 		t.Fatalf("committed controller = %#v, want live replacement %#v", got, live)
 	}
 	turnReq := <-turnRequests
-	if !agent.ContextTransferEmpty(turnReq.Context) {
+	if !session.ContextTransferEmpty(turnReq.Context) {
 		t.Fatalf("admitted Context = %#v, want no already-delivered dialogue at durable checkpoint %d", turnReq.Context, bindingCommitDurableSeq)
 	}
 	if want := fullDialogueContext(); !reflect.DeepEqual(turnReq.FreshContext, want) {
 		t.Fatalf("admitted FreshContext = %#v, want %#v", turnReq.FreshContext, want)
 	}
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reloaded, err := reopened.Session(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("reopened Session() error = %v", err)
@@ -217,7 +217,7 @@ func TestRuntimeCommitBindingFailureKeepsDeliveredCheckpoint(t *testing.T) {
 	}
 
 	// The failed prompt leaves checkpoint zero durable across a reopen.
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reloaded, err := reopened.Session(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("reopened Session() error = %v", err)

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -53,14 +53,14 @@ func (req Request) ValidateCoverage() error {
 		return invalid("coverage is required")
 	}
 	coverage := req.Coverage
-	sourceHash, err := requestsource.Fingerprint(req.Events)
+	sourceHash, err := requestmeta.Fingerprint(req.Events)
 	if err != nil {
 		return invalid(fmt.Sprintf("source fingerprint: %v", err))
 	}
 	if sourceHash != coverage.SourcePrefixHash {
 		return invalid("source prefix hash mismatch")
 	}
-	frozenHash, err := requestsource.Fingerprint(req.InContextRequest)
+	frozenHash, err := requestmeta.Fingerprint(req.InContextRequest)
 	if err != nil {
 		return invalid(fmt.Sprintf("frozen request fingerprint: %v", err))
 	}

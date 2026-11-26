@@ -8,7 +8,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -145,7 +145,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	if !dispatch || s.job != nil || req.Source == nil || !compactionPrefixSafe(req.Messages) {
 		return nil, nil
 	}
-	messagesHash, err := requestsource.Fingerprint(req.Messages)
+	messagesHash, err := requestmeta.Fingerprint(req.Messages)
 	if err != nil || messagesHash != req.Source.MessagesHash {
 		return nil, nil
 	}
@@ -181,7 +181,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 		cut++
 	}
 	events = events[:cut]
-	prefix, err := requestsource.Fingerprint(events)
+	prefix, err := requestmeta.Fingerprint(events)
 	if err != nil || prefix != req.Source.SourcePrefixHash || session.LastEventSeq(events) != req.Source.SourceThroughSeq {
 		return nil, nil
 	}
@@ -201,7 +201,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 		return nil, nil
 	}
 	frozen := model.CloneRequest(req)
-	frozenHash, err := requestsource.Fingerprint(frozen)
+	frozenHash, err := requestmeta.Fingerprint(frozen)
 	if err != nil {
 		return nil, nil
 	}
@@ -275,7 +275,7 @@ func asyncRequestFingerprint(req *model.Request) (string, error) {
 	prefix.Messages = nil
 	// Unlike the usage estimate's media-stripped hash this binds exact bytes,
 	// schema, reasoning, service tier, and output shape.
-	return requestsource.Fingerprint(prefix)
+	return requestmeta.Fingerprint(prefix)
 }
 
 // No pair may straddle the coverage cut. A standalone/unknown result or an

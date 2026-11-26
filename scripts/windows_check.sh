@@ -9,11 +9,12 @@ fi
 # Keep small platform owners complete; Linux CI covers the general suite.
 # Leave implicit vet enabled for Windows-only source files.
 go test -count=1 -p=2 -timeout "${GO_TEST_TIMEOUT:-5m}" \
-  ./platform/winproc \
+  ./platform/winproc ./platform/atomicfile \
   ./internal/filelock ./internal/productpaths ./internal/workspaceidentity ./internal/servicelifecycle ./internal/updater \
   ./control/appserver/httpclient ./control/sessionprofile \
-  ./agent-sdk/atomicfile ./agent-sdk/policy/presets \
-  ./agent-sdk/sandbox/consoleoutput ./agent-sdk/sandbox/internal/conpty \
+  ./agent-sdk/policy/presets \
+  ./agent-sdk/sandbox/internal/consoleoutput ./agent-sdk/sandbox/internal/winproc \
+  ./agent-sdk/sandbox/internal/winps ./agent-sdk/sandbox/internal/executil \
   ./agent-sdk/sandbox ./agent-sdk/sandbox/host ./agent-sdk/sandbox/backend/cmdsession \
   ./agent-sdk/sandbox/backend/fsboundary ./agent-sdk/sandbox/backend/policyfs \
   ./agent-sdk/sandbox/windows/... \

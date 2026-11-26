@@ -7,8 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
@@ -77,9 +76,9 @@ type acpTaskStreamNoticeFacts struct {
 }
 
 func buildACPTaskStreamNotice(sessionID string, facts acpTaskStreamNoticeFacts) eventstream.Envelope {
-	toolName := shell.RunCommandToolName
+	toolName := names.RunCommand
 	if facts.anchor.kind == task.KindSubagent {
-		toolName = spawn.ToolName
+		toolName = names.StartThread
 	}
 	code := errorcode.CodeOf(facts.err)
 	meta := map[string]any{

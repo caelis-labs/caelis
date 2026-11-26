@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 )
 
@@ -203,18 +202,18 @@ func (tm *taskRuntime) bindCommandOutput(ctx context.Context, task *commandTask,
 		return
 	}
 	if !task.running && taskapi.IsTerminalState(task.state) {
-		task.outputObserver = output.Nop()
+		task.outputObserver = taskapi.NopOutputObserver()
 		task.outputTerminal = true
 		return
 	}
 	if tm.runtime == nil || tm.runtime.taskOutput == nil {
-		task.outputObserver = output.Nop()
+		task.outputObserver = taskapi.NopOutputObserver()
 		return
 	}
-	task.outputObserver = tm.runtime.taskOutput.BindTaskOutput(ctx, output.Binding{
+	task.outputObserver = tm.runtime.taskOutput.BindTaskOutput(ctx, taskapi.OutputBinding{
 		SessionID: strings.TrimSpace(task.sessionRef.SessionID),
 		TaskID:    strings.TrimSpace(task.ref.TaskID), TerminalID: strings.TrimSpace(task.ref.TerminalID),
-		Kind: output.TaskKindCommand, StartsAtTaskOrigin: originComplete,
+		Kind: taskapi.KindCommand, StartsAtTaskOrigin: originComplete,
 	})
 }
 

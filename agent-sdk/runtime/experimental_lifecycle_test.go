@@ -17,6 +17,7 @@ import (
 )
 
 func TestExperimentalAsyncPreservesTurnStartBudget(t *testing.T) {
+	t.Parallel()
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
 			h := newAsyncHarness(t, "")
@@ -43,6 +44,7 @@ func TestExperimentalAsyncPreservesTurnStartBudget(t *testing.T) {
 }
 
 func TestExperimentalFailedMCPDoesNotBlockUnrelatedCompact(t *testing.T) {
+	t.Parallel()
 	for bits := 0; bits < 2; bits++ {
 		t.Run(fmt.Sprint(bits), func(t *testing.T) {
 			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "missing", Command: filepath.Join(t.TempDir(), "nonexistent")}}, nil)
@@ -101,6 +103,7 @@ func (m *progressingCompactModel) Generate(_ context.Context, req *model.Request
 	}
 }
 func TestExperimentalAsyncAllowsHealthyRepeatedRecovery(t *testing.T) {
+	t.Parallel()
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
 			store, active := newTestSessionService(t, "progress")

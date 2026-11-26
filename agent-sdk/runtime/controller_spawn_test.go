@@ -11,12 +11,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
 
 func TestControllerSpawnUsesCanonicalTaskPlacementAndLiveFence(t *testing.T) {
+	t.Parallel()
 	t.Run("active", func(t *testing.T) { testControllerSpawn(t, false) })
 	t.Run("restored", func(t *testing.T) { testControllerSpawn(t, true) })
 }
@@ -24,8 +25,8 @@ func TestControllerSpawnUsesCanonicalTaskPlacementAndLiveFence(t *testing.T) {
 func testControllerSpawn(t *testing.T, recoverController bool) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	child := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child result"}}
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	child := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child result"}}
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "test", PreferredSessionID: "controller-spawn", Workspace: session.WorkspaceRef{Key: "work", CWD: t.TempDir()}})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +77,7 @@ func testControllerSpawn(t *testing.T, recoverController bool) {
 		t.Fatal(ctx.Err())
 	}
 	frozen := mustSealPlacement(t, placement.Placement{Kind: placement.KindAgent, ProfileID: "acp:child:model", Agent: "child", Model: "child", ConfigFingerprint: "config", ReasoningEffort: "none", SessionConfigValues: map[string]string{"service_tier": "priority"}})
-	base := spawn.NewWithTargets([]delegation.Agent{{Name: "helper"}}, map[string]delegation.Target{"helper": {Selector: "helper", Placement: frozen}})
+	base := spawn.NewWithTargets([]task.DelegationAgent{{Name: "helper"}}, map[string]task.Target{"helper": {Selector: "helper", Placement: frozen}})
 	call := tool.Call{ID: "external-spawn", Name: spawn.ToolName, Input: []byte(`{"agent":"helper","prompt":"work"}`)}
 	stale := "old-epoch"
 	if recoverController {

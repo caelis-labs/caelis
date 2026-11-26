@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -20,7 +19,7 @@ import (
 func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 	bindings := map[string]tool.Binding{}
 	for _, event := range events {
-		mcpdiscovery.Apply(bindings, event)
+		applyMCPDiscoveryBindings(bindings, event)
 		if event == nil || event.Type != session.EventTypeToolCall || event.Tool == nil {
 			continue
 		}

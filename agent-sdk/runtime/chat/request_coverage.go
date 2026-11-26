@@ -6,14 +6,14 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func bindRequestSource(ctx agent.Context, req *model.Request) {
 	// Only this projection can certify the observed Session history.
 	req.Source = nil
-	tracker := requestsource.FromContext(ctx)
+	tracker := requestmeta.FromContext(ctx)
 	if tracker == nil {
 		return
 	}
@@ -28,11 +28,11 @@ func bindRequestSource(ctx agent.Context, req *model.Request) {
 	if through == 0 {
 		return
 	}
-	prefixHash, err := requestsource.Fingerprint(events)
+	prefixHash, err := requestmeta.Fingerprint(events)
 	if err != nil {
 		return
 	}
-	messagesHash, err := requestsource.Fingerprint(req.Messages)
+	messagesHash, err := requestmeta.Fingerprint(req.Messages)
 	if err != nil {
 		return
 	}

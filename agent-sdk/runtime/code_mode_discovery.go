@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -87,7 +86,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 	closed := h.closed || h.ctx.Err() != nil
 	h.mu.Unlock()
 	defer func() {
-		discoveryErr = mcpdiscovery.WithEntryHint(discoveryErr, "tools.search({name})")
+		discoveryErr = withMCPDiscoveryEntryHint(discoveryErr, "tools.search({name})")
 		if discoveryErr != nil {
 			h.mu.Lock()
 			h.isError = true

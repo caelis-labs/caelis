@@ -59,6 +59,7 @@ func TestRuntimeWrappedViewImageIsHiddenFromTextOnlyModel(t *testing.T) {
 }
 
 func TestRuntimeViewImageUsesModelSelectedByPrepareHook(t *testing.T) {
+	t.Parallel()
 	for _, imageInput := range []bool{false, true} {
 		name := "text"
 		if imageInput {
@@ -159,6 +160,7 @@ func TestRuntimeWorkspacePolicyExecutesViewImageForCapableModel(t *testing.T) {
 }
 
 func TestRuntimeDynamicViewImageVisibilityIncludesCodeMode(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	viewImage, err := filesystem.NewViewImage(hostRuntimeForTest(t, root))
 	if err != nil {

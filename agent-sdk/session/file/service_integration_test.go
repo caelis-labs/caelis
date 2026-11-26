@@ -13,7 +13,7 @@ func TestSessionServiceIntegration(t *testing.T) {
 
 	root := t.TempDir()
 	ctx := context.Background()
-	service := NewStore(Config{
+	service := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "parent-1" },
 	})
@@ -62,7 +62,7 @@ func TestSessionServiceIntegration(t *testing.T) {
 		t.Fatalf("PutParticipant(parent) error = %v", err)
 	}
 
-	childStore := NewStore(Config{
+	childStore := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "child-1" },
 	})
@@ -90,7 +90,7 @@ func TestSessionServiceIntegration(t *testing.T) {
 		t.Fatalf("AppendEvent(child) error = %v", err)
 	}
 
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	loadedParent, err := reopened.LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef: parent.SessionRef,
 	})

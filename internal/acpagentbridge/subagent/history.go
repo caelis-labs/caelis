@@ -13,8 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -26,11 +25,11 @@ import (
 // history; its ordered replay completion is sent to the observation writer.
 // Later authorized input reuses this connection. Opening history alone never
 // submits a prompt, applies execution configuration, or closes the Session.
-func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryRequest) (session.LoadedSession, error) {
+func (r *Runner) LoadHistory(ctx context.Context, raw task.HistoryRequest) (session.LoadedSession, error) {
 	if r == nil || ctx == nil {
 		return session.LoadedSession{}, fmt.Errorf("subagent history context is required")
 	}
-	req := tasksubagent.CloneHistoryRequest(raw)
+	req := task.CloneHistoryRequest(raw)
 	target := childEndpointFromReconnect(req.Anchor, &req.Reconnect)
 	if err := r.BindChildEndpoint(ctx, target, req.Reconnect.Spawn); err != nil {
 		return session.LoadedSession{}, err
@@ -46,7 +45,7 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 		run.mu.RLock()
 		active, state := run.running || run.finishing, run.state
 		run.mu.RUnlock()
-		if active || state == delegation.StateUnknownOutcome {
+		if active || state == task.StateUnknownOutcome {
 			return session.LoadedSession{}, errorcode.New(errorcode.Unavailable, "Cannot reload child history while its producer is active or unsettled")
 		}
 		if err := run.client.Close(ctx); err != nil {
@@ -90,7 +89,7 @@ type historyCollector struct {
 	projection        *historyProjection
 }
 
-func newHistoryCollector(runner *Runner, anchor delegation.Anchor, agentName string) *historyCollector {
+func newHistoryCollector(runner *Runner, anchor task.Anchor, agentName string) *historyCollector {
 	return &historyCollector{
 		runner: runner,
 		run: childRun{
@@ -459,7 +458,7 @@ func (c *historyCollector) errSnapshot() error {
 	return c.err
 }
 
-var _ tasksubagent.HistoryRunner = (*Runner)(nil)
+var _ task.HistoryRunner = (*Runner)(nil)
 
 func historyReplacement(event *session.Event) bool {
 	update := session.ProtocolUpdateOf(event)

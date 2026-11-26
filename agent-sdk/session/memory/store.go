@@ -7,10 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/internal/cwdpath"
 )
 
 // Config defines one in-memory session store and service instance.
@@ -146,7 +145,7 @@ func (s *Store) ListSessions(
 		if req.WorkspaceKey != "" && record.session.WorkspaceKey != strings.TrimSpace(req.WorkspaceKey) {
 			continue
 		}
-		if strings.TrimSpace(req.CWD) != "" && cwdpath.Compare(record.session.CWD, req.CWD) != 0 {
+		if strings.TrimSpace(req.CWD) != "" && sdkctx.CompareCWD(record.session.CWD, req.CWD) != 0 {
 			continue
 		}
 		rows = append(rows, session.SessionSummary{
@@ -744,7 +743,7 @@ func (s *Store) nextID(prefix string, custom func() string) string {
 			return id
 		}
 	}
-	return identity.New(prefix)
+	return sdkctx.NewID(prefix)
 }
 
 func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]struct{}) {
@@ -769,7 +768,7 @@ func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]st
 		}
 	}
 	for {
-		id = identity.New("event")
+		id = sdkctx.NewID("event")
 		if _, used := existing[id]; !used {
 			event.ID = id
 			return

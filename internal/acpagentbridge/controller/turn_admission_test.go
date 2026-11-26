@@ -112,7 +112,7 @@ func TestManagerRunTurnBusyPreservesPendingContext(t *testing.T) {
 
 	run := &controllerRun{
 		parentSessionID: "session-a",
-		context:         agent.ContextTransfer{Summary: "handoff context"},
+		context:         session.ContextTransfer{Summary: "handoff context"},
 		contextPending:  true,
 	}
 	first := newTestTurnHandle(nil)

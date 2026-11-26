@@ -5,12 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
-	"strings"
-	"sync"
-	"testing"
-	"time"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -21,13 +15,15 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"iter"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
 )
 
 func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placement {
@@ -40,9 +36,10 @@ func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placem
 }
 
 func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "review result"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "review result"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	taskStore := newFileTaskStoreForTest(t)
@@ -125,9 +122,10 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 }
 
 func TestDelegatedSpawnIncludeContextAttachesPublicTurns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	userMessage := model.NewTextMessage(model.RoleUser, "previous request")
@@ -161,9 +159,10 @@ func TestDelegatedSpawnIncludeContextAttachesPublicTurns(t *testing.T) {
 }
 
 func TestDelegatedSpawnDefaultOmitsParentContext(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	userMessage := model.NewTextMessage(model.RoleUser, "previous request")
@@ -189,8 +188,9 @@ func TestDelegatedSpawnDefaultOmitsParentContext(t *testing.T) {
 }
 
 func TestDelegatedSpawnIncludeContextAllowsEmptyHistory(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
@@ -207,8 +207,9 @@ func TestDelegatedSpawnIncludeContextAllowsEmptyHistory(t *testing.T) {
 }
 
 func TestDelegatedSpawnIncludeContextDegradesWithoutRouter(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child done"},
 	}
 	sessions := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
@@ -240,21 +241,22 @@ func TestDelegatedSpawnIncludeContextDegradesWithoutRouter(t *testing.T) {
 }
 
 func TestDelegatedSpawnIdentityBindsIncludeContextNotTransferContents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	first := task.SubagentStartRequest{
 		SpawnID: "include-context-identity", Agent: "helper", Prompt: "review",
 		IncludeContext: true, Role: session.ParticipantRoleDelegated,
 	}
-	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), first); err != nil {
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, task.AgentTarget("helper"), first); err != nil {
 		t.Fatal(err)
 	}
 	second := first
-	second.Context = agent.ContextTransfer{Summary: "later compact"}
-	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), second); err != nil {
+	second.Context = session.ContextTransfer{Summary: "later compact"}
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, task.AgentTarget("helper"), second); err != nil {
 		t.Fatalf("changed transfer contents error = %v, want frozen include_context identity to resume", err)
 	}
 	if runner.spawnTargetRequest.Prompt != "review" {
@@ -262,12 +264,13 @@ func TestDelegatedSpawnIdentityBindsIncludeContextNotTransferContents(t *testing
 	}
 	third := first
 	third.IncludeContext = false
-	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), third); err == nil || !strings.Contains(err.Error(), "conflicts with durable intent") {
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, task.AgentTarget("helper"), third); err == nil || !strings.Contains(err.Error(), "conflicts with durable intent") {
 		t.Fatalf("changed include_context error = %v, want durable identity conflict", err)
 	}
 }
 
 func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -282,7 +285,7 @@ func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
 		t.Fatal("test task store does not implement CASStore")
 	}
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "child done"},
 	}
 	runtime, err := New(testConfigWithACPForwarder(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store,
@@ -292,10 +295,10 @@ func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
 	}
 	req := task.SubagentStartRequest{
 		SpawnID: "frozen-context", Agent: "helper", Prompt: "review",
-		IncludeContext: true, Context: agent.ContextTransfer{Summary: "should-not-render"},
+		IncludeContext: true, Context: session.ContextTransfer{Summary: "should-not-render"},
 		Role: session.ParticipantRoleDelegated,
 	}
-	digest, err := subagentSpawnTargetRequestDigest(delegation.AgentTarget("helper"), req, runtime.defaultPolicyMode, session.ParticipantRoleDelegated)
+	digest, err := subagentSpawnTargetRequestDigest(task.AgentTarget("helper"), req, runtime.defaultPolicyMode, session.ParticipantRoleDelegated)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,14 +310,14 @@ func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
 		TaskID: taskID, Kind: task.KindSubagent, Session: activeSession.SessionRef, State: task.StatePrepared,
 		Spec: map[string]any{
 			"spawn_identity": req.SpawnID, "spawn_request_digest": digest,
-			"target": delegation.AgentTarget("helper"), "prompt": "review",
-			"include_context": true, "context": agent.ContextTransfer{},
+			"target": task.AgentTarget("helper"), "prompt": "review",
+			"include_context": true, "context": session.ContextTransfer{},
 		},
 		Metadata: map[string]any{"spawn_status": string(spawnPhaseIntent), "spawn_request_digest": digest},
 	}, ExpectedRevision: 0}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, delegation.AgentTarget("helper"), req); err != nil {
+	if _, err := runtime.tasks.StartSubagentTarget(ctx, activeSession, activeSession.SessionRef, runner, task.AgentTarget("helper"), req); err != nil {
 		t.Fatal(err)
 	}
 	if prompt := runner.spawnTargetRequest.Prompt; prompt != "review" {
@@ -325,7 +328,7 @@ func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
 func TestRuntimeSpawnToolHidesIncludeContextWithoutRouter(t *testing.T) {
 	t.Parallel()
 
-	hidden := runtimeSpawnTool{base: spawn.New([]delegation.Agent{{Name: "helper"}})}.Definition()
+	hidden := runtimeSpawnTool{base: spawn.New([]task.DelegationAgent{{Name: "helper"}})}.Definition()
 	hiddenProps, _ := hidden.InputSchema["properties"].(map[string]any)
 	if _, ok := hiddenProps["include_context"]; ok {
 		t.Fatalf("include_context exposed without ContextRouter: %#v", hiddenProps)
@@ -333,7 +336,7 @@ func TestRuntimeSpawnToolHidesIncludeContextWithoutRouter(t *testing.T) {
 
 	exposed := runtimeSpawnTool{
 		runtime: &Runtime{controllerContextRouter: testContextRouter{}},
-		base:    spawn.New([]delegation.Agent{{Name: "helper"}}),
+		base:    spawn.New([]task.DelegationAgent{{Name: "helper"}}),
 	}.Definition()
 	exposedProps, _ := exposed.InputSchema["properties"].(map[string]any)
 	if _, ok := exposedProps["include_context"]; !ok {
@@ -345,7 +348,7 @@ func callDelegatedSpawnTool(t *testing.T, runtime *Runtime, activeSession sessio
 	t.Helper()
 	target := runtimeSpawnTool{
 		runtime:      runtime,
-		base:         spawn.New([]delegation.Agent{{Name: "helper"}}),
+		base:         spawn.New([]task.DelegationAgent{{Name: "helper"}}),
 		session:      session.CloneSession(activeSession),
 		sessionRef:   activeSession.SessionRef,
 		tasks:        runtime.tasks,
@@ -366,9 +369,10 @@ func callDelegatedSpawnTool(t *testing.T, runtime *Runtime, activeSession sessio
 }
 
 func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, OutputPreview: "I will inspect files"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, OutputPreview: "I will inspect files"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
@@ -395,12 +399,13 @@ func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
 }
 
 func TestSlashSideSubagentDoesNotPromoteStreamTraceToCanonicalDialogue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult:      delegation.Result{State: delegation.StateCompleted},
+		spawnResult:      task.DelegationResult{State: task.StateCompleted},
 		publishOnSpawn:   true,
 		spawnStreamText:  "streamed final answer\n",
-		spawnStreamState: string(delegation.StateCompleted),
+		spawnStreamState: string(task.StateCompleted),
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
@@ -431,8 +436,9 @@ func TestSlashSideSubagentDoesNotPromoteStreamTraceToCanonicalDialogue(t *testin
 }
 
 func TestSubagentRoleComesFromNeutralRequestNotProductSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
 	side, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -456,8 +462,9 @@ func TestSubagentRoleComesFromNeutralRequestNotProductSource(t *testing.T) {
 }
 
 func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
 	side, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -509,13 +516,101 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 	}
 }
 
+func TestSubagentTerminatedResultSettlesTask(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{"spawn", "wait", "read", "completion"} {
+		t.Run(source, func(t *testing.T) {
+			ctx := t.Context()
+			terminated := task.DelegationResult{
+				State: " TERMINATED ", Running: true, Result: "stale final", OutputPreview: "stale preview", Error: "stale error",
+			}
+			runner := &recordingSubagentRunner{
+				spawnResult: task.DelegationResult{State: task.StateRunning, OutputPreview: "working"},
+				waitResult:  terminated,
+			}
+			if source == "spawn" {
+				runner.spawnResult = terminated
+			}
+			if source == "wait" {
+				runner.spawnResult.State = task.StateWaitingApproval
+			}
+			r, active := newSubagentTaskTestRuntime(t, runner)
+			snapshot, err := r.StartSubagentWithOptions(ctx, active.SessionRef, "helper", "inspect", "user", StartSubagentOptions{ReturnOnStart: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if source != "spawn" && (!snapshot.Running || snapshot.State != runner.spawnResult.State) {
+				t.Fatalf("StartSubagentWithOptions() = %#v, want active %q", snapshot, runner.spawnResult.State)
+			}
+			req := task.ControlRequest{TaskID: snapshot.Ref.TaskID, Principal: session.ActorKindController}
+			switch source {
+			case "wait":
+				snapshot, err = r.tasks.Wait(ctx, active.SessionRef, req)
+			case "read":
+				snapshot, err = r.tasks.Read(ctx, active.SessionRef, req)
+			case "completion":
+				// A later observation must see the callback's durable result, even
+				// though the runner still reports running.
+				runner.waitResult = runner.spawnResult
+				runner.spawnContext.Completion.PublishSubagentCompletion(terminated)
+				snapshot, err = r.tasks.Read(ctx, active.SessionRef, req)
+			}
+			if err != nil || snapshot.State != task.StateTerminated || snapshot.Running {
+				t.Fatalf("%s = %#v, %v; want terminated", source, snapshot, err)
+			}
+			entry, err := r.tasks.store.Get(ctx, req.TaskID)
+			if err != nil || entry == nil || entry.State != task.StateTerminated || entry.Running {
+				t.Fatalf("stored Task = %#v, %v; want terminated", entry, err)
+			}
+			for _, key := range []string{"result", "final_message", "output_preview", "error"} {
+				if _, exists := entry.Result[key]; exists {
+					t.Fatalf("terminated Task retained %q: %#v", key, entry.Result)
+				}
+			}
+		})
+	}
+}
+
+func TestSubagentWaitAndReadRejectInvalidResultState(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	runner := &recordingSubagentRunner{
+		spawnResult: task.DelegationResult{State: task.StateRunning, OutputPreview: "original preview"},
+	}
+	r, active := newSubagentTaskTestRuntime(t, runner)
+	started, err := r.StartSubagentWithOptions(ctx, active.SessionRef, "helper", "inspect", "user", StartSubagentOptions{ReturnOnStart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := task.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController}
+	before, err := r.tasks.store.Get(ctx, req.TaskID)
+	if err != nil || before == nil {
+		t.Fatalf("stored Task = %#v, %v", before, err)
+	}
+	for _, state := range []task.State{"", "unrecognized", task.StateWaitingInput} {
+		runner.waitResult = task.DelegationResult{State: state, Running: true, OutputPreview: "invalid preview"}
+		for _, observe := range []func(context.Context, session.SessionRef, task.ControlRequest) (task.Snapshot, error){r.tasks.Wait, r.tasks.Read} {
+			snapshot, err := observe(ctx, active.SessionRef, req)
+			if err == nil || snapshot.State != task.StateRunning || !snapshot.Running || snapshot.Result["output_preview"] != "original preview" {
+				t.Fatalf("observation of invalid state %q = %#v, %v; want error and previous snapshot", state, snapshot, err)
+			}
+		}
+	}
+	after, err := r.tasks.store.Get(ctx, req.TaskID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("invalid observations changed stored Task from %#v to %#v, %v", before, after, err)
+	}
+}
+
 func TestSubagentReadTransportErrorDoesNotInterruptRunningChild(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	waitErr := errors.New("temporary child status transport failure")
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "working"},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true, OutputPreview: "working"},
 		waitErr:     waitErr,
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
@@ -559,8 +654,8 @@ func TestSubagentRunningReadDoesNotAdvanceDurableRevision(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "still working"},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true, OutputPreview: "starting"},
+		waitResult:  task.DelegationResult{State: task.StateRunning, Running: true, OutputPreview: "still working"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -598,7 +693,7 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true, OutputPreview: "starting"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	parentRun := newRunner(t.Context(), "parent-run", func() {}, nil)
@@ -617,9 +712,9 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 		t.Fatal("SpawnContext.Completion is nil")
 	}
 
-	runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+	runner.spawnContext.Completion.PublishSubagentCompletion(task.DelegationResult{
 		TaskID: started.Ref.TaskID,
-		State:  delegation.StateCompleted,
+		State:  task.StateCompleted,
 		Result: "producer-owned final",
 	})
 
@@ -676,13 +771,13 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 func TestSubagentCompletionNoticeUsesInterruptionLanguage(t *testing.T) {
 	t.Parallel()
 
-	task := &subagentTask{
+	subtask := &subagentTask{
 		ref:        task.Ref{TaskID: "task-1"},
 		handle:     "nova",
 		turnSeq:    1,
 		sessionRef: session.SessionRef{SessionID: "parent-session"},
 	}
-	_, notice, ok := subagentCompletionNotice(task, delegation.Result{State: delegation.StateCancelled})
+	_, notice, ok := subagentCompletionNotice(subtask, task.DelegationResult{State: task.StateCancelled})
 	if !ok {
 		t.Fatal("subagentCompletionNotice() ok = false")
 	}
@@ -696,7 +791,7 @@ func TestSubagentCompletionNoticeDropsWhenParentIsIdle(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -709,8 +804,8 @@ func TestSubagentCompletionNoticeDropsWhenParentIsIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
-		TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "idle parent final",
+	runner.spawnContext.Completion.PublishSubagentCompletion(task.DelegationResult{
+		TaskID: started.Ref.TaskID, State: task.StateCompleted, Result: "idle parent final",
 	})
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -749,8 +844,8 @@ func TestSubagentTaskWaitKeepsRequestedYieldSemantics(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
+		waitResult:  task.DelegationResult{State: task.StateRunning, Running: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -775,8 +870,8 @@ func TestSubagentProducerCompletionIsNotBlockedByTaskWait(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
+		waitResult:  task.DelegationResult{State: task.StateRunning, Running: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -786,9 +881,9 @@ func TestSubagentProducerCompletionIsNotBlockedByTaskWait(t *testing.T) {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
 	runner.waitHook = func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		runner.spawnContext.Completion.PublishSubagentCompletion(task.DelegationResult{
 			TaskID: started.Ref.TaskID,
-			State:  delegation.StateCompleted,
+			State:  task.StateCompleted,
 			Result: "completed while Task wait was observing",
 		})
 	}
@@ -822,8 +917,8 @@ func TestSubagentWaitDoesNotExposeConcurrentLifecycleClaim(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
+		waitResult:  task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -864,8 +959,8 @@ func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
 	ctx := context.Background()
 	const finalMessage = "exact concurrent child result"
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "starting"},
-		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true, OutputPreview: "stale preview"},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true, OutputPreview: "starting"},
+		waitResult:  task.DelegationResult{State: task.StateRunning, Running: true, OutputPreview: "stale preview"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -879,8 +974,8 @@ func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
 	runtime.tasks.mu.RUnlock()
 	runner.waitHook = func() {
 		subagentTask.mu.Lock()
-		subagentTask.applyResult(delegation.Result{
-			State:  delegation.StateCompleted,
+		subagentTask.applyResult(task.DelegationResult{
+			State:  task.StateCompleted,
 			Result: finalMessage,
 		})
 		subagentTask.mu.Unlock()
@@ -912,8 +1007,9 @@ func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
 }
 
 func TestSubagentReadIgnoresRetiredSpawnResult(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "current final"}}
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "current final"}}
 	rt, active := newSubagentTaskTestRuntime(t, runner)
 	started, err := rt.tasks.StartSubagent(ctx, active, active.SessionRef, runner, task.SubagentStartRequest{Agent: "helper", Prompt: "review"})
 	if err != nil {
@@ -943,8 +1039,8 @@ func TestSubagentReadDoesNotAdvanceCancellationReconciliation(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
-		waitResult:  delegation.Result{State: delegation.StateCancelled, Result: "cancelled"},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
+		waitResult:  task.DelegationResult{State: task.StateCancelled, Result: "cancelled"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -996,7 +1092,7 @@ func TestSubagentReadDoesNotAdvanceCancellationReconciliation(t *testing.T) {
 func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
 	t.Parallel()
 
-	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted}}
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	_, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
 		Agent: "helper", Prompt: "review", Role: session.ParticipantRole("owner"), Source: "slash_agent",
@@ -1016,28 +1112,29 @@ func TestSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 		{Label: "@codex"},
 		{Label: "@codex2"},
 	}}
-	if got := agenthandle.Allocate(subagentHandlesFromSession(activeSession), "codex"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("agenthandle.Allocate() = %q, want shared human-name pool handle", got)
+	if got := task.AllocateHandle(subagentHandlesFromSession(activeSession), "codex"); !task.ContainsHandlePoolName(got) {
+		t.Fatalf("task.AllocateHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := agenthandle.Allocate(subagentHandlesFromSession(session.Session{}), "Anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("agenthandle.Allocate() = %q, want shared human-name pool handle", got)
+	if got := task.AllocateHandle(subagentHandlesFromSession(session.Session{}), "Anthropic/Claude Agent"); !task.ContainsHandlePoolName(got) {
+		t.Fatalf("task.AllocateHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := agenthandle.Allocate(subagentHandlesFromSession(session.Session{}), "!!!"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("agenthandle.Allocate() = %q, want shared human-name pool handle", got)
+	if got := task.AllocateHandle(subagentHandlesFromSession(session.Session{}), "!!!"); !task.ContainsHandlePoolName(got) {
+		t.Fatalf("task.AllocateHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := agenthandle.Allocate(subagentHandlesFromSession(session.Session{}), "self"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("agenthandle.Allocate(self) = %q, want shared human-name pool handle", got)
+	if got := task.AllocateHandle(subagentHandlesFromSession(session.Session{}), "self"); !task.ContainsHandlePoolName(got) {
+		t.Fatalf("task.AllocateHandle(self) = %q, want shared human-name pool handle", got)
 	}
 	usedSelfHandle := session.Session{Participants: []session.ParticipantBinding{{Label: "@jeff"}}}
-	if got := agenthandle.Allocate(subagentHandlesFromSession(usedSelfHandle), "self"); got == "jeff" || !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("agenthandle.Allocate(self with used handle) = %q, want unused shared pool handle", got)
+	if got := task.AllocateHandle(subagentHandlesFromSession(usedSelfHandle), "self"); got == "jeff" || !task.ContainsHandlePoolName(got) {
+		t.Fatalf("task.AllocateHandle(self with used handle) = %q, want unused shared pool handle", got)
 	}
 }
 
 func TestStartSubagentUsesRequestedHandleAndRejectsDuplicates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
@@ -1064,7 +1161,7 @@ func TestStartSubagentUsesRequestedHandleAndRejectsDuplicates(t *testing.T) {
 		t.Fatalf("StartSubagent(random) error = %v", err)
 	}
 	secondHandle := taskStringValue(second.Result["handle"])
-	if secondHandle == "" || secondHandle == "reviewer" || !agenthandle.ContainsPoolName(secondHandle) {
+	if secondHandle == "" || secondHandle == "reviewer" || !task.ContainsHandlePoolName(secondHandle) {
 		t.Fatalf("second handle = %q, want unused pool handle", secondHandle)
 	}
 
@@ -1079,9 +1176,10 @@ func TestStartSubagentUsesRequestedHandleAndRejectsDuplicates(t *testing.T) {
 }
 
 func TestStartSubagentRejectsRequestedHandleUsedByParticipant(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	activeSession.Participants = []session.ParticipantBinding{{Label: "@reviewer"}}
@@ -1100,9 +1198,10 @@ func TestStartSubagentRejectsRequestedHandleUsedByParticipant(t *testing.T) {
 }
 
 func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 
@@ -1122,10 +1221,10 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 	}
 	firstHandle := taskStringValue(first.Result["handle"])
 	secondHandle := taskStringValue(second.Result["handle"])
-	if firstHandle == "" || !agenthandle.ContainsPoolName(firstHandle) {
+	if firstHandle == "" || !task.ContainsHandlePoolName(firstHandle) {
 		t.Fatalf("first handle = %q, want shared pool handle", firstHandle)
 	}
-	if secondHandle == "" || !agenthandle.ContainsPoolName(secondHandle) {
+	if secondHandle == "" || !task.ContainsHandlePoolName(secondHandle) {
 		t.Fatalf("second handle = %q, want shared pool handle", secondHandle)
 	}
 	if firstHandle == secondHandle {
@@ -1134,8 +1233,9 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 }
 
 func TestSubagentProducerFinalResultSurvivesRehydration(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "producer final answer"}}
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "producer final answer"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	runtime.tasks.store = newFileTaskStoreForTest(t)
 	snapshot, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{Agent: "helper", Prompt: "review", Source: "agent_spawn"})
@@ -1156,6 +1256,7 @@ func TestSubagentProducerFinalResultSurvivesRehydration(t *testing.T) {
 }
 
 func TestResolveTaskHandleUsesStoreHandleLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runtime, activeSession := newSubagentTaskTestRuntime(t, &recordingSubagentRunner{})
 	store := &handleLookupTaskStore{
@@ -1221,7 +1322,7 @@ func TestTaskCancelRejectsSubagentWithoutRemoteEffect(t *testing.T) {
 
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
@@ -1254,6 +1355,7 @@ func TestTaskCancelRejectsSubagentWithoutRemoteEffect(t *testing.T) {
 }
 
 func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.T) {
+	t.Parallel()
 	meta := taskToolMeta(task.Snapshot{
 		Kind:        task.KindSubagent,
 		EventCursor: 17,
@@ -1287,6 +1389,7 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 }
 
 func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T) {
+	t.Parallel()
 	payload := taskToolPayload(task.Snapshot{
 		Kind:  task.KindSubagent,
 		State: task.StateCompleted,
@@ -1315,13 +1418,14 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 }
 
 func TestRuntimeSpawnToolUsesRequestedHandle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
-		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		base:       spawn.New([]task.DelegationAgent{{Name: "self"}}),
 		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -1369,13 +1473,14 @@ func TestRuntimeSpawnToolUsesRequestedHandle(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
-		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		base:       spawn.New([]task.DelegationAgent{{Name: "self"}}),
 		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -1412,7 +1517,7 @@ func TestRuntimeSpawnToolConcurrentAttachmentsConverge(t *testing.T) {
 	}()
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	wrapped := runtimeSpawnTool{
-		base: spawn.New([]delegation.Agent{{Name: "self"}}), session: activeSession,
+		base: spawn.New([]task.DelegationAgent{{Name: "self"}}), session: activeSession,
 		sessionRef: activeSession.SessionRef, tasks: runtime.tasks, runner: runner,
 	}
 	stepModel := &threeSpawnStepModel{}
@@ -1548,7 +1653,7 @@ func newOverlappingSubagentRunner(want int) *overlappingSubagentRunner {
 	return &overlappingSubagentRunner{want: want, ready: make(chan struct{}, want), release: make(chan struct{})}
 }
 
-func (r *overlappingSubagentRunner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+func (r *overlappingSubagentRunner) Spawn(ctx context.Context, spawn task.SpawnContext, req task.DelegationRequest) (task.Anchor, task.DelegationResult, error) {
 	r.mu.Lock()
 	r.active++
 	if r.active > r.maxSeen {
@@ -1563,23 +1668,23 @@ func (r *overlappingSubagentRunner) Spawn(ctx context.Context, spawn subagent.Sp
 	r.ready <- struct{}{}
 	select {
 	case <-ctx.Done():
-		return delegation.Anchor{}, delegation.Result{}, ctx.Err()
+		return task.Anchor{}, task.DelegationResult{}, ctx.Err()
 	case <-r.release:
 	}
 	r.mu.Lock()
 	r.active--
 	r.mu.Unlock()
 	taskID := strings.TrimSpace(spawn.TaskID)
-	return delegation.Anchor{SessionID: fmt.Sprintf("child-%d", id), Agent: req.Agent, AgentID: taskID}, delegation.Result{
-		State: delegation.StateRunning, Running: true,
+	return task.Anchor{SessionID: fmt.Sprintf("child-%d", id), Agent: req.Agent, AgentID: taskID}, task.DelegationResult{
+		State: task.StateRunning, Running: true,
 	}, nil
 }
 
-func (r *overlappingSubagentRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{State: delegation.StateRunning, Running: true}, nil
+func (r *overlappingSubagentRunner) Wait(context.Context, task.Anchor, int) (task.DelegationResult, error) {
+	return task.DelegationResult{State: task.StateRunning, Running: true}, nil
 }
 
-func (r *overlappingSubagentRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+func (r *overlappingSubagentRunner) Cancel(context.Context, task.Anchor) error { return nil }
 
 func (r *overlappingSubagentRunner) maxActive() int {
 	r.mu.Lock()
@@ -1588,13 +1693,14 @@ func (r *overlappingSubagentRunner) maxActive() int {
 }
 
 func TestRuntimeSpawnToolRejectsUnknownArgsBeforeRequiredPrompt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: task.DelegationResult{State: task.StateRunning, Running: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
-		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		base:       spawn.New([]task.DelegationAgent{{Name: "self"}}),
 		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -1617,13 +1723,14 @@ func TestRuntimeSpawnToolRejectsUnknownArgsBeforeRequiredPrompt(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
-		base:       spawn.New([]delegation.Agent{{Name: "self"}, {Name: "reviewer"}}),
+		base:       spawn.New([]task.DelegationAgent{{Name: "self"}, {Name: "reviewer"}}),
 		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -1666,15 +1773,16 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 }
 
 func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
 		base: spawn.NewWithTargets(
-			[]delegation.Agent{{Name: "self"}, {Name: "orbit"}},
-			map[string]delegation.Target{
+			[]task.DelegationAgent{{Name: "self"}, {Name: "orbit"}},
+			map[string]task.Target{
 				"orbit": {
 					Selector: "orbit",
 					Placement: mustSealPlacement(t, placement.Placement{
@@ -1711,13 +1819,14 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done", SupportsSteering: true},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done", SupportsSteering: true},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
-		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		base:       spawn.New([]task.DelegationAgent{{Name: "self"}}),
 		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -1744,7 +1853,7 @@ func TestRuntimeSpawnToolReportsUnsupportedSteering(t *testing.T) {
 	t.Parallel()
 
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	result := callDelegatedSpawnTool(t, runtime, activeSession, map[string]any{
@@ -1757,13 +1866,14 @@ func TestRuntimeSpawnToolReportsUnsupportedSteering(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolPassesApprovalModeToChild(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	targetTool := runtimeSpawnTool{
-		base:         spawn.New([]delegation.Agent{{Name: "self"}}),
+		base:         spawn.New([]task.DelegationAgent{{Name: "self"}}),
 		session:      activeSession,
 		sessionRef:   activeSession.SessionRef,
 		tasks:        runtime.tasks,
@@ -1783,9 +1893,10 @@ func TestRuntimeSpawnToolPassesApprovalModeToChild(t *testing.T) {
 }
 
 func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	if _, err := runtime.sessions.(session.StateWriter).UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), Update: func(state map[string]any) (map[string]any, error) {
@@ -1807,6 +1918,7 @@ func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
 }
 
 func TestRuntimeCurrentApprovalModeUsesConfiguredDefault(t *testing.T) {
+	t.Parallel()
 	runtime := &Runtime{defaultApprovalMode: approval.ModeManual}
 	if got := runtime.currentApprovalMode(nil); got != approval.ModeManual {
 		t.Fatalf("currentApprovalMode(empty) = %q, want manual", got)
@@ -1818,9 +1930,10 @@ func TestRuntimeCurrentApprovalModeUsesConfiguredDefault(t *testing.T) {
 }
 
 func TestStartSubagentWithOptionsUsesRuntimeDefaultApprovalMode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+		spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "done"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	runtime.defaultApprovalMode = approval.ModeManual
@@ -1833,7 +1946,7 @@ func TestStartSubagentWithOptionsUsesRuntimeDefaultApprovalMode(t *testing.T) {
 	}
 }
 
-func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime, session.Session) {
+func newSubagentTaskTestRuntime(t *testing.T, runner task.SubagentRunner) (*Runtime, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
@@ -1860,10 +1973,10 @@ func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime,
 }
 
 type recordingSubagentRunner struct {
-	spawnResult        delegation.Result
-	waitResult         delegation.Result
-	spawnRequest       delegation.Request
-	spawnTargetRequest delegation.TargetRequest
+	spawnResult        task.DelegationResult
+	waitResult         task.DelegationResult
+	spawnRequest       task.DelegationRequest
+	spawnTargetRequest task.TargetRequest
 	waitYieldMS        int
 	waitCalls          int
 	cancelCalls        int
@@ -1874,46 +1987,100 @@ type recordingSubagentRunner struct {
 	spawnStreamEvent   *session.Event
 	spawnStreamState   string
 	spawnStreamRunning bool
-	spawnContext       subagent.SpawnContext
+	spawnContext       task.SpawnContext
 }
 
-func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	r.spawnRequest = delegation.CloneRequest(req)
+func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn task.SpawnContext, req task.DelegationRequest) (task.Anchor, task.DelegationResult, error) {
+	r.spawnRequest = task.CloneDelegationRequest(req)
 	r.spawnContext = spawn
 	if r.publishOnSpawn && spawn.Output != nil {
 		state := strings.TrimSpace(r.spawnStreamState)
 		running := r.spawnStreamRunning
 		if state == "" {
-			state = string(delegation.StateRunning)
+			state = string(task.StateRunning)
 			running = true
 		}
-		_ = spawn.Output.ObserveTaskOutput(context.Background(), output.Event{
+		_ = spawn.Output.ObserveTaskOutput(context.Background(), task.OutputEvent{
 			Text: r.spawnStreamText, Event: session.CloneEvent(r.spawnStreamEvent),
 			State: state, Running: running, Closed: !running,
 		})
 	}
 	agentName := req.Agent
-	return delegation.Anchor{SessionID: "child-1", Agent: agentName, AgentID: strings.TrimSpace(spawn.TaskID)}, delegation.CloneResult(r.spawnResult), nil
+	return task.Anchor{SessionID: "child-1", Agent: agentName, AgentID: strings.TrimSpace(spawn.TaskID)}, task.CloneDelegationResult(r.spawnResult), nil
 }
 
-func (r *recordingSubagentRunner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
-	r.spawnTargetRequest = delegation.CloneTargetRequest(req)
-	return r.Spawn(ctx, spawn, delegation.Request{Agent: req.Target.Selector, Prompt: req.Prompt})
+func (r *recordingSubagentRunner) SpawnTarget(ctx context.Context, spawn task.SpawnContext, req task.TargetRequest) (task.Anchor, task.DelegationResult, error) {
+	r.spawnTargetRequest = task.CloneTargetRequest(req)
+	return r.Spawn(ctx, spawn, task.DelegationRequest{Agent: req.Target.Selector, Prompt: req.Prompt})
 }
 
-func (r *recordingSubagentRunner) Wait(_ context.Context, _ delegation.Anchor, yieldTimeMS int) (delegation.Result, error) {
+func (r *recordingSubagentRunner) Wait(_ context.Context, _ task.Anchor, yieldTimeMS int) (task.DelegationResult, error) {
 	r.waitCalls++
 	r.waitYieldMS = yieldTimeMS
 	if r.waitHook != nil {
 		r.waitHook()
 	}
 	if r.waitErr != nil {
-		return delegation.Result{}, r.waitErr
+		return task.DelegationResult{}, r.waitErr
 	}
-	return delegation.CloneResult(r.waitResult), nil
+	return task.CloneDelegationResult(r.waitResult), nil
 }
 
-func (r *recordingSubagentRunner) Cancel(context.Context, delegation.Anchor) error {
+func (r *recordingSubagentRunner) Cancel(context.Context, task.Anchor) error {
 	r.cancelCalls++
 	return nil
+}
+
+func TestSidecarInitialContentSurvivesTaskAndContextReplay(t *testing.T) {
+	t.Parallel()
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateCompleted, Result: "image inspected"}}
+	runtime, active := newSubagentTaskTestRuntime(t, runner)
+	runtime.tasks.store = newFileTaskStoreForTest(t)
+	parts := []model.ContentPart{{Type: model.ContentPartText, Text: "inspect image"}, {Type: model.ContentPartImage, Data: "aW1hZ2U=", MimeType: "image/png"}}
+	snapshot, err := runtime.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "inspect image", "slash_profile_orbit", StartSubagentOptions{SpawnID: "image-task", ContentParts: parts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(runner.spawnContext.ContentParts, parts) {
+		t.Fatalf("spawn lost content: %#v", runner.spawnContext.ContentParts)
+	}
+	entry, err := runtime.tasks.store.Get(t.Context(), snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := runtime.tasks.rehydrateSubagentTask(entry)
+	if !reflect.DeepEqual(restored.contentParts, parts) {
+		t.Fatalf("Task rehydrate lost content: %#v", restored.contentParts)
+	}
+	loaded, err := runtime.sessions.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range loaded.Events {
+		if event.Type != session.EventTypeUser || event.Scope == nil || event.Scope.Participant.DelegationID != snapshot.Ref.TaskID {
+			continue
+		}
+		found = true
+		if event.Message == nil || event.Message.Role != model.RoleUser || !reflect.DeepEqual(model.ContentPartsFromParts(event.Message.Parts), parts) {
+			t.Fatalf("canonical model context lost user content: %#v", event.Message)
+		}
+	}
+	if !found {
+		t.Fatal("replayed model context omitted sidecar user input")
+	}
+}
+
+func TestBackgroundStartReturnsWithoutWaitingForChild(t *testing.T) {
+	t.Parallel()
+	runner := &recordingSubagentRunner{spawnResult: task.DelegationResult{State: task.StateRunning, Running: true}}
+	runner.waitHook = func() { t.Error("background admission waited for child progress") }
+	runtime, active := newSubagentTaskTestRuntime(t, runner)
+	snapshot, err := runtime.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "work independently", "user", StartSubagentOptions{ReturnOnStart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Running || snapshot.Ref.TaskID == "" {
+		t.Fatalf("background start lost running Task identity: %#v", snapshot)
+	}
 }

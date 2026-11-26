@@ -8,8 +8,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpdraft"
 	"github.com/caelis-labs/caelis/internal/acptest/draftpeer"
@@ -72,8 +71,8 @@ func TestDraftLoadedToolRevisionPreservesCurrentActivityOwnership(t *testing.T) 
 			runner := replacementDraftRunner(t, peer)
 			events := make(chan childInputTestEvent, 64)
 			spawn := childInputSpawnContext(t, "loaded-tools-task", events)
-			anchor := delegation.Anchor{TaskID: spawn.TaskID, SessionID: peer.SessionID, AgentID: "loaded-agent"}
-			if _, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{Anchor: anchor, Reconnect: tasksubagent.ReconnectRequest{Spawn: spawn, Target: delegation.AgentTarget("helper")}}); err != nil {
+			anchor := taskapi.Anchor{TaskID: spawn.TaskID, SessionID: peer.SessionID, AgentID: "loaded-agent"}
+			if _, err := runner.LoadHistory(ctx, taskapi.HistoryRequest{Anchor: anchor, Reconnect: taskapi.ReconnectRequest{Spawn: spawn, Target: taskapi.AgentTarget("helper")}}); err != nil {
 				t.Fatal(err)
 			}
 			run, err := runner.lookup(anchor)
@@ -103,7 +102,7 @@ func TestDraftLoadedToolRevisionPreservesCurrentActivityOwnership(t *testing.T) 
 			if test.barrier {
 				want = ""
 			}
-			if !observed || terminal.Result == nil || terminal.Result.State != delegation.StateCompleted || terminal.Result.Result != want {
+			if !observed || terminal.Result == nil || terminal.Result.State != taskapi.StateCompleted || terminal.Result.Result != want {
 				t.Fatalf("tool revision ownership lost: observed=%t result=%+v want=%q", observed, terminal.Result, want)
 			}
 		})

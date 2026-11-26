@@ -27,7 +27,7 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		EventIDGenerator:   func() string { return "evt-1" },
@@ -93,9 +93,10 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 }
 
 func TestStoreExecutionConfigCreationBoundRoundTrip(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ctx := context.Background()
-	store := NewStore(Config{RootDir: root})
+	store := newLogicalTestStore(t, Config{RootDir: root})
 	inherit := false
 	requested := &sandbox.ExecutionConfig{
 		Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: map[string]string{"APP_MODE": "test", "MODEL_HIDDEN_SECRET": "should-not-enter-context"}, Unset: []string{"SECRET"}},
@@ -113,7 +114,7 @@ func TestStoreExecutionConfigCreationBoundRoundTrip(t *testing.T) {
 	requested.Environment.Set["APP_MODE"] = "modified"
 	*requested.Environment.Inherit = true
 	active.ExecutionConfig.Environment.Unset[0] = "modified"
-	loaded, err := NewStore(Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := newLogicalTestStore(t, Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestStoreRoundTripsTurnExecutorIdentity(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "executor-roundtrip" }})
+	store := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "executor-roundtrip" }})
 	ctx := context.Background()
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -166,7 +167,7 @@ func TestStoreRoundTripsTurnExecutorIdentity(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +180,7 @@ func TestStoreRoundTripsTurnExecutorIdentity(t *testing.T) {
 func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "paged-session" }})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "paged-session" }})
 	ctx := context.Background()
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -220,7 +221,7 @@ func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
 func TestStoreEventsPageDoesNotDecodePayloadBeforeCursor(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "cursor-session" }})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "cursor-session" }})
 	active, err := store.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -243,7 +244,7 @@ func TestStoreEventsPageDoesNotDecodePayloadBeforeCursor(t *testing.T) {
 func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -278,7 +279,7 @@ func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 func TestStoreEventsRejectsLegacySemanticEventLog(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -305,7 +306,7 @@ func TestStoreEventsRejectsLegacySemanticEventLog(t *testing.T) {
 func TestStoreEventsRejectsLegacyEmbeddedDocumentEvents(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -351,7 +352,7 @@ func TestStoreEventsRejectsLegacyEmbeddedDocumentEvents(t *testing.T) {
 func TestStoreEventsUpgradesLegacyCustomPluginContextEvent(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -410,7 +411,7 @@ func TestStoreEventsUpgradesLegacyCustomPluginContextEvent(t *testing.T) {
 func TestStoreEventsRejectsInvalidEventLog(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -437,7 +438,7 @@ func TestStoreEventsRejectsInvalidEventLog(t *testing.T) {
 func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -491,7 +492,7 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 func TestStoreAppendUsesDisplayTextForGeneratedTitle(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
@@ -533,7 +534,7 @@ func TestStoreGeneratedTitleTruncatesAtUnicodeBoundary(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-unicode-title" },
 	})
@@ -565,7 +566,7 @@ func TestStoreGeneratedTitleTruncatesAtUnicodeBoundary(t *testing.T) {
 	}
 
 	want := strings.Repeat("a", 79) + "中"
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	listed, err := reopened.ListSessions(ctx, session.ListSessionsRequest{
 		AppName: "caelis", UserID: "user-1", WorkspaceKey: "ws-1",
 	})
@@ -587,7 +588,7 @@ func TestStoreGeneratedTitleTruncatesAtUnicodeBoundary(t *testing.T) {
 func TestStoreParticipantLifecycleBeforeFirstPromptDoesNotClaimGeneratedTitle(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-side-first" },
 	})
@@ -663,7 +664,7 @@ func TestStoreParticipantLifecycleBeforeFirstPromptDoesNotClaimGeneratedTitle(t 
 func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "s-hxiurg3hq57a" },
 	})
@@ -732,7 +733,7 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.May, 17, 8, 30, 0, 0, time.UTC)
-	firstStore := NewStore(Config{
+	firstStore := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
@@ -761,7 +762,7 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 		t.Fatalf("first event id = %q, want durable event- prefix", first.ID)
 	}
 
-	secondStore := NewStore(Config{
+	secondStore := newLogicalTestStore(t, Config{
 		RootDir: root,
 		Clock:   func() time.Time { return at.Add(time.Second) },
 	})
@@ -794,7 +795,7 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 func TestServiceAppendEventCASAndStableIDConflict(t *testing.T) {
 	t.Parallel()
 
-	service := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-cas" }})
+	service := newLogicalTestStore(t, Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-cas" }})
 	ctx := context.Background()
 	created, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -814,7 +815,7 @@ func TestServiceAppendEventCASAndStableIDConflict(t *testing.T) {
 		t.Fatalf("first.Seq = %d, want 1", first.Seq)
 	}
 	one := uint64(1)
-	reopened := NewStore(Config{RootDir: service.rootDir})
+	reopened := newLogicalTestStore(t, Config{RootDir: service.rootDir})
 	retried, err := reopened.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef:       created.SessionRef,
 		ExpectedRevision: &one,
@@ -854,7 +855,7 @@ func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
@@ -902,7 +903,7 @@ func TestStoreListSurfacesCorruptSessionIndex(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
@@ -953,7 +954,7 @@ func TestStoreListSurfacesSessionIndexOpenError(t *testing.T) {
 		t.Fatalf("Mkdir(index path) error = %v", err)
 	}
 
-	_, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
+	_, err := newLogicalTestStore(t, Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
@@ -971,7 +972,7 @@ func TestStoreWriteSurfacesCorruptSessionIndexBeforeUpsert(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir: root,
 		Clock: func() time.Time {
 			return at
@@ -1014,7 +1015,7 @@ func TestStoreEventsIgnoresPartialFinalEventLogRecord(t *testing.T) {
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
 	nextEventID := 0
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		EventIDGenerator: func() string {
@@ -1073,7 +1074,7 @@ func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
 	nextEventID := 0
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		EventIDGenerator: func() string {
@@ -1136,6 +1137,7 @@ func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.
 }
 
 func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testing.T) {
+	t.Parallel()
 	// This stress test targets SQLite/Store serialization and complete logical
 	// readback, not host fsync latency or crash-boundary classification.
 	root := t.TempDir()
@@ -1197,6 +1199,7 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 }
 
 func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
+	t.Parallel()
 	// This stress test targets cross-Store locking and logical persistence;
 	// durability barrier failures have focused coverage.
 	root := t.TempDir()
@@ -1288,7 +1291,7 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	service := NewStore(Config{
+	service := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
@@ -1355,7 +1358,7 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-participant-atomic" },
 	})
@@ -1410,7 +1413,7 @@ func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T)
 func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-handoff-atomic" }})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-handoff-atomic" }})
 	ctx := context.Background()
 	created, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -1462,7 +1465,7 @@ func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T
 func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-participant-write-failure" },
 		EventIDGenerator:   func() string { return "evt-participant" },
@@ -1526,7 +1529,7 @@ func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *t
 func TestStoreAppendEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-append-write-failure" },
 		EventIDGenerator:   func() string { return "evt-append" },
@@ -1573,7 +1576,7 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-late-document-failure" },
 		EventIDGenerator:   func() string { return "evt-late-document-failure" },
@@ -1635,10 +1638,11 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 }
 
 func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"after_commit", "after_event_log", "after_document", "after_index"} {
 		t.Run(phase, func(t *testing.T) {
 			root := t.TempDir()
-			store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-wal" }})
+			store := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "sess-wal" }})
 			ctx := context.Background()
 			created, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 			if err != nil {
@@ -1670,7 +1674,7 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 				t.Fatalf("AppendEventsAndUpdateState() error = %v, want *session.CommittedError", err)
 			}
 
-			reopened := NewStore(Config{RootDir: root})
+			reopened := newLogicalTestStore(t, Config{RootDir: root})
 			loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
 			if err != nil {
 				t.Fatalf("LoadSession(recovery) error = %v", err)
@@ -1704,8 +1708,9 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 }
 
 func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-compound-committed" }})
+	store := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "sess-compound-committed" }})
 	service := store
 	created, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -1736,7 +1741,7 @@ func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 		t.Fatalf("first AppendEventsAndUpdateState() error = %v, want committed error", err)
 	}
 
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	if _, err := reopened.AppendEventsAndUpdateState(context.Background(), request()); err != nil {
 		t.Fatalf("retry AppendEventsAndUpdateState() error = %v", err)
 	}
@@ -1761,7 +1766,7 @@ func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 
 func TestParticipantLifecycleCommittedErrorReturnsExactResult(t *testing.T) {
 	t.Parallel()
-	store := NewStore(Config{RootDir: t.TempDir()})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	ctx := context.Background()
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "participant-committed"})
 	if err != nil {
@@ -1800,7 +1805,7 @@ func TestParticipantLifecycleCommittedErrorReturnsExactResult(t *testing.T) {
 func TestStoreAppendEventsDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-batch-write-failure" },
 		EventIDGenerator:   func() string { return "evt-batch" },
@@ -1848,7 +1853,7 @@ func TestStoreAppendEventsDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 func TestStoreAppendEventsAndUpdateStateDoesNotAppendLogWhenStateUpdateFails(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-batch-state-failure" },
 		EventIDGenerator:   func() string { return "evt-batch-state" },
@@ -1906,7 +1911,7 @@ func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	service := NewStore(Config{
+	service := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		EventIDGenerator:   func() string { return "evt-1" },
@@ -1965,7 +1970,7 @@ func TestStoreSnapshotStateReturnsEmptyForMissingDocumentStateWithoutRepair(t *t
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
@@ -2002,7 +2007,7 @@ func TestStoreSnapshotStateReturnsEmptyForMissingDocumentStateWithoutRepair(t *t
 		t.Fatalf("WriteFile(doc) error = %v", err)
 	}
 
-	reloaded := NewStore(Config{
+	reloaded := newLogicalTestStore(t, Config{
 		RootDir: root,
 		Clock:   func() time.Time { return at.Add(time.Minute) },
 	})
@@ -2042,7 +2047,7 @@ func TestStoreWriteDocumentUsesSecurePermissions(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
@@ -2091,11 +2096,11 @@ func TestStoreGeneratesFreshCompactSessionIDsAcrossRestart(t *testing.T) {
 		},
 	}
 
-	first, err := NewStore(Config{RootDir: root}).StartSession(ctx, req)
+	first, err := newLogicalTestStore(t, Config{RootDir: root}).StartSession(ctx, req)
 	if err != nil {
 		t.Fatalf("first StartSession() error = %v", err)
 	}
-	second, err := NewStore(Config{RootDir: root}).StartSession(ctx, req)
+	second, err := newLogicalTestStore(t, Config{RootDir: root}).StartSession(ctx, req)
 	if err != nil {
 		t.Fatalf("second StartSession() error = %v", err)
 	}
@@ -2113,7 +2118,7 @@ func TestStoreGeneratesFreshCompactSessionIDsAcrossRestart(t *testing.T) {
 		t.Fatalf("session ids collided across restart: %q", first.SessionID)
 	}
 
-	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
+	list, err := newLogicalTestStore(t, Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
@@ -2134,7 +2139,7 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, time.April, 19, 10, 0, 0, 0, time.UTC)
 	sessionIDs := []string{"sess-1", "sess-2"}
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir: root,
 		SessionIDGenerator: func() string {
 			id := sessionIDs[0]
@@ -2183,7 +2188,7 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 		t.Fatalf("AppendEvent(second) error = %v", err)
 	}
 
-	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
+	list, err := newLogicalTestStore(t, Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
@@ -2208,7 +2213,7 @@ func TestStoreStartSessionRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir: root,
 		Clock:   func() time.Time { return at },
 	})
@@ -2260,7 +2265,7 @@ func TestStoreGetLoadsSessionWithoutWorkspaceKey(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	service := NewStore(Config{RootDir: root})
+	service := newLogicalTestStore(t, Config{RootDir: root})
 	ctx := context.Background()
 
 	createdSession, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -2295,7 +2300,7 @@ func TestStoreGlobalSessionIDResolvesAcrossStoreReopen(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewStore(Config{RootDir: root})
+	store := newLogicalTestStore(t, Config{RootDir: root})
 	ctx := context.Background()
 	created, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
@@ -2311,7 +2316,7 @@ func TestStoreGlobalSessionIDResolvesAcrossStoreReopen(t *testing.T) {
 		t.Fatalf("StartSession(shared) error = %v", err)
 	}
 
-	reloaded := NewStore(Config{RootDir: root})
+	reloaded := newLogicalTestStore(t, Config{RootDir: root})
 	loaded, err := reloaded.Session(ctx, session.SessionRef{
 		AppName:   "caelis",
 		UserID:    "user-1",
@@ -2347,7 +2352,7 @@ func TestStoreIgnoresLegacyFlatSessionDocuments(t *testing.T) {
 		State: map[string]any{},
 	})
 
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-2" },
 	})

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/invocationctx"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/google/uuid"
 )
@@ -26,12 +26,12 @@ type targetKey struct{}
 // WithOccurrence supplies the Runtime-owned identity and replaces any parent
 // relation and target inherited from an outer invocation.
 func WithOccurrence(ctx context.Context, execution tool.InvocationContext, parent *tool.ParentCall, target *tool.Binding) context.Context {
-	ctx = invocationctx.With(ctx, invocationctx.ExecutionKey{}, execution)
+	ctx = sdkctx.WithOccurrence(ctx, sdkctx.ExecutionKey{}, execution)
 	if parent != nil {
 		copy := *parent
 		parent = &copy
 	}
-	ctx = invocationctx.With(ctx, invocationctx.ParentKey{}, parent)
+	ctx = sdkctx.WithOccurrence(ctx, sdkctx.ParentKey{}, parent)
 	var binding tool.Binding
 	if target != nil {
 		binding = *target

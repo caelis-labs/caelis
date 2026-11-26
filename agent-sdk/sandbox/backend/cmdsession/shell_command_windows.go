@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/winps"
 )
 
 const createNoWindow = 0x08000000
@@ -17,7 +17,7 @@ func buildPlatformShellCommand(ctx context.Context, command string, tty bool) (*
 	if tty {
 		return nil, fmt.Errorf("tty mode is not supported by cmdsession on windows")
 	}
-	cmd := exec.CommandContext(ctx, "powershell.exe", host.PowerShellExecArgs(command)...)
+	cmd := exec.CommandContext(ctx, "powershell.exe", winps.ExecArgs(command)...)
 	configureHiddenConsole(cmd)
 	return cmd, nil
 }

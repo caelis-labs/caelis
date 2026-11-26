@@ -15,11 +15,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newIdleChildActivityTask(t)
 	trace := &recordingProducerLifecycle{}
 	r.taskOutput = trace
@@ -47,7 +46,7 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	observed := &childActivityOutputCounter{}
 	req.Output.(*childTaskActivity).observer = observed
 	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: "follow up"})
-	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true, Event: &session.Event{
+	if err := req.Output.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "running", Running: true, Event: &session.Event{
 		Type: session.EventTypeContext, Actor: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Protocol: &protocol, Text: "follow up",
 	}}); err != nil {
@@ -58,12 +57,12 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 	}
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
 	// Closing a stable producer with no new activity must not open a turn.
-	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{ProducerClosed: true}); err != nil {
+	if err := req.Output.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{ProducerClosed: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
 	// Explicit producer lifecycle starts the activity before any content.
-	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+	if err := req.Output.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -86,6 +85,7 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 }
 
 func TestChildCompletionKickKeepsApplyingTask(t *testing.T) {
+	t.Parallel()
 	const taskID = "child"
 	claimedTask := &subagentTask{turnSeq: 1}
 	completion := &subagentCompletion{task: claimedTask}
@@ -102,6 +102,7 @@ func TestChildCompletionKickKeepsApplyingTask(t *testing.T) {
 }
 
 func TestChildActivityCompletionAdvancesWithoutOutput(t *testing.T) {
+	t.Parallel()
 	r, task, _ := newIdleChildActivityTask(t)
 	id, _, completion, err := r.prepareChildTaskOutput(t.Context(), task)
 	if err != nil {
@@ -119,6 +120,7 @@ func TestChildActivityCompletionAdvancesWithoutOutput(t *testing.T) {
 }
 
 func TestChildActivityCASConflictPreservesCommittedGeneration(t *testing.T) {
+	t.Parallel()
 	for _, state := range []taskapi.State{taskapi.StateRunning, taskapi.StateCompleted} {
 		for _, sameActivity := range []bool{true, false} {
 			t.Run(string(state)+map[bool]string{true: "/same", false: "/other"}[sameActivity], func(t *testing.T) {
@@ -142,7 +144,7 @@ func TestChildActivityCASConflictPreservesCommittedGeneration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "late first frame", Running: true}); err != nil {
+				if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "late first frame", Running: true}); err != nil {
 					t.Fatal(err)
 				}
 				if err := observer.(*childTaskActivity).awaitPersistence(t.Context()); err != nil {
@@ -159,15 +161,16 @@ func TestChildActivityCASConflictPreservesCommittedGeneration(t *testing.T) {
 }
 
 func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := sessions.StartSession(t.Context(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "test", Workspace: session.WorkspaceRef{Key: "workspace", CWD: t.TempDir()},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first sidecar final"}}
+	runner := &runtimeChildInputRunner{spawnResult: taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "first sidecar final"}}
 	r, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, Subagents: runner}))
 	if err != nil {
 		t.Fatal(err)
@@ -184,10 +187,10 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "disposable partial trace", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "disposable partial trace", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := observer.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "gauge-model-only")); err != nil {
@@ -197,7 +200,7 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	wantTask := assertChildContextUsage(t, r, task, 200000, 8000, "gauge-model-only")
 	assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	rebuilt, err := New(testConfigWithACPForwarder(Config{Sessions: reopened, TaskStore: sessionfile.NewTaskStore(reopened), AgentFactory: chat.Factory{}}))
 	if err != nil {
 		t.Fatal(err)
@@ -230,6 +233,7 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 }
 
 func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
+	t.Parallel()
 	for _, terminal := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "terminal"}[terminal], func(t *testing.T) {
 			r, task, _ := newIdleChildActivityTask(t)
@@ -251,7 +255,7 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 			}
 			returned := make(chan struct{})
 			go func() {
-				_ = observer.ObserveTaskOutput(t.Context(), output.Event{Text: "first", Running: !terminal, Closed: terminal})
+				_ = observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "first", Running: !terminal, Closed: terminal})
 				close(returned)
 			}()
 			select {
@@ -266,7 +270,7 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 			}
 			var done <-chan struct{}
 			if terminal {
-				done = completion.(subagentCompletionSink).enqueue(delegation.Result{State: delegation.StateCompleted, Result: "done"})
+				done = completion.(subagentCompletionSink).enqueue(taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "done"})
 			}
 			release()
 			if terminal {
@@ -303,12 +307,13 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 }
 
 func TestChildActivityPersistsReplaceableACPUsageGauge(t *testing.T) {
+	t.Parallel()
 	r, task, _ := newIdleChildActivityTask(t)
 	_, observer, completion, err := r.prepareChildTaskOutput(t.Context(), task)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := observer.(*childTaskActivity).awaitOpenPersistence(t.Context()); err != nil {
@@ -344,7 +349,7 @@ func TestChildActivityPersistsReplaceableACPUsageGauge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := observer.(*childTaskActivity).awaitOpenPersistence(t.Context()); err != nil {
@@ -360,11 +365,12 @@ func TestChildActivityPersistsReplaceableACPUsageGauge(t *testing.T) {
 }
 
 func TestChildSpawnPersistsSynchronousACPUsageGauge(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{
-		spawnResult:        delegation.Result{State: delegation.StateCompleted, Result: "spawned"},
+		spawnResult:        taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "spawned"},
 		publishOnSpawn:     true,
 		spawnStreamRunning: true,
-		spawnStreamState:   string(delegation.StateRunning),
+		spawnStreamState:   string(taskapi.StateRunning),
 		spawnStreamEvent: &session.Event{
 			ContextUsage: &session.ContextUsageSnapshot{Size: 200000, Used: 42000},
 			Invocation:   &session.EventInvocation{Provider: "codex", Model: "gpt-test"},
@@ -417,8 +423,8 @@ func TestChildSpawnPersistsSynchronousACPUsageGauge(t *testing.T) {
 	}
 }
 
-func childUsageOutput(size, used uint64, model string) output.Event {
-	return output.Event{State: "running", Running: true, Event: &session.Event{
+func childUsageOutput(size, used uint64, model string) taskapi.OutputEvent {
+	return taskapi.OutputEvent{State: "running", Running: true, Event: &session.Event{
 		ContextUsage: &session.ContextUsageSnapshot{Size: size, Used: used},
 		Invocation:   &session.EventInvocation{Provider: "codex", Model: model},
 	}}
@@ -443,7 +449,7 @@ func newIdleChildActivityTask(t *testing.T) (*Runtime, *subagentTask, *runtimeCh
 
 func newIdleChildActivityTaskWithRole(t *testing.T, role session.ParticipantRole) (*Runtime, *subagentTask, *runtimeChildInputRunner) {
 	t.Helper()
-	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
+	runner := &runtimeChildInputRunner{spawnResult: taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "first done"}}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	_, err := r.sessions.BindController(t.Context(), session.BindControllerRequest{
 		SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
@@ -475,11 +481,11 @@ func assertChildActivityEntry(t *testing.T, r *Runtime, task *subagentTask, revi
 	return entry
 }
 
-func finishChildActivity(t *testing.T, sink delegation.CompletionSink, result string) {
+func finishChildActivity(t *testing.T, sink taskapi.CompletionSink, result string) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
-		sink.PublishSubagentCompletion(delegation.Result{State: delegation.StateCompleted, Result: result})
+		sink.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCompleted, Result: result})
 		close(done)
 	}()
 	select {
@@ -491,7 +497,7 @@ func finishChildActivity(t *testing.T, sink delegation.CompletionSink, result st
 
 type childActivityOutputCounter struct{ count atomic.Int64 }
 
-func (o *childActivityOutputCounter) ObserveTaskOutput(context.Context, output.Event) error {
+func (o *childActivityOutputCounter) ObserveTaskOutput(context.Context, taskapi.OutputEvent) error {
 	o.count.Add(1)
 	return nil
 }

@@ -12,8 +12,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 )
 
 const (
@@ -118,7 +116,7 @@ func DeriveLegacyV1SID(storePath, root string) string {
 	identity := strings.Join([]string{
 		"caelis-windows-sandbox-capability-v1",
 		strings.ToLower(filepath.Clean(storePath)),
-		pathutil.Key(root),
+		PathKey(root),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(identity))
 	a := binary.LittleEndian.Uint32(sum[0:4])
@@ -250,12 +248,12 @@ func normalizeScope(scope Scope) (Scope, error) {
 	if !strings.HasPrefix(scope.HostUserSID, "S-1-") {
 		return Scope{}, fmt.Errorf("capability: current Host user SID is required")
 	}
-	scope.WorkspaceRoot = pathutil.Normalize(scope.WorkspaceRoot)
+	scope.WorkspaceRoot = NormalizePath(scope.WorkspaceRoot)
 	if scope.WorkspaceRoot == "" {
 		return Scope{}, fmt.Errorf("capability: canonical workspace root is required")
 	}
-	scope.SandboxEnvRoot = pathutil.Normalize(scope.SandboxEnvRoot)
-	scope.WriteRoots = pathutil.Dedupe(scope.WriteRoots)
+	scope.SandboxEnvRoot = NormalizePath(scope.SandboxEnvRoot)
+	scope.WriteRoots = DedupePaths(scope.WriteRoots)
 	if len(scope.WriteRoots) == 0 {
 		return Scope{}, fmt.Errorf("capability: at least one write root is required")
 	}
@@ -275,7 +273,7 @@ func bindingForScope(scope Scope) Binding {
 			binding.ExternalSIDs = append(binding.ExternalSIDs, sid)
 		}
 		binding.AllSIDs = append(binding.AllSIDs, sid)
-		binding.WriteRootTo[pathutil.Normalize(root)] = sid
+		binding.WriteRootTo[NormalizePath(root)] = sid
 	}
 	binding.ExternalSIDs = dedupeSIDs(binding.ExternalSIDs)
 	binding.AllSIDs = dedupeSIDs(binding.AllSIDs)
@@ -283,10 +281,10 @@ func bindingForScope(scope Scope) Binding {
 }
 
 func workspaceOwnedRoot(scope Scope, root string) bool {
-	if pathutil.IsUnder(root, scope.WorkspaceRoot) {
+	if IsPathUnder(root, scope.WorkspaceRoot) {
 		return true
 	}
-	return scope.SandboxEnvRoot != "" && pathutil.IsUnder(root, scope.SandboxEnvRoot)
+	return scope.SandboxEnvRoot != "" && IsPathUnder(root, scope.SandboxEnvRoot)
 }
 
 func storeContainsBinding(store Store, scope Scope, binding Binding) (bool, error) {
@@ -299,14 +297,14 @@ func storeContainsBinding(store Store, scope Scope, binding Binding) (bool, erro
 	if !strings.EqualFold(strings.TrimSpace(store.HostUserSID), scope.HostUserSID) {
 		return false, hostUserRotationError(store.HostUserSID, scope.HostUserSID)
 	}
-	if !strings.EqualFold(strings.TrimSpace(store.WorkspaceByRoot[pathutil.Key(scope.WorkspaceRoot)]), binding.WorkspaceSID) {
+	if !strings.EqualFold(strings.TrimSpace(store.WorkspaceByRoot[PathKey(scope.WorkspaceRoot)]), binding.WorkspaceSID) {
 		return false, nil
 	}
 	for root, sid := range binding.WriteRootTo {
 		if workspaceOwnedRoot(scope, root) {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(store.ExternalRootByPath[pathutil.Key(root)]), sid) {
+		if !strings.EqualFold(strings.TrimSpace(store.ExternalRootByPath[PathKey(root)]), sid) {
 			return false, nil
 		}
 	}
@@ -345,7 +343,7 @@ func upgradeStore(store *Store, hostUserSID string) (bool, error) {
 }
 
 func recordBinding(store *Store, scope Scope, binding Binding) (bool, error) {
-	workspaceKey := pathutil.Key(scope.WorkspaceRoot)
+	workspaceKey := PathKey(scope.WorkspaceRoot)
 	if current := strings.TrimSpace(store.WorkspaceByRoot[workspaceKey]); current != "" && !strings.EqualFold(current, binding.WorkspaceSID) {
 		return false, fmt.Errorf("capability: workspace SID conflict for %s", scope.WorkspaceRoot)
 	}
@@ -358,7 +356,7 @@ func recordBinding(store *Store, scope Scope, binding Binding) (bool, error) {
 		if workspaceOwnedRoot(scope, root) {
 			continue
 		}
-		rootKey := pathutil.Key(root)
+		rootKey := PathKey(root)
 		if current := strings.TrimSpace(store.ExternalRootByPath[rootKey]); current != "" {
 			if !strings.EqualFold(current, sid) {
 				return false, fmt.Errorf("capability: external writable-root SID conflict for %s", root)
@@ -560,7 +558,7 @@ func stableRootSID(hostUserSID, root string) string {
 	identity := strings.Join([]string{
 		"caelis-windows-sandbox-capability-v2",
 		strings.ToUpper(strings.TrimSpace(hostUserSID)),
-		pathutil.Key(root),
+		PathKey(root),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(identity))
 	a := binary.LittleEndian.Uint32(sum[0:4])

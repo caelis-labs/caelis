@@ -5,23 +5,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestEventMetadataSurvivesRestartAndBoundsPayloadReads(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 400)
 	req := session.EventPageRequest{SessionRef: active.SessionRef, Visibility: session.EventPageClientReplay, Limit: 1000}
 	if page, err := store.EventMetadataPage(t.Context(), req); err != nil || len(page.Events) != 2 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
-	cold := NewStore(Config{RootDir: store.rootDir})
+	cold := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	cold.eventMetadataLineRead = func(string, int, int64) { t.Fatal("restart rescanned indexed source") }
 	if _, err := cold.EventMetadataPage(t.Context(), req); err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func TestEventMetadataSurvivesRestartAndBoundsPayloadReads(t *testing.T) {
 }
 
 func TestEventMetadataInvalidationAndCancellation(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"missing cache", "corrupt cache", "truncate", "rewrite", "replace", "partial tail", "cancelled build"} {
 		t.Run(change, func(t *testing.T) {
 			store, active := newEventPageIndexFixture(t, 4)
@@ -112,7 +114,7 @@ func TestEventMetadataInvalidationAndCancellation(t *testing.T) {
 				if err := os.Remove(log + ".metadata"); err != nil {
 					t.Fatal(err)
 				}
-				store = NewStore(Config{RootDir: store.rootDir})
+				store = newLogicalTestStore(t, Config{RootDir: store.rootDir})
 				ctx, cancel := context.WithCancel(t.Context())
 				store.eventMetadataLineRead = func(string, int, int64) { cancel() }
 				if _, err := store.EventMetadataPage(ctx, req); !errors.Is(err, context.Canceled) {
@@ -120,7 +122,7 @@ func TestEventMetadataInvalidationAndCancellation(t *testing.T) {
 				}
 				store.eventMetadataLineRead = nil
 			}
-			cold := NewStore(Config{RootDir: store.rootDir})
+			cold := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 			got, err := cold.EventMetadataPage(t.Context(), req)
 			if err != nil || got.NextSeq != want && change != "rewrite" && change != "replace" {
 				t.Fatalf("page=%+v err=%v", got, err)
@@ -137,6 +139,7 @@ func TestEventMetadataInvalidationAndCancellation(t *testing.T) {
 }
 
 func TestEventMetadataVisibilityMatchesCanonicalReaders(t *testing.T) {
+	t.Parallel()
 	// Indexing must not infer a second set of projection rules for reviewed
 	// approvals or mirrored records.
 	cases := []*session.Event{
@@ -161,6 +164,7 @@ func TestEventMetadataVisibilityMatchesCanonicalReaders(t *testing.T) {
 }
 
 func TestEventMetadataRecoversCommittedWALBeforeReadingCachedIndex(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 4)
 	req := session.EventPageRequest{SessionRef: active.SessionRef, Visibility: session.EventPageAllDurable}
 	if _, err := store.EventMetadataPage(t.Context(), req); err != nil {
@@ -175,7 +179,7 @@ func TestEventMetadataRecoversCommittedWALBeforeReadingCachedIndex(t *testing.T)
 	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "receipt"}}}); !session.IsCommitted(err) {
 		t.Fatalf("append error=%v", err)
 	}
-	reopened := NewStore(Config{RootDir: store.rootDir})
+	reopened := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	page, err := reopened.EventMetadataPage(t.Context(), req)
 	if err != nil || page.NextSeq != 5 {
 		t.Fatalf("recovered metadata=%+v error=%v", page, err)
@@ -186,6 +190,7 @@ func TestEventMetadataRecoversCommittedWALBeforeReadingCachedIndex(t *testing.T)
 }
 
 func TestReopenRetiredJournalRebuildsApprovalIndex(t *testing.T) {
+	t.Parallel()
 	s, active := newEventPageIndexFixture(t, 0)
 	ctx := t.Context()
 	ref := active.SessionRef
@@ -222,7 +227,7 @@ func TestReopenRetiredJournalRebuildsApprovalIndex(t *testing.T) {
 		t.Fatal("missing historical approval index fixture")
 	}
 
-	cold := NewStore(Config{RootDir: s.rootDir})
+	cold := newLogicalTestStore(t, Config{RootDir: s.rootDir})
 	page, err := cold.EventMetadataPage(ctx, session.EventPageRequest{SessionRef: ref, Visibility: session.EventPageClientReplay})
 	if err != nil || len(page.Events) != 0 || page.NextSeq != old.Seq {
 		t.Fatalf("reopened client replay = %+v, %v", page, err)
@@ -231,12 +236,59 @@ func TestReopenRetiredJournalRebuildsApprovalIndex(t *testing.T) {
 	if _, err := cold.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: &session.Event{Type: session.EventTypeUser, Message: &msg}}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := NewStore(Config{RootDir: s.rootDir}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref, IncludeTransient: true})
+	loaded, err := newLogicalTestStore(t, Config{RootDir: s.rootDir}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref, IncludeTransient: true})
 	if err != nil || len(loaded.Events) != 2 || loaded.Events[0].Approval != nil || loaded.Events[0].Tool != nil || loaded.Events[1].Message.TextContent() != "continue" {
 		t.Fatalf("reopened mixed log = %+v, %v", loaded, err)
 	}
 	updated, err := os.ReadFile(path)
 	if err != nil || !bytes.HasPrefix(updated, historical) {
 		t.Fatalf("append changed historical row: %v", err)
+	}
+}
+
+func BenchmarkResumeMetadataIndex(b *testing.B) {
+	for _, count := range []int{4000, 20000} {
+		b.Run(fmt.Sprintf("events=%d", count), func(b *testing.B) {
+			store := NewStore(Config{RootDir: b.TempDir()})
+			active, err := store.StartSession(b.Context(), session.StartSessionRequest{AppName: "bench", UserID: "user"})
+			if err != nil {
+				b.Fatal(err)
+			}
+			events := make([]*session.Event, count)
+			for n := range events {
+				events[n] = &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityCanonical, Scope: &session.EventScope{TurnID: fmt.Sprint(n / 4)}, Lifecycle: &session.EventLifecycle{Status: "completed", Reason: strings.Repeat("history ", 256)}}
+			}
+			if _, err := store.AppendEvents(b.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: events}); err != nil {
+				b.Fatal(err)
+			}
+			path, err := store.resolveWritePath(active)
+			if err != nil {
+				b.Fatal(err)
+			}
+			for _, persisted := range []bool{false, true} {
+				b.Run(fmt.Sprintf("persisted=%v", persisted), func(b *testing.B) {
+					req := session.EventPageRequest{SessionRef: active.SessionRef, Visibility: session.EventPageClientReplay, Limit: count}
+					if _, err := store.EventMetadataPage(b.Context(), req); err != nil {
+						b.Fatal(err)
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for n := 0; n < b.N; n++ {
+						b.StopTimer()
+						if !persisted {
+							if err := os.Remove(eventLogPath(path) + ".metadata"); err != nil {
+								b.Fatal(err)
+							}
+						}
+						cold := NewStore(Config{RootDir: store.rootDir})
+						b.StartTimer()
+						page, err := cold.EventMetadataPage(b.Context(), req)
+						if err != nil || page.NextSeq != uint64(count) {
+							b.Fatalf("page=%+v error=%v", page, err)
+						}
+					}
+				})
+			}
+		})
 	}
 }

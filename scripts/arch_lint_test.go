@@ -75,7 +75,7 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 			name:       "internal kernel rejects implementation packages",
 			rel:        "internal/kernel/gateway.go",
 			importPath: modulePath + "/impl/stream/memory",
-			want:       "must not import impl/stream; use agent-sdk/task/output",
+			want:       "must not import impl/stream; use agent-sdk/task",
 		},
 		{
 			name:       "deleted implementation path retains migration gate",
@@ -164,6 +164,17 @@ func TestBoundaryRuleEnforcesRepresentativeArchitectureContracts(t *testing.T) {
 		{
 			name:       "TUI accepts canonical built-in names",
 			rel:        "surfaces/tui/app/tool_presentation.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/names",
+		},
+		{
+			name:       "ACP bridge rejects built-in implementation",
+			rel:        "internal/acpagentbridge/runtime_agent_child_terminal.go",
+			importPath: modulePath + "/agent-sdk/tool/builtin/spawn",
+			want:       "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names",
+		},
+		{
+			name:       "ACP bridge accepts canonical built-in names",
+			rel:        "internal/acpagentbridge/runtime_agent_child_terminal.go",
 			importPath: modulePath + "/agent-sdk/tool/builtin/names",
 		},
 		{
@@ -983,5 +994,26 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 				t.Fatalf("removedPackageFileRule(%q) line = %d, want 1", tt.rel, line)
 			}
 		})
+	}
+}
+
+func TestLogicalStoreTestHelperRule(t *testing.T) {
+	t.Parallel()
+	src := `package demo
+func f() {
+	_ = UseLogicalFileStore
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "demo.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, subject, line := logicalStoreTestHelperRule("app/gatewayapp/demo.go", file, fset)
+	if rule == "" || subject != "UseLogicalFileStore" || line != 3 {
+		t.Fatalf("logicalStoreTestHelperRule(prod) = (%q, %q, %d), want violation at line 3", rule, subject, line)
+	}
+	if rule, _, _ := logicalStoreTestHelperRule("agent-sdk/runtime/demo_test.go", file, fset); rule != "" {
+		t.Fatalf("logicalStoreTestHelperRule(test) = %q, want no violation", rule)
 	}
 }

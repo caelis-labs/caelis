@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
+	"github.com/caelis-labs/caelis/platform/atomicfile"
 )
 
 const schemaVersion = 1

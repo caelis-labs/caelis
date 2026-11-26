@@ -3,7 +3,7 @@ package projection
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/control/display"
 )
 
 // ToolTaskHandle returns the public Session-scoped Task identity used in

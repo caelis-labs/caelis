@@ -17,9 +17,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/sessionrun"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/consoleoutput"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
 )
 
 const hostTerminateDrain = 500 * time.Millisecond
@@ -112,7 +111,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		if err != nil {
 			return sandbox.CommandResult{Route: sandbox.RouteHost, Backend: sandbox.BackendHost}, err
 		}
-		return sessionrun.Wait(ctx, session, req.Stdin)
+		return executil.WaitSession(ctx, session, req.Stdin)
 	}
 	dir := sandbox.CommandDirectory(r.fs.cwd, req.Dir)
 	runCtx := ctx
@@ -389,11 +388,11 @@ func (s *hostSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker i
 }
 
 func (s *hostSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
-	observation, err := outputwait.Await(ctx, cursor, func() outputwait.Snapshot[sandbox.SessionStatus] {
+	observation, err := executil.AwaitOutput(ctx, cursor, func() executil.OutputSnapshot[sandbox.SessionStatus] {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		status := s.statusLocked()
-		return outputwait.Snapshot[sandbox.SessionStatus]{
+		return executil.OutputSnapshot[sandbox.SessionStatus]{
 			Signal:    s.outputSignal,
 			Published: sandbox.OutputCursor{Stdout: s.stdoutCursor, Stderr: s.stderrCursor},
 			Available: sandbox.OutputCursor{Stdout: s.stdoutTotal, Stderr: s.stderrTotal},

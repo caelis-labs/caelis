@@ -64,7 +64,7 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			root := t.TempDir()
-			files := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			files := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := files.StartSession(ctx, session.StartSessionRequest{
 				AppName: "test", UserID: "owner", Workspace: session.WorkspaceRef{CWD: t.TempDir()},
 			})
@@ -157,7 +157,7 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 				}
 			}
 			assertCompleted(rt.tasks.store)
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			assertCompleted(sessionfile.NewTaskStore(reopened))
 			probe := &recoveryCaptureModel{}
 			restored, err := New(Config{Sessions: reopened, TaskStore: sessionfile.NewTaskStore(reopened), AgentFactory: chat.Factory{}})

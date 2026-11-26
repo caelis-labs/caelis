@@ -9,9 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -19,15 +17,15 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 )
 
-func (r *Runner) reconnectChildEndpointLocked(ctx context.Context, anchor delegation.Anchor, recovery *tasksubagent.ReconnectRequest, slot *childSlot) (*childRun, error) {
+func (r *Runner) reconnectChildEndpointLocked(ctx context.Context, anchor task.Anchor, recovery *task.ReconnectRequest, slot *childSlot) (*childRun, error) {
 	run, _, err := r.loadChildEndpointLocked(ctx, anchor, recovery, slot, true, false)
 	return run, err
 }
 
 func (r *Runner) loadChildEndpointLocked(
 	ctx context.Context,
-	anchor delegation.Anchor,
-	recovery *tasksubagent.ReconnectRequest,
+	anchor task.Anchor,
+	recovery *task.ReconnectRequest,
 	slot *childSlot,
 	configure bool,
 	metadataOnly bool,
@@ -46,9 +44,9 @@ func (r *Runner) loadChildEndpointLocked(
 	case <-ctx.Done():
 		return nil, session.LoadedSession{}, ctx.Err()
 	}
-	recovery = tasksubagent.CloneReconnectRequest(recovery)
+	recovery = task.CloneReconnectRequest(recovery)
 	spawn := recovery.Spawn
-	anchor = delegation.CloneAnchor(anchor)
+	anchor = task.CloneAnchor(anchor)
 	if strings.TrimSpace(anchor.TaskID) == "" || strings.TrimSpace(anchor.SessionID) == "" ||
 		strings.TrimSpace(anchor.AgentID) == "" {
 		return nil, session.LoadedSession{}, fmt.Errorf("target Agent reconnect anchor is incomplete")
@@ -57,10 +55,10 @@ func (r *Runner) loadChildEndpointLocked(
 		strings.TrimSpace(spawn.SessionRef.SessionID) == "" {
 		return nil, session.LoadedSession{}, fmt.Errorf("target Agent reconnect identity does not match its Task")
 	}
-	if err := delegation.ValidateTarget(recovery.Target); err != nil {
+	if err := task.ValidateTarget(recovery.Target); err != nil {
 		return nil, session.LoadedSession{}, err
 	}
-	cfg, err := r.resolveSpawnConfig(ctx, spawn, delegation.TargetRequest{Target: recovery.Target})
+	cfg, err := r.resolveSpawnConfig(ctx, spawn, task.TargetRequest{Target: recovery.Target})
 	if err != nil {
 		return nil, session.LoadedSession{}, err
 	}
@@ -71,7 +69,7 @@ func (r *Runner) loadChildEndpointLocked(
 		anchor: anchor, agentName: strings.TrimSpace(cfg.Name),
 		configuredAuth: controlagents.NormalizeAuthentication(cfg.Authentication),
 		spawn:          spawn, taskID: strings.TrimSpace(anchor.TaskID), output: spawn.Output,
-		completion: spawn.Completion, state: delegation.StateCompleted, observationOnly: !configure,
+		completion: spawn.Completion, state: task.StateCompleted, observationOnly: !configure,
 		updatedAt: r.clock(), done: done,
 	}
 	detachedCtx := detachedChildContext(ctx)
@@ -150,11 +148,11 @@ func (r *Runner) loadChildEndpointLocked(
 					if err := collector.errSnapshot(); err != nil {
 						return err
 					}
-					if observer, ok := spawn.Output.(output.StreamingHistoryObserver); ok && collector.projection != nil {
+					if observer, ok := spawn.Output.(task.StreamingHistoryObserver); ok && collector.projection != nil {
 						if err := observer.ReplaceTaskHistoryStream(boundaryCtx, collector.streamEvents); err != nil {
 							return err
 						}
-					} else if observer, ok := spawn.Output.(output.HistoryObserver); ok {
+					} else if observer, ok := spawn.Output.(task.HistoryObserver); ok {
 						if err := observer.ReplaceTaskHistory(boundaryCtx, collector.eventsSnapshot()); err != nil {
 							return err
 						}
@@ -214,7 +212,7 @@ func (r *Runner) loadChildEndpointLocked(
 	return run, loaded, nil
 }
 
-func childEndpointFromReconnect(anchor delegation.Anchor, recovery *tasksubagent.ReconnectRequest) agent.ChildEndpointRef {
+func childEndpointFromReconnect(anchor task.Anchor, recovery *task.ReconnectRequest) agent.ChildEndpointRef {
 	target := agent.ChildEndpointRef{
 		ParticipantID: strings.TrimSpace(anchor.AgentID),
 		SessionID:     strings.TrimSpace(anchor.SessionID),

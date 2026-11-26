@@ -13,8 +13,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
@@ -37,7 +36,7 @@ func TestUserPromptRoundTripDoesNotParseBodyAsMail(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, fragmented := range []bool{false, true} {
-				collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{TaskID: "task-1", SessionID: "child-1"}, "helper")
+				collector := newHistoryCollector(&Runner{clock: time.Now}, taskapi.Anchor{TaskID: "task-1", SessionID: "child-1"}, "helper")
 				chunks := []string{part.Text}
 				if fragmented {
 					chunks = strings.Split(part.Text, "")
@@ -67,7 +66,7 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 	spawn := childInputSpawnContext(t, "user-history-task", events)
 	spawn.Role = session.ParticipantRoleSidecar
 	spawn.ContentParts = []model.ContentPart{{Type: model.ContentPartText, Text: "initial"}, {Type: model.ContentPartImage, Data: "aW1hZ2U=", MimeType: "image/png"}}
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +110,7 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{Anchor: anchor, Reconnect: tasksubagent.ReconnectRequest{Target: delegation.AgentTarget("helper"), Spawn: spawn}})
+	loaded, err := runner.LoadHistory(ctx, taskapi.HistoryRequest{Anchor: anchor, Reconnect: taskapi.ReconnectRequest{Target: taskapi.AgentTarget("helper"), Spawn: spawn}})
 	if err != nil {
 		t.Fatal(err)
 	}

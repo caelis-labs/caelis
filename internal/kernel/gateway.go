@@ -11,7 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 )
@@ -171,11 +171,11 @@ func (g *Gateway) sessionApprovals(ref session.SessionRef) *approvalCoordinator 
 	return coordinator
 }
 
-func (g *Gateway) Terminals() terminal.Controller {
+func (g *Gateway) Terminals() task.TerminalController {
 	if g == nil || g.runtime == nil {
 		return nil
 	}
-	provider, ok := g.runtime.(terminal.Provider)
+	provider, ok := g.runtime.(task.TerminalProvider)
 	if !ok {
 		return nil
 	}

@@ -19,6 +19,7 @@ import (
 )
 
 func TestModelCanCorrectInvalidReadArguments(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		hooks hook.Set
@@ -80,6 +81,7 @@ func TestModelCanCorrectInvalidReadArguments(t *testing.T) {
 }
 
 func TestRecoverableToolFailuresContinueBatchAndLoop(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"serial", "parallel"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active := newTestSessionService(t, "recoverable-batch")

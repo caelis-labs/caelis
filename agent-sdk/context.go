@@ -5,15 +5,12 @@ import (
 	"errors"
 	"iter"
 
-	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // Events provides readonly indexed access to one event sequence.
@@ -107,15 +104,6 @@ type BatchSubmissionRunner interface {
 	SubmitBatch(context.Context, []AgentCommunicationInput) error
 }
 
-// SubagentRunner starts delegated child runs from the current invocation.
-// Concrete child-agent configuration is app-owned; runtime only sees the
-// registry name and the resulting child instance ref.
-type SubagentRunner interface {
-	Spawn(context.Context, SubagentSpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
-	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
-	Cancel(context.Context, delegation.Anchor) error
-}
-
 // ChildEndpointRef is the provider-neutral address of one exact delegated
 // child endpoint. EndpointKey is an opaque runner-local identity copied from
 // the durable participant binding; callers must not interpret it as Task
@@ -152,8 +140,8 @@ type ChildInputRequest struct {
 	Input        string                    `json:"input,omitempty"`
 	DisplayInput string                    `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart       `json:"content_parts,omitempty"`
-	Output       output.Observer           `json:"-"`
-	Completion   delegation.CompletionSink `json:"-"`
+	Output       task.OutputObserver       `json:"-"`
+	Completion   task.CompletionSink       `json:"-"`
 }
 
 // ChildInputCommand addresses one child inside a parent Session topology.
@@ -193,29 +181,7 @@ type ChildInputBatchRunner interface {
 // Existing live producers retain their binding. Idle recovery installs the new
 // binding before reconnect setup can emit output.
 type ChildEndpointBinder interface {
-	BindChildEndpoint(context.Context, ChildEndpointRef, SubagentSpawnContext) error
-}
-
-// SubagentSpawnContext is the system-controlled parent context inherited by a
-// child endpoint. None of these fields are model-controlled tool arguments.
-type SubagentSpawnContext struct {
-	// ContentParts preserves the user request's structured text and attachments.
-	ContentParts      []model.ContentPart        `json:"content_parts,omitempty"`
-	SessionRef        session.SessionRef         `json:"session_ref,omitempty"`
-	Session           session.Session            `json:"session,omitempty"`
-	CWD               string                     `json:"cwd,omitempty"`
-	TaskID            string                     `json:"task_id,omitempty"`
-	ActivityID        string                     `json:"activity_id,omitempty"`
-	Handle            string                     `json:"handle,omitempty"`
-	Role              session.ParticipantRole    `json:"role,omitempty"`
-	ParentCallID      string                     `json:"parent_call_id,omitempty"`
-	Mode              string                     `json:"mode,omitempty"`
-	ApprovalMode      string                     `json:"approval_mode,omitempty"`
-	ApprovalRequester approval.SubagentRequester `json:"-"`
-	Output            output.Observer            `json:"-"`
-	// Completion is the Runtime-owned terminal lifecycle path for this child
-	// turn. Stream consumers and Task control calls remain observers.
-	Completion delegation.CompletionSink `json:"-"`
+	BindChildEndpoint(context.Context, ChildEndpointRef, task.SpawnContext) error
 }
 
 // Context exposes the Session and event history for one Agent invocation.
@@ -244,7 +210,7 @@ type AgentSpec struct {
 	// DeferredTools supplies MCP tools as their background initialization finishes.
 	// Runtime applies the same invocation, policy and lifecycle wrappers
 	// as static tools. A run pins each accepted definition and callable together.
-	DeferredTools toolset.Source `json:"-"`
+	DeferredTools tool.Source `json:"-"`
 	// ResolveModelRequest optionally replaces model-facing configuration at
 	// every unsent request boundary. Runtime authority and policy remain fixed.
 	ResolveModelRequest       ModelRequestResolver `json:"-"`

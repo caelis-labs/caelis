@@ -11,7 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 )
@@ -27,8 +27,8 @@ func TestIdlePromptDispatchOrdersInputBeforePeerOutput(t *testing.T) {
 			defer cancel()
 			events := make(chan childInputTestEvent, 8)
 			run := &childRun{
-				anchor: delegation.Anchor{TaskID: "task", SessionID: "child", AgentID: "helper"},
-				taskID: "task", state: delegation.StateCompleted, ctx: ctx,
+				anchor: task.Anchor{TaskID: "task", SessionID: "child", AgentID: "helper"},
+				taskID: "task", state: task.StateCompleted, ctx: ctx,
 			}
 			target := agent.ChildEndpointRef{
 				ParticipantID: "helper", SessionID: "parent", EndpointKey: "task", Role: "worker",

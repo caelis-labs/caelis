@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
+	"github.com/caelis-labs/caelis/control/display"
 )
 
 func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {

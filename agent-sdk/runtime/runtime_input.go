@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 )
 
 func (r *Runtime) prepareTurnInputs(ctx context.Context, active session.Session, turnID string, req agent.RunRequest) ([]*session.Event, error) {
@@ -91,7 +90,7 @@ func buildSteeringInputEvents(active session.Session, turnID string, submission 
 	}
 	events, err := buildRunInputEvents(active, turnID, agent.RunRequest{
 		InputKind: submission.Kind, Input: submission.Text,
-		DisplayInput: userdisplay.ResolveDisplayInput(submission.DisplayInput, submission.Metadata),
+		DisplayInput: session.ResolveDisplayInput(submission.DisplayInput, submission.Metadata),
 		ContentParts: submission.ContentParts, InputActor: submission.Actor, Inputs: submission.Inputs,
 	})
 	for _, event := range events {

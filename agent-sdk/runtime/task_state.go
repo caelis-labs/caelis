@@ -10,14 +10,11 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/textstream"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 const (
@@ -182,7 +179,7 @@ type commandTask struct {
 	result          map[string]any
 	metadata        map[string]any
 
-	outputObserver output.Observer
+	outputObserver taskapi.OutputObserver
 	outputTerminal bool
 	outputChanged  chan struct{}
 }
@@ -193,10 +190,10 @@ type subagentTask struct {
 
 	ref          taskapi.Ref
 	sessionRef   session.SessionRef
-	anchor       delegation.Anchor
-	runner       subagent.Runner
+	anchor       taskapi.Anchor
+	runner       taskapi.SubagentRunner
 	agent        string
-	target       delegation.Target
+	target       taskapi.Target
 	handle       string
 	title        string
 	prompt       string
@@ -346,7 +343,7 @@ type StartSubagentOptions struct {
 	// Background callers observe subsequent progress through the Task stream.
 	ReturnOnStart bool
 	// Target is the immutable placement selected by the embedding host.
-	Target       delegation.Target
+	Target       taskapi.Target
 	Handle       string
 	ContentParts []model.ContentPart
 	// SpawnID preserves one user/Control initiated spawn identity across retry.
@@ -386,25 +383,6 @@ func stateFromStatus(status sandbox.SessionStatus) taskapi.State {
 		return taskapi.StateCancelled
 	}
 	return taskapi.StateFailed
-}
-
-func taskStateFromDelegation(state delegation.State) taskapi.State {
-	switch state {
-	case delegation.StateCompleted:
-		return taskapi.StateCompleted
-	case delegation.StateCancelled:
-		return taskapi.StateCancelled
-	case delegation.StateInterrupted:
-		return taskapi.StateInterrupted
-	case delegation.StateUnknownOutcome:
-		return taskapi.StateUnknownOutcome
-	case delegation.StateWaitingApproval:
-		return taskapi.StateWaitingApproval
-	case delegation.StateFailed:
-		return taskapi.StateFailed
-	default:
-		return taskapi.StateRunning
-	}
 }
 
 func commandExitCodeAvailable(state taskapi.State, exitCode int, resultErr error) bool {

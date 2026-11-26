@@ -10,8 +10,9 @@ import (
 )
 
 func TestRepairWorkspaceKeysRewritesDurableSessionFenceAndTasks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	store := NewStore(Config{RootDir: t.TempDir()})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 		Workspace: session.WorkspaceRef{Key: "legacy", CWD: "/tmp/project-a"},
@@ -84,8 +85,9 @@ func TestRepairWorkspaceKeysRewritesDurableSessionFenceAndTasks(t *testing.T) {
 }
 
 func TestRepairWorkspaceKeysResumesPersistedPlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	store := NewStore(Config{RootDir: t.TempDir()})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 		Workspace: session.WorkspaceRef{Key: "legacy", CWD: "/tmp/project-a"},

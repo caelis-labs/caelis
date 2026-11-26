@@ -37,7 +37,7 @@ func TestAppendEventsCacheReadsHistoryOnceThenOnlyAppendedTail(t *testing.T) {
 	if reads != 1 {
 		t.Fatalf("cache catch-up decoded lines = %d, want one newly committed line", reads)
 	}
-	other := NewStore(Config{RootDir: store.rootDir})
+	other := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	appendLifecycleEvents(t, other, active.SessionRef, 10, 1)
 	reads = 0
 	appendLifecycleEvents(t, store, active.SessionRef, 11, 1)
@@ -105,7 +105,7 @@ func TestEventLogCacheInvalidatesAfterTruncateAndKeepsResultsIsolated(t *testing
 func TestEventLogCacheIsStrictlyBounded(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{})
+	store := newLogicalTestStore(t, Config{})
 	store.eventLogCaches = map[string]*eventLogCache{}
 	for i := 0; i < maxEventLogCaches+3; i++ {
 		store.storeEventLogCache(string(rune('a'+i)), &eventLogCache{size: 1})
@@ -236,7 +236,7 @@ func TestAppendEventsUsesCompactIndexBeyondFullHistoryCacheLimit(t *testing.T) {
 		t.Fatalf("warm compact-index conflict decoded %d lines, want no additional history scan", reads)
 	}
 
-	other := NewStore(Config{RootDir: store.rootDir})
+	other := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	other.eventLogCacheMaxBytes = store.eventLogCacheMaxBytes
 	appendLifecycleEvents(t, other, active.SessionRef, 10, 1)
 	reads = 0
@@ -280,6 +280,7 @@ func TestAppendEventsUsesCompactIndexBeyondFullHistoryCacheLimit(t *testing.T) {
 }
 
 func TestCompactIndexColdBuildAcceptsConcurrentAppendOnlyGrowth(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 8)
 	store.eventLogCacheMaxBytes = 512
 	indexStarted := make(chan struct{})
@@ -311,7 +312,7 @@ func TestCompactIndexColdBuildAcceptsConcurrentAppendOnlyGrowth(t *testing.T) {
 		t.Fatal("cold compact-index build did not start")
 	}
 
-	other := NewStore(Config{RootDir: store.rootDir})
+	other := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	other.eventLogCacheMaxBytes = store.eventLogCacheMaxBytes
 	appendLifecycleEvents(t, other, active.SessionRef, 8, 1)
 	close(releaseIndex)
@@ -331,6 +332,7 @@ func TestCompactIndexColdBuildAcceptsConcurrentAppendOnlyGrowth(t *testing.T) {
 }
 
 func TestOversizedWALRecoveryDoesNotScanFullLogDuringFenceRead(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 8)
 	store.eventLogCacheMaxBytes = 512
 	fence, err := store.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{
@@ -356,7 +358,7 @@ func TestOversizedWALRecoveryDoesNotScanFullLogDuringFenceRead(t *testing.T) {
 		t.Fatalf("AppendEvent() after WAL fault = %v, want committed error", err)
 	}
 
-	reopened := NewStore(Config{RootDir: store.rootDir})
+	reopened := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	reopened.eventLogCacheMaxBytes = store.eventLogCacheMaxBytes
 	reads := 0
 	reopened.eventLogLineRead = func(_ string, _ int, _ int64) { reads++ }
@@ -384,7 +386,7 @@ func TestOversizedWALRecoveryDoesNotScanFullLogDuringFenceRead(t *testing.T) {
 func TestEventAppendIndexIsStrictlyBounded(t *testing.T) {
 	t.Parallel()
 
-	store := NewStore(Config{})
+	store := newLogicalTestStore(t, Config{})
 	for i := 0; i < maxEventAppendIndexes+3; i++ {
 		store.storeEventAppendIndex(string(rune('a'+i)), &eventAppendIndex{bytes: 1})
 	}
@@ -401,6 +403,7 @@ func TestEventAppendIndexIsStrictlyBounded(t *testing.T) {
 }
 
 func TestPrewarmedEventAppendIndexSurvivesCacheEvictionAndAdmissionLimit(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 8)
 	store.eventLogCacheMaxBytes = 512
 	reads := 0

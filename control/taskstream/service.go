@@ -16,8 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
@@ -50,7 +48,7 @@ type Config struct {
 	Recorder          *Recorder
 	Sessions          SessionLoader
 	Directory         *DirectoryIndex
-	SubagentHistory   subagent.HistoryRunner
+	SubagentHistory   task.HistoryRunner
 	Authorizer        Authorizer
 	Secret            []byte
 }
@@ -63,7 +61,7 @@ type service struct {
 	recorder          *Recorder
 	historyLoads      singleflight.Group
 	sessions          SessionLoader
-	subagentHistory   subagent.HistoryRunner
+	subagentHistory   task.HistoryRunner
 	directory         *DirectoryIndex
 	authorizer        Authorizer
 	cursors           cursorCodec
@@ -650,7 +648,7 @@ func descriptorModelFromEntry(entry *task.Entry) string {
 	if err != nil {
 		return ""
 	}
-	var target delegation.Target
+	var target task.Target
 	if json.Unmarshal(raw, &target) != nil {
 		return ""
 	}

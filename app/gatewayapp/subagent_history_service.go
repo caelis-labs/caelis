@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sdksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 // subagentHistoryService routes recovery to the same Session Runtime that owns
@@ -15,7 +15,7 @@ type subagentHistoryService struct {
 	registry *sessionRuntimeRegistry
 }
 
-func (s *subagentHistoryService) LoadHistory(ctx context.Context, req sdksubagent.HistoryRequest) (session.LoadedSession, error) {
+func (s *subagentHistoryService) LoadHistory(ctx context.Context, req task.HistoryRequest) (session.LoadedSession, error) {
 	if s.registry == nil {
 		return session.LoadedSession{}, fmt.Errorf("gatewayapp: child Runtime registry is unavailable")
 	}

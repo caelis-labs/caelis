@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -41,8 +40,8 @@ func (r *controllerRun) markContextSynced(checkpoint uint64) {
 	r.mu.Unlock()
 }
 
-func (r *controllerRun) restoreContext(pending agent.ContextTransfer, checkpoint uint64, fresh bool) {
-	if r == nil || agent.ContextTransferEmpty(pending) {
+func (r *controllerRun) restoreContext(pending session.ContextTransfer, checkpoint uint64, fresh bool) {
+	if r == nil || session.ContextTransferEmpty(pending) {
 		return
 	}
 	r.mu.Lock()
@@ -50,11 +49,11 @@ func (r *controllerRun) restoreContext(pending agent.ContextTransfer, checkpoint
 		// A full bootstrap supersedes any incremental pending route. Merging
 		// them would duplicate history and could let a later incremental Turn
 		// erase the fact that this remote still has no durable baseline.
-		r.context = agent.CloneContextTransfer(pending)
+		r.context = session.CloneContextTransfer(pending)
 	} else {
-		r.context = agent.MergeContextTransfers(pending, r.context)
+		r.context = session.MergeContextTransfers(pending, r.context)
 	}
-	r.contextPending = !agent.ContextTransferEmpty(r.context)
+	r.contextPending = !session.ContextTransferEmpty(r.context)
 	r.contextFresh = fresh
 	if checkpoint > r.contextSyncSeq {
 		r.contextSyncSeq = checkpoint

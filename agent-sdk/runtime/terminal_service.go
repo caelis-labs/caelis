@@ -8,11 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 // Terminals provides command inspection and process control over this Runtime's tasks.
-func (r *Runtime) Terminals() terminal.Controller {
+func (r *Runtime) Terminals() taskapi.TerminalController {
 	if r == nil || r.tasks == nil {
 		return nil
 	}
@@ -23,11 +22,11 @@ type terminalService struct {
 	tasks *taskRuntime
 }
 
-func (s terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
-	ref = terminal.NormalizeRef(ref)
+func (s terminalService) Read(ctx context.Context, ref taskapi.TerminalRef) (taskapi.TerminalSnapshot, error) {
+	ref = taskapi.NormalizeTerminalRef(ref)
 	task, err := s.resolveTerminalCommand(ctx, ref)
 	if err != nil {
-		return terminal.Snapshot{}, err
+		return taskapi.TerminalSnapshot{}, err
 	}
 	commandSession := task.observableCommandSession()
 	var status sandbox.SessionStatus
@@ -37,14 +36,14 @@ func (s terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.S
 		status, err = commandStatusWithoutSession(task)
 	}
 	if err != nil {
-		return terminal.Snapshot{}, err
+		return taskapi.TerminalSnapshot{}, err
 	}
 	task.mu.Lock()
 	callback := task.outputState.callback
 	task.mu.Unlock()
 	if commandSession != nil && !callback {
 		if err := s.tasks.syncCommandOutput(ctx, task, status); err != nil {
-			return terminal.Snapshot{}, err
+			return taskapi.TerminalSnapshot{}, err
 		}
 	}
 	task.mu.Lock()
@@ -69,12 +68,12 @@ func (s terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.S
 	return snapshot, nil
 }
 
-func (s terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
-	ref = terminal.NormalizeRef(ref)
+func (s terminalService) Wait(ctx context.Context, ref taskapi.TerminalRef) (taskapi.TerminalSnapshot, error) {
+	ref = taskapi.NormalizeTerminalRef(ref)
 	for {
 		task, err := s.resolveTerminalCommand(ctx, ref)
 		if err != nil {
-			return terminal.Snapshot{}, err
+			return taskapi.TerminalSnapshot{}, err
 		}
 		task.mu.Lock()
 		settled := taskapi.IsTerminalState(task.state) && task.startCleanupErr == nil
@@ -88,7 +87,7 @@ func (s terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.S
 		process := task.observableCommandSession()
 		if process == nil {
 			if !task.waitForCommandProducer(ctx, taskWaitMaxYield) && ctx.Err() != nil {
-				return terminal.Snapshot{}, ctx.Err()
+				return taskapi.TerminalSnapshot{}, ctx.Err()
 			}
 			continue
 		}
@@ -96,11 +95,11 @@ func (s terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.S
 		// consumes its output cursor; using it here loses output for a later Task
 		// call and can finalize the Task before the model receives its result.
 		if _, err := process.Wait(ctx, taskWaitMaxYield); err != nil {
-			return terminal.Snapshot{}, err
+			return taskapi.TerminalSnapshot{}, err
 		}
 		observed, err := s.Read(ctx, ref)
 		if err != nil {
-			return terminal.Snapshot{}, err
+			return taskapi.TerminalSnapshot{}, err
 		}
 		if !observed.Running {
 			return observed, nil
@@ -108,8 +107,8 @@ func (s terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.S
 	}
 }
 
-func (s terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
-	task, err := s.resolveTerminalCommand(ctx, terminal.NormalizeRef(ref))
+func (s terminalService) Kill(ctx context.Context, ref taskapi.TerminalRef) error {
+	task, err := s.resolveTerminalCommand(ctx, taskapi.NormalizeTerminalRef(ref))
 	if err != nil {
 		return err
 	}
@@ -120,8 +119,8 @@ func (s terminalService) Kill(ctx context.Context, ref terminal.Ref) error {
 	return commandSession.Terminate(ctx)
 }
 
-func (s terminalService) Release(ctx context.Context, ref terminal.Ref) error {
-	task, err := s.resolveTerminalCommand(ctx, terminal.NormalizeRef(ref))
+func (s terminalService) Release(ctx context.Context, ref taskapi.TerminalRef) error {
+	task, err := s.resolveTerminalCommand(ctx, taskapi.NormalizeTerminalRef(ref))
 	if err != nil {
 		return err
 	}
@@ -139,11 +138,11 @@ func (s terminalService) Release(ctx context.Context, ref terminal.Ref) error {
 	return nil
 }
 
-func (s terminalService) resolveTerminalCommand(ctx context.Context, ref terminal.Ref) (*commandTask, error) {
+func (s terminalService) resolveTerminalCommand(ctx context.Context, ref taskapi.TerminalRef) (*commandTask, error) {
 	if s.tasks == nil {
 		return nil, fmt.Errorf("terminal service is unavailable")
 	}
-	if err := terminal.ValidateRef(ref); err != nil {
+	if err := taskapi.ValidateTerminalRef(ref); err != nil {
 		return nil, err
 	}
 	return s.tasks.lookupCommand(ctx, session.SessionRef{SessionID: ref.SessionID}, ref.TaskID)
@@ -169,16 +168,16 @@ func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, erro
 	}, nil
 }
 
-func terminalCommandSnapshotLocked(task *commandTask, status sandbox.SessionStatus) terminal.Snapshot {
+func terminalCommandSnapshotLocked(task *commandTask, status sandbox.SessionStatus) taskapi.TerminalSnapshot {
 	if task == nil {
-		return terminal.Snapshot{}
+		return taskapi.TerminalSnapshot{}
 	}
 	resultText := firstNonBlankTaskOutput(taskRawStringValue(task.result["result"]), task.output, noOutputPlaceholder)
-	ref := terminal.Ref{
+	ref := taskapi.TerminalRef{
 		SessionID: strings.TrimSpace(task.sessionRef.SessionID), TaskID: strings.TrimSpace(task.ref.TaskID),
 		TerminalID: firstNonEmpty(strings.TrimSpace(status.Terminal.TerminalID), strings.TrimSpace(task.ref.TerminalID)),
 	}
-	snapshot := terminal.Snapshot{
+	snapshot := taskapi.TerminalSnapshot{
 		Ref: ref, State: string(task.state), Running: task.running,
 		SupportsInput: status.SupportsInput && task.running, StartedAt: status.StartedAt, UpdatedAt: status.UpdatedAt,
 	}
@@ -190,7 +189,7 @@ func terminalCommandSnapshotLocked(task *commandTask, status sandbox.SessionStat
 			snapshot.ExitCode = &code
 		}
 	}
-	return terminal.CloneSnapshot(snapshot)
+	return taskapi.CloneTerminalSnapshot(snapshot)
 }
 
-var _ terminal.Provider = (*Runtime)(nil)
+var _ taskapi.TerminalProvider = (*Runtime)(nil)

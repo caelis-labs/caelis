@@ -11,14 +11,13 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 // Config defines one baseline local runtime instance.
@@ -48,7 +47,7 @@ type Config struct {
 	TaskStore                task.Store
 	// TaskOutput installs producer-only Task observers before external effects.
 	// The SDK never reads from or assigns retention semantics to this hook.
-	TaskOutput output.Binder
+	TaskOutput task.OutputBinder
 	// TaskActivityChanged reports a committed Task terminal transition. Product
 	// hosts may use it to re-evaluate an in-memory Runtime reference; it does not
 	// authorize work or replace the durable Task store.
@@ -57,7 +56,7 @@ type Config struct {
 	// Product Control may use it to advance a lightweight status index; the
 	// callback never owns Task lifecycle or content delivery.
 	TaskCommitted func(*task.Entry)
-	Subagents     agent.SubagentRunner
+	Subagents     task.SubagentRunner
 	// ChildApprovalRequester routes approvals independently of a parent Turn,
 	// including user-started children and child endpoints reattached after restart.
 	ChildApprovalRequester approval.Requester
@@ -93,7 +92,7 @@ type Runtime struct {
 	controllerContextRouter  controller.ContextRouter
 	controllerRecovery       controller.RecoveryCoordinator
 	controllerEventForwarder agent.ControllerEventForwarder
-	subagents                agent.SubagentRunner
+	subagents                task.SubagentRunner
 	sessionWrites            sessionWriteQueue
 	// participantMu linearizes durable participant topology mutations with
 	// source/target input reservations; remote receipt waits never hold it.
@@ -104,7 +103,7 @@ type Runtime struct {
 	activeRunners        map[string]activeRun
 	approvalWaiters      map[approvalKey]approvalWaiter
 	tasks                *taskRuntime
-	taskOutput           output.Binder
+	taskOutput           task.OutputBinder
 	lifecycle            agent.TraceOptions
 }
 
@@ -215,7 +214,7 @@ func (r *Runtime) nextID(prefix string, custom func() string) string {
 			return id
 		}
 	}
-	return identity.New(prefix)
+	return sdkctx.NewID(prefix)
 }
 
 func (r *Runtime) now() time.Time {

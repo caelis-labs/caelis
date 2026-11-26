@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
-	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/control/modelconfig/typesafe"
 )
 
 // APISystemOne identifies the typed evaluation protocol. It is configuration

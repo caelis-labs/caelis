@@ -155,8 +155,9 @@ func snapshotTestConfig(revision string, llm model.LLM, tools ...tool.Tool) agen
 }
 
 func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := sessions.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -276,7 +277,7 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	}
 	// Reopen the physical store and rebuild provider context through the real
 	// Runtime, proving the live prefix survives whole-object persistence.
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	resumed, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatal(err)
@@ -315,6 +316,7 @@ func (b *snapshotLifecycleBarrier) Prepare(ctx context.Context, _ hook.PrepareCo
 }
 
 func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) {
+	t.Parallel()
 	sessions, active := newToolFactTestSession(t, "snapshot-build-race")
 	oldModel, newModel := newRequestSnapshotModel("old"), newRequestSnapshotModel("new")
 	source := &requestSnapshotSource{}
@@ -350,6 +352,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 }
 
 func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
+	t.Parallel()
 	sessions, active := newToolFactTestSession(t, "snapshot-retry-race")
 	oldModel, newModel := newRequestSnapshotModel("old"), newRequestSnapshotModel("new")
 	source := &requestSnapshotSource{}
@@ -400,6 +403,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 }
 
 func TestRuntimeModelRequestSnapshotReleasesOnPreparationFailure(t *testing.T) {
+	t.Parallel()
 	sessions, active := newToolFactTestSession(t, "snapshot-prepare-failure")
 	llm := newRequestSnapshotModel("unused")
 	var releases atomic.Int64
@@ -428,6 +432,7 @@ func TestRuntimeModelRequestSnapshotReleasesOnPreparationFailure(t *testing.T) {
 }
 
 func TestRuntimeModelRequestSnapshotReleasesOnCancellation(t *testing.T) {
+	t.Parallel()
 	sessions, active := newToolFactTestSession(t, "snapshot-cancel")
 	llm := newRequestSnapshotModel("blocking")
 	var releases atomic.Int64
@@ -477,6 +482,7 @@ func (*snapshotOverflowCompactor) Force(context.Context, compact.Request, string
 }
 
 func TestRuntimeModelRequestSnapshotOverflowUsesActualModelAndTier(t *testing.T) {
+	t.Parallel()
 	sessions, active := newToolFactTestSession(t, "snapshot-overflow")
 	oldModel, newModel := newRequestSnapshotModel("bootstrap"), newRequestSnapshotModel("selected")
 	source := &requestSnapshotSource{}

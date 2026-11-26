@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -117,7 +117,7 @@ func (cfg responsesStreamConfig) response(ctx context.Context, req *model.Reques
 	for index, item := range wire.Output {
 		accumulator.applyItem(item, index)
 	}
-	allowToolRepair := len(req.Tools) > 0 && !req.DisableTools && modelinvocation.AllowsToolRepair(ctx, req)
+	allowToolRepair := len(req.Tools) > 0 && !req.DisableTools && sdkctx.AllowsToolRepair(ctx, req)
 	message, err := accumulator.message(allowToolRepair)
 	if err != nil {
 		return nil, err

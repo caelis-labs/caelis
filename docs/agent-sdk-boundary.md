@@ -264,7 +264,7 @@ then appends one `From` footer. Durable ActorRef values retain the full source
 identity; footer text does not grant routing or execution authority.
 
 Hosts can discover command inspection and process control through the optional
-`task/terminal.Provider` interface. The internal Task service owns the command
+`task.TerminalProvider` interface. The internal Task service owns the command
 lifecycle and final result. Command stdin is a
 separate Task capability; Agent communication never falls back to Task input.
 The SDK may expose a bounded current/final command result and ACP child final
@@ -371,9 +371,9 @@ identical retry returns the original facts. `session.AcquireFencedWriter` and
 `session.MarshalEventJSON` and `session.UnmarshalEventJSON` preserve the
 durable encoding, including supported schema upgrades and inline media.
 
-Backend implementers can run `sessiontest.ToolRunConformance` to compare the
-full model conversation across reopen, and `sessiontest.TurnAdmissionConformance`
-to check conflicting prompts and concurrent reads through two runtimes.
+The `agent-sdk/session` conformance suite (`conformance_runtime_test.go`) verifies
+full model conversation across reopen as well as conflicting prompts and
+concurrent reads through two runtimes.
 
 ## Durable facts and replay
 

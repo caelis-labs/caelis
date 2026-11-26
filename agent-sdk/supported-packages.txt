@@ -5,7 +5,6 @@ github.com/caelis-labs/caelis/agent-sdk/approval
 github.com/caelis-labs/caelis/agent-sdk/errorcode
 github.com/caelis-labs/caelis/agent-sdk/hook
 github.com/caelis-labs/caelis/agent-sdk/judgment
-github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe
 github.com/caelis-labs/caelis/agent-sdk/model
 github.com/caelis-labs/caelis/agent-sdk/placement
 github.com/caelis-labs/caelis/agent-sdk/policy
@@ -17,13 +16,7 @@ github.com/caelis-labs/caelis/agent-sdk/sandbox
 github.com/caelis-labs/caelis/agent-sdk/session
 github.com/caelis-labs/caelis/agent-sdk/session/file
 github.com/caelis-labs/caelis/agent-sdk/session/memory
-github.com/caelis-labs/caelis/agent-sdk/session/sessiontest
 github.com/caelis-labs/caelis/agent-sdk/skill
 github.com/caelis-labs/caelis/agent-sdk/task
-github.com/caelis-labs/caelis/agent-sdk/task/delegation
-github.com/caelis-labs/caelis/agent-sdk/task/output
-github.com/caelis-labs/caelis/agent-sdk/task/subagent
-github.com/caelis-labs/caelis/agent-sdk/task/terminal
 github.com/caelis-labs/caelis/agent-sdk/tool
 github.com/caelis-labs/caelis/agent-sdk/tool/artifact
-github.com/caelis-labs/caelis/agent-sdk/tool/toolset

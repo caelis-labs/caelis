@@ -3,11 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -15,16 +10,21 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"kernel", "controller"} {
 		for _, fail := range []bool{false, true} {
 			t.Run(path+map[bool]string{false: "/roundtrip", true: "/second-input-failure"}[fail], func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
 				root := t.TempDir()
-				store := &invalidSecondInputStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), fail: fail}
+				store := &invalidSecondInputStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), fail: fail}
 				active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "active-batch-test"})
 				if err != nil {
 					t.Fatal(err)
@@ -105,7 +105,7 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				if (err != nil) != fail {
 					t.Fatalf("error = %v, want failure %v", err, fail)
 				}
-				loaded, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+				loaded, err := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -185,6 +185,7 @@ func (s *invalidSecondInputStore) AppendEvents(ctx context.Context, req session.
 }
 
 func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"kernel", "controller"} {
 		for _, fail := range []bool{false, true} {
 			name := "roundtrip"
@@ -193,7 +194,7 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 			}
 			t.Run(path+"/"+name, func(t *testing.T) {
 				root := t.TempDir()
-				store := &invalidSecondInputStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), fail: fail}
+				store := &invalidSecondInputStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), fail: fail}
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "batch-test"})
 				if err != nil {
 					t.Fatal(err)
@@ -238,7 +239,7 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				if (err != nil) != fail {
 					t.Fatalf("error = %v, want failure %v", err, fail)
 				}
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				loaded, loadErr := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if loadErr != nil {
 					t.Fatal(loadErr)
@@ -291,7 +292,8 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 }
 
 func TestInputBatchPersistenceRequiresExactFence(t *testing.T) {
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	t.Parallel()
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "batch-test"})
 	if err != nil {
 		t.Fatal(err)
@@ -332,6 +334,7 @@ func TestInputBatchPersistenceRequiresExactFence(t *testing.T) {
 // an admission without a supplied correlation stays empty, and the correlation
 // never becomes the Turn or idempotency identity.
 func TestBuildRunInputEventsCarriesSuppliedAgentCorrelationOnly(t *testing.T) {
+	t.Parallel()
 	active := session.Session{SessionRef: session.SessionRef{SessionID: "correlation"}}
 	conversation, err := buildRunInputEvents(active, "turn-conversation", agent.RunRequest{
 		InputKind: agent.SubmissionKindConversation, Input: "hello",
@@ -364,10 +367,11 @@ func TestBuildRunInputEventsCarriesSuppliedAgentCorrelationOnly(t *testing.T) {
 }
 
 func TestTrustedCompletionNoticeSurvivesActiveTurnAndReopen(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	cfg := sessionfile.Config{RootDir: t.TempDir()}
-	store := sessionfile.NewStore(cfg)
+	store := newLogicalFileStore(t, cfg)
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "notice"})
 	if err != nil {
 		t.Fatal(err)
@@ -407,7 +411,7 @@ func TestTrustedCompletionNoticeSurvivesActiveTurnAndReopen(t *testing.T) {
 	if got := userMessages(requests[1].Messages); len(got) != 2 || !reflect.DeepEqual(got[1], want) {
 		t.Fatalf("parent did not consume the notice exactly once: %#v", got)
 	}
-	reopened := sessionfile.NewStore(cfg)
+	reopened := newLogicalFileStore(t, cfg)
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -436,5 +440,51 @@ func TestTrustedCompletionNoticeSurvivesActiveTurnAndReopen(t *testing.T) {
 	live := userMessages(requests[1].Messages)
 	if got := userMessages(next.messages); len(got) != len(live)+1 || !reflect.DeepEqual(got[:len(live)], live) {
 		t.Fatalf("reopened model context = %#v, live = %#v", got, live)
+	}
+}
+
+func TestSteeringInputCorrelationDoesNotAdoptSubmissionIdentity(t *testing.T) {
+	t.Parallel()
+	metadata := map[string]any{
+		"operation_id": "operation-one", "steering_operation_id": "operation-one", "display_input": "display guide",
+		"actor": "forged-actor", "message_id": "forged-message", "participant_id": "forged-participant",
+		"caelis": map[string]any{"agent_communication": true},
+	}
+	events, err := buildSteeringInputEvents(session.Session{}, "active-turn", agent.Submission{
+		Kind: agent.SubmissionKindConversation, Text: "guide", Metadata: metadata,
+	})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("buildSteeringInputEvents = %#v, %v", events, err)
+	}
+	event := events[0]
+	metadata["operation_id"] = "changed-after-admission"
+	if event.Meta["operation_id"] != "operation-one" || event.Meta["steering_operation_id"] != "operation-one" || event.Meta["display_input"] != "display guide" {
+		t.Fatalf("canonical steering metadata = %#v", event.Meta)
+	}
+	if len(event.Meta) != 3 || event.Actor.Kind != session.ActorKindUser || event.MessageID != "" || event.Scope.TurnID != "active-turn" || event.IdempotencyKey != "" {
+		t.Fatalf("submission metadata changed canonical ownership: %#v", event)
+	}
+	for _, invalid := range []any{nil, "", "  ", 42, map[string]any{"id": "operation-one"}} {
+		unrelated := &session.Event{Meta: map[string]any{"display_input": "display guide"}}
+		preserveSteeringCorrelation(unrelated, map[string]any{"operation_id": invalid, "steering_operation_id": invalid})
+		if len(unrelated.Meta) != 1 {
+			t.Fatalf("invalid correlation %v was preserved: %#v", invalid, unrelated.Meta)
+		}
+	}
+}
+
+func assertCommittedSteeringCorrelation(t *testing.T, event *session.Event, operation string) {
+	t.Helper()
+	if event.ID == "" || event.Seq <= 0 || event.Visibility != session.VisibilityCanonical ||
+		event.Meta["operation_id"] != operation || event.Meta["steering_operation_id"] != operation {
+		t.Fatalf("committed steering lost correlation or persistence evidence: %#v", event)
+	}
+	if event.ID == operation || session.EventMessageID(event) == operation || session.EventMessageID(event) == "forged-message" {
+		t.Fatalf("operation or metadata replaced canonical message/event identity: %#v", event)
+	}
+	for _, key := range []string{"actor", "message_id", "participant_id", "caelis"} {
+		if _, present := event.Meta[key]; present {
+			t.Fatalf("canonical steering adopted submission metadata %q: %#v", key, event.Meta)
+		}
 	}
 }

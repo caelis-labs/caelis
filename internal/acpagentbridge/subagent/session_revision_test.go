@@ -8,8 +8,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpdraft"
 	"github.com/caelis-labs/caelis/internal/acptest/draftpeer"
 )
@@ -42,8 +41,8 @@ func TestDraftLoadedSessionRevisionCannotBecomeNewActivityResult(t *testing.T) {
 	runner := replacementDraftRunner(t, peer)
 	events := make(chan childInputTestEvent, 64)
 	spawn := childInputSpawnContext(t, "loaded-task", events)
-	anchor := delegation.Anchor{TaskID: spawn.TaskID, SessionID: peer.SessionID, AgentID: "loaded-agent"}
-	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{Anchor: anchor, Reconnect: tasksubagent.ReconnectRequest{Spawn: spawn, Target: delegation.AgentTarget("helper")}})
+	anchor := taskapi.Anchor{TaskID: spawn.TaskID, SessionID: peer.SessionID, AgentID: "loaded-agent"}
+	loaded, err := runner.LoadHistory(ctx, taskapi.HistoryRequest{Anchor: anchor, Reconnect: taskapi.ReconnectRequest{Spawn: spawn, Target: taskapi.AgentTarget("helper")}})
 	if err != nil {
 		t.Fatal(err)
 	}

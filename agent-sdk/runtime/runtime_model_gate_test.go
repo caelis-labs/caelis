@@ -9,7 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -475,7 +475,7 @@ func setProviderEventPromptPrefix(event *session.Event, req *model.Request) {
 	if event.Invocation == nil {
 		event.Invocation = &session.EventInvocation{}
 	}
-	prefix := prefixusage.ForRequest(req)
+	prefix := requestmeta.ForRequest(req)
 	event.Invocation.PromptPrefixFingerprint = prefix.Fingerprint
 	event.Invocation.PromptPrefixTokens = prefix.Tokens
 }

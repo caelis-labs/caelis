@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 )
 
 func subagentTerminalID(taskID string) string {
@@ -83,9 +82,9 @@ func (tm *taskRuntime) reserveTaskHandle(ctx context.Context, activeSession sess
 
 func allocateTaskHandle(used map[string]struct{}, kind taskapi.Kind, hint string) string {
 	if kind == taskapi.KindSubagent {
-		return agenthandle.Allocate(used, hint)
+		return taskapi.AllocateHandle(used, hint)
 	}
-	base := agenthandle.NormalizeBase(hint)
+	base := taskapi.NormalizeHandleBase(hint)
 	if base == "" {
 		base = "task"
 	}

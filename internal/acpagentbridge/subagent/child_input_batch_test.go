@@ -11,7 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
@@ -22,7 +22,7 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 	runner := childInputTestRunner(t, "idle-no-steering")
 	events := make(chan childInputTestEvent, 24)
 	spawn := childInputSpawnContext(t, "task-idle-batch", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 			t.Fatalf("unexpected prompt: %#v", frame.Event)
 		}
 	}
-	if running != 1 || accepted != 2 || len(frames) != 4 || terminal.Result.State != delegation.StateCompleted {
+	if running != 1 || accepted != 2 || len(frames) != 4 || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("running %d frames %d accepted %d terminal %#v", running, len(frames), accepted, terminal.Result)
 	}
 	encoded, _ := json.Marshal(buildAgentCommunicationPrompt(agent.ChildInputRequest{Messages: inputs}))
@@ -88,7 +88,7 @@ func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 	runner := newChildInputTestRunner(t, "active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 16)
 	spawn := childInputSpawnContext(t, "task-active-batch", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 			t.Fatalf("unexpected activity: %#v", frame.Event)
 		}
 	}
-	if accepted != 2 || len(frames) != 3 || terminal.Result.State != delegation.StateCompleted {
+	if accepted != 2 || len(frames) != 3 || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("frames=%d accepted=%d terminal=%#v", len(frames), accepted, terminal.Result)
 	}
 	if err := runner.Quiesce(ctx); err != nil {

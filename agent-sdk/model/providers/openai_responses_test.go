@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -1038,10 +1039,10 @@ func TestOpenAIResponsesSessionFileStoreRebuildsModelContext(t *testing.T) {
 	}
 	toolResult := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart(calls[0].ID, calls[0].Name, map[string]any{"weather": "sunny"}, false))
 
-	store := sessionfile.NewStore(sessionfile.Config{
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-responses-roundtrip" },
-	})
+	}))
 	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

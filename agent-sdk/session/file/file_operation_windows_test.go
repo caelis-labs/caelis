@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"golang.org/x/sys/windows"
 )
 
 func TestWindowsReplaceFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "replacement.tmp")
 	to := filepath.Join(dir, "document.json")
@@ -49,6 +49,7 @@ func TestWindowsReplaceFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
 }
 
 func TestWindowsRemoveFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "session.txn.json")
 	if err := os.WriteFile(path, []byte("committed"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -68,6 +69,7 @@ func TestWindowsRemoveFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
 }
 
 func TestWindowsReplaceFileCancellationPreservesBothFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "replacement.tmp")
 	to := filepath.Join(dir, "document.json")
@@ -98,6 +100,7 @@ func TestWindowsReplaceFileCancellationPreservesBothFiles(t *testing.T) {
 }
 
 func TestWindowsAccessDeniedRetryRequiresAccessibleFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "replacement.tmp")
 	to := filepath.Join(dir, "document.json")
@@ -133,12 +136,17 @@ func TestWindowsAccessDeniedRetryRequiresAccessibleFiles(t *testing.T) {
 	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || attempts != 1 {
 		t.Fatalf("ineligible access-denied retry = attempts %d, error %v; want one immediate failure", attempts, err)
 	}
-	if got := display.UserVisibleError(err); got != "Caelis could not update local session storage." || strings.Contains(got, dir) {
+	var displayErr interface{ DisplayMessage() string }
+	if !errors.As(err, &displayErr) {
+		t.Fatalf("expected error to implement DisplayMessage(), got %T (%v)", err, err)
+	}
+	if got := strings.TrimSpace(displayErr.DisplayMessage()); got != "Caelis could not update local session storage." || strings.Contains(got, dir) {
 		t.Fatalf("user-visible file error = %q, want path-free summary", got)
 	}
 }
 
 func TestWindowsPathClassDistinguishesUNCAndExtendedLocalPaths(t *testing.T) {
+	t.Parallel()
 	tests := map[string]string{
 		`C:\store\sessions`:             "local",
 		`\\?\C:\store\sessions`:         "local",
@@ -155,6 +163,7 @@ func TestWindowsPathClassDistinguishesUNCAndExtendedLocalPaths(t *testing.T) {
 }
 
 func TestWindowsCommittedDocumentReplaceKeepsWALAndRecoversOneModelFact(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	at := time.Date(2026, time.August, 1, 2, 3, 4, 0, time.UTC)
 	store := NewStore(Config{RootDir: root, Clock: func() time.Time { return at }})
@@ -216,6 +225,7 @@ func TestWindowsCommittedDocumentReplaceKeepsWALAndRecoversOneModelFact(t *testi
 }
 
 func TestWindowsCancellationAfterWALRemainsCommittedAndRecoverable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	at := time.Date(2026, time.August, 2, 2, 3, 4, 0, time.UTC)
 	store := NewStore(Config{RootDir: root, Clock: func() time.Time { return at }})
@@ -288,6 +298,7 @@ func TestWindowsCancellationAfterWALRemainsCommittedAndRecoverable(t *testing.T)
 }
 
 func TestWindowsFileDiagnosticOmitsPathsAndSessionIdentity(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, nil))
 	attempts := 0

@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	spoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 )
@@ -27,21 +26,21 @@ func TestEventsPreservesRecordLocalSubagentActivityAcrossReplay(t *testing.T) {
 	store := newTaskStreamTestStore(entry)
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	first := recorder.BindTaskOutput(t.Context(), output.Binding{
+	first := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
 		SessionID: "session-1", TaskID: "task-1", TerminalID: "subagent-task-1",
-		ActivityID: "activity-1", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+		ActivityID: "activity-1", Kind: task.KindSubagent, StartsAtTaskOrigin: true,
 	})
-	second := recorder.BindTaskOutput(t.Context(), output.Binding{
+	second := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
 		SessionID: "session-1", TaskID: "task-1", TerminalID: "subagent-task-1",
-		ActivityID: "activity-2", Kind: output.TaskKindSubagent,
+		ActivityID: "activity-2", Kind: task.KindSubagent,
 	})
-	if err := first.ObserveTaskOutput(t.Context(), output.Event{
+	if err := first.ObserveTaskOutput(t.Context(), task.OutputEvent{
 		Running: true, OccurredAt: time.Unix(100, 0),
 		Event: &session.Event{ID: "input-1", Type: session.EventTypeContext, Text: "first turn"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := second.ObserveTaskOutput(t.Context(), output.Event{
+	if err := second.ObserveTaskOutput(t.Context(), task.OutputEvent{
 		Running: true, OccurredAt: time.Unix(110, 0),
 		Event: &session.Event{ID: "input-2", Type: session.EventTypeContext, Text: "second turn"},
 	}); err != nil {
@@ -85,11 +84,11 @@ func TestEventsReadsExactControlSpool(t *testing.T) {
 	store := newTaskStreamTestStore(entry)
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
 		SessionID: "session-1", TaskID: "task-1", TerminalID: "turn-1",
-		Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
+		Kind: task.KindCommand, StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "alpha", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Text: "alpha", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +108,7 @@ func TestEventsReadsExactControlSpool(t *testing.T) {
 		t.Fatalf("exact cursors are empty: %#v", batch)
 	}
 
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "beta", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Text: "beta", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	continued, err := service.Events(t.Context(), Principal{ID: "owner"}, ReadRequest{
@@ -130,8 +129,8 @@ func TestSubscribeWaitsForFirstProducerRecord(t *testing.T) {
 	store := newTaskStreamTestStore(entry)
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
+		SessionID: "session-1", TaskID: "task-1", Kind: task.KindCommand, StartsAtTaskOrigin: true,
 	})
 	service := newTaskStreamTestService(t, store, spool, recorder)
 	result, err := service.Subscribe(t.Context(), Principal{ID: "owner"}, SubscribeRequest{
@@ -147,7 +146,7 @@ func TestSubscribeWaitsForFirstProducerRecord(t *testing.T) {
 		t.Fatalf("pending subscription returned early: %#v", delivery)
 	case <-time.After(20 * time.Millisecond):
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "first", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Text: "first", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -167,8 +166,8 @@ func TestUnreadSubscriptionDoesNotBackpressureProducer(t *testing.T) {
 	store := newTaskStreamTestStore(entry)
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
+		SessionID: "session-1", TaskID: "task-1", Kind: task.KindCommand, StartsAtTaskOrigin: true,
 	})
 	service := newTaskStreamTestService(t, store, spool, recorder)
 	result, err := service.Subscribe(t.Context(), Principal{ID: "owner"}, SubscribeRequest{
@@ -182,7 +181,7 @@ func TestUnreadSubscriptionDoesNotBackpressureProducer(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		for range 128 {
-			if err := observer.ObserveTaskOutput(context.Background(), output.Event{Text: "chunk", Running: true}); err != nil {
+			if err := observer.ObserveTaskOutput(context.Background(), task.OutputEvent{Text: "chunk", Running: true}); err != nil {
 				done <- err
 				return
 			}
@@ -269,10 +268,10 @@ func TestValidCursorCacheMissReturnsAtomicFallback(t *testing.T) {
 	entry.Result = map[string]any{"result": "fallback"}
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
+		SessionID: "session-1", TaskID: "task-1", Kind: task.KindCommand, StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "prefix", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Text: "prefix", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), spool, recorder)
@@ -286,7 +285,7 @@ func TestValidCursorCacheMissReturnsAtomicFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: string(task.StateCompleted), Closed: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{State: string(task.StateCompleted), Closed: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := recorder.Flush(t.Context(), task.Ref{SessionID: entry.Session.SessionID, TaskID: entry.TaskID}); err != nil {
@@ -460,8 +459,8 @@ func TestCodeModeFinalFrameUsesProducerSettlement(t *testing.T) {
 	entry.Metadata["code_mode_source"] = map[string]any{"code": "return 42", "sha256": "original"}
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{SessionID: entry.Session.SessionID, TaskID: entry.TaskID, Kind: output.TaskKindCodeMode, StartsAtTaskOrigin: true})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "{}", State: "failed", Closed: true, ProducerClosed: true, ScriptCompletion: "completed"}); err != nil {
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{SessionID: entry.Session.SessionID, TaskID: entry.TaskID, Kind: task.KindCodeMode, StartsAtTaskOrigin: true})
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Text: "{}", State: "failed", Closed: true, ProducerClosed: true, ScriptCompletion: "completed"}); err != nil {
 		t.Fatal(err)
 	}
 	service := newTaskStreamTestService(t, newTaskStreamTestStore(entry), spool, recorder)

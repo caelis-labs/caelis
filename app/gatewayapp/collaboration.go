@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
@@ -262,7 +261,7 @@ func (s *runtimeComposition) collaborationInstructions(ctx context.Context, acti
 	return collaboration.IdentityInstructions(handle, role) + "\n" + collaboration.CollaboratorInstructions(definitions)
 }
 
-func (s *runtimeComposition) collaborationServers(spawn subagent.SpawnContext) ([]acp.McpServer, *collaboration.Grant, error) {
+func (s *runtimeComposition) collaborationServers(spawn task.SpawnContext) ([]acp.McpServer, *collaboration.Grant, error) {
 	if s.authorities.collaboration == nil {
 		return nil, nil, nil
 	}

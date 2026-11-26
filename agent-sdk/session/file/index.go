@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/internal/cwdpath"
 	"modernc.org/sqlite"
 )
 
 func init() {
-	sqlite.MustRegisterCollationUtf8("caelis_session_cwd", cwdpath.Compare)
+	sqlite.MustRegisterCollationUtf8("caelis_session_cwd", sdkctx.CompareCWD)
 }
 
 type sessionIndexEntry struct {

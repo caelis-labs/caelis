@@ -10,7 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 )
@@ -24,9 +24,9 @@ func TestInitialPromptAbortDrainsIngressBeforeJoiningClient(t *testing.T) {
 	events := make(chan childInputTestEvent, 8)
 	spawn := childInputSpawnContext(t, "task-aborted-dispatch", events)
 	run := &childRun{
-		anchor: delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child", AgentID: "helper"},
+		anchor: task.Anchor{TaskID: spawn.TaskID, SessionID: "child", AgentID: "helper"},
 		taskID: spawn.TaskID, spawn: spawn, output: spawn.Output, completion: spawn.Completion,
-		ctx: producerCtx, cancel: cancelProducer, running: true, state: delegation.StateRunning,
+		ctx: producerCtx, cancel: cancelProducer, running: true, state: task.StateRunning,
 		done: make(chan struct{}),
 	}
 	slot := newChildSlot(agent.ChildEndpointRef{}, run)
@@ -92,7 +92,7 @@ func TestInitialPromptAbortDrainsIngressBeforeJoiningClient(t *testing.T) {
 		t.Fatalf("subsequent cleanup retained a false connection join failure: %v", err)
 	}
 	frames, terminal := waitSpawnInputProjectionFrames(t, cleanupCtx, events, spawn.ActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome {
+	if terminal.Result == nil || terminal.Result.State != task.StateUnknownOutcome {
 		t.Fatalf("terminal = %#v, want unknown dispatch outcome", terminal)
 	}
 	var inputs []string

@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -18,7 +18,7 @@ func TestLoadedLongInputRetainsUTF8AtBothDisplayCuts(t *testing.T) {
 			head := userPromptOpen + strings.Repeat("h", (64<<10)-len(userPromptOpen)-1)
 			tail := strings.Repeat("t", (64<<10)-len(char)+1)
 			text := head + char + strings.Repeat("m", 200<<10) + char + tail
-			c := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{TaskID: "task", SessionID: "child-1"}, "helper")
+			c := newHistoryCollector(&Runner{clock: time.Now}, task.Anchor{TaskID: "task", SessionID: "child-1"}, "helper")
 			chunks := []string{text}
 			if fragmented {
 				chunks = []string{text[:len(head)+len(char)], text[len(head)+len(char):]}

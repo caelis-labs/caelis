@@ -25,11 +25,12 @@ import (
 // A durable edit must remain the active context after the first model step,
 // including when a real tool causes a second model step in the same Run.
 func TestHooksContextEditSurvivesToolRound(t *testing.T) {
+	t.Parallel()
 	for _, feedback := range []bool{false, true} {
 		for _, mode := range []string{"append", "replace", "empty-replacement"} {
 			t.Run(fmt.Sprintf("%s/feedback=%v", mode, feedback), func(t *testing.T) {
 				root := t.TempDir()
-				store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "review", UserID: "context"})
 				if err != nil {
 					t.Fatal(err)
@@ -112,7 +113,7 @@ func TestHooksContextEditSurvivesToolRound(t *testing.T) {
 				if mode != "append" && strings.Contains(all, "ORIGINAL-INPUT") {
 					t.Error("replaced original input resurrected in second request")
 				}
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if err != nil {
 					t.Fatal(err)
@@ -144,6 +145,7 @@ func TestHooksContextEditSurvivesToolRound(t *testing.T) {
 }
 
 func TestHooksSyntheticResponseStreamTransform(t *testing.T) {
+	t.Parallel()
 	for _, branch := range []string{"cache", "input-early", "turn-early"} {
 		t.Run(branch, func(t *testing.T) {
 			store, active := newTestSessionService(t, "review-redaction")
@@ -206,10 +208,11 @@ func TestHooksSyntheticResponseStreamTransform(t *testing.T) {
 // Around postprocessing has the same safe-failure obligation as ToolResult.
 // Run both routes through actual Runtime, and use Goja/FileStore for children.
 func TestHooksInvokePostFailureDoesNotPersistRaw(t *testing.T) {
+	t.Parallel()
 	for _, nested := range []bool{false, true} {
 		t.Run(fmt.Sprintf("nested=%v", nested), func(t *testing.T) {
 			root := t.TempDir()
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "review", UserID: "postfail"})
 			if err != nil {
 				t.Fatal(err)
@@ -259,7 +262,7 @@ func TestHooksInvokePostFailureDoesNotPersistRaw(t *testing.T) {
 			if effects.Load() != 1 {
 				t.Fatalf("effects=%d", effects.Load())
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -288,6 +291,7 @@ func TestHooksInvokePostFailureDoesNotPersistRaw(t *testing.T) {
 }
 
 func TestHooksTypedSchemaCloneCannotDefeatBindingCheck(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "schema-alias")
 	var providers atomic.Int64
 	probe := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"real": map[string]any{"type": "string"}}, "required": []string{"real"}}}}
@@ -328,6 +332,7 @@ func (c *hookBudgetCompactor) CompactOnOverflow(_ context.Context, r compact.Req
 	return compact.Result{Compacted: true, CompactEvent: e, PromptEvents: compact.PromptEventsFromLatestCompact([]*session.Event{e})}, nil
 }
 func TestHooksCompletionBudgetSurvivesRuntimeRebuild(t *testing.T) {
+	t.Parallel()
 	for _, overflows := range []int{1, 2} {
 		t.Run(fmt.Sprint(overflows), func(t *testing.T) {
 			store, active := newTestSessionService(t, "completion-rebuild")
@@ -396,8 +401,9 @@ func (s *hookResultAckStore) AppendEvent(ctx context.Context, r session.AppendEv
 	return s.Store.AppendEvent(ctx, r)
 }
 func TestHooksConcurrentNextAndResultReadback(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := &hookResultAckStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root})}
+	store := &hookResultAckStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root})}
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "review", UserID: "next"})
 	if err != nil {
 		t.Fatal(err)
@@ -452,7 +458,7 @@ func TestHooksConcurrentNextAndResultReadback(t *testing.T) {
 	if _, err = retained(t.Context()); err == nil {
 		t.Fatal("retained next remained usable")
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -468,10 +474,11 @@ func TestHooksConcurrentNextAndResultReadback(t *testing.T) {
 }
 
 func TestHooksContextEditRecoveryUsesCurrentProjection(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"append", "replace", "empty"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "recovery"})
 			if err != nil {
 				t.Fatal(err)
@@ -494,7 +501,7 @@ func TestHooksContextEditRecoveryUsesCurrentProjection(t *testing.T) {
 				return p, nil
 			}}}}
 			driver := &hookStreamModel{observe: func(req *model.Request) {
-				loaded, e := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+				loaded, e := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if e != nil {
 					t.Fatal(e)
 				}

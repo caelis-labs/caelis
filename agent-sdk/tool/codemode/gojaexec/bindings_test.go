@@ -9,6 +9,7 @@ import (
 )
 
 func TestContinuousEnvironmentRedeclaresEveryBindingKind(t *testing.T) {
+	t.Parallel()
 	run := newBindingFixture(t)
 	for _, first := range []string{"let", "const", "var"} {
 		for _, next := range []string{"let", "const", "var"} {
@@ -26,6 +27,7 @@ func TestContinuousEnvironmentRedeclaresEveryBindingKind(t *testing.T) {
 }
 
 func TestContinuousEnvironmentPublishesOnlyInitializedBindings(t *testing.T) {
+	t.Parallel()
 	run := newBindingFixture(t)
 	run(`const x=1;let y=2;var z=3;return [x,y,z];`, "[1,2,3]", "")
 	run(`const {value:x}=await Promise.resolve({value:4});return x;`, "4", "")
@@ -49,6 +51,7 @@ func TestContinuousEnvironmentPublishesOnlyInitializedBindings(t *testing.T) {
 }
 
 func TestContinuousEnvironmentBindingScopeAndReservedNames(t *testing.T) {
+	t.Parallel()
 	run := newBindingFixture(t)
 	run(`const count=1;const getCount=()=>count;let v=1;const getV=()=>v;return count;`, "1", "")
 	run(`count+=2;v=4;return [count,getCount(),v,getV()];`, "[3,1,4,4]", "")

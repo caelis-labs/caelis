@@ -5,7 +5,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 // A resumed producer can have exact current output without having the Task's
@@ -15,11 +14,11 @@ func TestSubagentMissingOriginReportsGapInsteadOfFinalOnlyFallback(t *testing.T)
 	entry.State, entry.Running = task.StateRunning, true
 	store, spool := newTaskStreamTestStore(entry), newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "task-1", ActivityID: "resumed", Kind: output.TaskKindSubagent,
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{
+		SessionID: "session-1", TaskID: "task-1", ActivityID: "resumed", Kind: task.KindSubagent,
 		StartsAtTaskOrigin: false,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Running: true,
+	if err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Running: true,
 		Event: &session.Event{Type: session.EventTypeAssistant, Text: "already streaming"},
 	}); err != nil {
 		t.Fatal(err)

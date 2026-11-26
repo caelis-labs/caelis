@@ -4,17 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
-	"sync"
-	"testing"
-	"time"
-
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"strings"
+	"sync"
+	"testing"
+	"time"
 )
 
 type failFromPutTaskStore struct {
@@ -769,6 +767,7 @@ func TestStartCommandCleansUpLiveSessionReturnedWithError(t *testing.T) {
 }
 
 func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"start", "persistence"} {
 		t.Run(failure, func(t *testing.T) {
 			_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -805,7 +804,7 @@ func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
 			if err != nil || again.Ref.TaskID != got.Ref.TaskID || backend.startCalls() != 1 || handle.terminateCalls() != 1 {
 				t.Fatalf("retry = %+v, %v, starts=%d, terminates=%d", again, err, backend.startCalls(), handle.terminateCalls())
 			}
-			ref := terminal.Ref{SessionID: active.SessionID, TaskID: got.Ref.TaskID, TerminalID: got.Ref.TerminalID}
+			ref := taskapi.TerminalRef{SessionID: active.SessionID, TaskID: got.Ref.TaskID, TerminalID: got.Ref.TerminalID}
 			if err := runtime.Terminals().Release(t.Context(), ref); err != nil || handle.terminateCalls() != 2 {
 				t.Fatalf("Terminal.Release() = %v, original handle Terminate calls = %d; want 2", err, handle.terminateCalls())
 			}
@@ -860,6 +859,7 @@ func (s *commandStartupCleanupProbe) WriteInput(context.Context, []byte) error {
 }
 
 func TestStartCommandCleanupUsesSettledStatusAfterCleanupError(t *testing.T) {
+	t.Parallel()
 	cleanupErr := errors.New("sandbox cleanup reply failed")
 	for _, tc := range []struct {
 		name         string
@@ -1873,4 +1873,100 @@ func TestCommandStartRequiresCASStoreBeforeExternalEffect(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "CASStore") || backend.startCalls() != 0 {
 		t.Fatalf("StartCommand() error/start calls = %v/%d, want fail closed before Start", err, backend.startCalls())
 	}
+}
+
+func TestNormalizeTaskControlRequestPreservesAppendNewline(t *testing.T) {
+	t.Parallel()
+	exact := false
+	normalized := normalizeTaskControlRequest(taskapi.ControlRequest{AppendNewline: &exact})
+	if normalized.AppendNewline == nil || *normalized.AppendNewline {
+		t.Fatalf("AppendNewline = %#v, want false", normalized.AppendNewline)
+	}
+	exact = true
+	if *normalized.AppendNewline {
+		t.Fatal("AppendNewline aliases caller pointer, want isolated clone")
+	}
+}
+
+func TestNormalizeTaskWriteInputUsesTerminalLineEndingAndExactMode(t *testing.T) {
+	t.Parallel()
+	exact := false
+	appendLine := true
+	for _, test := range []struct {
+		name          string
+		input         string
+		appendNewline *bool
+		backend       sandbox.Backend
+		want          string
+	}{
+		{name: "unix default line", input: "demo", backend: sandbox.BackendSeatbelt, want: "demo\n"},
+		{name: "unix explicit line", input: "demo", appendNewline: &appendLine, backend: sandbox.BackendBwrap, want: "demo\n"},
+		{name: "windows default line", input: "demo", backend: sandbox.BackendWindows, want: "demo\r"},
+		{name: "windows replaces line feed", input: "demo\n", backend: sandbox.BackendWindows, want: "demo\r"},
+		{name: "windows collapses crlf", input: "demo\r\n", backend: sandbox.BackendWindows, want: "demo\r"},
+		{name: "already terminated", input: "demo\r", backend: sandbox.BackendWindows, want: "demo\r"},
+		{name: "exact escape", input: "\x1b[A", appendNewline: &exact, backend: sandbox.BackendWindows, want: "\x1b[A"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := normalizeTaskWriteInput(test.input, test.appendNewline, test.backend); got != test.want {
+				t.Fatalf("normalizeTaskWriteInput() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCommandTaskSuccessfulDiagnosticTextIsOnlyOutput(t *testing.T) {
+	t.Parallel()
+	const text = "DecodePermissionRequest\nexample: GOCACHE: read-only file system\n"
+	_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
+	running := false
+	handle := &yieldProbeSandboxSession{
+		statusRunning: &running,
+		stdout:        text,
+		result: sandbox.CommandResult{
+			Stdout: text, ExitCode: 0, Route: sandbox.RouteSandbox, Backend: sandbox.BackendSeatbelt,
+		},
+	}
+	backend := newCommandStartProbe(handle, nil)
+	snapshot, err := runtime.tasks.StartCommand(t.Context(), active, active.SessionRef, backend, taskapi.CommandStartRequest{
+		Command: "cat diagnostics.txt", Workdir: active.CWD, ParentCall: "quoted-diagnostics",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State != taskapi.StateCompleted {
+		t.Fatalf("state = %s, want completed", snapshot.State)
+	}
+	for _, key := range []string{"error", "error_code", "system_hint"} {
+		if value, exists := snapshot.Result[key]; exists {
+			t.Fatalf("quoted diagnostics produced %s = %#v", key, value)
+		}
+	}
+	if got, _ := snapshot.Result["result"].(string); !strings.Contains(got, text) {
+		t.Fatalf("output lost quoted diagnostics: %q", got)
+	}
+}
+
+func TestCommandHandleLookupDuringApprovalRefresh(t *testing.T) {
+	t.Parallel()
+	ref := session.SessionRef{SessionID: "identity-session"}
+	command := &commandTask{sessionRef: ref, handle: "command", state: taskapi.StateWaitingApproval, running: true}
+	tasks := &taskRuntime{tasks: map[string]*commandTask{"command-id": command}}
+	entry := &taskapi.Entry{TaskID: "command-id", Session: ref, Handle: "command", State: taskapi.StateWaitingApproval, Running: true}
+	var group sync.WaitGroup
+	group.Go(func() {
+		for range 2000 {
+			applyCommandEntry(command, entry)
+		}
+	})
+	group.Go(func() {
+		for range 2000 {
+			identity, err := tasks.resolveTaskHandle(t.Context(), ref, "command")
+			if err != nil || identity.taskID != "command-id" {
+				t.Errorf("wrong original identity %+v %v", identity, err)
+				return
+			}
+		}
+	})
+	group.Wait()
 }

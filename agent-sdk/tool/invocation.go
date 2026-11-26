@@ -3,7 +3,7 @@ package tool
 import (
 	"context"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/invocationctx"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 )
 
 // InvocationContext identifies one tool invocation within a canonical Session/Turn.
@@ -33,13 +33,13 @@ type ParentCall struct {
 // occurrence. Standalone tools receive a zero identity. Identity conveys no
 // authorization and does not guarantee that the tool executed.
 func InvocationFromContext(ctx context.Context) InvocationContext {
-	return invocationctx.Read[InvocationContext](ctx, invocationctx.ExecutionKey{})
+	return sdkctx.ReadOccurrence[InvocationContext](ctx, sdkctx.ExecutionKey{})
 }
 
 // ParentFromContext returns a copy of the current occurrence's parent relation,
 // or nil for a root call. The relation does not convey execution authority.
 func ParentFromContext(ctx context.Context) *ParentCall {
-	parent := invocationctx.Read[*ParentCall](ctx, invocationctx.ParentKey{})
+	parent := sdkctx.ReadOccurrence[*ParentCall](ctx, sdkctx.ParentKey{})
 	if parent == nil {
 		return nil
 	}

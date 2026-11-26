@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -52,13 +51,13 @@ func (r *ContextRouter) ControllerContext(ctx context.Context, req controller.Co
 
 // ParticipantContext returns the public context offset that one participant
 // has not received.
-func (r *ContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (agent.ContextTransfer, error) {
+func (r *ContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (session.ContextTransfer, error) {
 	if r == nil || r.sessions == nil {
-		return agent.ContextTransfer{}, fmt.Errorf("controlplane: context router is unavailable")
+		return session.ContextTransfer{}, fmt.Errorf("controlplane: context router is unavailable")
 	}
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: session.NormalizeSessionRef(req.SessionRef)})
 	if err != nil {
-		return agent.ContextTransfer{}, err
+		return session.ContextTransfer{}, err
 	}
 	shared := sharedContextOffsetFromEvents(events, req.SinceSeq, "")
 	return shared.Transfer, nil
@@ -79,7 +78,7 @@ func (r *ContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, 
 
 type sharedContextOffset struct {
 	Checkpoint uint64
-	Transfer   agent.ContextTransfer
+	Transfer   session.ContextTransfer
 }
 
 type sharedTurnBuilder struct {
@@ -180,13 +179,13 @@ func sharedContextOffsetFromEvents(events []*session.Event, sinceSeq uint64, exc
 		if !session.ActorRefHasIdentity(executor) {
 			executor = session.ActorRef{Kind: session.ActorKindController, Name: "unknown"}
 		}
-		out.Transfer.Turns = append(out.Transfer.Turns, agent.ContextTurn{
+		out.Transfer.Turns = append(out.Transfer.Turns, session.ContextTurn{
 			Executor:         executor,
 			UserMessages:     append([]string(nil), builder.userMessages...),
 			AssistantSummary: builder.assistantSummary,
 		})
 	}
-	out.Transfer = agent.CloneContextTransfer(out.Transfer)
+	out.Transfer = session.CloneContextTransfer(out.Transfer)
 	return out
 }
 

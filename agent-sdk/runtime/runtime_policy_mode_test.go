@@ -29,6 +29,7 @@ func workspacePolicyRegistry(t *testing.T) policy.Registry {
 }
 
 func TestHostOwnsToolPolicy(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                          string
 		registry                      policy.Registry
@@ -76,6 +77,7 @@ func TestHostOwnsToolPolicy(t *testing.T) {
 }
 
 func TestDefaultPolicyModeRequiresRegistry(t *testing.T) {
+	t.Parallel()
 	store, _ := newTestSessionService(t, "missing-registry")
 	if _, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, DefaultPolicyMode: policy.ProfileWorkspaceWrite}); err == nil {
 		t.Fatal("accepted a default policy mode without a registry")
@@ -83,6 +85,7 @@ func TestDefaultPolicyModeRequiresRegistry(t *testing.T) {
 }
 
 func TestCommandRiskApprovalPreservesCallAndRoute(t *testing.T) {
+	t.Parallel()
 	const installURL = "https://caelis.dev/install.sh"
 	for _, tc := range []struct {
 		name    string

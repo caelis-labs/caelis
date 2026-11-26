@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -220,7 +219,7 @@ func normalizeTaskControlRequest(req taskapi.ControlRequest) taskapi.ControlRequ
 		AppendNewline: cloneBoolPointer(req.AppendNewline),
 		Principal:     req.Principal,
 		Source:        strings.TrimSpace(req.Source),
-		Context:       agent.CloneContextTransfer(req.Context),
+		Context:       session.CloneContextTransfer(req.Context),
 	}
 }
 

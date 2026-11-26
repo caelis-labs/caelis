@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
@@ -30,7 +29,7 @@ type codeModeTask struct {
 	persistErr error
 	// modelOutputCursor records the selected result observed by the model.
 	modelOutputCursor int64
-	observer          output.Observer
+	observer          taskapi.OutputObserver
 }
 
 func (t runtimeCodeModeTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
@@ -85,14 +84,14 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	// outlive the foreground observation, not the original Run's authority.
 	workCtx, _ := toolbinding.Observe(ctx)
 	workCtx, cancel := context.WithCancel(workCtx)
-	task := &codeModeTask{entry: entry, sessionRef: owner.ref, handle: handle, done: make(chan struct{}), cancel: cancel, observer: output.Nop()}
+	task := &codeModeTask{entry: entry, sessionRef: owner.ref, handle: handle, done: make(chan struct{}), cancel: cancel, observer: taskapi.NopOutputObserver()}
 	if err = tm.persistTaskEntry(ctx, entry); err != nil {
 		release()
 		cancel()
 		return tool.Result{}, err
 	}
 	if tm.runtime.taskOutput != nil {
-		task.observer = tm.runtime.taskOutput.BindTaskOutput(workCtx, output.Binding{SessionID: owner.ref.SessionID, TaskID: taskID, Kind: output.TaskKindCodeMode, StartsAtTaskOrigin: true})
+		task.observer = tm.runtime.taskOutput.BindTaskOutput(workCtx, taskapi.OutputBinding{SessionID: owner.ref.SessionID, TaskID: taskID, Kind: taskapi.KindCodeMode, StartsAtTaskOrigin: true})
 	}
 	tm.mu.Lock()
 	if tm.codeTasks == nil {
@@ -205,7 +204,7 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 	if release != nil {
 		release()
 	}
-	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true, ScriptCompletion: o.ScriptCompletion})
+	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), taskapi.OutputEvent{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true, ScriptCompletion: o.ScriptCompletion})
 	task.cancel()
 	execution.release()
 	close(task.done)
@@ -294,7 +293,7 @@ func (tm *taskRuntime) codeModeTarget(ctx context.Context, ref session.SessionRe
 	}
 	done := make(chan struct{})
 	close(done)
-	task = &codeModeTask{entry: entry, sessionRef: ref, handle: entry.Handle, done: done, cancel: func() {}, observer: output.Nop()}
+	task = &codeModeTask{entry: entry, sessionRef: ref, handle: entry.Handle, done: done, cancel: func() {}, observer: taskapi.NopOutputObserver()}
 	task.modelOutputCursor, _ = taskInt64Value(entry.Metadata["model_output_cursor"])
 	tm.mu.Lock()
 	if tm.codeTasks == nil {

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 )
 
 const testHostUserSID = "S-1-5-21-111-222-333-1001"
@@ -36,12 +34,12 @@ func TestBindWriteRootsPersistsStableRootSIDs(t *testing.T) {
 	if len(first.AllSIDs) != 4 {
 		t.Fatalf("AllSIDs = %#v, want one SID per canonical root", first.AllSIDs)
 	}
-	workspaceSID := first.WriteRootTo[pathutil.Normalize(workspace)]
+	workspaceSID := first.WriteRootTo[NormalizePath(workspace)]
 	if workspaceSID == "" {
 		t.Fatalf("WriteRootTo = %#v, want workspace SID", first.WriteRootTo)
 	}
 	for _, root := range []string{commandDir, envRoot, extra} {
-		if sid := first.WriteRootTo[pathutil.Normalize(root)]; sid == "" || sid == workspaceSID {
+		if sid := first.WriteRootTo[NormalizePath(root)]; sid == "" || sid == workspaceSID {
 			t.Fatalf("WriteRootTo[%s] = %q, want a path-bound identity distinct from workspace SID %q", root, sid, workspaceSID)
 		}
 	}
@@ -56,11 +54,11 @@ func TestBindWriteRootsPersistsStableRootSIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second BindWriteRoots() error = %v", err)
 	}
-	if first.WriteRootTo[pathutil.Normalize(workspace)] != second.WriteRootTo[pathutil.Normalize(workspace)] {
-		t.Fatalf("workspace SID changed: %q -> %q", first.WriteRootTo[pathutil.Normalize(workspace)], second.WriteRootTo[pathutil.Normalize(workspace)])
+	if first.WriteRootTo[NormalizePath(workspace)] != second.WriteRootTo[NormalizePath(workspace)] {
+		t.Fatalf("workspace SID changed: %q -> %q", first.WriteRootTo[NormalizePath(workspace)], second.WriteRootTo[NormalizePath(workspace)])
 	}
-	if first.WriteRootTo[pathutil.Normalize(extra)] != second.WriteRootTo[pathutil.Normalize(extra)] {
-		t.Fatalf("extra SID changed: %q -> %q", first.WriteRootTo[pathutil.Normalize(extra)], second.WriteRootTo[pathutil.Normalize(extra)])
+	if first.WriteRootTo[NormalizePath(extra)] != second.WriteRootTo[NormalizePath(extra)] {
+		t.Fatalf("extra SID changed: %q -> %q", first.WriteRootTo[NormalizePath(extra)], second.WriteRootTo[NormalizePath(extra)])
 	}
 	data, err := os.ReadFile(store)
 	if err != nil {
@@ -93,7 +91,7 @@ func TestBindWriteRootsUsesSameIdentityAcrossWorkspaceAndExternalRoles(t *testin
 	if err != nil {
 		t.Fatalf("BindWriteRoots(external role) error = %v", err)
 	}
-	key := pathutil.Normalize(sharedRoot)
+	key := NormalizePath(sharedRoot)
 	if workspaceBinding.WriteRootTo[key] == "" || workspaceBinding.WriteRootTo[key] != externalBinding.WriteRootTo[key] {
 		t.Fatalf("same physical root SIDs = %q/%q, want one Host/path identity", workspaceBinding.WriteRootTo[key], externalBinding.WriteRootTo[key])
 	}
@@ -139,7 +137,7 @@ func TestBindWriteRootsConcurrentPersistsValidStableStore(t *testing.T) {
 	want := results[0].WriteRootTo
 	for i, result := range results[1:] {
 		for _, root := range roots {
-			normalized := pathutil.Normalize(root)
+			normalized := NormalizePath(root)
 			if got := result.WriteRootTo[normalized]; got == "" || got != want[normalized] {
 				t.Fatalf("result[%d][%s] = %q, want stable %q", i+1, normalized, got, want[normalized])
 			}
@@ -215,7 +213,7 @@ func TestBindWriteRootsConcurrentProcessesPersistsValidStableStore(t *testing.T)
 		t.Fatalf("LookupWriteRoots() error = %v", err)
 	}
 	for _, root := range roots {
-		normalized := pathutil.Normalize(root)
+		normalized := NormalizePath(root)
 		if got := binding.WriteRootTo[normalized]; got == "" {
 			t.Fatalf("binding[%s] empty after concurrent helper processes: %#v", normalized, binding)
 		}
@@ -283,7 +281,7 @@ func TestBindWriteRootsExcludesStateDirFromStableIdentity(t *testing.T) {
 	}
 
 	for _, root := range []string{workspace, extra} {
-		normalized := pathutil.Normalize(root)
+		normalized := NormalizePath(root)
 		if first.WriteRootTo[normalized] != second.WriteRootTo[normalized] {
 			t.Fatalf("SID for %s changed after rebuild: %q -> %q", normalized, first.WriteRootTo[normalized], second.WriteRootTo[normalized])
 		}
@@ -329,7 +327,7 @@ func TestBindWriteRootsSharesExternalRootIdentityAcrossWorkspaces(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BindWriteRoots(workspace B) error = %v", err)
 	}
-	externalKey := pathutil.Normalize(externalRoot)
+	externalKey := NormalizePath(externalRoot)
 	if first.WriteRootTo[externalKey] == "" || first.WriteRootTo[externalKey] != second.WriteRootTo[externalKey] {
 		t.Fatalf("external root SIDs = %q/%q, want one Host/path identity", first.WriteRootTo[externalKey], second.WriteRootTo[externalKey])
 	}
@@ -357,8 +355,8 @@ func TestBindWriteRootsMigratesV1StoreWithoutDroppingACLReceipts(t *testing.T) {
 	legacyWorkspaceSID := "S-1-5-21-1-2-3-4"
 	legacyExternalSID := "S-1-5-21-5-6-7-8"
 	v1 := Store{
-		WorkspaceByCWD:     map[string]string{pathutil.Key(workspace): legacyWorkspaceSID},
-		WritableRootByPath: map[string]string{pathutil.Key(extra): legacyExternalSID},
+		WorkspaceByCWD:     map[string]string{PathKey(workspace): legacyWorkspaceSID},
+		WritableRootByPath: map[string]string{PathKey(extra): legacyExternalSID},
 	}
 	data, err := json.Marshal(v1)
 	if err != nil {
@@ -387,10 +385,10 @@ func TestBindWriteRootsMigratesV1StoreWithoutDroppingACLReceipts(t *testing.T) {
 	if v2.Version != StoreVersion || v2.LegacyV1 == nil {
 		t.Fatalf("migrated store = %+v, want v%d plus legacy receipts", v2, StoreVersion)
 	}
-	if v2.LegacyV1.WorkspaceByCWD[pathutil.Key(workspace)] != legacyWorkspaceSID || v2.LegacyV1.WritableRootByPath[pathutil.Key(extra)] != legacyExternalSID {
+	if v2.LegacyV1.WorkspaceByCWD[PathKey(workspace)] != legacyWorkspaceSID || v2.LegacyV1.WritableRootByPath[PathKey(extra)] != legacyExternalSID {
 		t.Fatalf("legacy receipts = %+v, want original v1 mappings", v2.LegacyV1)
 	}
-	if binding.WorkspaceSID == legacyWorkspaceSID || binding.WriteRootTo[pathutil.Normalize(extra)] == legacyExternalSID {
+	if binding.WorkspaceSID == legacyWorkspaceSID || binding.WriteRootTo[NormalizePath(extra)] == legacyExternalSID {
 		t.Fatalf("v2 binding = %+v, want newly derived schema-v2 identities", binding)
 	}
 }

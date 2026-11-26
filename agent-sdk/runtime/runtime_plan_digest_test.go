@@ -21,7 +21,7 @@ func TestPlanCompoundDigestIncludesPersistedExplanation(t *testing.T) {
 			t.Parallel()
 			var service session.ManagedService
 			if storeKind == "file" {
-				service = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+				service = newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 			} else {
 				service = inmemory.NewStore(inmemory.Config{})
 			}

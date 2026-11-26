@@ -2,9 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"testing"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
@@ -13,11 +12,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"reflect"
+	"testing"
 )
 
 func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "controller")
 	requesterCalls := 0
 	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
@@ -55,6 +56,7 @@ func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t 
 }
 
 func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "participant")
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
@@ -92,6 +94,7 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 }
 
 func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
+	t.Parallel()
 	for _, cancelApproval := range []bool{false, true} {
 		t.Run(map[bool]string{false: "settle_after_parent_starts", true: "register_and_cancel_during_parent"}[cancelApproval], func(t *testing.T) {
 			store, active := newTestSessionService(t, "parent")
@@ -131,7 +134,7 @@ func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
 				startParent()
 				return approval.Response{Outcome: "selected", OptionID: "allow_once"}, nil
 			}), active, active.SessionRef)
-			resp, err := bridge.RequestSubagentApproval(previous, subagent.ApprovalRequest{TaskID: "child", ParentCallID: "spawn", ToolCall: subagent.ApprovalToolCall{ID: "req", Name: "lookup"}, Options: endpointApprovalTestOptions()})
+			resp, err := bridge.RequestSubagentApproval(previous, approval.SubagentRequest{TaskID: "child", ParentCallID: "spawn", ToolCall: session.ProtocolToolCall{ID: "req", Name: "lookup"}, Options: endpointApprovalTestOptions()})
 			want := session.ApprovalRecordResolved
 			if cancelApproval {
 				want = session.ApprovalRecordCancelled
@@ -150,6 +153,7 @@ func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
 }
 
 func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "subagent")
 	requesterCalls := 0
 	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
@@ -157,9 +161,9 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 		return approval.Response{}, nil
 	})
 	bridge := newSubagentApprovalRequester(runtime, policy.ProfileDangerFullAccess, requester, activeSession, activeSession.SessionRef)
-	response, err := bridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
+	response, err := bridge.RequestSubagentApproval(context.Background(), approval.SubagentRequest{
 		Mode: policy.ProfileDangerFullAccess,
-		ToolCall: subagent.ApprovalToolCall{
+		ToolCall: session.ProtocolToolCall{
 			ID:       "call-subagent",
 			Name:     "external.custom.tool",
 			Kind:     "execute",
@@ -179,6 +183,7 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 }
 
 func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "malformed-options")
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
@@ -224,6 +229,7 @@ func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T)
 }
 
 func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T) {
+	t.Parallel()
 	registry, err := presets.NewRegistry()
 	if err != nil {
 		t.Fatal(err)
@@ -272,9 +278,9 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 	if subagentBridge == nil {
 		t.Fatal("subagent approval requester = nil, want fail-closed policy bridge")
 	}
-	_, err = subagentBridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
+	_, err = subagentBridge.RequestSubagentApproval(context.Background(), approval.SubagentRequest{
 		Mode: mode,
-		ToolCall: subagent.ApprovalToolCall{
+		ToolCall: session.ProtocolToolCall{
 			ID:   "call-subagent-unregistered",
 			Name: "external.custom.tool",
 		},
@@ -287,6 +293,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 }
 
 func TestDangerFullAccessEndpointPolicyRegistryFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	wantErr := errors.New("registry unavailable")
 	runtime := &Runtime{hooks: hook.Set{ToolPolicy: errorPolicyRegistry{err: wantErr}}}
 	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), policy.ProfileDangerFullAccess, approval.Request{
@@ -341,5 +348,70 @@ func endpointApprovalTestOptions() []approval.Option {
 	return []approval.Option{
 		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+	}
+}
+
+func TestEndpointApprovalRequestersPreserveNamePresence(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{"controller", "subagent"} {
+		for _, tc := range []struct {
+			label, name string
+			present     *bool
+		}{
+			{"native", "Read", nil},
+			{"standard", " read_file ", new(true)},
+			{"empty", "", new(true)},
+			{"fallback", "Read file", new(false)},
+		} {
+			t.Run(source+"/"+tc.label, func(t *testing.T) {
+				var captured approval.Request
+				requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+					captured = req
+					return approval.Response{}, nil
+				})
+				call := session.ProtocolToolCall{ID: "call-1", Name: tc.name, NamePresent: tc.present, Title: "Read file", Kind: "read"}
+				var err error
+				if source == "controller" {
+					_, err = (controllerApprovalRequester{requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{ToolCall: call})
+				} else {
+					_, err = (subagentApprovalRequester{requester: requester}).RequestSubagentApproval(t.Context(), approval.SubagentRequest{ToolCall: call})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if captured.Approval == nil {
+					t.Fatal("approval was not forwarded")
+				}
+				approval := session.CloneProtocolApproval(*captured.Approval)
+				if approval.ToolCall.Name != tc.name || !reflect.DeepEqual(approval.ToolCall.NamePresent, tc.present) {
+					t.Fatalf("approval name = %q, presence = %v; want %q, %v", approval.ToolCall.Name, approval.ToolCall.NamePresent, tc.name, tc.present)
+				}
+			})
+		}
+	}
+}
+
+func TestEndpointIndependentPermissionPreservesMachineContextWithoutFakeTool(t *testing.T) {
+	t.Parallel()
+	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original title", Description: new("Original description"), RawSubject: json.RawMessage(`{"type":"command","command":"exact command","cwd":"/workspace"}`), NativeRequestID: json.RawMessage(`"original-jsonrpc-id"`)}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: " Allow original ", Kind: "allow_once"}}}
+	for _, child := range []bool{false, true} {
+		var observed approval.Request
+		requester := approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
+			observed = req
+			return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
+		})
+		var err error
+		if child {
+			_, err = (subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: requester}).RequestSubagentApproval(t.Context(), approval.SubagentRequest{Origin: approval.Origin{SessionID: "child", Endpoint: approval.EndpointExternalACP}, TaskID: "task", ParentCallID: "spawn", Approval: original})
+		} else {
+			_, err = (controllerApprovalRequester{sessionRef: session.SessionRef{SessionID: "owner"}, requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{EndpointSessionID: "remote", Approval: original})
+		}
+		if err != nil || !reflect.DeepEqual(observed.Approval, original) || observed.Call.ID != "" || observed.Call.Name != "" || len(observed.Call.Input) != 0 || observed.Tool.Name != "" || observed.Origin.ToolCallID != "" {
+			t.Fatalf("independent request became synthetic tool or lost private evidence: %+v %v", observed, err)
+		}
+		observed.Approval.Context.RawSubject[0] = 'x'
+		if original.Context.RawSubject[0] != '{' {
+			t.Fatal("endpoint evidence not isolated from requester")
+		}
 	}
 }

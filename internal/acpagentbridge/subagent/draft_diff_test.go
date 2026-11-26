@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
@@ -57,7 +57,7 @@ func TestDraftChildStructuredFileDiffSurvivesStoreAndReplay(t *testing.T) {
 	runner := replacementDraftRunner(t, peer)
 	events := make(chan childInputTestEvent, 64)
 	spawn := childInputSpawnContext(t, "diff-task", events)
-	if _, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "input"}); err != nil {
+	if _, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "input"}); err != nil {
 		t.Fatal(err)
 	}
 	var observed *session.Event

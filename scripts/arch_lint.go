@@ -144,7 +144,50 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 	if rule, subject, line := topLevelTerminalMetaRule(rel, file, fset); rule != "" {
 		return rule, subject, line
 	}
+	if rule, subject, line := logicalStoreTestHelperRule(rel, file, fset); rule != "" {
+		return rule, subject, line
+	}
 	return "", "", 0
+}
+
+func logicalStoreTestHelperRule(rel string, file *ast.File, fset *token.FileSet) (string, string, int) {
+	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "agent-sdk/internal/sdkctx/logical_store.go" {
+		return "", "", 0
+	}
+	var subject string
+	var rule string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		var name string
+		var pos token.Pos
+		switch n := node.(type) {
+		case *ast.SelectorExpr:
+			name = n.Sel.Name
+			pos = n.Sel.Pos()
+		case *ast.Ident:
+			name = n.Name
+			pos = n.Pos()
+		}
+		switch name {
+		case "UseLogicalFileStore":
+			subject = name
+			rule = "UseLogicalFileStore is for *_test.go files only and must never be referenced from production code"
+			line = fset.Position(pos).Line
+			return false
+		case "RegisterLogicalFileStore":
+			if rel != "agent-sdk/session/file/durability.go" {
+				subject = name
+				rule = "RegisterLogicalFileStore may only be called by agent-sdk/session/file/durability.go"
+				line = fset.Position(pos).Line
+				return false
+			}
+		}
+		return true
+	})
+	return rule, subject, line
 }
 
 func localAdapterConcreteHostRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
@@ -553,7 +596,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	if !strings.HasSuffix(rel, "_test.go") &&
 		startsWithAny(rel,
 			"control/appserver/projection/", "control/appserver/taskstream/", "control/taskstream/",
-			"surfaces/internal/transcript/", "surfaces/tui/app/") &&
+			"internal/acpagentbridge/", "surfaces/internal/transcript/", "surfaces/tui/app/") &&
 		(target == "agent-sdk/tool/builtin" || strings.HasPrefix(target, "agent-sdk/tool/builtin/")) &&
 		target != "agent-sdk/tool/builtin/names" {
 		return "tool presentation uses agent-sdk/tool/builtin/names for built-in tool names"
@@ -774,8 +817,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 }
 
 func isProductionTestSupportPackage(rel string) bool {
-	return strings.HasPrefix(rel, "agent-sdk/session/sessiontest/") ||
-		strings.HasPrefix(rel, "internal/evalharness/") ||
+	return strings.HasPrefix(rel, "internal/evalharness/") ||
 		strings.HasPrefix(rel, "internal/testenv/")
 }
 
@@ -811,9 +853,13 @@ func deletedSDKImplPaths() []deletedSDKImplPath {
 		})
 	}
 	paths = append(paths,
-		deletedSDKImplPath{prefix: "impl/sandbox/internal/consoleoutput", sdk: "agent-sdk/sandbox/consoleoutput"},
-		deletedSDKImplPath{prefix: "impl/sandbox/internal/textstream", sdk: "agent-sdk/sandbox/textstream"},
-		deletedSDKImplPath{prefix: "impl/sandbox/internal/winps", sdk: "agent-sdk/sandbox/windows/winps"},
+		deletedSDKImplPath{prefix: "impl/sandbox/windows/internal/job", sdk: "agent-sdk/sandbox/internal/winproc"},
+		deletedSDKImplPath{prefix: "impl/sandbox/windows/internal/pathutil", sdk: "agent-sdk/sandbox/windows/internal/capability"},
+		deletedSDKImplPath{prefix: "impl/sandbox/internal/procutil", sdk: "agent-sdk/sandbox/internal/executil"},
+		deletedSDKImplPath{prefix: "impl/sandbox/internal/runnerruntime", sdk: "agent-sdk/sandbox/backend/cmdsession"},
+		deletedSDKImplPath{prefix: "impl/sandbox/internal/consoleoutput", sdk: "agent-sdk/sandbox/internal/consoleoutput"},
+		deletedSDKImplPath{prefix: "impl/sandbox/internal/textstream", sdk: "agent-sdk/internal/textstream"},
+		deletedSDKImplPath{prefix: "impl/sandbox/internal/winps", sdk: "agent-sdk/sandbox/internal/winps"},
 	)
 	paths = append(paths,
 		deletedSDKImplPath{prefix: "impl/agent/local", sdk: "agent-sdk/runtime"},
@@ -835,7 +881,7 @@ func deletedSDKImplPaths() []deletedSDKImplPath {
 	paths = append(paths,
 		deletedSDKImplPath{prefix: "impl/policy", sdk: "agent-sdk/policy"},
 		deletedSDKImplPath{prefix: "impl/session", sdk: "agent-sdk/session"},
-		deletedSDKImplPath{prefix: "impl/stream", sdk: "agent-sdk/task/output"},
+		deletedSDKImplPath{prefix: "impl/stream", sdk: "agent-sdk/task"},
 		deletedSDKImplPath{prefix: "impl/sandbox", sdk: "agent-sdk/sandbox"},
 		deletedSDKImplPath{prefix: "impl/tool", sdk: "agent-sdk/tool"},
 	)
@@ -1006,27 +1052,28 @@ func builtinStatelessLeafPackages() []string {
 }
 
 func sandboxMovedBackendHelperNames() []string {
-	return []string{"cmdsession", "fsboundary", "policy", "policyfs", "procutil", "runnerruntime"}
+	return []string{"cmdsession", "fsboundary", "policy", "policyfs"}
 }
 
 func sandboxMovedWindowsHelperNames() []string {
-	return []string{"acl", "capability", "job", "pathutil", "policy", "win32"}
+	return []string{"acl", "capability", "policy", "win32"}
 }
 
 func agentSDKSandboxMovedLeaf(rel string) string {
 	switch {
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/host/"):
 		return "host"
-	case strings.HasPrefix(rel, "agent-sdk/sandbox/consoleoutput/"):
-		return "consoleoutput"
-	case strings.HasPrefix(rel, "agent-sdk/sandbox/textstream/"):
-		return "textstream"
+	case strings.HasPrefix(rel, "agent-sdk/sandbox/internal/"):
+		rest := strings.TrimPrefix(rel, "agent-sdk/sandbox/internal/")
+		parts := strings.SplitN(rest, "/", 2)
+		if parts[0] == "" {
+			return ""
+		}
+		return "internal/" + parts[0]
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/bwrap/"):
 		return "bwrap"
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/seatbelt/"):
 		return "seatbelt"
-	case strings.HasPrefix(rel, "agent-sdk/sandbox/windows/winps/"):
-		return "windows/winps"
 	case strings.HasPrefix(rel, "agent-sdk/sandbox/windows/internal/"):
 		rest := strings.TrimPrefix(rel, "agent-sdk/sandbox/windows/internal/")
 		parts := strings.SplitN(rest, "/", 2)
@@ -1090,12 +1137,12 @@ func isAllowedAgentSDKSandboxMovedLeafTarget(leaf, target string) bool {
 	case leaf == "host":
 		allowed = append(allowed,
 			"agent-sdk/sandbox",
-			"agent-sdk/sandbox/consoleoutput",
-			"agent-sdk/sandbox/textstream",
+			"agent-sdk/sandbox/internal/",
+			"agent-sdk/internal/textstream",
 		)
 	case leaf == "bwrap", leaf == "seatbelt", leaf == "windows":
 		allowed = append(allowed, allowedAgentSDKSandboxBackendDependencyPrefixes()...)
-	case strings.HasPrefix(leaf, "backend/"):
+	case strings.HasPrefix(leaf, "backend/"), strings.HasPrefix(leaf, "internal/"):
 		allowed = append(allowed, allowedAgentSDKSandboxBackendDependencyPrefixes()...)
 	case strings.HasPrefix(leaf, "windows/internal/"):
 		allowed = append(allowed, allowedAgentSDKSandboxWindowsDependencyPrefixes()...)
@@ -1112,12 +1159,11 @@ func allowedAgentSDKSandboxBackendDependencyPrefixes() []string {
 	prefixes := []string{
 		"agent-sdk/sandbox",
 		"agent-sdk/sandbox/host",
-		"agent-sdk/sandbox/consoleoutput",
-		"agent-sdk/sandbox/textstream",
+		"agent-sdk/sandbox/internal/",
+		"agent-sdk/internal/textstream",
 		"agent-sdk/sandbox/bwrap",
 		"agent-sdk/sandbox/seatbelt",
 		"agent-sdk/sandbox/windows",
-		"agent-sdk/sandbox/windows/winps",
 	}
 	for _, helper := range sandboxMovedBackendHelperNames() {
 		prefixes = append(prefixes, "agent-sdk/sandbox/backend/"+helper)
@@ -1176,19 +1222,19 @@ func sdkOwnedPortsImportMessage(target string) string {
 		sdk   string
 	}{
 		{"ports/tool/commanddiag", "agent-sdk/tool/commanddiag"},
-		{"ports/subagent/agenthandle", "agent-sdk/task/agenthandle"},
-		{"ports/displaypolicy", "agent-sdk/display"},
-		{"ports/userdisplay", "agent-sdk/session/userdisplay"},
+		{"ports/subagent/agenthandle", "agent-sdk/task"},
+		{"ports/displaypolicy", "control/display"},
+		{"ports/userdisplay", "agent-sdk/session"},
 		{"ports/assembly", "internal/controlassembly"},
 		{"ports/controller", "agent-sdk/runtime/controller"},
-		{"ports/delegation", "agent-sdk/task/delegation"},
-		{"ports/subagent", "agent-sdk/task/subagent"},
+		{"ports/delegation", "agent-sdk/task"},
+		{"ports/subagent", "agent-sdk/task"},
 		{"ports/compact", "agent-sdk/runtime/compact"},
 		{"ports/approval", "agent-sdk/approval"},
 		{"ports/sandbox", "agent-sdk/sandbox"},
 		{"ports/session", "agent-sdk/session"},
 		{"ports/policy", "agent-sdk/policy"},
-		{"ports/stream", "agent-sdk/task/output"},
+		{"ports/stream", "agent-sdk/task"},
 		{"ports/agent", "agent-sdk"},
 		{"ports/model", "agent-sdk/model"},
 		{"ports/tool", "agent-sdk/tool"},

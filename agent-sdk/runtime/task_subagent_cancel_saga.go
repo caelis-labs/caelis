@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
 // subagentCancelPhase records the one-way boundary around the remote Cancel
@@ -42,7 +41,7 @@ func (tm *taskRuntime) advanceSubagentCancel(
 	if task == nil || task.runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent cancellation cannot be reconciled without a runner")
 	}
-	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), yieldMS)
+	result, err := task.runner.Wait(ctx, taskapi.CloneAnchor(task.anchor), yieldMS)
 	if err != nil {
 		if phase == subagentCancelPhaseClaimed {
 			_, persistErr := tm.persistSubagentCancelPhase(context.WithoutCancel(ctx), task, cancelTurnSeq, subagentCancelPhaseUnknown,
@@ -51,7 +50,11 @@ func (tm *taskRuntime) advanceSubagentCancel(
 		}
 		return task.snapshot(), err
 	}
-	if subagentCancelResultPending(result) {
+	result = taskapi.CloneDelegationResult(result)
+	if err := validateSubagentResultState(result.State); err != nil {
+		return task.snapshot(), err
+	}
+	if subagentResultIsActive(result.State) {
 		next := phase
 		if phase == subagentCancelPhaseClaimed {
 			next = subagentCancelPhaseUnknown
@@ -61,9 +64,6 @@ func (tm *taskRuntime) advanceSubagentCancel(
 			return task.snapshot(), err
 		}
 		return task.snapshot(), nil
-	}
-	if !subagentCancelResultTerminal(result) {
-		return task.snapshot(), fmt.Errorf("subagent cancellation reconciliation returned invalid state %q", result.State)
 	}
 	persisted, err := tm.persistSubagentCancelPhase(ctx, task, cancelTurnSeq, subagentCancelPhaseCompleted, "", &result, true)
 	if err != nil {
@@ -83,30 +83,13 @@ func (tm *taskRuntime) advanceSubagentCancel(
 	return snapshot, nil
 }
 
-func subagentCancelResultPending(result delegation.Result) bool {
-	return result.Running || result.State == delegation.StateRunning || result.State == delegation.StateWaitingApproval
-}
-
-func subagentCancelResultTerminal(result delegation.Result) bool {
-	switch result.State {
-	case delegation.StateCompleted,
-		delegation.StateFailed,
-		delegation.StateCancelled,
-		delegation.StateInterrupted,
-		delegation.StateUnknownOutcome:
-		return true
-	default:
-		return false
-	}
-}
-
 func (tm *taskRuntime) persistSubagentCancelPhase(
 	ctx context.Context,
 	task *subagentTask,
 	cancelTurnSeq int64,
 	phase subagentCancelPhase,
 	reason string,
-	result *delegation.Result,
+	result *taskapi.DelegationResult,
 	terminal bool,
 ) (bool, error) {
 	if task == nil {
@@ -115,7 +98,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	if cancelTurnSeq <= 0 {
 		return false, fmt.Errorf("subagent cancellation target generation is required")
 	}
-	if terminal && (result == nil || !subagentCancelResultTerminal(*result) || result.Running) {
+	if terminal && (result == nil || !taskapi.IsTerminalState(result.State)) {
 		return false, fmt.Errorf("subagent cancellation terminal persistence requires an explicit terminal result")
 	}
 	task.activityApplyMu.Lock()

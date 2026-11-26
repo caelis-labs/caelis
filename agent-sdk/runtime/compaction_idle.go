@@ -12,7 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -118,7 +118,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	}
 	events := mainInvocationEvents(loaded.Events)
 	source := snapshot.dispatch.Source
-	messagesHash, err := requestsource.Fingerprint(snapshot.dispatch.Messages)
+	messagesHash, err := requestmeta.Fingerprint(snapshot.dispatch.Messages)
 	if err != nil || messagesHash != source.MessagesHash {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	for cut < len(events) && events[cut].Seq <= source.SourceThroughSeq {
 		cut++
 	}
-	hash, err := requestsource.Fingerprint(events[:cut])
+	hash, err := requestmeta.Fingerprint(events[:cut])
 	if err != nil {
 		return nil, err
 	}
@@ -185,11 +185,11 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 		return nil, err
 	}
 	frozen := model.CloneRequest(snapshot.request)
-	frozenHash, err := requestsource.Fingerprint(frozen)
+	frozenHash, err := requestmeta.Fingerprint(frozen)
 	if err != nil {
 		return nil, err
 	}
-	sourceHash, err := requestsource.Fingerprint(events)
+	sourceHash, err := requestmeta.Fingerprint(events)
 	if err != nil {
 		return nil, err
 	}

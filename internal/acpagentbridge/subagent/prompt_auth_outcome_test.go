@@ -14,8 +14,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
@@ -27,17 +26,17 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 		failure                string
 		prompts                int
 		authenticates          int
-		state                  delegation.State
+		state                  task.State
 		cancelBeforeSettlement bool
 	}{
-		{"removed method", "removed-login", "", 1, 0, delegation.StateFailed, false},
-		{"authenticate RPC failed", "agent-login", "authenticate", 1, 1, delegation.StateFailed, false},
-		{"authenticate connection lost", "agent-login", "authenticate-disconnect", 1, 1, delegation.StateFailed, false},
-		{"retry rejected", "agent-login", "retry-auth-required", 2, 1, delegation.StateFailed, false},
-		{"retry internal error", "agent-login", "retry", 2, 1, delegation.StateUnknownOutcome, false},
-		{"retry connection lost", "agent-login", "retry-disconnect", 2, 1, delegation.StateUnknownOutcome, false},
-		{"rejected authentication races cancellation", "removed-login", "", 1, 0, delegation.StateFailed, true},
-		{"internal retry error races cancellation", "agent-login", "retry", 2, 1, delegation.StateUnknownOutcome, true},
+		{"removed method", "removed-login", "", 1, 0, task.StateFailed, false},
+		{"authenticate RPC failed", "agent-login", "authenticate", 1, 1, task.StateFailed, false},
+		{"authenticate connection lost", "agent-login", "authenticate-disconnect", 1, 1, task.StateFailed, false},
+		{"retry rejected", "agent-login", "retry-auth-required", 2, 1, task.StateFailed, false},
+		{"retry internal error", "agent-login", "retry", 2, 1, task.StateUnknownOutcome, false},
+		{"retry connection lost", "agent-login", "retry-disconnect", 2, 1, task.StateUnknownOutcome, false},
+		{"rejected authentication races cancellation", "removed-login", "", 1, 0, task.StateFailed, true},
+		{"internal retry error races cancellation", "agent-login", "retry", 2, 1, task.StateUnknownOutcome, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -60,7 +59,7 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 				runner.diagnostics = slog.New(&promptResponseCancelHandler{Handler: slog.NewTextHandler(io.Discard, nil), cancel: func() {
 					// Authentication failure may already have closed the peer. Neither
 					// a successful nor failed cancel changes admission evidence.
-					_ = runner.Cancel(context.Background(), delegation.Anchor{TaskID: "task-auth"})
+					_ = runner.Cancel(context.Background(), task.Anchor{TaskID: "task-auth"})
 				}})
 			}
 			defer func() {
@@ -68,22 +67,22 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 					t.Error(err)
 				}
 			}()
-			completed := make(chan delegation.Result, 2)
-			sink := completionSinkFunc(func(result delegation.Result) { completed <- result })
-			wait := func() delegation.Result {
+			completed := make(chan task.DelegationResult, 2)
+			sink := completionSinkFunc(func(result task.DelegationResult) { completed <- result })
+			wait := func() task.DelegationResult {
 				select {
 				case result := <-completed:
 					return result
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
-					return delegation.Result{}
+					return task.DelegationResult{}
 				}
 			}
-			anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+			anchor, _, err := runner.Spawn(ctx, task.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-auth"},
 				ActivityID: "initial-auth", TaskID: "task-auth", CWD: t.TempDir(),
 				Output: &recordingStreams{}, Completion: sink,
-			}, delegation.Request{Agent: "helper", Prompt: "first"})
+			}, task.DelegationRequest{Agent: "helper", Prompt: "first"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,7 +116,7 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 				Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "after repair",
 				ActivityID: "after-repair", Output: &recordingStreams{}, Completion: sink,
 			})
-			if test.state == delegation.StateUnknownOutcome {
+			if test.state == task.StateUnknownOutcome {
 				if !errorcode.Is(err, errorcode.UnknownOutcome) {
 					t.Fatalf("indeterminate retry was not isolated: %v", err)
 				}
@@ -125,7 +124,7 @@ func TestPromptAuthenticationFailureKeepsAdmissionEvidence(t *testing.T) {
 				if err != nil {
 					t.Fatalf("repaired authentication cannot resume: %#v", diagnosticErrorChain(err))
 				}
-				if result := wait(); result.State != delegation.StateCompleted {
+				if result := wait(); result.State != task.StateCompleted {
 					t.Fatalf("after repair = %#v", result)
 				}
 			}

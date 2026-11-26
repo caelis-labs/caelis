@@ -53,7 +53,7 @@ func (r *Runtime) repairToolPairsAtCut(ctx context.Context, ref session.SessionR
 		event.Seq = 0
 		event.Time = r.now()
 		event.Type = session.EventTypeToolResult
-		payload := map[string]any{"code": "execution_interrupted", "message": "执行已中断，结果未确认；操作可能已发生；不要盲目重试"}
+		payload := map[string]any{"code": "execution_interrupted", "message": "Execution was interrupted and the outcome is unconfirmed; the operation may have already taken effect; do not retry blindly."}
 		result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: mustRepairJSON(payload)}}}
 		event.Tool.Result = &result
 		event.Tool.Outcome = "unknown_outcome"

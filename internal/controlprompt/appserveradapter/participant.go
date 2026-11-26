@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -139,7 +138,7 @@ func allocateParticipantLabel(participants []session.ParticipantBinding, handle 
 			used[label] = struct{}{}
 		}
 	}
-	return "@" + agenthandle.Allocate(used, handle)
+	return "@" + taskapi.AllocateHandle(used, handle)
 }
 
 func shiftControlAttachments(items []controlprompt.Attachment, offset int) []controlprompt.Attachment {

@@ -16,6 +16,7 @@ import (
 )
 
 func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing.T) {
+	t.Parallel()
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	store := newFileTaskStoreForTest(t)
 	runtime.tasks.store = store
@@ -105,6 +106,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 }
 
 func TestRuntimeTaskWriteAllowsWhitespaceOnlyExactInput(t *testing.T) {
+	t.Parallel()
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	_, err := (runtimeTaskTool{
 		base:       tasktool.New(),
@@ -123,6 +125,7 @@ func TestRuntimeTaskWriteAllowsWhitespaceOnlyExactInput(t *testing.T) {
 }
 
 func TestRuntimeCommandTTYTaskWritePreservesUTF8Input(t *testing.T) {
+	t.Parallel()
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	runtime.tasks.store = newFileTaskStoreForTest(t)
 	hostRuntime := hostRuntimeForTest(t, activeSession.CWD)

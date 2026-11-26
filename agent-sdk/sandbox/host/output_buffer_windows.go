@@ -2,7 +2,7 @@
 
 package host
 
-import "github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
+import "github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/consoleoutput"
 
 // hostOutputDecoder stores normalized console text on Windows because
 // PowerShell pipe output can contain CLIXML, UTF-16, and codepage-specific

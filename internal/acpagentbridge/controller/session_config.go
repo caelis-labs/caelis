@@ -8,8 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/sessionconfig"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
@@ -22,9 +21,9 @@ func (m *Manager) participantSessionConfig(ctx context.Context, parent session.S
 		}
 		// Revalidate the recorded placement on reattachment as well as first
 		// startup. A handle's current binding must not replace its durable model.
-		resolved, err := m.placementResolver(ctx, tasksubagent.SpawnContext{
+		resolved, err := m.placementResolver(ctx, task.SpawnContext{
 			SessionRef: parent.SessionRef, Session: parent, CWD: parent.CWD,
-		}, delegation.TargetRequest{Target: delegation.Target{Selector: cfg.Name, Placement: frozen}})
+		}, task.TargetRequest{Target: task.Target{Selector: cfg.Name, Placement: frozen}})
 		if err != nil {
 			return subagent.AgentConfig{}, err
 		}

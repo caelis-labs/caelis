@@ -15,14 +15,12 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
@@ -64,7 +62,7 @@ func mustParticipantPlacement(t *testing.T, agentName string) placement.Placemen
 }
 
 func testPlacementResolver(registry *subagent.Registry) subagent.PlacementResolver {
-	return func(_ context.Context, _ tasksubagent.SpawnContext, req delegation.TargetRequest) (subagent.AgentConfig, error) {
+	return func(_ context.Context, _ task.SpawnContext, req task.TargetRequest) (subagent.AgentConfig, error) {
 		return registry.Resolve(req.Target.Placement.Agent)
 	}
 }
@@ -163,7 +161,7 @@ func TestComposeACPContextPromptLeavesEmptyOffsetUnchanged(t *testing.T) {
 	t.Parallel()
 
 	prompt := buildPromptParts("hi", nil)
-	got := composeACPContextPrompt(prompt, agent.ContextTransfer{})
+	got := composeACPContextPrompt(prompt, session.ContextTransfer{})
 	if len(got) != 1 || string(got[0]) != string(prompt[0]) {
 		t.Fatalf("composeACPContextPrompt() = %s, want unchanged prompt %s", got, prompt)
 	}
@@ -176,7 +174,7 @@ func TestComposeACPContextPromptSeparatesBackgroundFromCurrentContentParts(t *te
 		{Type: model.ContentPartText, Text: "hi"},
 		{Type: model.ContentPartImage, MimeType: "image/png", Data: "iVBORw0KGgo="},
 	})
-	got := composeACPContextPrompt(prompt, agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	got := composeACPContextPrompt(prompt, session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor:     session.ActorRef{Kind: session.ActorKindParticipant, Name: "claude(aria)"},
 		UserMessages: []string{"earlier question"}, AssistantSummary: "earlier answer",
 	}}})
@@ -1655,8 +1653,8 @@ func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing
 	}
 	if _, err := manager.Activate(context.Background(), controller.HandoffRequest{
 		Session: parent, Agent: "helper",
-		Context:        agent.ContextTransfer{Summary: "DELTA-CONTEXT"},
-		FreshContext:   agent.ContextTransfer{Summary: "FULL-CONTEXT"},
+		Context:        session.ContextTransfer{Summary: "DELTA-CONTEXT"},
+		FreshContext:   session.ContextTransfer{Summary: "FULL-CONTEXT"},
 		ContextSyncSeq: 4,
 	}); err != nil {
 		t.Fatal(err)
@@ -1670,8 +1668,8 @@ func TestManagerRunTurnUsesFullContextWhenReconnectCreatesFreshRemote(t *testing
 		Session:        parent,
 		TurnID:         "turn-fresh-reconnect",
 		ContentParts:   []model.ContentPart{{Type: model.ContentPartText, Text: "continue"}},
-		Context:        agent.ContextTransfer{Summary: "DELTA-CONTEXT"},
-		FreshContext:   agent.ContextTransfer{Summary: "FULL-CONTEXT"},
+		Context:        session.ContextTransfer{Summary: "DELTA-CONTEXT"},
+		FreshContext:   session.ContextTransfer{Summary: "FULL-CONTEXT"},
 		ContextSyncSeq: 4,
 	})
 	if err != nil {
@@ -2252,8 +2250,8 @@ func TestManagerActivateResetsContextCheckpointForNewRemoteSession(t *testing.T)
 			},
 		},
 		Agent:          "helper",
-		Context:        agent.ContextTransfer{Summary: "incremental context for old remote"},
-		FreshContext:   agent.ContextTransfer{Summary: "complete context for fresh remote"},
+		Context:        session.ContextTransfer{Summary: "incremental context for old remote"},
+		FreshContext:   session.ContextTransfer{Summary: "complete context for fresh remote"},
 		ContextSyncSeq: 42,
 	})
 	if err != nil {
@@ -2280,14 +2278,14 @@ func TestManagerActivateResetsContextCheckpointForNewRemoteSession(t *testing.T)
 func TestSelectControllerTurnContextDoesNotDuplicateActivationOffset(t *testing.T) {
 	t.Parallel()
 
-	activation := agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	activation := session.ContextTransfer{Turns: []session.ContextTurn{{
 		UserMessages: []string{"first"}, AssistantSummary: "first answer",
 	}}}
-	turn := agent.ContextTransfer{Turns: []agent.ContextTurn{
+	turn := session.ContextTransfer{Turns: []session.ContextTurn{
 		{UserMessages: []string{"first"}, AssistantSummary: "first answer"},
 		{UserMessages: []string{"second"}, AssistantSummary: "second answer"},
 	}}
-	got, checkpoint, fresh := selectControllerTurnContext(activation, 2, false, turn, agent.ContextTransfer{}, 4)
+	got, checkpoint, fresh := selectControllerTurnContext(activation, 2, false, turn, session.ContextTransfer{}, 4)
 	if !reflect.DeepEqual(got, turn) || checkpoint != 4 || fresh {
 		t.Fatalf("selected context/checkpoint/provenance = %#v/%d/%v, want Turn route without duplicate/4/false", got, checkpoint, fresh)
 	}
@@ -2296,9 +2294,9 @@ func TestSelectControllerTurnContextDoesNotDuplicateActivationOffset(t *testing.
 func TestSelectControllerTurnContextPreservesFreshBootstrapAcrossFailedTurn(t *testing.T) {
 	t.Parallel()
 
-	activation := agent.ContextTransfer{Summary: "stale full bootstrap"}
-	incremental := agent.ContextTransfer{Summary: "delta from old durable checkpoint"}
-	currentFull := agent.ContextTransfer{Summary: "current full bootstrap"}
+	activation := session.ContextTransfer{Summary: "stale full bootstrap"}
+	incremental := session.ContextTransfer{Summary: "delta from old durable checkpoint"}
+	currentFull := session.ContextTransfer{Summary: "current full bootstrap"}
 	got, checkpoint, fresh := selectControllerTurnContext(activation, 4, true, incremental, currentFull, 6)
 	if !reflect.DeepEqual(got, currentFull) || checkpoint != 6 || !fresh {
 		t.Fatalf("selected context/checkpoint/provenance = %#v/%d/%v, want current full bootstrap/6/true", got, checkpoint, fresh)
@@ -2476,7 +2474,7 @@ func TestManagerActivateDoesNotCheckpointUnsentContext(t *testing.T) {
 			},
 		},
 		Agent:          "helper",
-		Context:        agent.ContextTransfer{Summary: "context that still needs delivery"},
+		Context:        session.ContextTransfer{Summary: "context that still needs delivery"},
 		ContextSyncSeq: 9,
 	}
 
@@ -2523,7 +2521,7 @@ func TestManagerActivateRejectsStalePlacementBeforeStartingClient(t *testing.T) 
 	placementChanged := errors.New("placement configuration changed")
 	manager, err := NewManager(Config{
 		Registry: registry,
-		PlacementResolver: func(context.Context, tasksubagent.SpawnContext, delegation.TargetRequest) (subagent.AgentConfig, error) {
+		PlacementResolver: func(context.Context, task.SpawnContext, task.TargetRequest) (subagent.AgentConfig, error) {
 			return subagent.AgentConfig{}, placementChanged
 		},
 	})

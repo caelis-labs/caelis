@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -64,20 +64,20 @@ func (r *Registry) Replace(configs []AgentConfig) error {
 	return nil
 }
 
-func (r *Registry) Get(_ context.Context, name string) (delegation.Agent, error) {
+func (r *Registry) Get(_ context.Context, name string) (task.DelegationAgent, error) {
 	cfg, err := r.lookup(name)
 	if err != nil {
-		return delegation.Agent{}, err
+		return task.DelegationAgent{}, err
 	}
-	return delegation.Agent{Name: cfg.Name, Description: cfg.Description}, nil
+	return task.DelegationAgent{Name: cfg.Name, Description: cfg.Description}, nil
 }
 
-func (r *Registry) List(context.Context) ([]delegation.Agent, error) {
+func (r *Registry) List(context.Context) ([]task.DelegationAgent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]delegation.Agent, 0, len(r.agents))
+	out := make([]task.DelegationAgent, 0, len(r.agents))
 	for _, one := range r.agents {
-		out = append(out, delegation.Agent{Name: one.Name, Description: one.Description})
+		out = append(out, task.DelegationAgent{Name: one.Name, Description: one.Description})
 	}
 	return out, nil
 }

@@ -11,8 +11,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
@@ -34,13 +33,13 @@ func TestSpawnProjectsInitialInputBeforeOutputAndDeduplicatesEcho(t *testing.T) 
 			runner := spawnInputProjectionTestRunner(t, test.mode, nil)
 			events := make(chan childInputTestEvent, 8)
 			spawn := childInputSpawnContext(t, "task-spawn-input-"+test.mode, events)
-			_, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial prompt"})
+			_, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial prompt"})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			frames, terminal := waitSpawnInputProjectionFrames(t, ctx, events, spawn.ActivityID)
-			if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+			if terminal.Result == nil || terminal.Result.State != task.StateCompleted {
 				t.Fatalf("terminal = %#v, want completed", terminal.Result)
 			}
 			if len(frames) != 2 || frames[0].Event == nil || frames[1].Event == nil {
@@ -84,13 +83,13 @@ func TestSpawnDoesNotProjectInitialInputWhenDispatchDoesNotStart(t *testing.T) {
 	})
 	events := make(chan childInputTestEvent, 4)
 	spawn := childInputSpawnContext(t, "task-spawn-input-dispatch-failure", events)
-	_, _, err := runner.Spawn(dispatchCtx, spawn, delegation.Request{Agent: "helper", Prompt: "must not appear"})
+	_, _, err := runner.Spawn(dispatchCtx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "must not appear"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	frames, terminal := waitSpawnInputProjectionFrames(t, observeCtx, events, spawn.ActivityID)
-	if terminal.Result == nil || terminal.Result.State == delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State == task.StateCompleted {
 		t.Fatalf("terminal = %#v, want failed or interrupted dispatch", terminal.Result)
 	}
 	for _, frame := range frames {
@@ -108,9 +107,9 @@ func waitSpawnInputProjectionFrames(
 	ctx context.Context,
 	events <-chan childInputTestEvent,
 	activityID string,
-) ([]output.Event, childInputTestEvent) {
+) ([]task.OutputEvent, childInputTestEvent) {
 	t.Helper()
-	var frames []output.Event
+	var frames []task.OutputEvent
 	for {
 		select {
 		case event := <-events:

@@ -12,8 +12,8 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -201,7 +201,7 @@ func modelHookContext(ctx context.Context, request hook.RequestContext) context.
 		return ctx
 	}
 	var ordinal atomic.Uint64
-	return context.WithValue(ctx, modelinvocation.MiddlewareKey{}, func(ctx context.Context, in model.Invocation, req *model.Request, next func(context.Context) error) error {
+	return context.WithValue(ctx, sdkctx.MiddlewareKey{}, func(ctx context.Context, in model.Invocation, req *model.Request, next func(context.Context) error) error {
 		e := hook.AttemptContext{RequestContext: request, InvocationID: in.ID, AttemptOrdinal: ordinal.Add(1)}
 		chain := next
 		for i := len(entries) - 1; i >= 0; i-- {

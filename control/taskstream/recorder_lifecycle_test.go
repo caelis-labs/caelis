@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func TestRecorderCompactionPreservesEveryActivityBoundary(t *testing.T) {
@@ -21,9 +20,9 @@ func TestRecorderCompactionPreservesEveryActivityBoundary(t *testing.T) {
 			at := time.Unix(100, 0).UTC()
 			for n := range 3 {
 				id := fmt.Sprint(n)
-				o := r.BindTaskOutput(t.Context(), output.Binding{SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindSubagent, ActivityID: id, TerminalID: "terminal-" + id, StartsAtTaskOrigin: n == 0})
+				o := r.BindTaskOutput(t.Context(), task.OutputBinding{SessionID: "session-1", TaskID: "task-1", Kind: task.KindSubagent, ActivityID: id, TerminalID: "terminal-" + id, StartsAtTaskOrigin: n == 0})
 				message := model.NewTextMessage(model.RoleAssistant, "answer-"+id)
-				event := output.Event{OccurredAt: at.Add(time.Duration(n) * time.Second), Event: &session.Event{Type: session.EventTypeAssistant, Message: &message}, Text: "frame-" + id, State: "running", Running: true}
+				event := task.OutputEvent{OccurredAt: at.Add(time.Duration(n) * time.Second), Event: &session.Event{Type: session.EventTypeAssistant, Message: &message}, Text: "frame-" + id, State: "running", Running: true}
 				if combined {
 					event.State, event.Running, event.Closed, event.ExitCode = "completed", false, true, new(n)
 				}
@@ -31,7 +30,7 @@ func TestRecorderCompactionPreservesEveryActivityBoundary(t *testing.T) {
 					t.Fatal(err)
 				}
 				if !combined {
-					if err := o.ObserveTaskOutput(t.Context(), output.Event{OccurredAt: event.OccurredAt.Add(time.Millisecond), State: "completed", Closed: true, ExitCode: new(n), Text: "closed-" + id}); err != nil {
+					if err := o.ObserveTaskOutput(t.Context(), task.OutputEvent{OccurredAt: event.OccurredAt.Add(time.Millisecond), State: "completed", Closed: true, ExitCode: new(n), Text: "closed-" + id}); err != nil {
 						t.Fatal(err)
 					}
 				}

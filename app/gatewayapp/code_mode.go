@@ -7,11 +7,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	"github.com/caelis-labs/caelis/control/toolpolicy"
 )
 
-func codeModeHintsForSession(ctx context.Context, sessions session.Service, ref session.SessionRef, source toolset.Source) ([]string, error) {
+func codeModeHintsForSession(ctx context.Context, sessions session.Service, ref session.SessionRef, source tool.Source) ([]string, error) {
 	state, err := sessions.SnapshotState(ctx, ref)
 	if err != nil {
 		return nil, err

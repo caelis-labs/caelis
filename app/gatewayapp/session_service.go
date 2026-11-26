@@ -8,7 +8,7 @@ import (
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
@@ -149,7 +149,7 @@ func (s *runtimeComposition) estimatedPromptPrefixTokens(ctx context.Context, re
 	return base + extra
 }
 
-func spawnTools(agents []delegation.Agent) []tool.Tool {
+func spawnTools(agents []task.DelegationAgent) []tool.Tool {
 	if len(agents) == 0 {
 		return nil
 	}

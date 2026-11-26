@@ -17,12 +17,14 @@ import (
 )
 
 func TestContextEditDurableProjectionAndUnknownCommit(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"append", "replace", "replace-empty"} {
 		replace := mode != "append"
 		for _, ack := range []string{"normal", "unknown", "conflict"} {
 			t.Run(mode+"/"+ack, func(t *testing.T) {
+				t.Parallel()
 				root := t.TempDir()
-				store := &contextEditAckStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), mode: ack}
+				store := &contextEditAckStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), mode: ack}
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "context"})
 				if err != nil {
 					t.Fatal(err)
@@ -73,7 +75,7 @@ func TestContextEditDurableProjectionAndUnknownCommit(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if err != nil {
 					t.Fatal(err)
@@ -140,6 +142,7 @@ func (s *contextEditAckStore) AppendEvent(ctx context.Context, req session.Appen
 }
 
 func TestContextEditStaleAssemblyDoesNotAppendTwice(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "stale-edit")
 	hookCalls, admissions, providers := 0, 0, 0
 	llm := scriptedTestModel{generate: func(_ context.Context, r *model.Request) *model.Response {
@@ -195,6 +198,7 @@ func TestContextEditStaleAssemblyDoesNotAppendTwice(t *testing.T) {
 }
 
 func TestContextEditRejectsUnpairedReplacementAndFutureCheckpoint(t *testing.T) {
+	t.Parallel()
 	m := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "one", Name: "effect", Args: `{}`}}, "")
 	if err := session.ValidateContextMessages([]model.Message{m}); err == nil {
 		t.Fatal("half tool group accepted")

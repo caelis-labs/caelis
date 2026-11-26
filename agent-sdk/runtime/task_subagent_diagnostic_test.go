@@ -9,62 +9,63 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
 func TestSubagentApplyResultKeepsFailureDiagnosticTerminalOnly(t *testing.T) {
-	task := &subagentTask{result: map[string]any{"error": "previous failure"}}
+	t.Parallel()
+	subtask := &subagentTask{result: map[string]any{"error": "previous failure"}}
 
-	task.applyResult(delegation.Result{
-		State:   delegation.StateRunning,
+	subtask.applyResult(task.DelegationResult{
+		State:   task.StateRunning,
 		Running: true,
 		Error:   "must not leak while running",
 	})
-	if _, exists := task.result["error"]; exists {
-		t.Fatalf("running result retained error: %#v", task.result)
+	if _, exists := subtask.result["error"]; exists {
+		t.Fatalf("running result retained error: %#v", subtask.result)
 	}
 
-	task.applyResult(delegation.Result{
-		State: delegation.StateFailed,
+	subtask.applyResult(task.DelegationResult{
+		State: task.StateFailed,
 		Error: "current failure",
 	})
-	if got := taskStringValue(task.result["error"]); got != "current failure" {
+	if got := taskStringValue(subtask.result["error"]); got != "current failure" {
 		t.Fatalf("failed result error = %q, want current failure", got)
 	}
 	for _, key := range []string{"result", "final_message", "output_preview"} {
-		if _, exists := task.result[key]; exists {
-			t.Fatalf("failed result contains %q: %#v", key, task.result)
+		if _, exists := subtask.result[key]; exists {
+			t.Fatalf("failed result contains %q: %#v", key, subtask.result)
 		}
 	}
 
-	task.applyResult(delegation.Result{
-		State:         delegation.StateInterrupted,
+	subtask.applyResult(task.DelegationResult{
+		State:         task.StateInterrupted,
 		OutputPreview: "stale child activity",
 		Result:        "must not become a final message",
 	})
-	if got := taskStringValue(task.result["error"]); got != "participant interrupted" {
+	if got := taskStringValue(subtask.result["error"]); got != "participant interrupted" {
 		t.Fatalf("interrupted fallback error = %q, want fixed diagnostic", got)
 	}
 	for _, key := range []string{"result", "final_message", "output_preview"} {
-		if _, exists := task.result[key]; exists {
-			t.Fatalf("interrupted result contains %q: %#v", key, task.result)
+		if _, exists := subtask.result[key]; exists {
+			t.Fatalf("interrupted result contains %q: %#v", key, subtask.result)
 		}
 	}
 
-	task.applyResult(delegation.Result{
-		State:  delegation.StateCompleted,
+	subtask.applyResult(task.DelegationResult{
+		State:  task.StateCompleted,
 		Error:  "must not leak after completion",
 		Result: "done",
 	})
-	if _, exists := task.result["error"]; exists {
-		t.Fatalf("completed result retained stale error: %#v", task.result)
+	if _, exists := subtask.result["error"]; exists {
+		t.Fatalf("completed result retained stale error: %#v", subtask.result)
 	}
-	if got := taskStringValue(task.result["final_message"]); got != "done" {
+	if got := taskStringValue(subtask.result["final_message"]); got != "done" {
 		t.Fatalf("completed final_message = %q, want done", got)
 	}
 }
 
 func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.T) {
+	t.Parallel()
 	result := map[string]any{
 		"state":          string(task.StateFailed),
 		"error":          "previous failure",
@@ -90,15 +91,16 @@ func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.
 }
 
 func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const failure = "subagent prompt failed"
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{
-			State:   delegation.StateRunning,
+		spawnResult: task.DelegationResult{
+			State:   task.StateRunning,
 			Running: true,
 		},
-		waitResult: delegation.Result{
-			State:         delegation.StateFailed,
+		waitResult: task.DelegationResult{
+			State:         task.StateFailed,
 			OutputPreview: "child exited before first update",
 			Error:         failure,
 		},
@@ -180,6 +182,7 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 }
 
 func TestSubagentTaskPayloadOwnsFailureDiagnostic(t *testing.T) {
+	t.Parallel()
 	const rawLegacyError = "Bearer direct-secret api_key=direct-key /Users/alice/private"
 	result := map[string]any{
 		"output_preview": "stale activity",
@@ -209,6 +212,7 @@ func TestSubagentTaskPayloadOwnsFailureDiagnostic(t *testing.T) {
 }
 
 func TestLegacySubagentFailureErrorIsNotPromotedAcrossRehydrate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		state      task.State
@@ -301,6 +305,7 @@ func TestLegacySubagentFailureErrorIsNotPromotedAcrossRehydrate(t *testing.T) {
 }
 
 func TestLegacyNonFailureSubagentErrorIsDroppedFromRehydratePayloadAndStream(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		state   task.State
@@ -385,6 +390,7 @@ func TestLegacyNonFailureSubagentErrorIsDroppedFromRehydratePayloadAndStream(t *
 }
 
 func TestCanonicalSubagentFailureDoesNotPromoteUntypedDiagnostic(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		backfill bool
@@ -456,6 +462,7 @@ func TestCanonicalSubagentFailureDoesNotPromoteUntypedDiagnostic(t *testing.T) {
 }
 
 func TestCanonicalNonFailureSubagentDropsLegacyError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		state    task.State
@@ -552,6 +559,7 @@ func TestCanonicalNonFailureSubagentDropsLegacyError(t *testing.T) {
 }
 
 func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) {
+	t.Parallel()
 	failedResult := map[string]any{}
 	unknownResult := map[string]any{}
 	normalizeSubagentResultForState(&failedResult, task.StateFailed, "subagent prompt failed")
@@ -601,6 +609,7 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 // typed Runtime diagnostic. A supplied diagnostic is retained verbatim so
 // historical transcripts keep rendering unchanged.
 func TestSubagentFailureDiagnosticFallbacksNameParticipant(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		state task.State
 		want  string

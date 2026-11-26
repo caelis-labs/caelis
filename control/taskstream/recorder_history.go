@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
@@ -14,7 +14,7 @@ import (
 // ReplaceTaskHistoryStream queues one producer replay boundary and joins its
 // consumer before returning. Later live callbacks keep their bounded queue and
 // never wait for this reader's I/O. Only the complete incarnation is published.
-func (o *boundRecorder) ReplaceTaskHistoryStream(ctx context.Context, source output.HistorySource) error {
+func (o *boundRecorder) ReplaceTaskHistoryStream(ctx context.Context, source task.HistorySource) error {
 	if source == nil {
 		return fmt.Errorf("taskstream: history source is required")
 	}
@@ -62,6 +62,6 @@ func historyOutputRecord(activityID string, event *session.Event) (streamspool.R
 	if event.Scope != nil {
 		terminalID = event.Scope.TurnID
 	}
-	payload, err := json.Marshal(recordedTaskOutput{TerminalID: terminalID, ActivityID: activityID, Event: output.Event{Event: event, OccurredAt: event.Time}})
+	payload, err := json.Marshal(recordedTaskOutput{TerminalID: terminalID, ActivityID: activityID, Event: task.OutputEvent{Event: event, OccurredAt: event.Time}})
 	return streamspool.Record{Type: taskOutputRecordType, OccurredAt: event.Time, Payload: payload}, err
 }

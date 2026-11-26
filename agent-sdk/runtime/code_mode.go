@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -295,7 +294,7 @@ func (h *codeModeHost) Call(ctx context.Context, name string, args json.RawMessa
 
 func (h *codeModeHost) call(requestCtx context.Context, name string, arguments json.RawMessage, discovery bool) (returned codemode.Reply, callError error) {
 	defer func() {
-		callError = mcpdiscovery.WithEntryHint(callError, "tools.search({name})")
+		callError = withMCPDiscoveryEntryHint(callError, "tools.search({name})")
 		if callError != nil || returned.IsError || returned.Outcome == codemode.OutcomeUnknown {
 			h.mu.Lock()
 			h.isError = true

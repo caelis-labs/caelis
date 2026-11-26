@@ -4,8 +4,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
@@ -25,7 +24,7 @@ func TestSelfApprovalInheritsEffectiveParentSessionAndHostPosture(t *testing.T) 
 			cfg := stack.composition.activeRuntime
 			cfg.ApprovalMode = "manual" // deliberately older than the Spawn context
 			cfg.DangerouslySkipPermissions = fullAccess
-			resolved, err := stack.composition.delegationPlacementResolver(cfg)(t.Context(), subagent.SpawnContext{ApprovalMode: mode}, delegation.TargetRequest{Target: targets["self"]})
+			resolved, err := stack.composition.delegationPlacementResolver(cfg)(t.Context(), task.SpawnContext{ApprovalMode: mode}, task.TargetRequest{Target: targets["self"]})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -35,7 +35,7 @@ func TestAnthropicActualRequestsRespectInvocationAdmissionAndAccounting(t *testi
 					t.Errorf("attempt receipt=%+v", in)
 				}
 			})
-			wrapped := model.WithRetry(llm, model.RetryConfig{MaxRetries: 5, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
+			wrapped := model.WithRetry(llm, model.RetryConfig{MaxRetries: 5, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond, RateLimitBaseDelay: time.Nanosecond, RateLimitMaxDelay: time.Nanosecond})
 			var finalErr error
 			for _, err := range model.Generate(ctx, wrapped, &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "source")}, Stream: stream}) {
 				if err != nil {

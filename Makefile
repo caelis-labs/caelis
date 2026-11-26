@@ -83,6 +83,7 @@ sdk-proxy-smoke: cache-dirs
 
 sdk-race: cache-dirs
 	go test -race -timeout $(GO_TEST_TIMEOUT) ./agent-sdk/policy/... ./agent-sdk/session/... ./agent-sdk/runtime/...
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./eval '^TestWebSearchUnavailableReachesProviderAndFileHistory$$' sdk-web-search-replay -race
 
 docs-links: cache-dirs
 	go run ./scripts/markdown_links

@@ -5,13 +5,12 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // Deferred MCP tools pass through the same wrappers as static tools before a
 // chat run can pin them. Sources cannot inject builtins through this path.
 type deferredToolSource struct {
-	source toolset.Source
+	source tool.Source
 	wrap   func([]tool.Tool) []tool.Tool
 }
 
@@ -36,7 +35,7 @@ func (s *deferredToolSource) Tools() []tool.Tool {
 func (s *deferredToolSource) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
 	var target tool.Tool
 	var def tool.Definition
-	if named, ok := s.source.(toolset.NamedSource); ok {
+	if named, ok := s.source.(tool.NamedSource); ok {
 		one, found, err := named.Lookup(ctx, name)
 		if err != nil || !found {
 			return nil, false, err

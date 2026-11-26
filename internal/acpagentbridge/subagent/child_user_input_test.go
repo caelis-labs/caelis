@@ -10,7 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
@@ -33,7 +33,7 @@ func TestUserChildInputActiveAndIdleKeepHumanProvenance(t *testing.T) {
 			}()
 			events := make(chan childInputTestEvent, 32)
 			spawn := childInputSpawnContext(t, "task-user-"+mode, events)
-			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+			anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 			if err != nil {
 				t.Fatal(err)
 			}

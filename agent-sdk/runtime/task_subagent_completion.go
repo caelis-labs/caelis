@@ -13,12 +13,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
 type subagentCompletion struct {
 	ctx      context.Context
-	result   delegation.Result
+	result   taskapi.DelegationResult
 	turnSeq  int64
 	activity *childTaskActivity
 	// observedTerminal forces the Task write that advances an activity cursor
@@ -70,7 +69,7 @@ func newSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID
 	}
 }
 
-func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.Result) {
+func (sink subagentCompletionSink) PublishSubagentCompletion(result taskapi.DelegationResult) {
 	done := sink.enqueue(result)
 	if done != nil {
 		<-done
@@ -78,23 +77,17 @@ func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.R
 	}
 }
 
-func (sink subagentCompletionSink) enqueue(result delegation.Result) <-chan struct{} {
+func (sink subagentCompletionSink) enqueue(result taskapi.DelegationResult) <-chan struct{} {
 	if sink.runtime == nil || sink.taskID == "" {
 		return nil
 	}
-	result = delegation.CloneResult(result)
+	result = taskapi.CloneDelegationResult(result)
+	if !taskapi.IsTerminalState(result.State) {
+		return nil
+	}
 	result.TaskID = sink.taskID
 	result.Running = false
 	result.Yielded = false
-	switch result.State {
-	case delegation.StateCompleted,
-		delegation.StateFailed,
-		delegation.StateCancelled,
-		delegation.StateInterrupted,
-		delegation.StateUnknownOutcome:
-	default:
-		return nil
-	}
 	sink.activity.sealUsage()
 	return sink.runtime.enqueueSubagentCompletion(&subagentCompletion{
 		ctx:              sink.ctx,
@@ -364,7 +357,7 @@ func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagent
 	}()
 }
 
-func subagentCompletionNotice(task *subagentTask, result delegation.Result) (session.SessionRef, agent.Submission, bool) {
+func subagentCompletionNotice(task *subagentTask, result taskapi.DelegationResult) (session.SessionRef, agent.Submission, bool) {
 	if task == nil {
 		return session.SessionRef{}, agent.Submission{}, false
 	}
@@ -381,7 +374,7 @@ func subagentCompletionNotice(task *subagentTask, result delegation.Result) (ses
 
 	state := strings.TrimSpace(string(result.State))
 	text := fmt.Sprintf("Participant @%s is %s.", strings.TrimPrefix(handle, "@"), state)
-	if result.State == delegation.StateCancelled || result.State == delegation.StateInterrupted {
+	if result.State == taskapi.StateCancelled || result.State == taskapi.StateInterrupted {
 		text = fmt.Sprintf("Participant @%s is interrupted.", strings.TrimPrefix(handle, "@"))
 	}
 	return ref, agent.Submission{

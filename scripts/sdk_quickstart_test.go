@@ -29,7 +29,7 @@ func TestAgentSDKQuickstartImportsOnlySupportedPackages(t *testing.T) {
 	if err := scanner.Err(); err != nil {
 		t.Fatal(err)
 	}
-	file, err := parser.ParseFile(token.NewFileSet(), "../agent-sdk/runtime/quickstart_external_test.go", nil, parser.ImportsOnly)
+	file, err := parser.ParseFile(token.NewFileSet(), "../agent-sdk/quickstart_external_test.go", nil, parser.ImportsOnly)
 	if err != nil {
 		t.Fatal(err)
 	}

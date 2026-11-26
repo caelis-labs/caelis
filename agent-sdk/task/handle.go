@@ -1,0 +1,168 @@
+package task
+
+import (
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"regexp"
+	"strings"
+)
+
+const (
+	// MaxRequestedHandleLength is the maximum canonical length of a
+	// model-supplied Task handle.
+	MaxRequestedHandleLength = 32
+	// RequestedHandlePattern is the canonical charset for a model-supplied
+	// Task handle: a leading letter, then lowercase letters, digits, or hyphens.
+	RequestedHandlePattern = `^[a-z][a-z0-9-]*$`
+)
+
+var requestedHandlePattern = regexp.MustCompile(RequestedHandlePattern)
+
+var reservedRequestedHandles = map[string]struct{}{
+	"parent": {},
+}
+
+var handleNamePool = []string{
+	"emun", "ari", "aria", "ava", "ben", "cai", "cleo", "dana",
+	"eden", "eli", "emma", "finn", "gia", "hugo", "ivy", "jane",
+	"juno", "kai", "kira", "lena", "leo", "lina", "luca", "maya",
+	"mila", "mina", "mira", "nina", "nora", "olga", "omar", "otto",
+	"palo", "quinn", "rhea", "rio", "sara", "tala", "tari", "thea",
+	"uma", "vera", "wren", "xena", "yara", "zane", "zoe", "noa",
+	"nia", "zuri", "mika", "niko", "rafe", "ravi", "reya", "sima",
+	"tova", "yuki", "akio", "amir", "anika", "arlo", "bela", "brio",
+	"cora", "dario", "elio", "farah", "hani", "iona", "keira", "lumi",
+	"maia", "navi", "orla", "pippa", "rohan", "siena", "tessa", "timo",
+	"vito", "wen", "yuna", "zola", "alba", "azra", "bryn", "cian",
+	"dora", "eira", "faye", "gwen", "hale", "inez", "joel", "kian",
+	"lora", "mona", "pavel", "remy", "sona", "tina", "urie", "vida",
+	"willa", "xavi", "yori", "ziva",
+}
+
+// AllocateHandle returns a short human handle that is unique within used. It
+// prefers the shared human-name pool and falls back to a normalized
+// agent-derived base only after the pool is exhausted.
+func AllocateHandle(used map[string]struct{}, agent string) string {
+	if used == nil {
+		used = map[string]struct{}{}
+	}
+	if len(handleNamePool) > 0 {
+		offset := randomHandleOffset(len(handleNamePool))
+		for i := 0; i < len(handleNamePool); i++ {
+			candidate := NormalizeHandle(handleNamePool[(offset+i)%len(handleNamePool)])
+			if candidate == "" {
+				continue
+			}
+			if _, exists := used[candidate]; !exists {
+				return candidate
+			}
+		}
+	}
+	for _, base := range fallbackHandleBases(agent) {
+		for i := 0; i < 1000; i++ {
+			candidate := base
+			if i > 0 {
+				candidate = fmt.Sprintf("%s%d", base, i+1)
+			}
+			if _, exists := used[candidate]; !exists {
+				return candidate
+			}
+		}
+	}
+	return "agent"
+}
+
+// ContainsHandlePoolName reports whether name matches a normalized entry from
+// the shared human-name pool.
+func ContainsHandlePoolName(name string) bool {
+	name = NormalizeHandle(name)
+	if name == "" {
+		return false
+	}
+	for _, candidate := range handleNamePool {
+		if NormalizeHandle(candidate) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// CanonicalRequestedHandle normalizes a model-supplied handle. Empty input
+// remains empty so callers can fall back to AllocateHandle. Non-empty values
+// must use the shared handle charset and must not use reserved routing names.
+func CanonicalRequestedHandle(value string) (string, error) {
+	handle := NormalizeHandle(value)
+	if handle == "" {
+		return "", nil
+	}
+	if len(handle) > MaxRequestedHandleLength {
+		return "", fmt.Errorf("agent-sdk/task: handle %q exceeds %d characters", handle, MaxRequestedHandleLength)
+	}
+	if !requestedHandlePattern.MatchString(handle) {
+		return "", fmt.Errorf("agent-sdk/task: handle %q must start with a letter and use only lowercase letters, numbers, or hyphens", handle)
+	}
+	if _, reserved := reservedRequestedHandles[handle]; reserved {
+		return "", fmt.Errorf("agent-sdk/task: handle %q is reserved", handle)
+	}
+	return handle, nil
+}
+
+// NormalizeHandleBase derives a stable handle base from value by lowercasing,
+// stripping @, and replacing separators with dashes.
+func NormalizeHandleBase(value string) string {
+	value = NormalizeHandle(value)
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		var keep rune
+		switch {
+		case r >= 'a' && r <= 'z':
+			keep = r
+		case r >= '0' && r <= '9':
+			keep = r
+		case r == '-' || r == '_':
+			keep = r
+		case r == '/' || r == '.' || r == ' ' || r == '\t':
+			if !lastDash && b.Len() > 0 {
+				keep = '-'
+				lastDash = true
+			}
+		}
+		if keep == 0 {
+			continue
+		}
+		if keep != '-' && keep != '_' {
+			lastDash = false
+		}
+		b.WriteRune(keep)
+	}
+	return strings.Trim(b.String(), "-_")
+}
+
+func randomHandleOffset(n int) int {
+	if n <= 1 {
+		return 0
+	}
+	value, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(value.Int64())
+}
+
+func fallbackHandleBases(agent string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 2)
+	for _, base := range []string{NormalizeHandleBase(agent), "agent"} {
+		if base == "" {
+			continue
+		}
+		if _, ok := seen[base]; ok {
+			continue
+		}
+		seen[base] = struct{}{}
+		out = append(out, base)
+	}
+	return out
+}
