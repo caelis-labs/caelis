@@ -18,7 +18,6 @@ import (
 type hostControlAssembly struct {
 	runtimeStateReader *controlRuntimeStateReader
 	participantHandles *participantHandleReader
-	taskStreamRouter   *hostTaskStreamService
 	taskDirectory      *controltaskstream.DirectoryIndex
 	subagentHistory    *subagentHistoryService
 }
@@ -130,9 +129,6 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		return hostControlAssembly{}, err
 	}
 
-	taskStreamRouter := &hostTaskStreamService{
-		host: &stack.composition, lifecycle: stack.composition.authorities.taskOutputLifecycle,
-	}
 	taskDirectory := controltaskstream.NewDirectoryIndex()
 	stack.composition.taskCommitted = taskDirectory.Notify
 	subagentHistory := &subagentHistoryService{}
@@ -154,7 +150,6 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	return hostControlAssembly{
 		runtimeStateReader: runtimeStateReader,
 		participantHandles: participantHandles,
-		taskStreamRouter:   taskStreamRouter,
 		taskDirectory:      taskDirectory,
 		subagentHistory:    subagentHistory,
 	}, nil
@@ -209,11 +204,13 @@ func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 			return err
 		}
 	}
-	assembly.taskStreamRouter.registry = sessionRuntimes
 	assembly.subagentHistory.registry = sessionRuntimes
 	if err := inputRouter.bind(sessionRuntimes); err != nil {
 		_ = stack.Close()
 		return err
+	}
+	stack.terminalStreams = &hostTaskStreamService{
+		registry: sessionRuntimes, lifecycle: stack.composition.authorities.taskOutputLifecycle,
 	}
 	done := make(chan struct{})
 	stack.composition.authorities.collaborationDone = done

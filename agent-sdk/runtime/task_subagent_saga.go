@@ -216,10 +216,11 @@ func (tm *taskRuntime) startSubagentTarget(
 		if result.TaskID == "" {
 			result.TaskID = taskID
 		}
-		// Validate before any durable post_spawn commit so a crash cannot
-		// roll-forward an invalid anchor (empty AgentID, mismatched agent, etc.).
+		// Validate before the durable post_spawn commit so recovery cannot
+		// roll forward an invalid anchor or result.
 		if validationErr := validateSubagentSpawnResult(taskID, anchor, result); validationErr != nil {
-			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
+			unconfirmed := taskapi.DelegationResult{State: taskapi.StateUnknownOutcome}
+			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, unconfirmed, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
 		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
@@ -554,7 +555,7 @@ func newSubagentTaskFromSpawn(
 		agent: agentName, target: target, handle: handle, title: spawn.ToolName + " " + agentName,
 		prompt: strings.TrimSpace(req.Prompt), contentParts: append([]model.ContentPart(nil), req.ContentParts...), mode: strings.TrimSpace(mode),
 		approvalMode: strings.TrimSpace(req.ApprovalMode), createdAt: now, revision: revision,
-		state: taskStateFromDelegation(result.State), running: result.State == taskapi.StateRunning, producerLive: true, turnSeq: 1,
+		producerLive: true, turnSeq: 1,
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
 			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
@@ -599,13 +600,7 @@ func validateSubagentSpawnResult(taskID string, anchor taskapi.Anchor, result ta
 	if resultTaskID := strings.TrimSpace(result.TaskID); resultTaskID != "" && resultTaskID != strings.TrimSpace(taskID) {
 		return fmt.Errorf("spawned subagent result task_id %q does not match %q", resultTaskID, taskID)
 	}
-	switch result.State {
-	case taskapi.StateRunning, taskapi.StateCompleted, taskapi.StateFailed, taskapi.StateCancelled,
-		taskapi.StateInterrupted, taskapi.StateUnknownOutcome, taskapi.StateWaitingApproval:
-		return nil
-	default:
-		return fmt.Errorf("spawned subagent result has invalid state %q", result.State)
-	}
+	return validateSubagentResultState(result.State)
 }
 
 func (tm *taskRuntime) rememberRehydratedSubagent(task *subagentTask) {

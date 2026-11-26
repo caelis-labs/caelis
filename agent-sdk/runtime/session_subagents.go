@@ -257,11 +257,14 @@ func (tm *taskRuntime) cancelSessionSubagent(ctx context.Context, ref session.Se
 	if settled {
 		return errors.Join(effectErr, waitErr)
 	}
+	result = taskapi.CloneDelegationResult(result)
 	if waitErr != nil {
 		_, err = tm.persistSubagentCancelPhase(ctx, task, turnSeq, subagentCancelPhaseUnknown, "remote subagent cancellation outcome could not be confirmed", nil, false)
-	} else if subagentCancelResultTerminal(result) && !result.Running {
+	} else if err = validateSubagentResultState(result.State); err != nil {
+		return errors.Join(effectErr, err)
+	} else if taskapi.IsTerminalState(result.State) {
 		_, err = tm.persistSubagentCancelPhase(ctx, task, turnSeq, subagentCancelPhaseCompleted, "", &result, true)
-	} else if subagentCancelResultPending(result) {
+	} else {
 		next := phase
 		if claim {
 			next = subagentCancelPhaseApplied
@@ -270,8 +273,6 @@ func (tm *taskRuntime) cancelSessionSubagent(ctx context.Context, ref session.Se
 			next = subagentCancelPhaseUnknown
 		}
 		_, err = tm.persistSubagentCancelPhase(ctx, task, turnSeq, next, "remote subagent cancellation is not yet terminal", &result, false)
-	} else {
-		err = fmt.Errorf("subagent cancellation returned invalid state %q", result.State)
 	}
 	return errors.Join(effectErr, waitErr, err)
 }

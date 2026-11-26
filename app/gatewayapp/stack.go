@@ -139,6 +139,7 @@ type Stack struct {
 	pluginCommands            appserver.PluginCommandService
 	sessionProfiles           *appserver.SessionProfileService
 	taskStreams               acptaskstream.Service
+	terminalStreams           task.TerminalController
 	operations                appserver.DurableOperationStore
 	lifecycleCancel           context.CancelFunc
 	sessionRuntimes           *sessionRuntimeRegistry
@@ -263,14 +264,14 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 	return s.taskStreams
 }
 
-// ControlTerminalStreams returns the Session-routed Runtime terminal stream
-// used by AppServer terminal services. Presentation surfaces must consume the
-// typed TerminalClient instead of this Runtime-facing controller.
+// ControlTerminalStreams returns the Host's terminal controller for AppServer
+// assembly. It routes to the owning Session Runtime and releases the Control
+// recorder partition after successful terminal release.
 func (s *Stack) ControlTerminalStreams() task.TerminalController {
 	if s == nil {
 		return nil
 	}
-	return hostTaskStreamService{host: &s.composition, registry: s.sessionRuntimes}
+	return s.terminalStreams
 }
 
 func (s *runtimeComposition) currentGateway() *kernelimpl.Gateway {

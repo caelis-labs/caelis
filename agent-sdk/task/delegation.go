@@ -61,10 +61,12 @@ type CompletionSink interface {
 // DelegationResult captures one collaborating Agent summary visible to Runtime
 // and the calling Agent. The collaborator transcript remains in its own Session.
 type DelegationResult struct {
-	TaskID  string `json:"task_id,omitempty"`
-	State   State  `json:"state,omitempty"`
-	Running bool   `json:"running,omitempty"`
-	Yielded bool   `json:"yielded,omitempty"`
+	TaskID string `json:"task_id,omitempty"`
+	// State is authoritative for Runtime. StateRunning and StateWaitingApproval
+	// describe live activities. All other valid values are terminal Task states.
+	State   State `json:"state,omitempty"`
+	Running bool  `json:"running,omitempty"`
+	Yielded bool  `json:"yielded,omitempty"`
 	// SupportsSteering allows Agent input while the current Turn is running.
 	SupportsSteering bool   `json:"supports_steering"`
 	OutputPreview    string `json:"output_preview,omitempty"`
@@ -127,11 +129,11 @@ func ValidateTarget(raw Target) error {
 	return nil
 }
 
-// CloneDelegationResult returns a trimmed copy with error scrubbed unless
-// terminal failure.
+// CloneDelegationResult trims text, canonicalizes the state, and retains Error
+// only for terminal failures.
 func CloneDelegationResult(in DelegationResult) DelegationResult {
 	out := in
-	out.State = State(strings.TrimSpace(string(in.State)))
+	out.State = State(strings.ToLower(strings.TrimSpace(string(in.State))))
 	out.TaskID = strings.TrimSpace(in.TaskID)
 	out.OutputPreview = strings.TrimSpace(in.OutputPreview)
 	out.Error = strings.TrimSpace(in.Error)

@@ -516,6 +516,94 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 	}
 }
 
+func TestSubagentTerminatedResultSettlesTask(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{"spawn", "wait", "read", "completion"} {
+		t.Run(source, func(t *testing.T) {
+			ctx := t.Context()
+			terminated := task.DelegationResult{
+				State: " TERMINATED ", Running: true, Result: "stale final", OutputPreview: "stale preview", Error: "stale error",
+			}
+			runner := &recordingSubagentRunner{
+				spawnResult: task.DelegationResult{State: task.StateRunning, OutputPreview: "working"},
+				waitResult:  terminated,
+			}
+			if source == "spawn" {
+				runner.spawnResult = terminated
+			}
+			if source == "wait" {
+				runner.spawnResult.State = task.StateWaitingApproval
+			}
+			r, active := newSubagentTaskTestRuntime(t, runner)
+			snapshot, err := r.StartSubagentWithOptions(ctx, active.SessionRef, "helper", "inspect", "user", StartSubagentOptions{ReturnOnStart: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if source != "spawn" && (!snapshot.Running || snapshot.State != runner.spawnResult.State) {
+				t.Fatalf("StartSubagentWithOptions() = %#v, want active %q", snapshot, runner.spawnResult.State)
+			}
+			req := task.ControlRequest{TaskID: snapshot.Ref.TaskID, Principal: session.ActorKindController}
+			switch source {
+			case "wait":
+				snapshot, err = r.tasks.Wait(ctx, active.SessionRef, req)
+			case "read":
+				snapshot, err = r.tasks.Read(ctx, active.SessionRef, req)
+			case "completion":
+				// A later observation must see the callback's durable result, even
+				// though the runner still reports running.
+				runner.waitResult = runner.spawnResult
+				runner.spawnContext.Completion.PublishSubagentCompletion(terminated)
+				snapshot, err = r.tasks.Read(ctx, active.SessionRef, req)
+			}
+			if err != nil || snapshot.State != task.StateTerminated || snapshot.Running {
+				t.Fatalf("%s = %#v, %v; want terminated", source, snapshot, err)
+			}
+			entry, err := r.tasks.store.Get(ctx, req.TaskID)
+			if err != nil || entry == nil || entry.State != task.StateTerminated || entry.Running {
+				t.Fatalf("stored Task = %#v, %v; want terminated", entry, err)
+			}
+			for _, key := range []string{"result", "final_message", "output_preview", "error"} {
+				if _, exists := entry.Result[key]; exists {
+					t.Fatalf("terminated Task retained %q: %#v", key, entry.Result)
+				}
+			}
+		})
+	}
+}
+
+func TestSubagentWaitAndReadRejectInvalidResultState(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	runner := &recordingSubagentRunner{
+		spawnResult: task.DelegationResult{State: task.StateRunning, OutputPreview: "original preview"},
+	}
+	r, active := newSubagentTaskTestRuntime(t, runner)
+	started, err := r.StartSubagentWithOptions(ctx, active.SessionRef, "helper", "inspect", "user", StartSubagentOptions{ReturnOnStart: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := task.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController}
+	before, err := r.tasks.store.Get(ctx, req.TaskID)
+	if err != nil || before == nil {
+		t.Fatalf("stored Task = %#v, %v", before, err)
+	}
+	for _, state := range []task.State{"", "unrecognized", task.StateWaitingInput} {
+		runner.waitResult = task.DelegationResult{State: state, Running: true, OutputPreview: "invalid preview"}
+		for _, observe := range []func(context.Context, session.SessionRef, task.ControlRequest) (task.Snapshot, error){r.tasks.Wait, r.tasks.Read} {
+			snapshot, err := observe(ctx, active.SessionRef, req)
+			if err == nil || snapshot.State != task.StateRunning || !snapshot.Running || snapshot.Result["output_preview"] != "original preview" {
+				t.Fatalf("observation of invalid state %q = %#v, %v; want error and previous snapshot", state, snapshot, err)
+			}
+		}
+	}
+	after, err := r.tasks.store.Get(ctx, req.TaskID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("invalid observations changed stored Task from %#v to %#v, %v", before, after, err)
+	}
+}
+
 func TestSubagentReadTransportErrorDoesNotInterruptRunningChild(t *testing.T) {
 	t.Parallel()
 

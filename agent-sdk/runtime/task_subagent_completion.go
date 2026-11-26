@@ -82,18 +82,12 @@ func (sink subagentCompletionSink) enqueue(result taskapi.DelegationResult) <-ch
 		return nil
 	}
 	result = taskapi.CloneDelegationResult(result)
+	if !taskapi.IsTerminalState(result.State) {
+		return nil
+	}
 	result.TaskID = sink.taskID
 	result.Running = false
 	result.Yielded = false
-	switch result.State {
-	case taskapi.StateCompleted,
-		taskapi.StateFailed,
-		taskapi.StateCancelled,
-		taskapi.StateInterrupted,
-		taskapi.StateUnknownOutcome:
-	default:
-		return nil
-	}
 	sink.activity.sealUsage()
 	return sink.runtime.enqueueSubagentCompletion(&subagentCompletion{
 		ctx:              sink.ctx,

@@ -50,7 +50,11 @@ func (tm *taskRuntime) advanceSubagentCancel(
 		}
 		return task.snapshot(), err
 	}
-	if subagentCancelResultPending(result) {
+	result = taskapi.CloneDelegationResult(result)
+	if err := validateSubagentResultState(result.State); err != nil {
+		return task.snapshot(), err
+	}
+	if subagentResultIsActive(result.State) {
 		next := phase
 		if phase == subagentCancelPhaseClaimed {
 			next = subagentCancelPhaseUnknown
@@ -60,9 +64,6 @@ func (tm *taskRuntime) advanceSubagentCancel(
 			return task.snapshot(), err
 		}
 		return task.snapshot(), nil
-	}
-	if !subagentCancelResultTerminal(result) {
-		return task.snapshot(), fmt.Errorf("subagent cancellation reconciliation returned invalid state %q", result.State)
 	}
 	persisted, err := tm.persistSubagentCancelPhase(ctx, task, cancelTurnSeq, subagentCancelPhaseCompleted, "", &result, true)
 	if err != nil {
@@ -82,23 +83,6 @@ func (tm *taskRuntime) advanceSubagentCancel(
 	return snapshot, nil
 }
 
-func subagentCancelResultPending(result taskapi.DelegationResult) bool {
-	return result.Running || result.State == taskapi.StateRunning || result.State == taskapi.StateWaitingApproval
-}
-
-func subagentCancelResultTerminal(result taskapi.DelegationResult) bool {
-	switch result.State {
-	case taskapi.StateCompleted,
-		taskapi.StateFailed,
-		taskapi.StateCancelled,
-		taskapi.StateInterrupted,
-		taskapi.StateUnknownOutcome:
-		return true
-	default:
-		return false
-	}
-}
-
 func (tm *taskRuntime) persistSubagentCancelPhase(
 	ctx context.Context,
 	task *subagentTask,
@@ -114,7 +98,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	if cancelTurnSeq <= 0 {
 		return false, fmt.Errorf("subagent cancellation target generation is required")
 	}
-	if terminal && (result == nil || !subagentCancelResultTerminal(*result) || result.Running) {
+	if terminal && (result == nil || !taskapi.IsTerminalState(result.State)) {
 		return false, fmt.Errorf("subagent cancellation terminal persistence requires an explicit terminal result")
 	}
 	task.activityApplyMu.Lock()

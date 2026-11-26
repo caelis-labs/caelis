@@ -91,7 +91,7 @@ func TestCollectCompactionResponseTerminalReasons(t *testing.T) {
 }
 
 func TestCollectCompactionResponseUnreportedLogs(t *testing.T) {
-	t.Parallel()
+	// Keep this test serial because it replaces the process-wide logger.
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))

@@ -118,10 +118,57 @@ func TestCancelSessionSubagentsRetainsProducerUntilTerminal(t *testing.T) {
 				if queued := parent.drainSubmissions(); len(queued) != 0 {
 					t.Fatalf("cancelled child woke a later parent: %#v", queued)
 				}
-				if _, err := r.tasks.Read(t.Context(), active.SessionRef, taskapi.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController}); err != nil {
+				req := taskapi.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController}
+				if _, err := r.tasks.Read(t.Context(), active.SessionRef, req); err != nil {
 					t.Fatalf("cancelled Task history unavailable: %v", err)
 				}
+				waited, err := r.tasks.Wait(t.Context(), active.SessionRef, req)
+				if err != nil || waited.Running || waited.State != taskapi.StateCancelled {
+					t.Fatalf("Wait() = %#v, %v; want producer completion despite stale running sample", waited, err)
+				}
 			})
+		})
+	}
+}
+
+func TestCancelSessionSubagentsReconcilesTerminatedResult(t *testing.T) {
+	t.Parallel()
+	for _, reconcileWithWait := range []bool{false, true} {
+		name := "session cancel"
+		if reconcileWithWait {
+			name = "task wait"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			const terminated taskapi.State = " TERMINATED "
+			runner := &sessionCancelRunner{waitState: terminated}
+			if reconcileWithWait {
+				runner.waitState = taskapi.StateWaitingApproval
+			}
+			r, active := newSubagentTaskTestRuntime(t, runner)
+			started := startSessionCancelChild(t, r, active, runner, "child")
+			if _, err := r.CancelSessionSubagents(ctx, active.SessionRef); err != nil {
+				t.Fatal(err)
+			}
+			if reconcileWithWait {
+				req := taskapi.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController}
+				pending, err := r.tasks.Read(ctx, active.SessionRef, req)
+				if err != nil || !pending.Running || pending.State != taskapi.StateUnknownOutcome {
+					t.Fatalf("Read() = %#v, %v; want pending cancellation", pending, err)
+				}
+				runner.mu.Lock()
+				runner.waitState = terminated
+				runner.mu.Unlock()
+				settled, err := r.tasks.Wait(ctx, active.SessionRef, req)
+				if err != nil || settled.Running || settled.State != taskapi.StateTerminated {
+					t.Fatalf("Wait() = %#v, %v; want termination from reconciliation", settled, err)
+				}
+			}
+			entry, err := r.tasks.store.Get(ctx, started.Ref.TaskID)
+			if err != nil || entry == nil || entry.Running || entry.State != taskapi.StateTerminated ||
+				taskStringValue(entry.Metadata[subagentCancelPhaseKey]) != string(subagentCancelPhaseCompleted) {
+				t.Fatalf("stored Task = %#v, %v; want terminated with reconciled cancellation", entry, err)
+			}
 		})
 	}
 }

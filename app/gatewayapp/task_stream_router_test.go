@@ -7,8 +7,52 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/streamspool"
+	"github.com/caelis-labs/caelis/control/taskstream"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
+
+// NewTerminalReleaseTestFixture prepares an activated Session and an open Task
+// spool for the external test that exercises the local AppServer.
+func NewTerminalReleaseTestFixture(t *testing.T) (*Stack, appserver.TerminalRequest, func(streamspool.State)) {
+	t.Helper()
+	ctx := t.Context()
+	stack, active := newLocalStateTestStack(t)
+	const taskID, handle = "command-task", "release-command"
+	ref := session.SessionRef{AppName: active.AppName, UserID: active.UserID, SessionID: active.SessionID}
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, &task.Entry{
+		TaskID: taskID, Handle: handle, Kind: task.KindCommand, Session: ref, State: task.StateCompleted,
+		Result: map[string]any{"result": "command output"},
+	}); err != nil {
+		t.Fatalf("seed command Task: %v", err)
+	}
+	lease, err := stack.ControlRuntimes().Acquire(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ActionCancel, active.SessionID, true)
+	if err != nil {
+		t.Fatalf("activate owning Runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = lease.Close(context.Background()) })
+
+	recorder := stack.composition.authorities.taskOutput.(*taskstream.Recorder)
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{
+		SessionID: active.SessionID, TaskID: taskID, Kind: task.KindCommand, StartsAtTaskOrigin: true,
+	})
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "command output"}); err != nil {
+		t.Fatalf("record command output: %v", err)
+	}
+	if err := recorder.Flush(ctx, task.Ref{SessionID: active.SessionID, TaskID: taskID}); err != nil {
+		t.Fatalf("flush command output: %v", err)
+	}
+	logical := streamspool.LogicalKey{Namespace: streamspool.NamespaceTask, Digest: streamspool.DigestStrings(active.SessionID, taskID)}
+	assertState := func(want streamspool.State) {
+		t.Helper()
+		_, bounds, err := stack.composition.authorities.streamSpool.Resolve(ctx, logical)
+		if err != nil || bounds.State != want {
+			t.Fatalf("Task spool state = %v, %v, want %v", bounds.State, err, want)
+		}
+	}
+	return stack, appserver.TerminalRequest{SessionID: active.SessionID, TerminalID: handle}, assertState
+}
 
 func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 	stack, active := newLocalStateTestStack(t)
@@ -16,10 +60,6 @@ func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 
 	rootGateway := newTaskStreamRouterTestGateway(t, stack, "root")
 	childGateway := newTaskStreamRouterTestGateway(t, stack, "child")
-	stack.composition.mu.Lock()
-	stack.composition.gateway = rootGateway
-	stack.composition.mu.Unlock()
-
 	rootInstance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: rootGateway}}
 	childInstance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: childGateway}}
 	stack.sessionRuntimes.mu.Lock()
@@ -34,7 +74,7 @@ func TestHostTaskStreamServiceRoutesByOwningSessionRuntime(t *testing.T) {
 	stack.sessionRuntimes.mu.Unlock()
 
 	lifecycle := &recordingTaskOutputLifecycle{}
-	router := hostTaskStreamService{host: &stack.composition, registry: stack.sessionRuntimes, lifecycle: lifecycle}
+	router := hostTaskStreamService{registry: stack.sessionRuntimes, lifecycle: lifecycle}
 	root, err := router.Read(context.Background(), task.TerminalRef{SessionID: active.SessionID, TaskID: "task-root"})
 	if err != nil {
 		t.Fatal(err)

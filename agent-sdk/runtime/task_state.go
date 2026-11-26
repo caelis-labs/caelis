@@ -385,25 +385,6 @@ func stateFromStatus(status sandbox.SessionStatus) taskapi.State {
 	return taskapi.StateFailed
 }
 
-func taskStateFromDelegation(state taskapi.State) taskapi.State {
-	switch state {
-	case taskapi.StateCompleted:
-		return taskapi.StateCompleted
-	case taskapi.StateCancelled:
-		return taskapi.StateCancelled
-	case taskapi.StateInterrupted:
-		return taskapi.StateInterrupted
-	case taskapi.StateUnknownOutcome:
-		return taskapi.StateUnknownOutcome
-	case taskapi.StateWaitingApproval:
-		return taskapi.StateWaitingApproval
-	case taskapi.StateFailed:
-		return taskapi.StateFailed
-	default:
-		return taskapi.StateRunning
-	}
-}
-
 func commandExitCodeAvailable(state taskapi.State, exitCode int, resultErr error) bool {
 	if exitCode < 0 {
 		return false

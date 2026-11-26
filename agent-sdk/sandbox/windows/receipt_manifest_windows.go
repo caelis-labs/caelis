@@ -956,16 +956,20 @@ func (r *runtime) persistHostReceiptLedger(ledger hostReceiptLedger) error {
 }
 
 func replaceHostReceiptFile(source, destination string) error {
+	return replaceHostReceiptFileWith(source, destination, os.Rename, time.Sleep)
+}
+
+func replaceHostReceiptFileWith(source, destination string, rename func(string, string) error, sleep func(time.Duration)) error {
 	const retryLimit = 20
 	const retryDelay = 10 * time.Millisecond
 	var err error
 	for attempt := 0; attempt < retryLimit; attempt++ {
-		err = os.Rename(source, destination)
+		err = rename(source, destination)
 		if err == nil || !isRetryableWindowsReplaceError(err) {
 			return err
 		}
 		if attempt+1 < retryLimit {
-			time.Sleep(retryDelay)
+			sleep(retryDelay)
 		}
 	}
 	return err

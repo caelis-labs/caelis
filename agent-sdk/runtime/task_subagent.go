@@ -220,9 +220,10 @@ func (tm *taskRuntime) observePendingSubagentCancel(
 	turnSeq := canonical.turnSeq
 	phase := subagentCancelPhase(taskStringValue(canonical.metadata[subagentCancelPhaseKey]))
 	cancelTurnSeq, cancelTurnScoped := subagentCancelTurnSeq(canonical.metadata)
+	settled := !canonical.running && (canonical.pendingInput == nil || canonical.pendingInput.settled.Load())
 	snapshot := canonical.snapshotLocked()
 	canonical.mu.Unlock()
-	if turnSeq != expectedTurnSeq || phase == subagentCancelPhaseNone || phase == subagentCancelPhaseCompleted {
+	if turnSeq != expectedTurnSeq || settled || phase == subagentCancelPhaseNone || phase == subagentCancelPhaseCompleted {
 		return snapshot, nil
 	}
 	if !cancelTurnScoped {
@@ -288,19 +289,23 @@ func (tm *taskRuntime) applyObservedSubagentResult(
 		task.mu.Unlock()
 		return snapshot, nil
 	}
-	if task.running && !persistRunning &&
-		(result.Running || result.State == taskapi.StateRunning) {
-		snapshot := task.snapshotLocked()
-		if preview := result.OutputPreview; taskOutputHasNonBlankLine(preview) {
-			snapshot.Result["output_preview"] = preview
-		}
-		task.mu.Unlock()
-		return snapshot, nil
-	}
-	// A Task-stream observer may have applied a terminal result while this
-	// runner sample was in flight. Terminal state is monotonic: persist the
-	// current result instead of reopening it with an older running snapshot.
+	// Completion may have settled this Turn while the runner sample was in
+	// flight. Persist the current result when that sample is stale.
 	if task.running {
+		result = taskapi.CloneDelegationResult(result)
+		if err := validateSubagentResultState(result.State); err != nil {
+			snapshot := task.snapshotLocked()
+			task.mu.Unlock()
+			return snapshot, err
+		}
+		if !persistRunning && subagentResultIsActive(result.State) {
+			snapshot := task.snapshotLocked()
+			if preview := result.OutputPreview; taskOutputHasNonBlankLine(preview) {
+				snapshot.Result["output_preview"] = preview
+			}
+			task.mu.Unlock()
+			return snapshot, nil
+		}
 		task.applyResult(result)
 	}
 	snapshot := task.snapshotLocked()
@@ -556,13 +561,24 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	return task
 }
 
+func subagentResultIsActive(state taskapi.State) bool {
+	return state == taskapi.StateRunning || state == taskapi.StateWaitingApproval
+}
+
+func validateSubagentResultState(state taskapi.State) error {
+	if subagentResultIsActive(state) || taskapi.IsTerminalState(state) {
+		return nil
+	}
+	return errors.New("subagent runner returned an invalid state")
+}
+
+// applyResult applies a canonical result whose state was validated at ingress.
 func (t *subagentTask) applyResult(result taskapi.DelegationResult) {
 	if t == nil {
 		return
 	}
-	result = taskapi.CloneDelegationResult(result)
-	t.state = taskStateFromDelegation(result.State)
-	t.running = result.State == taskapi.StateRunning
+	t.state = result.State
+	t.running = subagentResultIsActive(result.State)
 	if !t.running && t.producerContextRelease != nil {
 		t.producerContextRelease()
 		t.producerContextRelease = nil
