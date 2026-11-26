@@ -9,6 +9,7 @@ import (
 )
 
 func TestLiveContentOwnershipUsesMessageIdentityWithoutInspectingText(t *testing.T) {
+	t.Parallel()
 	tracker := liveContentOwnership{}
 	delta := model.NewTextMessage(model.RoleAssistant, "prefix")
 	if tracker.observe(session.MarkUIOnly(&session.Event{
@@ -26,6 +27,7 @@ func TestLiveContentOwnershipUsesMessageIdentityWithoutInspectingText(t *testing
 }
 
 func TestLiveContentOwnershipSeparatesEqualMessageIDsByScope(t *testing.T) {
+	t.Parallel()
 	tracker := liveContentOwnership{}
 	childA := &session.EventScope{Participant: session.ParticipantRef{ID: "child-a"}}
 	childB := &session.EventScope{Participant: session.ParticipantRef{ID: "child-b"}}
@@ -49,6 +51,7 @@ func TestLiveContentOwnershipSeparatesEqualMessageIDsByScope(t *testing.T) {
 }
 
 func TestLiveContentOwnershipDoesNotGuessAnonymousNarrativeOwnership(t *testing.T) {
+	t.Parallel()
 	tracker := liveContentOwnership{}
 	delta := model.NewTextMessage(model.RoleAssistant, "delta")
 	tracker.observe(session.MarkUIOnly(&session.Event{Type: session.EventTypeAssistant, Message: &delta}))
@@ -61,6 +64,7 @@ func TestLiveContentOwnershipDoesNotGuessAnonymousNarrativeOwnership(t *testing.
 }
 
 func TestLiveContentOwnershipAssignsTaskBackedRunCommandToTaskStream(t *testing.T) {
+	t.Parallel()
 	event := &session.Event{
 		Type:       session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical,
@@ -80,6 +84,7 @@ func TestLiveContentOwnershipAssignsTaskBackedRunCommandToTaskStream(t *testing.
 }
 
 func TestLiveContentOwnershipAssignsCommandTaskObservationToTaskStream(t *testing.T) {
+	t.Parallel()
 	event := &session.Event{
 		Type:       session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical,
@@ -105,6 +110,7 @@ func TestLiveContentOwnershipAssignsCommandTaskObservationToTaskStream(t *testin
 }
 
 func TestLiveContentOwnershipRejectsUntrustedCommandTaskMetadata(t *testing.T) {
+	t.Parallel()
 	event := &session.Event{
 		Type:       session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical,
@@ -120,6 +126,7 @@ func TestLiveContentOwnershipRejectsUntrustedCommandTaskMetadata(t *testing.T) {
 }
 
 func TestLiveContentOwnershipKeepsUnpublishedAnswerWithSharedThoughtMessageID(t *testing.T) {
+	t.Parallel()
 	tracker := liveContentOwnership{}
 	thought := model.NewReasoningMessage(model.RoleAssistant, "thinking", model.ReasoningVisibilityVisible)
 	tracker.observe(session.MarkUIOnly(&session.Event{

@@ -9,6 +9,7 @@ import (
 )
 
 func TestBodyKeepsAllContentAndOriginalMedia(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Parts: []codemode.Part{{Kind: "text", Text: `{"value":1}`}, {Kind: "json", JSON: json.RawMessage(`{"value":1}`)}, {Kind: "text", Text: "second text"}, {Kind: "json", JSON: json.RawMessage(`{"value":2}`)}, {Kind: "media", Handle: "original-image", MimeType: "image/png"}}}, nil
 	}}
@@ -36,6 +37,7 @@ func (h *bodyEntryHost) Search(ctx context.Context, _ codemode.SearchRequest) (c
 }
 
 func TestBodyKeepsStructuredNull(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Value: json.RawMessage(`null`)}, nil
 	}}
@@ -46,6 +48,7 @@ func TestBodyKeepsStructuredNull(t *testing.T) {
 }
 
 func TestAllScriptEntriesReturnBody(t *testing.T) {
+	t.Parallel()
 	h := &bodyEntryHost{namedTestHost: namedTestHost{names: []codemode.ToolRoute{{Name: "Read"}, {Name: "apps", Server: "dtw", Tool: "apps", Plugin: "desktop"}}}}
 	calls := 0
 	h.call = func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
@@ -60,6 +63,7 @@ func TestAllScriptEntriesReturnBody(t *testing.T) {
 }
 
 func TestReviewS1AuthenticatedReplyGetterEvaluatedOnce(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "media", Handle: "owned-A", MimeType: "image/png"}}}, nil
 	}}
@@ -89,6 +93,7 @@ func TestReviewS1AuthenticatedReplyGetterEvaluatedOnce(t *testing.T) {
 
 // Selection uses the actual single budgeted element read, including accessors.
 func TestReplyPartElementAccessorEvaluatedOnce(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "media", Handle: "owned-A"}}}, nil
 	}}
@@ -110,6 +115,7 @@ func TestReplyPartElementAccessorEvaluatedOnce(t *testing.T) {
 }
 
 func TestNestedAuthenticatedMediaKeepsEncodingBudgets(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{Value: json.RawMessage(`{}`), Parts: []codemode.Part{{Kind: "json", JSON: json.RawMessage(`{}`)}, {Kind: "media", Handle: "owned-A"}, {Kind: "media", Handle: "owned-B"}}}, nil
 	}}
@@ -126,6 +132,7 @@ func TestNestedAuthenticatedMediaKeepsEncodingBudgets(t *testing.T) {
 }
 
 func TestBusinessResultMutationSelectsActualReferences(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{CallID: "original", Value: json.RawMessage(`{"content":"business"}`), Parts: []codemode.Part{{Kind: "text", Text: "original text"}, {Kind: "media", Handle: "owned-image", MimeType: "image/png"}}}, nil
 	}}

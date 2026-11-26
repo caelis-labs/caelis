@@ -13,6 +13,7 @@ import (
 )
 
 func TestRunnerPublishesSynchronouslyToInstalledObserver(t *testing.T) {
+	t.Parallel()
 	var got []agent.SourceEvent
 	observer := agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {
 		got = append(got, agent.CloneSourceEvent(event))
@@ -32,6 +33,7 @@ func TestRunnerPublishesSynchronouslyToInstalledObserver(t *testing.T) {
 }
 
 func TestRunnerWithoutObserverRetainsNoPayloadQueue(t *testing.T) {
+	t.Parallel()
 	runner := newRunner(t.Context(), "run-1", func() {}, nil)
 	for range 1024 {
 		runner.publishEvent(&session.Event{ID: "event", Type: session.EventTypeAssistant})
@@ -43,6 +45,7 @@ func TestRunnerWithoutObserverRetainsNoPayloadQueue(t *testing.T) {
 }
 
 func TestRunnerObserverFailureDoesNotCancelProducer(t *testing.T) {
+	t.Parallel()
 	cancelled := make(chan struct{}, 1)
 	runner := newRunner(t.Context(), "run-1", func() { cancelled <- struct{}{} }, agent.SourceEventObserverFunc(
 		func(context.Context, agent.SourceEvent) error { return errors.New("spool unavailable") },
@@ -60,6 +63,7 @@ func TestRunnerObserverFailureDoesNotCancelProducer(t *testing.T) {
 }
 
 func TestRunnerSourceOwnershipUsesStableMessageIdentity(t *testing.T) {
+	t.Parallel()
 	var got []agent.SourceEvent
 	runner := newRunner(t.Context(), "run-1", func() {}, agent.SourceEventObserverFunc(
 		func(_ context.Context, event agent.SourceEvent) error {
@@ -82,6 +86,7 @@ func TestRunnerSourceOwnershipUsesStableMessageIdentity(t *testing.T) {
 }
 
 func TestRunnerCancelClosesInputBeforeFinish(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	run := newRunner(ctx, "run-1", cancel, nil)
@@ -121,6 +126,7 @@ func TestRunnerPublicSubmitRejectsRuntimeModelContext(t *testing.T) {
 }
 
 func TestRunnerFinalDrainLinearizesContinuationAndClosure(t *testing.T) {
+	t.Parallel()
 	for range 100 {
 		r := newRunner(t.Context(), "race", func() {}, nil)
 		start := make(chan struct{})
@@ -143,6 +149,7 @@ func TestRunnerFinalDrainLinearizesContinuationAndClosure(t *testing.T) {
 }
 
 func TestRunnerBatchAdmissionValidatesAllSourcesAndClones(t *testing.T) {
+	t.Parallel()
 	r := newRunner(t.Context(), "batch", func() {}, nil)
 	sub := agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: []agent.AgentCommunicationInput{
 		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one"}, Input: "one"},
@@ -320,6 +327,7 @@ func TestRunnerSubmissionDispatcherSkipsCanceledQueuedRequest(t *testing.T) {
 }
 
 func TestRunnerInputReadyTracksAdmissionAndDrain(t *testing.T) {
+	t.Parallel()
 	r := newRunner(t.Context(), "input-signal", func() {}, nil)
 	other := newRunner(t.Context(), "other-turn", func() {}, nil)
 	ready := r.inputReadySignal()

@@ -84,7 +84,7 @@ func approvalRecordFromEvent(event *session.Event) *session.ApprovalRecord {
 func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 	t.Parallel()
 
-	base := sessionfile.NewStore(sessionfile.Config{
+	base := newLogicalFileStore(t, sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-approval-committed" },
 	})
@@ -397,7 +397,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			case "memory":
 				base = inmemory.NewStore(inmemory.Config{})
 			case "file":
-				base = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+				base = newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 			}
 			resolverCtx, cancel := context.WithCancel(context.Background())
 			sessions := &cancelAfterCommitApprovalService{ManagedService: base, cancel: cancel}
@@ -478,6 +478,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 }
 
 func TestRequestDurableApprovalHonorsFirstCommittedDecision(t *testing.T) {
+	t.Parallel()
 	sessions, active := newTestSessionService(t, "approval-first-wins")
 	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
 	if err != nil {
@@ -535,8 +536,9 @@ func TestRequestDurableApprovalHonorsFirstCommittedDecision(t *testing.T) {
 }
 
 func TestDurableApprovalSeparatesPrivateEvidenceFromPresentation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -559,7 +561,7 @@ func TestDurableApprovalSeparatesPrivateEvidenceFromPresentation(t *testing.T) {
 	if err != nil || got != decision {
 		t.Fatalf("request = %+v, %v", got, err)
 	}
-	fresh := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	fresh := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	events, err := fresh.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
@@ -583,8 +585,9 @@ func TestDurableApprovalSeparatesPrivateEvidenceFromPresentation(t *testing.T) {
 }
 
 func TestDurableIndependentPermissionRestoresExactEvidenceWithoutTool(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -605,7 +608,7 @@ func TestDurableIndependentPermissionRestoresExactEvidenceWithoutTool(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	events, err := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}

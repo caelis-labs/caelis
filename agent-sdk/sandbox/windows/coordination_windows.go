@@ -6,7 +6,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 )
 
 var errSandboxStateBusy = errors.New("windows sandbox state is in use")
@@ -30,7 +30,7 @@ type sandboxStateCoordinator struct {
 var sandboxStateCoordinators sync.Map
 
 func sandboxCoordinatorFor(stateRoot string) *sandboxStateCoordinator {
-	key := pathutil.Key(stateRoot)
+	key := capability.PathKey(stateRoot)
 	actual, _ := sandboxStateCoordinators.LoadOrStore(key, &sandboxStateCoordinator{
 		activeEnvRoots: map[string]int{},
 		envRemovals:    map[string]chan struct{}{},
@@ -42,7 +42,7 @@ func (c *sandboxStateCoordinator) registerRuntime(envRoot string) error {
 	if c == nil {
 		return nil
 	}
-	key := pathutil.Key(envRoot)
+	key := capability.PathKey(envRoot)
 	for {
 		c.aclMu.Lock()
 		c.mu.Lock()
@@ -90,7 +90,7 @@ func (c *sandboxStateCoordinator) unregisterRuntime(envRoot string) {
 	if c.runtimeRefs > 0 {
 		c.runtimeRefs--
 	}
-	if key := pathutil.Key(envRoot); key != "" {
+	if key := capability.PathKey(envRoot); key != "" {
 		if refs := c.activeEnvRoots[key]; refs > 1 {
 			c.activeEnvRoots[key] = refs - 1
 		} else {
@@ -111,7 +111,7 @@ func (c *sandboxStateCoordinator) beginUse(envRoot string) (func(), error) {
 		return nil, errSandboxStateBusy
 	}
 	c.activeUses++
-	envKey := pathutil.Key(envRoot)
+	envKey := capability.PathKey(envRoot)
 	if envKey != "" {
 		if c.activeEnvRoots == nil {
 			c.activeEnvRoots = map[string]int{}
@@ -164,7 +164,7 @@ func (c *sandboxStateCoordinator) protectsEnvRoot(path string) bool {
 	if c == nil {
 		return false
 	}
-	key := pathutil.Key(path)
+	key := capability.PathKey(path)
 	if key == "" {
 		return false
 	}
@@ -177,7 +177,7 @@ func (c *sandboxStateCoordinator) withUnusedEnvRoot(path string, remove func() e
 	if c == nil {
 		return true, remove()
 	}
-	key := pathutil.Key(path)
+	key := capability.PathKey(path)
 	if key == "" {
 		return false, nil
 	}

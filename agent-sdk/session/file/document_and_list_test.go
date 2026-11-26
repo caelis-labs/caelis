@@ -25,7 +25,7 @@ func TestStoreCurrentDocumentRoundTripsSealedACPPlacement(t *testing.T) {
 
 	root := t.TempDir()
 	ctx := context.Background()
-	store := NewStore(Config{RootDir: root})
+	store := newLogicalTestStore(t, Config{RootDir: root})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "current-user",
@@ -61,7 +61,7 @@ func TestStoreCurrentDocumentRoundTripsSealedACPPlacement(t *testing.T) {
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
 
-	loaded, err := NewStore(Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := newLogicalTestStore(t, Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -89,6 +89,7 @@ func TestStoreCurrentDocumentRoundTripsSealedACPPlacement(t *testing.T) {
 }
 
 func TestStoreUnreadableSessionLeavesOriginalBytes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		data   string
@@ -104,7 +105,7 @@ func TestStoreUnreadableSessionLeavesOriginalBytes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := t.Context()
-			store := NewStore(Config{RootDir: t.TempDir()})
+			store := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 			req := session.StartSessionRequest{AppName: "app", UserID: "user", PreferredSessionID: "old"}
 			old, err := store.StartSession(ctx, req)
 			if err != nil {
@@ -136,8 +137,9 @@ func TestStoreUnreadableSessionLeavesOriginalBytes(t *testing.T) {
 }
 
 func TestUnreadableIndexRowPreservesPaginationAndExactReadFailure(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	store := NewStore(Config{RootDir: t.TempDir()})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	for _, id := range []string{"healthy", "bad-metadata", "bad-path"} {
 		if _, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "app", UserID: "user", PreferredSessionID: id}); err != nil {
 			t.Fatal(err)
@@ -153,7 +155,7 @@ func TestUnreadableIndexRowPreservesPaginationAndExactReadFailure(t *testing.T) 
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reader := NewStore(Config{RootDir: store.rootDir})
+	reader := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	cursor := ""
 	for _, id := range []string{"bad-path", "bad-metadata", "healthy"} {
 		page, err := reader.ListSessions(ctx, session.ListSessionsRequest{Limit: 1, Cursor: cursor})
@@ -172,6 +174,7 @@ func TestUnreadableIndexRowPreservesPaginationAndExactReadFailure(t *testing.T) 
 }
 
 func TestCanonicalLogIsAppendOnlyAcrossReopen(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 2)
 	document, err := store.resolveDocumentPath(active.SessionID, active.WorkspaceKey)
 	if err != nil {
@@ -190,7 +193,7 @@ func TestCanonicalLogIsAppendOnlyAcrossReopen(t *testing.T) {
 	if len(after) <= len(before) || !bytes.HasPrefix(after, before) {
 		t.Fatal("log is not append-only")
 	}
-	reopened := NewStore(Config{RootDir: store.rootDir})
+	reopened := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	again, err := reopened.resolveDocumentPath(active.SessionID, active.WorkspaceKey)
 	if err != nil || eventLogPath(again) != path {
 		t.Fatalf("path changed %s %v", again, err)
@@ -207,6 +210,7 @@ func TestCanonicalLogIsAppendOnlyAcrossReopen(t *testing.T) {
 }
 
 func TestStoreListCWDNormalizesStoredPathsBeforePagination(t *testing.T) {
+	t.Parallel()
 	workspace := t.TempDir()
 	sep := string(filepath.Separator)
 	testStoreListCWDVariants(t, workspace, []string{
@@ -218,6 +222,7 @@ func TestStoreListCWDNormalizesStoredPathsBeforePagination(t *testing.T) {
 }
 
 func TestWindowsStoreListCWDMatchesPathSpellings(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows path comparison")
 	}
@@ -243,10 +248,10 @@ func testStoreListCWDVariants(t *testing.T, workspace string, variants []string)
 			var store, reader session.Lifecycle
 			if backend == "file" {
 				root := t.TempDir()
-				store = NewStore(Config{RootDir: root, Clock: clock})
+				store = newLogicalTestStore(t, Config{RootDir: root, Clock: clock})
 				// Listing must also recognize spellings in an existing index after
 				// reopening, without rewriting the durable Session's CWD or key.
-				reader = NewStore(Config{RootDir: root})
+				reader = newLogicalTestStore(t, Config{RootDir: root})
 			} else {
 				store = inmemory.NewStore(inmemory.Config{Clock: clock})
 				reader = store
@@ -297,9 +302,10 @@ func testStoreListCWDVariants(t *testing.T, workspace string, variants []string)
 }
 
 func TestLargeJournalReceiptSurvivesColdAppendAndReopen(t *testing.T) {
+	t.Parallel()
 	store, active := newLargeJournalFixture(t, 1)
 	root := store.rootDir
-	store = NewStore(Config{RootDir: root})
+	store = newLogicalTestStore(t, Config{RootDir: root})
 	// Exercise the same cold compact-index path as a log crossing 32 MiB,
 	// without making the correctness fixture depend on machine throughput.
 	store.eventLogCacheMaxBytes = 1024
@@ -318,7 +324,7 @@ func TestLargeJournalReceiptSurvivesColdAppendAndReopen(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)

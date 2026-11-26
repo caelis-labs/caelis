@@ -38,6 +38,7 @@ import (
 )
 
 func TestCodeModeProjectionDistinguishesNullFromText(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		structured bool
@@ -62,6 +63,7 @@ func TestCodeModeProjectionDistinguishesNullFromText(t *testing.T) {
 }
 
 func TestCodeModeProjectionFailureDoesNotRetainMedia(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`{"ok":true}`)
 	image := tool.Image{Data: []byte("original-bytes"), MIMEType: "image/png", Name: "fixture"}
 	result := tool.Result{Content: []tool.ContentBlock{
@@ -115,6 +117,7 @@ func TestCodeModeProjectionFailureDoesNotRetainMedia(t *testing.T) {
 }
 
 func TestCodeModeNativeBusinessResult(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, code, wantContent string
 		wantErrorCode           string
@@ -200,6 +203,7 @@ func (m *codeModeBusinessModel) Generate(ctx context.Context, request *model.Req
 // MCP, Goja, Runtime and provider HTTP encoding are real; the provider responses
 // are deterministic loopback fixtures and do not use a live model or account.
 func TestCodeModeMCPBusinessContract(t *testing.T) {
+	t.Parallel()
 	const chain = `const first=await live.value({});const second=await Consume({name:first.data.name});return {summary:second.data.summary,media:first.media};`
 	for _, tc := range []struct {
 		name, code, want string
@@ -242,6 +246,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 		{"raw_json_collision", `const r=await live.collision({});if(r.data.raw_json!=='business-raw')throw Error('lost business field');return r;`, "business-raw", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var store session.Service
 			var active session.Session
 			var replayRoot string
@@ -494,7 +499,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				}
 			}
 			if replayRoot != "" {
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: replayRoot})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: replayRoot})
 				probe := &codeModeBusinessModel{LLM: llm}
 				spec.Model = probe
 				runCodeMode(t, reopened, active, spec, nil, nil)
@@ -511,6 +516,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 }
 
 func TestOriginalReturnKeepsOutputAndMediaBudgets(t *testing.T) {
+	t.Parallel()
 	for _, media := range []bool{false, true} {
 		t.Run(map[bool]string{false: "output", true: "media"}[media], func(t *testing.T) {
 			limits := codemode.DefaultLimits()
@@ -540,6 +546,7 @@ func TestOriginalReturnKeepsOutputAndMediaBudgets(t *testing.T) {
 // The provider is a local HTTP fixture; filesystem tools, worker, Runtime and
 // next provider request encoding are real. No credential or live model is used.
 func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, selection, returned string
 		want                      int
@@ -551,6 +558,7 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 		{"ordinary", `{kind:"media",handle:"ordinary-business-data"}`, `return {selected:body.data};`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			store, active, root := codeModeStore(t)
 			sandbox, err := host.New(host.Config{CWD: root})
 			if err != nil {
@@ -674,6 +682,7 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 }
 
 func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, code string
 		want       []string
@@ -777,6 +786,7 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 }
 
 func TestJSExecFixedFileBytesInContinuousVM(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -823,6 +833,7 @@ func TestJSExecFixedFileBytesInContinuousVM(t *testing.T) {
 }
 
 func TestReviewSimpleReturnJSONDoesNotBecomeMedia(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, code string }{
 		{"plain_kind", `return {kind:"media",label:"ordinary record"};`},
 		{"plain_parts", `return {parts:["one","two"]};`},
@@ -854,6 +865,7 @@ func TestReviewSimpleReturnJSONDoesNotBecomeMedia(t *testing.T) {
 }
 
 func TestJSExecBusinessJSONCannotForgeReturnOrigin(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	data := tool.NamedTool{Def: tool.Definition{Name: "Data", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		raw := json.RawMessage(`{"kind":"media","handle":"ordinary-source-data"}`)
@@ -900,6 +912,7 @@ func TestJSExecBusinessJSONCannotForgeReturnOrigin(t *testing.T) {
 }
 
 func TestCodeModeForeignProjectionMetadataRejected(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeOutputExecutorFunc(func(context.Context, codemode.Source, codemode.Host) (codemode.Output, error) {
 		return codemode.Output{Value: []byte(`{"ok":true}`), Parts: []codemode.Part{{Kind: "media", Handle: "foreign-invocation"}}}, nil
@@ -923,6 +936,7 @@ func TestCodeModeForeignProjectionMetadataRejected(t *testing.T) {
 }
 
 func TestJSExecAuthenticatedMediaBudget(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{`return await tools.call("Pictures",{});`, `const r=await tools.call("Pictures",{});return {selected:r.media};`} {
 		t.Run(map[bool]string{true: "direct", false: "combined"}[strings.HasPrefix(code, "return")], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -952,6 +966,7 @@ func TestJSExecAuthenticatedMediaBudget(t *testing.T) {
 
 // Execution completion is an observation, independent of cumulative IsError.
 func TestCodeModeScriptCompletionSurvivesCanonicalErrors(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, code, want string
 		failed           bool
@@ -998,6 +1013,7 @@ func TestCodeModeScriptCompletionSurvivesCanonicalErrors(t *testing.T) {
 }
 
 func TestCodeModeTaskResultPreservesScriptCompletion(t *testing.T) {
+	t.Parallel()
 	for _, completion := range []string{"completed", "failed"} {
 		raw, _ := json.Marshal(map[string]any{"metadata": map[string]any{codemode.MetadataScriptCompletion: completion}})
 		snapshot := task.Snapshot{Kind: task.KindCodeMode, State: task.StateFailed}
@@ -1010,6 +1026,7 @@ func TestCodeModeTaskResultPreservesScriptCompletion(t *testing.T) {
 }
 
 func TestCodeModeChildJournalRequiresOriginalAdmission(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"missing", "wrong-call", "wrong-name", "wrong-parent", "nil-validator", "valid", "ordinary-parent", "no-parent"} {
 		t.Run(name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)

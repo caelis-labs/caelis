@@ -25,8 +25,9 @@ import (
 )
 
 func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "user", Workspace: session.WorkspaceRef{CWD: t.TempDir()}})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +102,7 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	if err != nil || bytes.Count(raw, []byte(data)) != 1 {
 		t.Fatalf("runtime media was not shared on disk: %v", err)
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +124,7 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	// Continue with a new Runtime and Store. The model's next request must match
 	// its actual pre-restart context plus the completed answer and new input.
 	second := &mediaPersistenceModel{toolLoopRuntimeModel: toolLoopRuntimeModel{calls: 1}}
-	run(sessionfile.NewStore(sessionfile.Config{RootDir: root}), second, "continue")
+	run(newLogicalFileStore(t, sessionfile.Config{RootDir: root}), second, "continue")
 	want := append(model.CloneMessages(first.requests[1]), model.NewTextMessage(model.RoleAssistant, "pong"), model.NewTextMessage(model.RoleUser, "continue"))
 	if len(second.requests) != 1 || !reflect.DeepEqual(second.requests[0], want) {
 		t.Fatal("rebuilt model context differs from Runtime-produced context")

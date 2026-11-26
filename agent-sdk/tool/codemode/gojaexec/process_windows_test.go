@@ -15,6 +15,7 @@ import (
 )
 
 func TestWorkerWindowsDetachedHost(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("CAELIS_GOJA_WINDOWS_HOST") != "1" {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()

@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -1586,10 +1587,10 @@ func TestResponseInvocationUsesRequestedModelIdentity(t *testing.T) {
 func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-context-roundtrip" },
-	})
+	}))
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1719,10 +1720,10 @@ func TestChildVisibilityMirrorDoesNotChangeParentModelContext(t *testing.T) {
 func TestProviderReplayMetadataRoundTripsThroughSessionStore(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-provider-replay-meta" },
-	})
+	}))
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1804,10 +1805,10 @@ func TestProviderReplayMetadataRoundTripsThroughSessionStore(t *testing.T) {
 func TestServerSideToolReplayPartsRoundTripThroughSessionStore(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-server-tool-roundtrip" },
-	})
+	}))
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1888,10 +1889,10 @@ func serverSideToolReplayTestPart(kind string, raw json.RawMessage) model.Part {
 func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-context-stability" },
-	})
+	}))
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

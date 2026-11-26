@@ -26,6 +26,7 @@ import (
 )
 
 func TestPolicyAndApprovalReceiveResolvedSessionIdentity(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "by-id")
 	var policyRef, approvalRef, approvalSession session.SessionRef
 	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "ask", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
@@ -61,6 +62,7 @@ func TestPolicyAndApprovalReceiveResolvedSessionIdentity(t *testing.T) {
 }
 
 func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
+	t.Parallel()
 	for _, synthetic := range []bool{false, true} {
 		for _, deny := range []bool{false, true} {
 			t.Run(map[bool]string{false: "dispatch", true: "synthetic"}[synthetic]+map[bool]string{false: "/allow", true: "/deny"}[deny], func(t *testing.T) {
@@ -154,6 +156,7 @@ func TestHooksFreezeFinalArgumentsBeforePolicyAndBatch(t *testing.T) {
 }
 
 func TestHooksPrepareInvalidSchemaNeverCommitsOrDispatches(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "hook-schema")
 	var effects atomic.Int64
 	probe := tool.NamedTool{Def: tool.Definition{Name: "operate", InputSchema: map[string]any{"type": "object", "required": []string{"app"}}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}
@@ -193,6 +196,7 @@ func TestHooksPrepareInvalidSchemaNeverCommitsOrDispatches(t *testing.T) {
 }
 
 func TestHooksModelCacheAndResultKeepActualAccounting(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "hook-cache")
 	var providers atomic.Int64
 	llm := scriptedTestModel{generate: func(_ context.Context, r *model.Request) *model.Response {
@@ -257,6 +261,7 @@ func hookMessage(text string) *model.Message {
 }
 
 func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"accepted", "result-failure", "view-failure", "invalid-structured", "invalid-output-schema", "forged-completion"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -330,7 +335,7 @@ func TestHooksCodeModeFullResultAndModelViewShareFact(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			reopened, err := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -402,6 +407,7 @@ func (s *projectionArtifactRecorder) Save(_ context.Context, result tool.Result)
 }
 
 func TestToolProjectionBoundsCodeModeViewsAndSavesOnlyOuterResult(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	text := strings.Repeat("payload", 3000)
 	probe := tool.NamedTool{Def: tool.Definition{Name: "lookup", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -426,7 +432,7 @@ func TestToolProjectionBoundsCodeModeViewsAndSavesOnlyOuterResult(t *testing.T) 
 	if err = run.Handle.WaitCompletion(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	loaded, err := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,11 +462,13 @@ func TestToolProjectionBoundsCodeModeViewsAndSavesOnlyOuterResult(t *testing.T) 
 }
 
 func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
+	t.Parallel()
 	for _, nested := range []bool{false, true} {
 		for _, mode := range []string{"error", "panic", "timeout", "invalid", "unknown", "accepted"} {
 			t.Run(fmt.Sprintf("nested=%v/%s", nested, mode), func(t *testing.T) {
+				t.Parallel()
 				root := t.TempDir()
-				store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "safe-result"})
 				if err != nil {
 					t.Fatal(err)
@@ -556,7 +564,7 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 				if err != nil || !reflect.DeepEqual(live, events) {
 					t.Fatalf("full fact replay changed: %v", err)

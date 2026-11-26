@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -24,7 +25,7 @@ func TestPriorHostFenceReplacementRequiresStoreAuthorization(t *testing.T) {
 	}{
 		{name: "memory", new: func(*testing.T) session.ManagedService { return inmemory.NewStore(inmemory.Config{}) }},
 		{name: "file", new: func(t *testing.T) session.ManagedService {
-			return sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+			return sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,7 +63,8 @@ func TestPriorHostFenceCapabilityRechecksAuthorization(t *testing.T) {
 			case "memory":
 				service, priorHostFences = inmemory.NewStoreWithPriorHostFences(inmemory.Config{}, deny)
 			case "file":
-				service, priorHostFences = sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: t.TempDir()}, deny)
+				store, cap := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: t.TempDir()}, deny)
+				service, priorHostFences = sdkctx.UseLogicalFileStore(t, store), cap
 			}
 			active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 				AppName: "caelis", UserID: "user-1", PreferredSessionID: "denied-takeover",
@@ -101,7 +103,7 @@ func TestSessionFenceObservationCannotForgeReleaseOrMutation(t *testing.T) {
 			case "memory":
 				service = inmemory.NewStore(inmemory.Config{})
 			case "file":
-				service = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+				service = sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
 			}
 			ctx := context.Background()
 			active, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -174,11 +176,11 @@ func TestSessionFenceServiceConformance(t *testing.T) {
 			case "file":
 				root := t.TempDir()
 				base, prior := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: root, Clock: clock.Now}, allowPriorHostFence)
-				service = base
+				service = sdkctx.UseLogicalFileStore(t, base)
 				priorHostFences = prior
 				reopen = func() (session.ManagedService, session.PriorHostFenceService) {
 					reopened, reopenedPrior := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: root, Clock: clock.Now}, allowPriorHostFence)
-					return reopened, reopenedPrior
+					return sdkctx.UseLogicalFileStore(t, reopened), reopenedPrior
 				}
 			}
 			ctx := context.Background()
@@ -250,7 +252,8 @@ func TestSessionFenceReleaseAndFenceConformance(t *testing.T) {
 			case "memory":
 				service, priorHostFences = inmemory.NewStoreWithPriorHostFences(inmemory.Config{Clock: clock.Now}, allowPriorHostFence)
 			case "file":
-				service, priorHostFences = sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: t.TempDir(), Clock: clock.Now}, allowPriorHostFence)
+				store, cap := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: t.TempDir(), Clock: clock.Now}, allowPriorHostFence)
+				service, priorHostFences = sdkctx.UseLogicalFileStore(t, store), cap
 			}
 			active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 				AppName: "caelis", UserID: "user-1", PreferredSessionID: "fence-boundary",

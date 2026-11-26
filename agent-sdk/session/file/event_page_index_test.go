@@ -103,7 +103,7 @@ func TestEventsPageCheckpointSurvivesCrossStoreAppend(t *testing.T) {
 		t.Fatalf("initial page = %#v, want complete seq 220", page)
 	}
 
-	other := NewStore(Config{RootDir: store.rootDir})
+	other := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	appendLifecycleEvents(t, other, active.SessionRef, 220, 3)
 	var lines []int
 	store.eventPageLineRead = func(_ string, lineNo int, _ int64) {
@@ -249,6 +249,7 @@ func TestEventsPageCheckpointScanHonorsContextCancellation(t *testing.T) {
 }
 
 func TestEventsPageCheckpointBoundsProductionShapedLiveChildBurst(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 73)
 	page, err := store.EventsPage(context.Background(), session.EventPageRequest{
 		SessionRef: active.SessionRef, ThroughSeq: 73, Visibility: session.EventPageAllDurable,
@@ -306,7 +307,7 @@ func TestEventsPageCheckpointBoundsProductionShapedLiveChildBurst(t *testing.T) 
 
 func newEventPageIndexFixture(t testing.TB, count int) (*Store, session.Session) {
 	t.Helper()
-	store := NewStore(Config{
+	store := newLogicalTestStore(t, Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "event-page-index-session" },
 	})
@@ -354,6 +355,7 @@ func eventPageCheckpointForSeq(index *eventPageIndex, seq uint64) (eventPageChec
 }
 
 func TestEventsPageStopsAtRequestedDurableCut(t *testing.T) {
+	t.Parallel()
 	for _, visibility := range []session.EventPageVisibility{session.EventPageAllDurable, session.EventPageClientReplay} {
 		t.Run(string(visibility), func(t *testing.T) {
 			store, active := newEventPageIndexFixture(t, 1000)
@@ -379,6 +381,7 @@ func TestEventsPageStopsAtRequestedDurableCut(t *testing.T) {
 }
 
 func TestEventsPageValidatesOnlyRequestedCut(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 4)
 	document, err := store.resolveWritePath(active)
 	if err != nil {
@@ -403,6 +406,7 @@ func TestEventsPageValidatesOnlyRequestedCut(t *testing.T) {
 }
 
 func TestFileReplayExcludesValidJSONWithoutRecordTerminator(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 2)
 	document, err := store.resolveWritePath(active)
 	if err != nil {
@@ -424,7 +428,7 @@ func TestFileReplayExcludesValidJSONWithoutRecordTerminator(t *testing.T) {
 	if err := errors.Join(writeErr, file.Close()); err != nil {
 		t.Fatal(err)
 	}
-	cold := NewStore(Config{RootDir: store.rootDir})
+	cold := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	ref := active.SessionRef
 	page, err := cold.EventsPage(t.Context(), session.EventPageRequest{SessionRef: ref, Visibility: session.EventPageAllDurable})
 	if err != nil || page.NextSeq != 2 || len(page.Events) != 2 {

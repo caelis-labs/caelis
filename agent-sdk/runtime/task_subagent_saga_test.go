@@ -338,6 +338,7 @@ func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.Append
 }
 
 func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
+	t.Parallel()
 	baseStore := newSagaTaskStore()
 	store := &completionGateTaskStore{
 		base:    baseStore,
@@ -389,6 +390,7 @@ func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
 }
 
 func TestSubagentProducerCompletionRetriesWithoutTaskObservation(t *testing.T) {
+	t.Parallel()
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
@@ -425,6 +427,7 @@ func TestSubagentProducerCompletionRetriesWithoutTaskObservation(t *testing.T) {
 }
 
 func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
+	t.Parallel()
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
@@ -468,6 +471,7 @@ func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
 }
 
 func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *testing.T) {
+	t.Parallel()
 	baseSessions := memory.NewStore(memory.Config{})
 	sessions := &sagaSessionService{ManagedService: baseSessions, failCanonicalAt: 2}
 	store := newSagaTaskStore()
@@ -513,6 +517,7 @@ func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *tes
 }
 
 func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) {
+	t.Parallel()
 	baseSessions := memory.NewStore(memory.Config{})
 	sessions := &completionNoticeFailSessionService{sagaSessionService: &sagaSessionService{ManagedService: baseSessions}}
 	sessions.fail.Store(true)
@@ -1559,7 +1564,7 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	sessions := store
 	tasks := sessionfile.NewTaskStore(store)
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
@@ -1602,7 +1607,7 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedStore := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reopenedSessions := reopenedStore
 	reopenedTasks := sessionfile.NewTaskStore(reopenedStore)
 	gotTask, err := reopenedTasks.Get(context.Background(), snapshot.Ref.TaskID)

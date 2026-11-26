@@ -32,6 +32,7 @@ import (
 )
 
 func TestCodeModeCancelsPendingApprovalWithoutEffect(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	started, approvalStarted := make(chan struct{}), make(chan struct{})
 	var effects atomic.Int32
@@ -124,6 +125,7 @@ func TestCodeModeCancelsPendingApprovalWithoutEffect(t *testing.T) {
 }
 
 func TestCodeModeYieldedCallOverlapsSameTargetFromNativeSnapshot(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	release := make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
@@ -244,6 +246,7 @@ func (s taskWaitFactStore) AppendEvent(ctx context.Context, req session.AppendEv
 }
 
 func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
+	t.Parallel()
 	files, active, _ := codeModeStore(t)
 	waitStarted := make(chan struct{})
 	markWait := sync.OnceFunc(func() { close(waitStarted) })
@@ -314,6 +317,7 @@ func TestCodeModeNativeTaskWaitAllowsNestedTaskRead(t *testing.T) {
 }
 
 func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{filesystem.WriteToolName, filesystem.PatchToolName} {
 		t.Run(name, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -379,6 +383,7 @@ func TestNativeFileMutationBatchRunsInModelOrder(t *testing.T) {
 }
 
 func TestNativeScriptTaskWaitAndCancelOrdering(t *testing.T) {
+	t.Parallel()
 	for _, separated := range []bool{false, true} {
 		name := "adjacent"
 		if separated {

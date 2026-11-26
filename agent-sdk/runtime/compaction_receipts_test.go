@@ -27,7 +27,8 @@ type interleavedCompactionModel struct {
 }
 
 func TestCompactionReceiptAndCheckpointKeepOriginalFence(t *testing.T) {
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	t.Parallel()
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -72,10 +73,11 @@ func (m *interleavedCompactionModel) Generate(ctx context.Context, req *model.Re
 }
 
 func TestCompactionAccountingSurvivesConcurrentJournalWithoutAdmittingStaleContext(t *testing.T) {
+	t.Parallel()
 	for _, visible := range []bool{false, true} {
 		t.Run(map[bool]string{false: "journal", true: "model_context"}[visible], func(t *testing.T) {
 			root := t.TempDir()
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "user"})
 			if err != nil {
 				t.Fatal(err)
@@ -83,7 +85,7 @@ func TestCompactionAccountingSurvivesConcurrentJournalWithoutAdmittingStaleConte
 			if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: userTextEvent("original objective")}); err != nil {
 				t.Fatal(err)
 			}
-			other := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			other := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			llm := &interleavedCompactionModel{mutate: func() {
 				event := session.NewModelInvocationReceipt(model.Invocation{ID: "concurrent-review", Outcome: "completed"}, "guardian")
 				if visible {
@@ -105,7 +107,7 @@ func TestCompactionAccountingSurvivesConcurrentJournalWithoutAdmittingStaleConte
 			} else if err != nil || !result.Compacted {
 				t.Fatalf("journal-only compaction = %+v, %v", result, err)
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -213,6 +215,7 @@ func bindCoverage(t *testing.T, req *compact.Request) {
 }
 
 func TestCompactionCoverageRejectsInvalidBeforeGeneration(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"force", "compact"} {
 		for _, tt := range []struct {
 			name   string
@@ -265,6 +268,7 @@ func TestCompactionCoverageRejectsInvalidBeforeGeneration(t *testing.T) {
 }
 
 func TestCompactionCoverageAllowsCheckpointAfterRawTail(t *testing.T) {
+	t.Parallel()
 	llm := &coverageModel{}
 	req := coverageRequest(t, llm)
 	checkpoint := &session.Event{ID: "checkpoint", Seq: 3, Type: session.EventTypeCompact, Text: "older summary", Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(session.CheckpointData{ContractVersion: compact.CompactContractVersion, SummarizedThroughSeq: 1, SummarizedThroughID: "user"})}}
@@ -289,6 +293,7 @@ func TestCompactionCoverageAllowsCheckpointAfterRawTail(t *testing.T) {
 }
 
 func TestCompactionRequireInContextNeverFallsBack(t *testing.T) {
+	t.Parallel()
 	for _, requirement := range []string{"request", "coverage"} {
 		for _, failure := range []string{"empty", "tools", "length", "error"} {
 			t.Run(requirement+"/"+failure, func(t *testing.T) {
@@ -318,6 +323,7 @@ func TestCompactionRequireInContextNeverFallsBack(t *testing.T) {
 }
 
 func TestCompactionRequireInContextOptionalRetainsFallback(t *testing.T) {
+	t.Parallel()
 	llm := &coverageModel{err: errors.New("in-context generation failed")}
 	req := coverageRequest(t, llm)
 	req.RequireInContext, req.Coverage = false, nil
@@ -358,10 +364,11 @@ func (m *invocationFaultModel) Generate(context.Context, *model.Request) iter.Se
 }
 
 func TestRuntimeInvocationReceiptsSurviveRepairFailureCancellationAndReopen(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"repair", "failure", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "w", CWD: t.TempDir()}})
 			if err != nil {
 				t.Fatal(err)
@@ -397,7 +404,7 @@ func TestRuntimeInvocationReceiptsSurviveRepairFailureCancellationAndReopen(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			after, err := reopened.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -431,6 +438,7 @@ func TestRuntimeInvocationReceiptsSurviveRepairFailureCancellationAndReopen(t *t
 }
 
 func TestRuntimeCompactionPersistsEveryAttemptEvenWhenCheckpointFails(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "failure"}[fail], func(t *testing.T) {
 			sessions, active := newTestSessionService(t, "compact-usage")
@@ -486,6 +494,7 @@ func (s failingInvocationStore) AppendEvent(ctx context.Context, req session.App
 	return s.Service.AppendEvent(ctx, req)
 }
 func TestRuntimeReceiptPersistenceFailureCannotBecomeSuccessfulTurn(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "receipt-failure")
 	failure := errors.New("receipt write failed")
 	rt, err := New(Config{Sessions: failingInvocationStore{Service: store, failure: failure}, AgentFactory: chat.Factory{}})
@@ -513,6 +522,7 @@ func TestRuntimeReceiptPersistenceFailureCannotBecomeSuccessfulTurn(t *testing.T
 }
 
 func TestAsyncCompactionDynamicMissingParentValidateDisablesSpeculation(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run, err := h.rt.Run(h.ctx, agent.RunRequest{SessionRef: h.active.SessionRef, Input: "continue", AgentSpec: agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
 		return agent.ModelRequestSnapshot{Revision: "optional-validator", Model: h.llm, Tools: []tool.Tool{h.tool}}, nil
@@ -545,6 +555,7 @@ func TestAsyncCompactionDynamicMissingParentValidateDisablesSpeculation(t *testi
 }
 
 func TestAsyncCompactionDynamicRemovedParentValidatePreventsAdoption(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	var removed atomic.Bool
 	run, err := h.rt.Run(h.ctx, agent.RunRequest{SessionRef: h.active.SessionRef, Input: "continue", AgentSpec: agent.AgentSpec{ResolveModelRequest: func(ctx context.Context) (agent.ModelRequestSnapshot, error) {
@@ -583,6 +594,7 @@ func TestAsyncCompactionDynamicRemovedParentValidatePreventsAdoption(t *testing.
 type overflowOnlyCompactor struct{ compact.Engine }
 
 func TestExperimentalDynamicRecoveryRejectsMissingRequestAuthority(t *testing.T) {
+	t.Parallel()
 	for _, async := range []bool{false, true} {
 		t.Run(fmt.Sprintf("async_%t", async), func(t *testing.T) {
 			h := newAsyncHarness(t, "")

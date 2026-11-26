@@ -295,6 +295,7 @@ func TestRuntimeSendMessageToolErrorHasNoImplementationPrefix(t *testing.T) {
 }
 
 func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T) {
+	t.Parallel()
 	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, runner, taskapi.SubagentStartRequest{
@@ -538,6 +539,7 @@ func TestRuntimeTaskRejectsNonStringInput(t *testing.T) {
 }
 
 func TestTaskRejectsParticipantHandlesForEveryAction(t *testing.T) {
+	t.Parallel()
 	_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
 	runtime.tasks.subagents["child"] = &subagentTask{ref: taskapi.Ref{TaskID: "child", SessionID: "child-session"}, sessionRef: active.SessionRef, handle: "worker", state: taskapi.StateCompleted}
 	target := runtimeTaskTool{base: tasktool.New(), sessionRef: active.SessionRef, tasks: runtime.tasks}

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 )
 
 // normalizeResourceLimits gives command and filesystem policy the same fixed
@@ -20,7 +20,7 @@ func normalizeResourceLimits(cfg Config) (Config, error) {
 	if cfg.ResourceLimits.ReadPaths != nil {
 		return Config{}, fmt.Errorf("sandbox: mandatory read limits require Seatbelt or Bubblewrap")
 	}
-	roots := pathutil.Dedupe(cfg.ResourceLimits.WritePaths)
+	roots := capability.DedupePaths(cfg.ResourceLimits.WritePaths)
 	if len(roots) == 0 {
 		return Config{}, fmt.Errorf("sandbox: Windows resource limits require a writable directory")
 	}
@@ -47,10 +47,10 @@ func (r *runtime) validateResourceLimitEnvironment(root string) error {
 	for _, path := range paths {
 		allowed := false
 		for _, limit := range r.cfg.ResourceLimits.WritePaths {
-			if pathutil.IsUnder(path, limit) {
+			if capability.IsPathUnder(path, limit) {
 				// The environment is prepared by the Host. Do not follow a
 				// process-created reparse point when creating its directories.
-				for current := path; pathutil.IsUnder(current, limit); current = filepath.Dir(current) {
+				for current := path; capability.IsPathUnder(current, limit); current = filepath.Dir(current) {
 					reparse, err := isReparsePoint(current)
 					if err != nil && !os.IsNotExist(err) {
 						return fmt.Errorf("sandbox: inspect Windows process environment %s: %w", current, err)

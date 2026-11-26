@@ -17,13 +17,14 @@ import (
 )
 
 func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"kernel", "controller"} {
 		for _, fail := range []bool{false, true} {
 			t.Run(path+map[bool]string{false: "/roundtrip", true: "/second-input-failure"}[fail], func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
 				root := t.TempDir()
-				store := &invalidSecondInputStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), fail: fail}
+				store := &invalidSecondInputStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), fail: fail}
 				active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "active-batch-test"})
 				if err != nil {
 					t.Fatal(err)
@@ -104,7 +105,7 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				if (err != nil) != fail {
 					t.Fatalf("error = %v, want failure %v", err, fail)
 				}
-				loaded, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+				loaded, err := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -184,6 +185,7 @@ func (s *invalidSecondInputStore) AppendEvents(ctx context.Context, req session.
 }
 
 func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"kernel", "controller"} {
 		for _, fail := range []bool{false, true} {
 			name := "roundtrip"
@@ -192,7 +194,7 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 			}
 			t.Run(path+"/"+name, func(t *testing.T) {
 				root := t.TempDir()
-				store := &invalidSecondInputStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), fail: fail}
+				store := &invalidSecondInputStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), fail: fail}
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "batch-test"})
 				if err != nil {
 					t.Fatal(err)
@@ -237,7 +239,7 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				if (err != nil) != fail {
 					t.Fatalf("error = %v, want failure %v", err, fail)
 				}
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				loaded, loadErr := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 				if loadErr != nil {
 					t.Fatal(loadErr)
@@ -290,7 +292,8 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 }
 
 func TestInputBatchPersistenceRequiresExactFence(t *testing.T) {
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	t.Parallel()
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "batch-test"})
 	if err != nil {
 		t.Fatal(err)
@@ -331,6 +334,7 @@ func TestInputBatchPersistenceRequiresExactFence(t *testing.T) {
 // an admission without a supplied correlation stays empty, and the correlation
 // never becomes the Turn or idempotency identity.
 func TestBuildRunInputEventsCarriesSuppliedAgentCorrelationOnly(t *testing.T) {
+	t.Parallel()
 	active := session.Session{SessionRef: session.SessionRef{SessionID: "correlation"}}
 	conversation, err := buildRunInputEvents(active, "turn-conversation", agent.RunRequest{
 		InputKind: agent.SubmissionKindConversation, Input: "hello",
@@ -363,10 +367,11 @@ func TestBuildRunInputEventsCarriesSuppliedAgentCorrelationOnly(t *testing.T) {
 }
 
 func TestTrustedCompletionNoticeSurvivesActiveTurnAndReopen(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	cfg := sessionfile.Config{RootDir: t.TempDir()}
-	store := sessionfile.NewStore(cfg)
+	store := newLogicalFileStore(t, cfg)
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "notice"})
 	if err != nil {
 		t.Fatal(err)
@@ -406,7 +411,7 @@ func TestTrustedCompletionNoticeSurvivesActiveTurnAndReopen(t *testing.T) {
 	if got := userMessages(requests[1].Messages); len(got) != 2 || !reflect.DeepEqual(got[1], want) {
 		t.Fatalf("parent did not consume the notice exactly once: %#v", got)
 	}
-	reopened := sessionfile.NewStore(cfg)
+	reopened := newLogicalFileStore(t, cfg)
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)

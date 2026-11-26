@@ -41,7 +41,7 @@ func (p faultingBindingProvider) ActiveControllerBinding(context.Context, sessio
 func seedBindingCommitSession(t *testing.T, root, sessionID string) (*sessionfile.Store, session.Session, session.ControllerBinding, session.SessionFence) {
 	t.Helper()
 	ctx := context.Background()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "binding-commit",
@@ -156,7 +156,7 @@ func TestRuntimeCommitBindingPublishesReplacementRemoteBeforePrompt(t *testing.T
 		t.Fatalf("admitted FreshContext = %#v, want %#v", turnReq.FreshContext, want)
 	}
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reloaded, err := reopened.Session(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("reopened Session() error = %v", err)
@@ -217,7 +217,7 @@ func TestRuntimeCommitBindingFailureKeepsDeliveredCheckpoint(t *testing.T) {
 	}
 
 	// The failed prompt leaves checkpoint zero durable across a reopen.
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reloaded, err := reopened.Session(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("reopened Session() error = %v", err)

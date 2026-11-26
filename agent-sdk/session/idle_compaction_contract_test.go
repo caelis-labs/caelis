@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -50,7 +51,7 @@ func newIdleFixture(t *testing.T, backend string) *idleFixture {
 		f.reopen = func() idleBackend {
 			store, capability := sessionfile.NewStoreWithPriorHostFences(sessionfile.Config{RootDir: root, Clock: clock}, authorize)
 			f.recovery = capability.(session.PriorHostCompactionReceiptRecovery)
-			return store
+			return sdkctx.UseLogicalFileStore(t, store)
 		}
 		f.store = f.reopen()
 	}

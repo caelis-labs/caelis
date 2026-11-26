@@ -21,10 +21,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/envfd"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
 )
 
 const (
@@ -82,7 +80,7 @@ func New(cfg Config) (sandbox.Runtime, error) {
 		_ = runner.Close()
 		return nil, err
 	}
-	return runnerruntime.New(runnerruntime.Config{
+	return cmdsession.NewRuntime(cmdsession.RuntimeConfig{
 		CWD:     cfg.CWD,
 		Backend: sandbox.BackendBwrap,
 		Descriptor: sandbox.Descriptor{
@@ -133,7 +131,7 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	// Validate the configured mounts separately from the fixed backend probe.
 	// The probe only exercises Bubblewrap startup with a trusted no-op.
 	if effectivePolicy.ResourceLimits != nil && effectivePolicy.ResourceLimits.ReadPaths != nil {
-		workDir, err := procutil.ResolveHostWorkDir(b.cfg.CWD)
+		workDir, err := executil.ResolveHostWorkDir(b.cfg.CWD)
 		if err != nil {
 			return fmt.Errorf("bwrap sandbox probe failed: %w", err)
 		}
@@ -161,11 +159,11 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	defer cancel()
 	cmd := b.execCommand(probeCtx, "bwrap", probeArgs...)
 	cmd.Env = []string{}
-	procutil.ApplyNonInteractiveCommandDefaults(cmd)
+	executil.ApplyNonInteractiveCommandDefaults(cmd)
 	cmd.WaitDelay = bwrapProbeWaitDelay
 	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
-	bounded := &procutil.BoundedWriter{Writer: &stderr, Remaining: bwrapProbeStderrLimit}
+	bounded := &executil.BoundedWriter{Writer: &stderr, Remaining: bwrapProbeStderrLimit}
 	cmd.Stderr = bounded
 	err = cmd.Run()
 	msg := strings.TrimSpace(stderr.String())
@@ -195,7 +193,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 	}
 	defer cancel()
 
-	workDir, err := procutil.ResolveHostWorkDir(req.Dir)
+	workDir, err := executil.ResolveHostWorkDir(req.Dir)
 	if err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: resolve bwrap workdir failed: %w", err)
 	}
@@ -211,7 +209,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 		return sandbox.CommandResult{}, err
 	}
 	defer payload.Close()
-	procutil.ApplyNonInteractiveCommandDefaults(cmd)
+	executil.ApplyNonInteractiveCommandDefaults(cmd)
 	if strings.TrimSpace(req.Dir) != "" {
 		cmd.Dir = req.Dir
 	}
@@ -219,20 +217,20 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 	var stderr bytes.Buffer
 	lastOutput := atomic.Int64{}
 	lastOutput.Store(time.Now().UnixNano())
-	cmd.Stdout = procutil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
-	cmd.Stderr = procutil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
+	cmd.Stdout = executil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
+	cmd.Stderr = executil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
 	if b.cfg.ResourceLimits != nil {
-		cmd.Stdout = &procutil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
-		cmd.Stderr = &procutil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
+		cmd.Stdout = &executil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
+		cmd.Stderr = &executil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
 	}
 	if err := cmd.Start(); err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: bwrap sandbox command start failed: %w", err)
 	}
-	waitErr := procutil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
+	waitErr := executil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
 	if b.cfg.ResourceLimits != nil {
-		_ = procutil.KillProcess(cmd)
+		_ = executil.KillProcess(cmd)
 	}
-	if b.cfg.ResourceLimits != nil && (cmd.Stdout.(*procutil.BoundedWriter).Exceeded || cmd.Stderr.(*procutil.BoundedWriter).Exceeded) {
+	if b.cfg.ResourceLimits != nil && (cmd.Stdout.(*executil.BoundedWriter).Exceeded || cmd.Stderr.(*executil.BoundedWriter).Exceeded) {
 		return sandbox.CommandResult{}, fmt.Errorf("sandbox command output budget exceeded")
 	}
 	result := sandbox.CommandResult{
@@ -252,7 +250,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 		}
 		return result, fmt.Errorf("tool: bwrap sandbox command timed out after %s; %s", label, commandOutputSummary(result))
 	}
-	if errors.Is(waitErr, procutil.ErrIdleTimeout) {
+	if errors.Is(waitErr, executil.ErrIdleTimeout) {
 		label := "idle limit"
 		if req.IdleTimeout > 0 {
 			label = req.IdleTimeout.String()
@@ -267,7 +265,7 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) 
 	if err != nil {
 		return "", err
 	}
-	workDir, err := procutil.ResolveHostWorkDir(req.Dir)
+	workDir, err := executil.ResolveHostWorkDir(req.Dir)
 	if err != nil {
 		return "", fmt.Errorf("tool: resolve bwrap workdir failed: %w", err)
 	}
@@ -286,7 +284,7 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) 
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
 		TTY:             req.TTY,
-		OnOutput:        runnerruntime.UTF8OutputForwarder(req.OnOutput),
+		OnOutput:        cmdsession.UTF8OutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
 			args, err := buildBwrapArgs(effectivePolicy, workDir)
 			if err != nil {
@@ -521,11 +519,11 @@ func appendBwrapEnvironment(args, env []string) []string {
 }
 
 func (b *bwrapRunner) commandWithArgs(ctx context.Context, options []string, shell string, shellArgs []string) (*exec.Cmd, *os.File, error) {
-	data, err := envfd.PackNUL(options)
+	data, err := executil.PackNUL(options)
 	if err != nil {
 		return nil, nil, err
 	}
-	payload, err := envfd.Open(data)
+	payload, err := executil.OpenPipe(data)
 	if err != nil {
 		return nil, nil, err
 	}

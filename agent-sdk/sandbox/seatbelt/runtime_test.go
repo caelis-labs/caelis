@@ -17,7 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
 )
 
 func TestSeatbeltWritableRootsSkipMissingRootWithoutCreatingIt(t *testing.T) {
@@ -287,7 +287,7 @@ func TestSeatbeltProbeUsesFixedExecutableWithoutLoginShell(t *testing.T) {
 	if started.WaitDelay != seatbeltProbeWaitDelay {
 		t.Fatalf("WaitDelay = %v, want %v", started.WaitDelay, seatbeltProbeWaitDelay)
 	}
-	if _, ok := started.Stderr.(*procutil.BoundedWriter); !ok {
+	if _, ok := started.Stderr.(*executil.BoundedWriter); !ok {
 		t.Fatalf("Stderr type = %T, want bounded writer", started.Stderr)
 	}
 }

@@ -21,7 +21,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
 	"golang.org/x/sys/windows"
 )
@@ -207,7 +206,7 @@ func (r *runtime) verifyRepairRootsWritable(ctx context.Context) error {
 }
 
 func verifyDirectoryFileWrite(root string) error {
-	root = pathutil.Normalize(root)
+	root = capability.NormalizePath(root)
 	if root == "" {
 		return fmt.Errorf("path is required")
 	}
@@ -312,7 +311,7 @@ func readValidatedElevatedRepairRequest(data []byte) (elevatedRepairRequest, err
 		return elevatedRepairRequest{}, err
 	}
 	request.HostUserSID = normalizedHostSID
-	request.HostReceiptAuthorityRoot = pathutil.Normalize(request.HostReceiptAuthorityRoot)
+	request.HostReceiptAuthorityRoot = capability.NormalizePath(request.HostReceiptAuthorityRoot)
 	cfg := sandbox.NormalizeConfig(request.Config)
 	if err := validateElevatedRepairConfig(cfg, request.HostUserSID); err != nil {
 		return elevatedRepairRequest{}, err
@@ -403,7 +402,7 @@ func normalizeAbsoluteRepairPath(path string) (string, error) {
 	if path == "" || !filepath.IsAbs(path) {
 		return "", fmt.Errorf("canonical absolute path is required")
 	}
-	normalized, err := pathutil.NormalizeWithBase("", path)
+	normalized, err := capability.NormalizePathWithBase("", path)
 	if err != nil {
 		return "", err
 	}
@@ -437,7 +436,7 @@ func validateRepairReceiptOwners(hostUserSID string, receiptSets ...[]manifestRe
 }
 
 func validateElevatedRepairAuthority(authorityRoot, hostUserSID string) error {
-	authorityRoot = pathutil.Normalize(authorityRoot)
+	authorityRoot = capability.NormalizePath(authorityRoot)
 	sum := sha256.Sum256([]byte(strings.ToUpper(strings.TrimSpace(hostUserSID))))
 	if !strings.EqualFold(filepath.Base(authorityRoot), hex.EncodeToString(sum[:])[:16]) {
 		return fmt.Errorf("impl/sandbox/windows: Host receipt authority is not bound to Host user SID")
@@ -577,10 +576,10 @@ func legacyV1ReceiptEffects(policy workspacePolicy, storePath string) []receiptE
 	var effects []receiptEffect
 	for _, root := range policy.WriteRoots {
 		sid := capability.DeriveLegacyV1SID(storePath, root)
-		rootSIDs[pathutil.Normalize(root)] = sid
+		rootSIDs[capability.NormalizePath(root)] = sid
 		effects = append(effects, receiptEffect{Path: root, Entry: acl.Entry{Principal: sid, Rights: acl.Modify, Mode: acl.Grant, Inherit: true}})
 	}
-	if envRoot := pathutil.Normalize(policy.SandboxEnvRoot); envRoot != "" {
+	if envRoot := capability.NormalizePath(policy.SandboxEnvRoot); envRoot != "" {
 		sid := capability.DeriveLegacyV1SID(storePath, envRoot)
 		rootSIDs[envRoot] = sid
 		for _, path := range sandboxEnvDirs(envRoot) {
@@ -591,7 +590,7 @@ func legacyV1ReceiptEffects(policy workspacePolicy, storePath string) []receiptE
 	}
 	for _, path := range policy.DenyWritePaths {
 		for root, sid := range rootSIDs {
-			if pathutil.IsUnder(path, root) {
+			if capability.IsPathUnder(path, root) {
 				effects = append(effects, receiptEffect{Path: path, Entry: acl.Entry{Principal: sid, Rights: acl.Write, Mode: acl.Deny, Inherit: true}})
 			}
 		}
@@ -623,7 +622,7 @@ func validateElevatedRepairConfig(cfg sandbox.Config, hostUserSID string) error 
 	if sandbox.CanonicalBackend(cfg.RequestedBackend) != sandbox.BackendWindows {
 		return fmt.Errorf("impl/sandbox/windows: elevated repair only supports the Windows sandbox backend")
 	}
-	workspaceRoot, err := pathutil.NormalizeWithBase("", cfg.CWD)
+	workspaceRoot, err := capability.NormalizePathWithBase("", cfg.CWD)
 	if err != nil {
 		return err
 	}
@@ -641,7 +640,7 @@ func validateElevatedRepairConfig(cfg sandbox.Config, hostUserSID string) error 
 		return err
 	}
 	for _, root := range cfg.WritableRoots {
-		normalized, err := pathutil.NormalizeWithBase(workspaceRoot, root)
+		normalized, err := capability.NormalizePathWithBase(workspaceRoot, root)
 		if err != nil {
 			return err
 		}
@@ -667,7 +666,7 @@ func validateElevatedRepairConfig(cfg sandbox.Config, hostUserSID string) error 
 }
 
 func validateRepairDirectory(label string, path string, hostUserSID string) error {
-	path = pathutil.Normalize(path)
+	path = capability.NormalizePath(path)
 	if path == "" {
 		return fmt.Errorf("impl/sandbox/windows: %s path is required", label)
 	}
@@ -730,7 +729,7 @@ func isVolumeRoot(path string) bool {
 
 func isKnownSystemPath(path string) bool {
 	for _, root := range knownSystemRoots() {
-		if root != "" && pathutil.IsUnder(path, root) {
+		if root != "" && capability.IsPathUnder(path, root) {
 			return true
 		}
 	}
@@ -741,10 +740,10 @@ func knownSystemRoots() []string {
 	var roots []string
 	for _, key := range []string{"WINDIR", "SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-			roots = append(roots, pathutil.Normalize(value))
+			roots = append(roots, capability.NormalizePath(value))
 		}
 	}
-	return pathutil.Dedupe(roots)
+	return capability.DedupePaths(roots)
 }
 
 func isReparsePoint(path string) (bool, error) {

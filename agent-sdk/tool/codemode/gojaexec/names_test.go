@@ -24,6 +24,7 @@ func (h *namedTestHost) ToolNames(context.Context) ([]codemode.ToolRoute, error)
 }
 
 func TestOriginalNamesWithoutSearch(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{names: []codemode.ToolRoute{
 		{Name: "Read"}, {Name: "odd-native-name"},
 		{Name: "mcp_apps", Server: "dtw", Tool: "apps", Plugin: "desktop"},
@@ -48,6 +49,7 @@ func TestOriginalNamesWithoutSearch(t *testing.T) {
 }
 
 func TestNameCollisionsPreserveGlobalsAndQualifiedRoutes(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{names: []codemode.ToolRoute{
 		{Name: "Object"}, {Name: "tools"}, {Name: "mixed"},
 		{Name: "mixed_remote", Server: "mixed", Tool: "run"},
@@ -71,6 +73,7 @@ func TestNameCollisionsPreserveGlobalsAndQualifiedRoutes(t *testing.T) {
 }
 
 func TestPrototypeSensitiveToolNames(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{names: []codemode.ToolRoute{
 		{Name: "__proto__"}, {Name: "constructor"}, {Name: "then"},
 		{Name: "proto", Server: "__proto__", Tool: "__proto__", Plugin: "__proto__"},
@@ -93,6 +96,7 @@ func TestPrototypeSensitiveToolNames(t *testing.T) {
 }
 
 func TestNamedCallsShareValidationErrorsMediaAndBudgets(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{names: []codemode.ToolRoute{{Name: "Read"}}}
 	calls := 0
 	h.call = func(_ context.Context, _ string, args json.RawMessage) (codemode.Reply, error) {
@@ -115,6 +119,7 @@ func TestNamedCallsShareValidationErrorsMediaAndBudgets(t *testing.T) {
 }
 
 func TestToolNamesFailBeforeWorkerLaunch(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{err: errors.New("catalog unavailable")}
 	e := Executor{Observe: func(Metrics) { t.Error("worker launched for failed name snapshot") }}
 	_, err := e.Execute(t.Context(), fixed(`return null;`), codemode.Limits{}, h)
@@ -124,6 +129,7 @@ func TestToolNamesFailBeforeWorkerLaunch(t *testing.T) {
 }
 
 func TestTightReplyBudgetStillRejectsOversizedToolReply(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{names: []codemode.ToolRoute{{Name: "Read"}}}
 	calls := 0
 	h.call = func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
@@ -139,6 +145,7 @@ func TestTightReplyBudgetStillRejectsOversizedToolReply(t *testing.T) {
 }
 
 func TestLargeNameSnapshotIndependentOfReplyBudget(t *testing.T) {
+	t.Parallel()
 	h := &namedTestHost{names: []codemode.ToolRoute{{Name: "Read"}}}
 	// Escaped JSON and multi-byte UTF-8 cross frame boundaries. The snapshot
 	// exceeds even the default reply limit, without imposing a catalog count cap.

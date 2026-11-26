@@ -768,6 +768,7 @@ func TestStartCommandCleansUpLiveSessionReturnedWithError(t *testing.T) {
 }
 
 func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"start", "persistence"} {
 		t.Run(failure, func(t *testing.T) {
 			_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -859,6 +860,7 @@ func (s *commandStartupCleanupProbe) WriteInput(context.Context, []byte) error {
 }
 
 func TestStartCommandCleanupUsesSettledStatusAfterCleanupError(t *testing.T) {
+	t.Parallel()
 	cleanupErr := errors.New("sandbox cleanup reply failed")
 	for _, tc := range []struct {
 		name         string
@@ -1875,6 +1877,7 @@ func TestCommandStartRequiresCASStoreBeforeExternalEffect(t *testing.T) {
 }
 
 func TestNormalizeTaskControlRequestPreservesAppendNewline(t *testing.T) {
+	t.Parallel()
 	exact := false
 	normalized := normalizeTaskControlRequest(taskapi.ControlRequest{AppendNewline: &exact})
 	if normalized.AppendNewline == nil || *normalized.AppendNewline {
@@ -1887,6 +1890,7 @@ func TestNormalizeTaskControlRequestPreservesAppendNewline(t *testing.T) {
 }
 
 func TestNormalizeTaskWriteInputUsesTerminalLineEndingAndExactMode(t *testing.T) {
+	t.Parallel()
 	exact := false
 	appendLine := true
 	for _, test := range []struct {
@@ -1913,6 +1917,7 @@ func TestNormalizeTaskWriteInputUsesTerminalLineEndingAndExactMode(t *testing.T)
 }
 
 func TestCommandTaskSuccessfulDiagnosticTextIsOnlyOutput(t *testing.T) {
+	t.Parallel()
 	const text = "DecodePermissionRequest\nexample: GOCACHE: read-only file system\n"
 	_, active, runtime := newRuntimeRunCommandToolTestHarness(t)
 	running := false
@@ -1944,6 +1949,7 @@ func TestCommandTaskSuccessfulDiagnosticTextIsOnlyOutput(t *testing.T) {
 }
 
 func TestCommandHandleLookupDuringApprovalRefresh(t *testing.T) {
+	t.Parallel()
 	ref := session.SessionRef{SessionID: "identity-session"}
 	command := &commandTask{sessionRef: ref, handle: "command", state: taskapi.StateWaitingApproval, running: true}
 	tasks := &taskRuntime{tasks: map[string]*commandTask{"command-id": command}}

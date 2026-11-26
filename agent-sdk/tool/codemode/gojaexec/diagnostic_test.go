@@ -13,6 +13,7 @@ import (
 )
 
 func TestUserSourceAndJSONFieldDiagnostics(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, code, want string }{
 		{"file_throw", "const x=1;\nthrow new Error('user failure');", "/task/probe.js:2"},
 		{"undefined", `return {nested:{optional:undefined}};`, "$.nested.optional"},
@@ -38,6 +39,7 @@ func TestUserSourceAndJSONFieldDiagnostics(t *testing.T) {
 }
 
 func TestUncaughtDiagnosticUsesOutputBudget(t *testing.T) {
+	t.Parallel()
 	detail := strings.Repeat("diagnostic ", 200)
 	encoded, _ := json.Marshal(detail)
 	src := fixed("const x=1;\nthrow new Error(" + string(encoded) + ");")
@@ -49,6 +51,7 @@ func TestUncaughtDiagnosticUsesOutputBudget(t *testing.T) {
 }
 
 func TestCaughtValidationDetailAndTransportRedaction(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeInvalidInput, `required $.path: missing path`)
 	}}

@@ -13,6 +13,7 @@ import (
 )
 
 func TestSubagentApplyResultKeepsFailureDiagnosticTerminalOnly(t *testing.T) {
+	t.Parallel()
 	task := &subagentTask{result: map[string]any{"error": "previous failure"}}
 
 	task.applyResult(delegation.Result{
@@ -65,6 +66,7 @@ func TestSubagentApplyResultKeepsFailureDiagnosticTerminalOnly(t *testing.T) {
 }
 
 func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.T) {
+	t.Parallel()
 	result := map[string]any{
 		"state":          string(task.StateFailed),
 		"error":          "previous failure",
@@ -90,6 +92,7 @@ func TestNormalizeSubagentCancelledClearsStaleFailureAndOutputFields(t *testing.
 }
 
 func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const failure = "subagent prompt failed"
 	runner := &recordingSubagentRunner{
@@ -180,6 +183,7 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 }
 
 func TestSubagentTaskPayloadOwnsFailureDiagnostic(t *testing.T) {
+	t.Parallel()
 	const rawLegacyError = "Bearer direct-secret api_key=direct-key /Users/alice/private"
 	result := map[string]any{
 		"output_preview": "stale activity",
@@ -209,6 +213,7 @@ func TestSubagentTaskPayloadOwnsFailureDiagnostic(t *testing.T) {
 }
 
 func TestLegacySubagentFailureErrorIsNotPromotedAcrossRehydrate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		state      task.State
@@ -301,6 +306,7 @@ func TestLegacySubagentFailureErrorIsNotPromotedAcrossRehydrate(t *testing.T) {
 }
 
 func TestLegacyNonFailureSubagentErrorIsDroppedFromRehydratePayloadAndStream(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		state   task.State
@@ -385,6 +391,7 @@ func TestLegacyNonFailureSubagentErrorIsDroppedFromRehydratePayloadAndStream(t *
 }
 
 func TestCanonicalSubagentFailureDoesNotPromoteUntypedDiagnostic(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		backfill bool
@@ -456,6 +463,7 @@ func TestCanonicalSubagentFailureDoesNotPromoteUntypedDiagnostic(t *testing.T) {
 }
 
 func TestCanonicalNonFailureSubagentDropsLegacyError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		state    task.State
@@ -552,6 +560,7 @@ func TestCanonicalNonFailureSubagentDropsLegacyError(t *testing.T) {
 }
 
 func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) {
+	t.Parallel()
 	failedResult := map[string]any{}
 	unknownResult := map[string]any{}
 	normalizeSubagentResultForState(&failedResult, task.StateFailed, "subagent prompt failed")
@@ -601,6 +610,7 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 // typed Runtime diagnostic. A supplied diagnostic is retained verbatim so
 // historical transcripts keep rendering unchanged.
 func TestSubagentFailureDiagnosticFallbacksNameParticipant(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		state task.State
 		want  string

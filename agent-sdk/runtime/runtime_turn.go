@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -162,9 +162,9 @@ func (r *Runtime) runAttempt(
 
 	ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
 	ctx, planResults := toolbinding.WithPlanResults(ctx)
-	var source *requestsource.Tracker
+	var source *requestmeta.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled || len(r.hooks.ModelPrepare) > 0 {
-		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)
+		ctx, source = requestmeta.WithTracker(ctx, invocation.SourceEvents)
 	}
 	var throughSeq, visibleCount uint64
 	observeSequence := func(event *session.Event) {

@@ -22,10 +22,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/envfd"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
 )
 
 const (
@@ -105,7 +103,7 @@ func New(cfg Config) (sandbox.Runtime, error) {
 		_ = runner.Close()
 		return nil, err
 	}
-	return runnerruntime.New(runnerruntime.Config{
+	return cmdsession.NewRuntime(cmdsession.RuntimeConfig{
 		CWD:     cfg.CWD,
 		Backend: sandbox.BackendSeatbelt,
 		Descriptor: sandbox.Descriptor{
@@ -149,7 +147,7 @@ func (s *seatbeltRunner) probe(ctx context.Context) error {
 	}
 	profile := "(version 1) (allow default)"
 	if s.cfg.ResourceLimits != nil {
-		workDir, err := procutil.ResolveHostWorkDir(s.cfg.CWD)
+		workDir, err := executil.ResolveHostWorkDir(s.cfg.CWD)
 		if err != nil {
 			return fmt.Errorf("seatbelt sandbox probe failed: %w", err)
 		}
@@ -165,11 +163,11 @@ func (s *seatbeltRunner) probe(ctx context.Context) error {
 	defer cancel()
 	cmd := s.execCommand(probeCtx, "sandbox-exec", "-p", profile, seatbeltProbeExecutable)
 	cmd.Env = []string{}
-	procutil.ApplyNonInteractiveCommandDefaults(cmd)
+	executil.ApplyNonInteractiveCommandDefaults(cmd)
 	cmd.WaitDelay = seatbeltProbeWaitDelay
 	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
-	bounded := &procutil.BoundedWriter{Writer: &stderr, Remaining: seatbeltProbeStderrLimit}
+	bounded := &executil.BoundedWriter{Writer: &stderr, Remaining: seatbeltProbeStderrLimit}
 	cmd.Stderr = bounded
 	err := cmd.Run()
 	msg := strings.TrimSpace(stderr.String())
@@ -196,7 +194,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 	}
 	defer cancel()
 
-	workDir, err := procutil.ResolveHostWorkDir(req.Dir)
+	workDir, err := executil.ResolveHostWorkDir(req.Dir)
 	if err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: resolve seatbelt workdir failed: %w", err)
 	}
@@ -212,7 +210,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 		return sandbox.CommandResult{}, err
 	}
 	defer payload.Close()
-	procutil.ApplyNonInteractiveCommandDefaults(cmd)
+	executil.ApplyNonInteractiveCommandDefaults(cmd)
 	if strings.TrimSpace(req.Dir) != "" {
 		cmd.Dir = req.Dir
 	}
@@ -221,22 +219,22 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 	var stderr bytes.Buffer
 	lastOutput := atomic.Int64{}
 	lastOutput.Store(time.Now().UnixNano())
-	cmd.Stdout = procutil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
-	cmd.Stderr = procutil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
+	cmd.Stdout = executil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
+	cmd.Stderr = executil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
 
 	if s.cfg.ResourceLimits != nil {
-		cmd.Stdout = &procutil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
-		cmd.Stderr = &procutil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
+		cmd.Stdout = &executil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
+		cmd.Stderr = &executil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
 	}
 	if err := cmd.Start(); err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: seatbelt sandbox command start failed: %w", err)
 	}
-	waitErr := procutil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
+	waitErr := executil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
 	if s.cfg.ResourceLimits != nil {
-		_ = procutil.KillProcess(cmd)
+		_ = executil.KillProcess(cmd)
 	}
 
-	if s.cfg.ResourceLimits != nil && (cmd.Stdout.(*procutil.BoundedWriter).Exceeded || cmd.Stderr.(*procutil.BoundedWriter).Exceeded) {
+	if s.cfg.ResourceLimits != nil && (cmd.Stdout.(*executil.BoundedWriter).Exceeded || cmd.Stderr.(*executil.BoundedWriter).Exceeded) {
 		return sandbox.CommandResult{}, fmt.Errorf("sandbox command output budget exceeded")
 	}
 	result := sandbox.CommandResult{
@@ -256,7 +254,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 		}
 		return result, fmt.Errorf("tool: seatbelt sandbox command timed out after %s; %s", label, commandOutputSummary(result))
 	}
-	if errors.Is(waitErr, procutil.ErrIdleTimeout) {
+	if errors.Is(waitErr, executil.ErrIdleTimeout) {
 		label := "idle limit"
 		if req.IdleTimeout > 0 {
 			label = req.IdleTimeout.String()
@@ -271,7 +269,7 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req sandbox.CommandReques
 	if err != nil {
 		return "", err
 	}
-	workDir, err := procutil.ResolveHostWorkDir(req.Dir)
+	workDir, err := executil.ResolveHostWorkDir(req.Dir)
 	if err != nil {
 		return "", fmt.Errorf("tool: resolve seatbelt workdir failed: %w", err)
 	}
@@ -290,7 +288,7 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req sandbox.CommandReques
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
 		TTY:             req.TTY,
-		OnOutput:        runnerruntime.UTF8OutputForwarder(req.OnOutput),
+		OnOutput:        cmdsession.UTF8OutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
 			profile, err := buildSeatbeltProfile(effectivePolicy, workDir)
 			if err != nil {
@@ -581,7 +579,7 @@ func (s *seatbeltRunner) seatbeltCommand(ctx context.Context, profile, shell str
 	if err != nil {
 		return nil, nil, err
 	}
-	file, err := envfd.Open(payload)
+	file, err := executil.OpenPipe(payload)
 	if err != nil {
 		return nil, nil, err
 	}

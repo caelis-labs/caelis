@@ -13,7 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"image"
@@ -53,6 +53,7 @@ func compactionTerminalResponse(reason model.FinishReason) *model.Response {
 }
 
 func TestCollectCompactionResponseTerminalReasons(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name     string
 		reason   model.FinishReason
@@ -90,6 +91,7 @@ func TestCollectCompactionResponseTerminalReasons(t *testing.T) {
 }
 
 func TestCollectCompactionResponseUnreportedLogs(t *testing.T) {
+	t.Parallel()
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -115,6 +117,7 @@ func TestCollectCompactionResponseUnreportedLogs(t *testing.T) {
 }
 
 func TestCompactionTerminalErrorsDoNotRetryOrFallback(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name   string
 		reason model.FinishReason
@@ -153,6 +156,7 @@ func TestCompactionTerminalErrorsDoNotRetryOrFallback(t *testing.T) {
 }
 
 func TestCompactionRejectsShortRawMarkdown(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"independent", "in_context", "salvage"} {
 		t.Run(path, func(t *testing.T) {
 			response := compactionTerminalResponse(model.FinishReasonStop)
@@ -183,10 +187,11 @@ func TestCompactionRejectsShortRawMarkdown(t *testing.T) {
 }
 
 func TestRuntimeCompactionTruncatedPreservesContextAndReceipts(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"foreground", "manual"} {
 		t.Run(path, func(t *testing.T) {
 			root := t.TempDir()
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "terminal", UserID: "fixture"})
 			if err != nil {
 				t.Fatal(err)
@@ -216,7 +221,7 @@ func TestRuntimeCompactionTruncatedPreservesContextAndReceipts(t *testing.T) {
 			if !errors.Is(err, errCompactionTruncated) {
 				t.Errorf("error=%v, want truncated", err)
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			after, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -250,6 +255,7 @@ func assertCompactionTerminalReceipts(t *testing.T, events []*session.Event, att
 }
 
 func TestAsyncCompactionTruncatedNeverCommitsAtNextRequest(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -282,7 +288,7 @@ func TestAsyncCompactionTruncatedNeverCommitsAtNextRequest(t *testing.T) {
 		t.Fatal("terminal rejection retried or segmented the candidate")
 	}
 	// Rebuild the complete model request from reopened files, not only UI events.
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: h.root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: h.root})
 	resumed, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatal(err)
@@ -312,6 +318,7 @@ func (f compactionTerminalTransport) RoundTrip(req *http.Request) (*http.Respons
 }
 
 func TestCompactionProviderTerminalNeverRetriesOrFallsBack(t *testing.T) {
+	t.Parallel()
 	for _, api := range []model.APIType{model.APIOllama, model.APIGemini} {
 		for _, stream := range []bool{false, true} {
 			for _, reason := range []string{"length", "unknown", "filtered", "unspecified"} {
@@ -385,6 +392,7 @@ func (m *cancelledCompactionModel) Generate(context.Context, *model.Request) ite
 	}
 }
 func TestCompactionRejectsProviderSuccessAfterCancellation(t *testing.T) {
+	t.Parallel()
 	for _, before := range []bool{true, false} {
 		t.Run(map[bool]string{true: "before_request", false: "during_stream"}[before], func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
@@ -410,6 +418,7 @@ func TestCompactionRejectsProviderSuccessAfterCancellation(t *testing.T) {
 }
 
 func TestAsyncCompactionGenerationBeyond30Seconds(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		h := newAsyncHarness(t, "")
 		run := h.run(t)
@@ -455,6 +464,7 @@ func (m *recoveringSummaryModel) Generate(ctx context.Context, _ *model.Request)
 }
 
 func TestCompactionForegroundOfflineWaitingHasNoTotalDeadline(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		r := &Runtime{}
 		inner := &recoveringSummaryModel{}
@@ -476,6 +486,7 @@ func appendTestEventWithGuard(t *testing.T, h *asyncHarness, event *session.Even
 }
 
 func TestCompactionPreparedImageSource(t *testing.T) {
+	t.Parallel()
 	var data bytes.Buffer
 	if err := png.Encode(&data, image.NewGray(image.Rect(0, 0, 2100, 1100))); err != nil {
 		t.Fatal(err)
@@ -499,7 +510,7 @@ func TestCompactionPreparedImageSource(t *testing.T) {
 			receiveSnapshotValue(t, h.llm.foreground)
 			h.llm.responses <- asyncToolResponse("first")
 			next := receiveSnapshotValue(t, h.llm.foreground)
-			hash, err := requestsource.Fingerprint(next.request.Messages)
+			hash, err := requestmeta.Fingerprint(next.request.Messages)
 			if err != nil || next.request.Source == nil || next.request.Source.MessagesHash != hash || next.scope == nil || next.scope.job == nil {
 				t.Fatal("image normalization invalidated bound dispatch source")
 			}

@@ -996,3 +996,24 @@ func TestRemovedPackageFileRuleRejectsDeletedPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestLogicalStoreTestHelperRule(t *testing.T) {
+	t.Parallel()
+	src := `package demo
+func f() {
+	_ = UseLogicalFileStore
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "demo.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule, subject, line := logicalStoreTestHelperRule("app/gatewayapp/demo.go", file, fset)
+	if rule == "" || subject != "UseLogicalFileStore" || line != 3 {
+		t.Fatalf("logicalStoreTestHelperRule(prod) = (%q, %q, %d), want violation at line 3", rule, subject, line)
+	}
+	if rule, _, _ := logicalStoreTestHelperRule("agent-sdk/runtime/demo_test.go", file, fset); rule != "" {
+		t.Fatalf("logicalStoreTestHelperRule(test) = %q, want no violation", rule)
+	}
+}

@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -164,7 +164,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			var calls []model.ToolCall
 			var final *model.Response
 			var messageID string
-			var requestPrefix prefixusage.Snapshot
+			var requestPrefix requestmeta.Snapshot
 			ok := true
 			var err error
 			if early := hookrun.FromContext(ctx).TakeEarly(); early != nil {
@@ -307,14 +307,14 @@ func (a *Agent) collectCanonicalModelStep(
 	watchdog *generationWatchdog,
 	visibility *toolVisibility,
 	yield func(*session.Event) bool,
-) (model.Message, []model.ToolCall, *model.Response, string, prefixusage.Snapshot, bool, error) {
+) (model.Message, []model.ToolCall, *model.Response, string, requestmeta.Snapshot, bool, error) {
 	invalidAttempts := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+			return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, err
 		}
 		if err := a.refreshModelRequest(ctx); err != nil {
-			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+			return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, err
 		}
 		*visibility = newToolVisibility(a.tools)
 		stream := a.request.StreamEnabled(false)
@@ -351,14 +351,14 @@ func (a *Agent) collectCanonicalModelStep(
 			if a.resolveModelRequest != nil && errors.Is(prepareErr, agent.ErrModelRequestSnapshotStale) {
 				continue
 			}
-			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
+			return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, prepareErr
 		}
 		request = prepared
 		var persistInstructions func(context.Context) error
 		if cached == nil && a.resolveSessionInstructions != nil {
 			instructions, persist, err := a.resolveSessionInstructions(ctx, a.summaryID)
 			if err != nil {
-				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+				return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, err
 			}
 			if instructions != "" {
 				request.Instructions = slices.Insert(request.Instructions, request.BaseInstructionCount, model.NewTextPart(instructions))
@@ -402,7 +402,7 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		for _, receipt := range receipts {
 			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {
-				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
+				return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, false, nil
 			}
 		}
 		if err != nil {
@@ -410,14 +410,14 @@ func (a *Agent) collectCanonicalModelStep(
 				watchdog.resetAll()
 				continue
 			}
-			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+			return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, err
 		}
 		resultEvidence := evidence
 		resultEvidence.InvocationID = final.InvocationID
 		resultEvidence.AttemptOrdinal = uint64(len(receipts))
 		final, err = resultModel(ctx, resultEvidence, final)
 		if err != nil {
-			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+			return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, err
 		}
 		if !run.Hooks.StreamMode.PublishesIncrementally() {
 			final.Message = normalizeAssistantCitations(final.Message, *messages)
@@ -426,21 +426,21 @@ func (a *Agent) collectCanonicalModelStep(
 		assistantMessage, calls, err := validateAssistantToolCalls(final.Message)
 		if err == nil {
 			run.FinishRequest(logicalID)
-			return assistantMessage, calls, final, messageID, prefixusage.ForRequest(request), true, nil
+			return assistantMessage, calls, final, messageID, requestmeta.ForRequest(request), true, nil
 		}
 		if invalidAttempts >= maxInvalidToolCallRepairAttempts {
-			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+			return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, true, err
 		}
 		invalidAttempts++
 		run.FinishRequest(logicalID)
 		if reset := invalidToolCallAttemptResetEvent(invalidAttempts, messageID); reset != nil {
 			if yield != nil && !yield(reset) {
-				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
+				return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, false, nil
 			}
 		}
 		for _, event := range invalidToolCallWarningEvents(final.Message, err, !stream) {
 			if yield != nil && !yield(event) {
-				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
+				return model.Message{}, nil, nil, "", requestmeta.Snapshot{}, false, nil
 			}
 		}
 	}

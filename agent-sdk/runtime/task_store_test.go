@@ -12,7 +12,7 @@ import (
 
 func newFileTaskStoreForTest(t testing.TB) taskapi.Store {
 	t.Helper()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	return sessionfile.NewTaskStore(store)
 }
 

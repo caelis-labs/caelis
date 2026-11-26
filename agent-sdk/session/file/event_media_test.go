@@ -31,6 +31,7 @@ func newSharedMediaFixture(t testing.TB, count int) (*Store, session.Session, []
 }
 
 func TestSharedMediaSurvivesWALRecoveryPagingAndIdempotentRetry(t *testing.T) {
+	t.Parallel()
 	store, active, events := newSharedMediaFixture(t, 2)
 	root := store.rootDir
 	path, err := store.resolveWritePath(active)
@@ -111,6 +112,7 @@ func TestSharedMediaSurvivesWALRecoveryPagingAndIdempotentRetry(t *testing.T) {
 }
 
 func TestSharedMediaLegacyLogAndMixedAppend(t *testing.T) {
+	t.Parallel()
 	store, active, events := newSharedMediaFixture(t, 2)
 	persisted, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: events[0]})
 	if err != nil {
@@ -193,6 +195,7 @@ func BenchmarkColdSharedMediaLoad(b *testing.B) {
 }
 
 func TestSharedMediaCorruptionFailsClosed(t *testing.T) {
+	t.Parallel()
 	store, active, events := newSharedMediaFixture(t, 1)
 	if _, err := store.AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: events}); err != nil {
 		t.Fatal(err)
@@ -230,6 +233,7 @@ func TestSharedMediaCorruptionFailsClosed(t *testing.T) {
 }
 
 func TestLegacySharedMediaRejectedByStore(t *testing.T) {
+	t.Parallel()
 	for _, target := range []string{"log", "wal"} {
 		for _, table := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/table=%t", target, table), func(t *testing.T) {

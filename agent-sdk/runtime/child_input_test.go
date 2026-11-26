@@ -15,6 +15,7 @@ import (
 )
 
 func TestSubmitChildInputBindsCanonicalParentSourceNotLocalAgentName(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	_, err := r.SubmitChildInput(t.Context(), task.sessionRef, agent.ChildInputCommand{
 		Target: task.handle,
@@ -38,6 +39,7 @@ func TestSubmitChildInputBindsCanonicalParentSourceNotLocalAgentName(t *testing.
 }
 
 func TestSubmitChildInputRejectsReservedParentSourceAlias(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	_, err := r.SubmitChildInput(t.Context(), task.sessionRef, agent.ChildInputCommand{
 		Target: task.handle, Source: session.ParentCommunicationActor(), Input: "must not bypass controller identity",
@@ -54,6 +56,7 @@ func TestSubmitChildInputRejectsReservedParentSourceAlias(t *testing.T) {
 }
 
 func TestSubmitChildInputRejectsStaleControllerAfterHandoff(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	stale := session.ControllerExecutor(session.ControllerBinding{
 		Kind: session.ControllerKindKernel, ControllerID: "controller-1", AgentName: "local",
@@ -101,6 +104,7 @@ func TestSubmitChildInputRejectsStaleControllerAfterHandoff(t *testing.T) {
 }
 
 func TestSubmitChildInputRejectsLocalAsParentSourceAlias(t *testing.T) {
+	t.Parallel()
 	r, task, _ := newLocalControllerChildActivityTask(t)
 	_, err := r.SubmitChildInput(t.Context(), task.sessionRef, agent.ChildInputCommand{
 		Target: task.handle,
@@ -113,6 +117,7 @@ func TestSubmitChildInputRejectsLocalAsParentSourceAlias(t *testing.T) {
 }
 
 func TestSubmitChildInputDoesNotRouteLocalHandleToParent(t *testing.T) {
+	t.Parallel()
 	r, task, _ := newLocalControllerChildActivityTask(t)
 	_, err := r.SubmitChildInput(t.Context(), task.sessionRef, agent.ChildInputCommand{
 		Target: "local",
@@ -130,6 +135,7 @@ func TestSubmitChildInputDoesNotRouteLocalHandleToParent(t *testing.T) {
 }
 
 func TestRuntimeSendMessageToChildUsesParentSourceNotLocal(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	active, err := r.sessions.Session(t.Context(), task.sessionRef)
 	if err != nil {
@@ -151,6 +157,7 @@ func TestRuntimeSendMessageToChildUsesParentSourceNotLocal(t *testing.T) {
 }
 
 func TestRuntimeSendMessageDoesNotTreatLocalAsParentTarget(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	active, err := r.sessions.Session(t.Context(), task.sessionRef)
 	if err != nil {
@@ -198,6 +205,7 @@ func newLocalControllerChildActivityTask(t *testing.T) (*Runtime, *subagentTask,
 }
 
 func TestChildInputRejectsPersistedUnresolvedExecution(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	task.mu.Lock()
 	task.applyResult(delegation.Result{State: delegation.StateUnknownOutcome, Error: "prompt observation lost"})
@@ -238,6 +246,7 @@ func TestChildInputRejectsPersistedUnresolvedExecution(t *testing.T) {
 }
 
 func TestUserChildInputPreservesUserAndRejectsReplacedBinding(t *testing.T) {
+	t.Parallel()
 	runtime, task, runner := newLocalControllerChildActivityTask(t)
 	trace := &recordingProducerLifecycle{}
 	runtime.taskOutput = trace

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -46,7 +47,7 @@ func TestMessagesFromContextProjectsCompactSystemOverlayAsProviderUser(t *testin
 func TestAgentCommunicationDisplayRepairKeepsRuntimeAndReplayInput(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "owner"})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +95,7 @@ func TestAgentCommunicationDisplayRepairKeepsRuntimeAndReplayInput(t *testing.T)
 		return provider.last.Messages
 	}
 	actual := invoke(live)
-	loaded, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root})).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,18 +120,18 @@ func TestChildOriginAndToolProjectionSurviveFileReopenAndNextRequest(t *testing.
 
 	ctx := t.Context()
 	root := t.TempDir()
-	parentStore := sessionfile.NewStore(sessionfile.Config{
+	parentStore := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "parent-293" },
-	})
+	}))
 	parent, err := parentStore.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "owner"})
 	if err != nil {
 		t.Fatalf("StartSession(parent) error = %v", err)
 	}
-	childStore := sessionfile.NewStore(sessionfile.Config{
+	childStore := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "child-293" },
-	})
+	}))
 	child, err := childStore.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "owner"})
 	if err != nil {
 		t.Fatalf("StartSession(child) error = %v", err)
@@ -214,7 +215,7 @@ func TestChildOriginAndToolProjectionSurviveFileReopenAndNextRequest(t *testing.
 	liveModel := &recordingModel{}
 	runCloneReopenChat(t, ctx, parent, parentEvents, liveModel)
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	loadedParent, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: parent.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatalf("LoadSession(parent) error = %v", err)
@@ -303,7 +304,7 @@ func TestNativeStructuredDiffModelContextSurvivesFileStore(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "owner"})
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +322,7 @@ func TestNativeStructuredDiffModelContextSurvivesFileStore(t *testing.T) {
 		}
 	}
 	want := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: ctx, Session: active, Events: live}))
-	loaded, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root})).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +352,7 @@ func TestCommandConversationReplayMatchesRuntimeProducedModelContext(t *testing.
 	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "owner"})
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +397,7 @@ func TestCommandConversationReplayMatchesRuntimeProducedModelContext(t *testing.
 			t.Fatal(err)
 		}
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -514,7 +515,7 @@ func TestToolObservationInputNumbersSurviveSessionFileReplay(t *testing.T) {
 	ctx := context.Background()
 	wantContext := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: ctx, Events: live}))
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -524,7 +525,7 @@ func TestToolObservationInputNumbersSurviveSessionFileReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -552,7 +553,7 @@ func TestRecordedToolReplySurvivesDifferentOutputBudget(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	cfg := sessionfile.Config{RootDir: t.TempDir()}
-	store := sessionfile.NewStore(cfg)
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(cfg))
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -569,7 +570,7 @@ func TestRecordedToolReplySurvivesDifferentOutputBudget(t *testing.T) {
 		}
 	}
 
-	reopened := sessionfile.NewStore(cfg)
+	reopened := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(cfg))
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -593,7 +594,7 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 	}
 	want := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: ctx, Events: live}))
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "test", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -622,7 +623,7 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fresh := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	fresh := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	loaded, err := fresh.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)

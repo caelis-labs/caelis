@@ -129,7 +129,7 @@ func TestFileSessionFenceReleaseDoesNotDependOnSessionIndex(t *testing.T) {
 func newCommittedFenceTestStore(t *testing.T, sessionID string) (*Store, session.SessionRef, string) {
 	t.Helper()
 	root := t.TempDir()
-	store := NewStore(Config{RootDir: root})
+	store := newLogicalTestStore(t, Config{RootDir: root})
 	created, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: sessionID,
 	})
@@ -167,7 +167,8 @@ func assertFenceEquivalent(t *testing.T, got, want session.SessionFence) {
 }
 
 func TestPreCancelledAppendAndStateWriterDoNotCommitWithFreeLocks(t *testing.T) {
-	service := NewStore(Config{RootDir: t.TempDir()})
+	t.Parallel()
+	service := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "cancel-fence",
 	})

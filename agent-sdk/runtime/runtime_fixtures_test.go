@@ -8,6 +8,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -15,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -1573,7 +1575,12 @@ func shellAsyncDelayForTest() time.Duration {
 	if goruntime.GOOS == "windows" {
 		return time.Second
 	}
-	return 50 * time.Millisecond
+	return 200 * time.Millisecond
+}
+
+func newLogicalFileStore(t testing.TB, cfg sessionfile.Config) *sessionfile.Store {
+	t.Helper()
+	return sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(cfg))
 }
 
 func policyOutsidePathForRuntimeTest() string {

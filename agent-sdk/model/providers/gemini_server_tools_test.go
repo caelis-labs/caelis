@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -436,10 +437,10 @@ func TestGeminiServerToolReplayPartsRoundTripThroughFileStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-gemini-server-tools" },
-	})
+	}))
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

@@ -5,7 +5,7 @@ import (
 	"errors"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"iter"
@@ -35,17 +35,17 @@ func TestRequestCoverageBindsNormalizedHistory(t *testing.T) {
 			for i, event := range events[1:] {
 				event.Seq = uint64(8 + i)
 			}
-			base, tracker := requestsource.WithTracker(t.Context(), events)
+			base, tracker := requestmeta.WithTracker(t.Context(), events)
 			ctx := agent.NewContext(agent.ContextSpec{Context: base, Events: events})
 			req := &model.Request{Messages: messagesFromContext(ctx)}
 			if !reflect.DeepEqual(req.Messages, []model.Message{input}) {
 				t.Fatalf("normalized messages = %#v, want only canonical input", req.Messages)
 			}
-			prefix, err := requestsource.Fingerprint(tracker.Events())
+			prefix, err := requestmeta.Fingerprint(tracker.Events())
 			if err != nil {
 				t.Fatal(err)
 			}
-			messages, err := requestsource.Fingerprint(req.Messages)
+			messages, err := requestmeta.Fingerprint(req.Messages)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -78,7 +78,7 @@ func TestRequestCoverageBindsOnlyExactTrackerProjection(t *testing.T) {
 					&session.Event{ID: "result", Seq: 9, Type: session.EventTypeToolResult, Message: &result},
 				)
 			}
-			base, _ := requestsource.WithTracker(t.Context(), events)
+			base, _ := requestmeta.WithTracker(t.Context(), events)
 			if scenario == "no_tracker" {
 				base = t.Context()
 			}
@@ -108,8 +108,8 @@ func TestRequestCoverageBindsOnlyExactTrackerProjection(t *testing.T) {
 				t.Fatal("binding changed the foreground messages")
 			}
 			if req.Source != nil {
-				prefix, _ := requestsource.Fingerprint(events)
-				messages, _ := requestsource.Fingerprint(req.Messages)
+				prefix, _ := requestmeta.Fingerprint(events)
+				messages, _ := requestmeta.Fingerprint(req.Messages)
 				if req.Source.SourceThroughSeq != 7 || req.Source.SourcePrefixHash != prefix || req.Source.MessagesHash != messages {
 					t.Fatalf("incorrect source binding: %+v", req.Source)
 				}
@@ -131,7 +131,7 @@ func TestRequestCoverageRejectsUnverifiedSources(t *testing.T) {
 		if _, err := session.OrderToolFacts(events); err == nil {
 			t.Fatal("fixture must fail history projection")
 		}
-		base, _ := requestsource.WithTracker(t.Context(), events)
+		base, _ := requestmeta.WithTracker(t.Context(), events)
 		ctx := agent.NewContext(agent.ContextSpec{Context: base})
 		req := &model.Request{}
 		bindRequestSource(ctx, req)

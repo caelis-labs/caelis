@@ -12,6 +12,7 @@ import (
 )
 
 func TestRuntimeCommandTTYDefaultTaskWriteSubmitsWindowsLine(t *testing.T) {
+	t.Parallel()
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	hostRuntime := hostRuntimeForTest(t, activeSession.CWD)
 

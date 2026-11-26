@@ -55,7 +55,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{CWD: t.TempDir()}})
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if results != 1 || reviewed != 1 {
 		t.Fatalf("canonical results/reviews = %d/%d", results, reviewed)
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reviewed = 0
 	var after uint64
 	for {
@@ -247,6 +247,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 }
 
 func TestCommandApprovalYieldAllowsIndependentCommandAndOptionalWait(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"wait for result", "finish without result"} {
 		t.Run(scenario, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -353,6 +354,7 @@ func TestCommandApprovalYieldAllowsIndependentCommandAndOptionalWait(t *testing.
 }
 
 func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
+	t.Parallel()
 	for _, delay := range []time.Duration{3 * time.Second, 25 * time.Second, 60 * time.Second, 89 * time.Second, 91 * time.Second} {
 		t.Run(delay.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -425,6 +427,7 @@ func mustCommandTaskID(t *testing.T, ref session.SessionRef, callID string) stri
 }
 
 func TestCommandExecutionSpecRoundTrip(t *testing.T) {
+	t.Parallel()
 	req := taskapi.CommandStartRequest{Timeout: 123 * time.Second, Constraints: sandbox.Constraints{Route: sandbox.RouteHost, Backend: sandbox.BackendHost, Permission: sandbox.PermissionFullAccess}}
 	spec := commandExecutionForRequest(req)
 	spec.Approval = &commandApprovalRef{RunID: "r", TurnID: "t", RequestID: "p", Deadline: time.Now().UTC().Truncate(time.Second)}
@@ -443,6 +446,7 @@ func TestCommandExecutionSpecRoundTrip(t *testing.T) {
 }
 
 func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"cancel", "steer", "task_cancel"} {
 		t.Run(action, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -589,6 +593,7 @@ func TestCommandApprovalRecoveryNeverRestarts(t *testing.T) {
 }
 
 func TestTaskContinuationScopeBoundsAdmissionAndSerializesClaim(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		scope := newTaskContinuationScope()
 		for i := range maxTaskContinuations {
@@ -640,6 +645,7 @@ func TestTaskContinuationScopeBoundsAdmissionAndSerializesClaim(t *testing.T) {
 }
 
 func TestCommandApprovalFinalSafePointJoinsAndAcceptsSteering(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		sessions, active, r := newRuntimeRunCommandToolTestHarness(t)
 		r.tasks.store = newSagaTaskStore()
@@ -789,6 +795,7 @@ func TestDeferredCommandRevalidatesSelectedOptionBeforeStart(t *testing.T) {
 }
 
 func TestTaskContinuationJoinClosesAdmissionBeforeWaiting(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		scope := newTaskContinuationScope()
 		ctx := t.Context()

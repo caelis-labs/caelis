@@ -20,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 	xwindows "golang.org/x/sys/windows"
 )
 
@@ -75,7 +74,7 @@ func TestResolveStateRootCanonicalizesWindowsPathSpelling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveStateRoot() error = %v", err)
 	}
-	want := pathutil.Normalize(raw)
+	want := capability.NormalizePath(raw)
 	if !strings.EqualFold(got, want) {
 		t.Fatalf("resolveStateRoot(%q) = %q, want canonical %q", raw, got, want)
 	}
@@ -685,13 +684,13 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 		if request.Version != elevatedRepairRequestVersion {
 			t.Fatalf("repair request version = %d, want %d", request.Version, elevatedRepairRequestVersion)
 		}
-		if pathutil.Key(request.Config.CWD) != pathutil.Key(workspace) {
+		if capability.PathKey(request.Config.CWD) != capability.PathKey(workspace) {
 			t.Fatalf("repair request cwd = %q, want %q", request.Config.CWD, workspace)
 		}
 		if request.Config.RequestedBackend != sandbox.BackendWindows {
 			t.Fatalf("repair request backend = %q, want windows", request.Config.RequestedBackend)
 		}
-		if request.HostUserSID != windowsRT.hostUserSID || pathutil.Key(request.HostReceiptAuthorityRoot) != pathutil.Key(windowsRT.hostReceiptAuthorityRoot) {
+		if request.HostUserSID != windowsRT.hostUserSID || capability.PathKey(request.HostReceiptAuthorityRoot) != capability.PathKey(windowsRT.hostReceiptAuthorityRoot) {
 			t.Fatalf("repair request Host authority = %q/%q, want Runtime authority", request.HostUserSID, request.HostReceiptAuthorityRoot)
 		}
 		for _, name := range []string{requestName, flagValue(args, "-result-name")} {
@@ -715,7 +714,7 @@ func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
 	if gotExe == "" {
 		t.Fatalf("launcher executable was empty")
 	}
-	if pathutil.Key(gotCWD) != pathutil.Key(workspace) {
+	if capability.PathKey(gotCWD) != capability.PathKey(workspace) {
 		t.Fatalf("launcher cwd = %q, want %q", gotCWD, workspace)
 	}
 	if len(gotArgs) == 0 || gotArgs[0] != internalRepairHelperCommand {
@@ -772,7 +771,7 @@ func TestInternalRepairVerifiesAllReplacementsBeforeLegacyRetirement(t *testing.
 	findGrant := func(path string) receiptEffect {
 		t.Helper()
 		for _, effect := range receiptEffects(policy) {
-			if pathutil.Key(effect.Path) == pathutil.Key(path) && effect.Entry.Mode == acl.Grant && effect.Entry.Rights == acl.Modify {
+			if capability.PathKey(effect.Path) == capability.PathKey(path) && effect.Entry.Mode == acl.Grant && effect.Entry.Rights == acl.Modify {
 				return effect
 			}
 		}
@@ -857,7 +856,7 @@ func TestNormalizeRepairReceiptPathsCanonicalizesBothPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalizeRepairReceiptPaths() error = %v", err)
 	}
-	want := pathutil.Normalize(path)
+	want := capability.NormalizePath(path)
 	if len(got) != 1 || !strings.EqualFold(got[0].Path, want) || !strings.EqualFold(got[0].Receipt.Path, want) {
 		t.Fatalf("normalizeRepairReceiptPaths() = %#v, want both paths %q", got, want)
 	}
@@ -1173,7 +1172,7 @@ func TestEnsureWritesManifestAndIsIdempotent(t *testing.T) {
 	if !containsPath(first.WriteRoots, first.SandboxEnvRoot) {
 		t.Fatalf("WriteRoots = %#v, want sandbox env root %q", first.WriteRoots, first.SandboxEnvRoot)
 	}
-	if pathutil.IsUnder(first.SandboxEnvRoot, workspace) {
+	if capability.IsPathUnder(first.SandboxEnvRoot, workspace) {
 		t.Fatalf("SandboxEnvRoot = %q, want outside workspace %q", first.SandboxEnvRoot, workspace)
 	}
 	envSID := first.sidForWriteRoot(first.SandboxEnvRoot)
@@ -1282,9 +1281,9 @@ func TestRefreshMigratesLegacyManifestAndCleansStaleDenyACL(t *testing.T) {
 	legacyWorkspaceSID := "S-1-5-21-100-200-300-4101"
 	legacyEnvSID := "S-1-5-21-100-200-300-4102"
 	legacyStore := capability.Store{
-		WorkspaceByCWD: map[string]string{pathutil.Key(workspace): legacyWorkspaceSID},
+		WorkspaceByCWD: map[string]string{capability.PathKey(workspace): legacyWorkspaceSID},
 		WritableRootByPath: map[string]string{
-			pathutil.Key(windowsRT.sandboxEnvRoot(workspace)): legacyEnvSID,
+			capability.PathKey(windowsRT.sandboxEnvRoot(workspace)): legacyEnvSID,
 		},
 	}
 	legacyStoreData, err := json.Marshal(legacyStore)
@@ -1303,8 +1302,8 @@ func TestRefreshMigratesLegacyManifestAndCleansStaleDenyACL(t *testing.T) {
 	}
 	legacyPolicy.CapabilitySIDs = []string{legacyWorkspaceSID, legacyEnvSID}
 	legacyPolicy.WriteRootCapabilitySIDs = map[string]string{
-		pathutil.Normalize(workspace):                   legacyWorkspaceSID,
-		pathutil.Normalize(legacyPolicy.SandboxEnvRoot): legacyEnvSID,
+		capability.NormalizePath(workspace):                   legacyWorkspaceSID,
+		capability.NormalizePath(legacyPolicy.SandboxEnvRoot): legacyEnvSID,
 	}
 	windowsRT.stateCoordinator.aclMu.Lock()
 	for _, effect := range receiptEffects(legacyPolicy) {
@@ -1478,7 +1477,7 @@ func TestSharedExternalRootReceiptSurvivesCrossStateDirRetirement(t *testing.T) 
 	}
 	entry := allowEntries(policyA.sidForWriteRoot(externalRoot))[0]
 	if err := windowsA.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
-		index := hostReceiptIndex(*ledger, pathutil.Normalize(externalRoot), entry)
+		index := hostReceiptIndex(*ledger, capability.NormalizePath(externalRoot), entry)
 		if index < 0 {
 			t.Fatal("Host ledger has no cross-StateDir external-root receipt")
 		}
@@ -1612,7 +1611,7 @@ func TestDeletingEnvironmentRecoversBeforeRuntimeUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read deleting manifest error = %v", err)
 	}
-	if manifest.Phase != manifestPhaseDeleting || pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(envRoot) || pathutil.Key(manifest.DeletingEnvRoot) != pathutil.Key(envRoot) {
+	if manifest.Phase != manifestPhaseDeleting || capability.PathKey(manifest.SandboxEnvRoot) != capability.PathKey(envRoot) || capability.PathKey(manifest.DeletingEnvRoot) != capability.PathKey(envRoot) {
 		t.Fatalf("deleting manifest = %+v, want durable source and target", manifest)
 	}
 	if err := rt.Close(); err != nil {
@@ -1732,7 +1731,7 @@ func TestRetiringReceiptRevivesWithoutReleasingHostReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest B error = %v", err)
 	}
-	rootAKey := receiptEffectKey(pathutil.Normalize(rootA), entryA)
+	rootAKey := receiptEffectKey(capability.NormalizePath(rootA), entryA)
 	managedA := receiptIndex(manifest.ManagedReceipts, rootAKey)
 	if managedA < 0 {
 		t.Fatalf("manifest B managed receipts = %+v, want preserved root A before retirement", manifest.ManagedReceipts)
@@ -1788,7 +1787,7 @@ func TestHostReceiptReleaseResumesAfterReferenceCommit(t *testing.T) {
 	entry := allowEntries(policy.sidForWriteRoot(externalRoot))[0]
 	reference := hostReceiptReferenceForManifest(windowsRT.manifestPath())
 	if err := windowsRT.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
-		index := hostReceiptIndex(*ledger, pathutil.Normalize(externalRoot), entry)
+		index := hostReceiptIndex(*ledger, capability.NormalizePath(externalRoot), entry)
 		if index < 0 {
 			t.Fatalf("Host ledger has no external-root receipt")
 		}
@@ -2025,7 +2024,7 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
 
-	envRoot = pathutil.Normalize(envRoot)
+	envRoot = capability.NormalizePath(envRoot)
 	tempRoot := sandboxTempRoot(envRoot)
 	cacheRoot := sandboxCacheRoot(envRoot)
 	for key, want := range map[string]string{
@@ -2232,7 +2231,7 @@ func TestSandboxEnvironmentPreservesHostDefaultCacheOverridesAndRedirectsForcedC
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
-	cacheRoot := sandboxCacheRoot(pathutil.Normalize(envRoot))
+	cacheRoot := sandboxCacheRoot(capability.NormalizePath(envRoot))
 	for key, want := range map[string]string{
 		"GOCACHE":          filepath.Join(cacheRoot, "go-build"),
 		"GOMODCACHE":       filepath.Join(cacheRoot, "go-mod"),
@@ -3074,9 +3073,9 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 }
 
 func containsPath(paths []string, want string) bool {
-	wantKey := pathutil.Key(want)
+	wantKey := capability.PathKey(want)
 	for _, path := range paths {
-		if pathutil.Key(path) == wantKey {
+		if capability.PathKey(path) == wantKey {
 			return true
 		}
 	}

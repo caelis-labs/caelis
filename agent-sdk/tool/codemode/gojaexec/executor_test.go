@@ -34,6 +34,7 @@ func fixed(code string) codemode.Source {
 }
 
 func TestFreshWorkerAsync(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		return codemode.Reply{CallID: "original", Outcome: codemode.OutcomeSucceeded, Value: json.RawMessage(`{"n":17}`)}, nil
 	}}
@@ -55,6 +56,7 @@ func TestFreshWorkerAsync(t *testing.T) {
 }
 
 func TestCancelInterruptAndCPU(t *testing.T) {
+	t.Parallel()
 	for _, cancelEarly := range []bool{true, false} {
 		t.Run(map[bool]string{true: "cancel", false: "cpu"}[cancelEarly], func(t *testing.T) {
 			ctx, stop := context.WithTimeout(t.Context(), 10*time.Second)
@@ -82,6 +84,7 @@ func TestCancelInterruptAndCPU(t *testing.T) {
 }
 
 func TestHostWaitDoesNotConsumeCPUBudget(t *testing.T) {
+	t.Parallel()
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 		time.Sleep(1200 * time.Millisecond)
 		return codemode.Reply{}, nil
@@ -93,6 +96,7 @@ func TestHostWaitDoesNotConsumeCPUBudget(t *testing.T) {
 }
 
 func TestBudgetsAndDefaultUnboundedHeap(t *testing.T) {
+	t.Parallel()
 	e := Executor{}
 	if _, err := e.Execute(t.Context(), fixed(`return {};`), codemode.Limits{}, testHost{}); err != nil {
 		t.Fatal(err)
@@ -108,6 +112,7 @@ func TestBudgetsAndDefaultUnboundedHeap(t *testing.T) {
 }
 
 func TestBodyProjectionAndOriginalReturn(t *testing.T) {
+	t.Parallel()
 	raw := json.RawMessage(`{"n":9223372036854775807,"content":"retained payload"}`)
 	reply := codemode.Reply{CallID: "original-receipt", Outcome: codemode.OutcomeSucceeded, Value: raw, Parts: []codemode.Part{{Kind: "json", JSON: raw}}}
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) { return reply, nil }}
@@ -134,6 +139,7 @@ func TestBodyProjectionAndOriginalReturn(t *testing.T) {
 }
 
 func TestFailedReplyPreservesOutcomeClassification(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{codemode.OutcomeFailed, codemode.OutcomeUnknown} {
 		t.Run(outcome, func(t *testing.T) {
 			h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
@@ -155,6 +161,7 @@ func TestFailedReplyPreservesOutcomeClassification(t *testing.T) {
 }
 
 func TestArgumentQuotingUsesPristineStringEncoder(t *testing.T) {
+	t.Parallel()
 	const code = `JSON.stringify = () => "wrong";
 	const key = 'a"\\b';
 	await tools.call("Write", {[key]: "line\n\t\u0000中文😀", lone: "\ud800"});

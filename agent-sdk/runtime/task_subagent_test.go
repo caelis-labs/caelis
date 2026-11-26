@@ -40,6 +40,7 @@ func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placem
 }
 
 func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "review result"},
@@ -125,6 +126,7 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 }
 
 func TestDelegatedSpawnIncludeContextAttachesPublicTurns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
@@ -161,6 +163,7 @@ func TestDelegatedSpawnIncludeContextAttachesPublicTurns(t *testing.T) {
 }
 
 func TestDelegatedSpawnDefaultOmitsParentContext(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
@@ -189,6 +192,7 @@ func TestDelegatedSpawnDefaultOmitsParentContext(t *testing.T) {
 }
 
 func TestDelegatedSpawnIncludeContextAllowsEmptyHistory(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
 	}
@@ -207,6 +211,7 @@ func TestDelegatedSpawnIncludeContextAllowsEmptyHistory(t *testing.T) {
 }
 
 func TestDelegatedSpawnIncludeContextDegradesWithoutRouter(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
 	}
@@ -240,6 +245,7 @@ func TestDelegatedSpawnIncludeContextDegradesWithoutRouter(t *testing.T) {
 }
 
 func TestDelegatedSpawnIdentityBindsIncludeContextNotTransferContents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child done"},
@@ -268,6 +274,7 @@ func TestDelegatedSpawnIdentityBindsIncludeContextNotTransferContents(t *testing
 }
 
 func TestDelegatedSpawnRendersFrozenSpecContextOnResume(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -366,6 +373,7 @@ func callDelegatedSpawnTool(t *testing.T, runtime *Runtime, activeSession sessio
 }
 
 func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, OutputPreview: "I will inspect files"},
@@ -395,6 +403,7 @@ func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
 }
 
 func TestSlashSideSubagentDoesNotPromoteStreamTraceToCanonicalDialogue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult:      delegation.Result{State: delegation.StateCompleted},
@@ -431,6 +440,7 @@ func TestSlashSideSubagentDoesNotPromoteStreamTraceToCanonicalDialogue(t *testin
 }
 
 func TestSubagentRoleComesFromNeutralRequestNotProductSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
@@ -456,6 +466,7 @@ func TestSubagentRoleComesFromNeutralRequestNotProductSource(t *testing.T) {
 }
 
 func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
@@ -912,6 +923,7 @@ func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
 }
 
 func TestSubagentReadIgnoresRetiredSpawnResult(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "current final"}}
 	rt, active := newSubagentTaskTestRuntime(t, runner)
@@ -1035,6 +1047,7 @@ func TestSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 }
 
 func TestStartSubagentUsesRequestedHandleAndRejectsDuplicates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1079,6 +1092,7 @@ func TestStartSubagentUsesRequestedHandleAndRejectsDuplicates(t *testing.T) {
 }
 
 func TestStartSubagentRejectsRequestedHandleUsedByParticipant(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1100,6 +1114,7 @@ func TestStartSubagentRejectsRequestedHandleUsedByParticipant(t *testing.T) {
 }
 
 func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1134,6 +1149,7 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 }
 
 func TestSubagentProducerFinalResultSurvivesRehydration(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "producer final answer"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
@@ -1156,6 +1172,7 @@ func TestSubagentProducerFinalResultSurvivesRehydration(t *testing.T) {
 }
 
 func TestResolveTaskHandleUsesStoreHandleLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runtime, activeSession := newSubagentTaskTestRuntime(t, &recordingSubagentRunner{})
 	store := &handleLookupTaskStore{
@@ -1254,6 +1271,7 @@ func TestTaskCancelRejectsSubagentWithoutRemoteEffect(t *testing.T) {
 }
 
 func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.T) {
+	t.Parallel()
 	meta := taskToolMeta(task.Snapshot{
 		Kind:        task.KindSubagent,
 		EventCursor: 17,
@@ -1287,6 +1305,7 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 }
 
 func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T) {
+	t.Parallel()
 	payload := taskToolPayload(task.Snapshot{
 		Kind:  task.KindSubagent,
 		State: task.StateCompleted,
@@ -1315,6 +1334,7 @@ func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T
 }
 
 func TestRuntimeSpawnToolUsesRequestedHandle(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1369,6 +1389,7 @@ func TestRuntimeSpawnToolUsesRequestedHandle(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
@@ -1588,6 +1609,7 @@ func (r *overlappingSubagentRunner) maxActive() int {
 }
 
 func TestRuntimeSpawnToolRejectsUnknownArgsBeforeRequiredPrompt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
@@ -1617,6 +1639,7 @@ func TestRuntimeSpawnToolRejectsUnknownArgsBeforeRequiredPrompt(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1666,6 +1689,7 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 }
 
 func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1711,6 +1735,7 @@ func TestRuntimeSpawnToolPersistsResolvedPlacementBeforeSpawn(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done", SupportsSteering: true},
@@ -1757,6 +1782,7 @@ func TestRuntimeSpawnToolReportsUnsupportedSteering(t *testing.T) {
 }
 
 func TestRuntimeSpawnToolPassesApprovalModeToChild(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1783,6 +1809,7 @@ func TestRuntimeSpawnToolPassesApprovalModeToChild(t *testing.T) {
 }
 
 func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1807,6 +1834,7 @@ func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
 }
 
 func TestRuntimeCurrentApprovalModeUsesConfiguredDefault(t *testing.T) {
+	t.Parallel()
 	runtime := &Runtime{defaultApprovalMode: approval.ModeManual}
 	if got := runtime.currentApprovalMode(nil); got != approval.ModeManual {
 		t.Fatalf("currentApprovalMode(empty) = %q, want manual", got)
@@ -1818,6 +1846,7 @@ func TestRuntimeCurrentApprovalModeUsesConfiguredDefault(t *testing.T) {
 }
 
 func TestStartSubagentWithOptionsUsesRuntimeDefaultApprovalMode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
@@ -1919,6 +1948,7 @@ func (r *recordingSubagentRunner) Cancel(context.Context, delegation.Anchor) err
 }
 
 func TestSidecarInitialContentSurvivesTaskAndContextReplay(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "image inspected"}}
 	runtime, active := newSubagentTaskTestRuntime(t, runner)
 	runtime.tasks.store = newFileTaskStoreForTest(t)
@@ -1958,6 +1988,7 @@ func TestSidecarInitialContentSurvivesTaskAndContextReplay(t *testing.T) {
 }
 
 func TestBackgroundStartReturnsWithoutWaitingForChild(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateRunning, Running: true}}
 	runner.waitHook = func() { t.Error("background admission waited for child progress") }
 	runtime, active := newSubagentTaskTestRuntime(t, runner)

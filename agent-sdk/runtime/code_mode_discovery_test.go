@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"iter"
 	"net/http"
@@ -32,6 +31,7 @@ import (
 
 // Complete-schema query budgets do not gate a direct call with known arguments.
 func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
+	t.Parallel()
 	for _, exact := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fuzzy", true: "exact_oversize"}[exact], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -106,6 +106,7 @@ func (s *h1NamedSource) Lookup(ctx context.Context, name string) (tool.Tool, boo
 }
 
 func TestJSExecLookupStillFiltersAndWrapsSourceTarget(t *testing.T) {
+	t.Parallel()
 	s := h1Directory(2)
 	named := h1Indexed(s)
 	wraps := 0
@@ -140,6 +141,7 @@ func (s *managerAdmissionSource) CheckToolBinding(ctx context.Context, binding t
 }
 
 func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"revoke", "schema"} {
 		t.Run(change, func(t *testing.T) {
 			var effects atomic.Int32
@@ -334,6 +336,7 @@ func h1Run(t *testing.T, rt *Runtime, active session.Session, spec agent.AgentSp
 	return events
 }
 func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"permission", "schema"} {
 		t.Run(change, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -420,6 +423,7 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 }
 
 func TestJSExecH1HintPreservesDescriptionsAndStoredSnapshots(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, Update: func(state map[string]any) (map[string]any, error) {
 		if state == nil {
@@ -499,6 +503,7 @@ func TestJSExecH1HintPreservesDescriptionsAndStoredSnapshots(t *testing.T) {
 }
 
 func TestJSExecSearchRejectsUnsupportedObject(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	s := h1Directory(0)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
@@ -520,6 +525,7 @@ func TestJSExecSearchRejectsUnsupportedObject(t *testing.T) {
 // A static MCP Tool is legal assembled input. Discovering it must not duplicate
 // that same registered target when the next isolated VM restores eligibility.
 func TestReviewStaticMCPDiscoveryAcrossVMs(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	s := h1Directory(2)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
@@ -544,6 +550,7 @@ func TestReviewStaticMCPDiscoveryAcrossVMs(t *testing.T) {
 }
 
 func TestJSExecStaticDiscoveredUnionStillRejectsDuplicateRegistrations(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	s := h1Directory(2)
 	driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
@@ -572,6 +579,7 @@ func TestJSExecStaticDiscoveredUnionStillRejectsDuplicateRegistrations(t *testin
 }
 
 func TestJSExecStaticAndDeferredUnionKeepsBothBindings(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	s := h1Directory(2)
 	driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
@@ -592,6 +600,7 @@ func TestJSExecStaticAndDeferredUnionKeepsBothBindings(t *testing.T) {
 }
 
 func TestCodeModeConcurrentSearchFailuresRetainEachAttempt(t *testing.T) {
+	t.Parallel()
 	entered, release := make(chan struct{}, 2), make(chan struct{})
 	host := &codeModeHost{ctx: t.Context(), owner: runtimeCodeModeTool{lookup: func(context.Context, string) (tool.Tool, bool, error) {
 		entered <- struct{}{}
@@ -619,6 +628,7 @@ func TestCodeModeConcurrentSearchFailuresRetainEachAttempt(t *testing.T) {
 }
 
 func TestCodeModeServiceFiltersCurrentRuntimeSourceBeforeLimit(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	source := h1Directory(20)
 	// Discovery's catalog is broader than the assembled execution source. The
@@ -636,7 +646,7 @@ func TestCodeModeServiceFiltersCurrentRuntimeSourceBeforeLimit(t *testing.T) {
 	}
 }
 
-func runSearchContractResult(t *testing.T, source toolset.Source, extra []tool.Tool, code string) (*session.Event, []*session.Event) {
+func runSearchContractResult(t *testing.T, source tool.Source, extra []tool.Tool, code string) (*session.Event, []*session.Event) {
 	t.Helper()
 	store, active, _ := codeModeStore(t)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -662,7 +672,7 @@ func runSearchContractResult(t *testing.T, source toolset.Source, extra []tool.T
 	return nil, nil
 }
 
-func runSearchContract(t *testing.T, source toolset.Source, extra []tool.Tool, code string) []*session.Event {
+func runSearchContract(t *testing.T, source tool.Source, extra []tool.Tool, code string) []*session.Event {
 	t.Helper()
 	event, events := runSearchContractResult(t, source, extra, code)
 	if event.Meta[codemode.MetadataScriptCompletion] != "completed" {
@@ -689,6 +699,7 @@ func runSearchContract(t *testing.T, source toolset.Source, extra []tool.Tool, c
 }
 
 func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
+	t.Parallel()
 	const canonical = "canonical__read\"quoted\\path"
 	const server = "server\"with-punctuation."
 	const remote = "read'quoted\"tool-name"
@@ -743,6 +754,7 @@ return {contract:true};`, metadata)
 }
 
 func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
+	t.Parallel()
 	source := &runtimeDeferredSource{}
 	def := fixtureMCPDefinition("search-contract-late-v1")
 	def.Name = "late__read"
@@ -783,6 +795,7 @@ return {contract:true};`)
 }
 
 func TestCodeModeSearchRefreshesModelFunctionInCurrentScript(t *testing.T) {
+	t.Parallel()
 	source := &changingBindingSource{}
 	makeRemote := func(version, field string) tool.NamedTool {
 		def := fixtureMCPDefinition(version)
@@ -832,6 +845,7 @@ if(entry.input_schema.required[0]!=="newValue")throw Error("schema did not refre
 }
 
 func TestCodeModeSearchContractPagination(t *testing.T) {
+	t.Parallel()
 	source := &runtimeDeferredSource{}
 	for index := 0; index < 20; index++ {
 		def := fixtureMCPDefinition("v1")
@@ -848,6 +862,7 @@ func TestCodeModeSearchContractPagination(t *testing.T) {
 }
 
 func TestCodeModeExactNameDoesNotFallBackToFilter(t *testing.T) {
+	t.Parallel()
 	source := &runtimeDeferredSource{}
 	def := fixtureMCPDefinition("v1")
 	source.publish(tool.NamedTool{Def: def})
@@ -858,6 +873,7 @@ func TestCodeModeExactNameDoesNotFallBackToFilter(t *testing.T) {
 }
 
 func TestCodeModeSearchRanksServicesAndMethodsAndBatchesExactSchemas(t *testing.T) {
+	t.Parallel()
 	source := &runtimeDeferredSource{}
 	makeRemote := func(name, server, method, description string) tool.NamedTool {
 		def := fixtureMCPDefinition("rank-v1")
@@ -900,6 +916,7 @@ return {contract:true};`)
 }
 
 func TestCodeModeLargeCatalogStartup(t *testing.T) {
+	t.Parallel()
 	for _, count := range []int{1200, 2000} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -955,6 +972,7 @@ func TestCodeModeLargeCatalogStartup(t *testing.T) {
 }
 
 func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	if err != nil {
@@ -993,6 +1011,7 @@ func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
 }
 
 func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
+	t.Parallel()
 	for _, dynamic := range []bool{false, true} {
 		t.Run(map[bool]string{false: "static", true: "dynamic"}[dynamic], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -1094,6 +1113,7 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 }
 
 func TestCodeModeMinimalModelInterface(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	if err != nil {

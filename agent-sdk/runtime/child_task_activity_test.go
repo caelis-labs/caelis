@@ -20,6 +20,7 @@ import (
 )
 
 func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newIdleChildActivityTask(t)
 	trace := &recordingProducerLifecycle{}
 	r.taskOutput = trace
@@ -86,6 +87,7 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 }
 
 func TestChildCompletionKickKeepsApplyingTask(t *testing.T) {
+	t.Parallel()
 	const taskID = "child"
 	claimedTask := &subagentTask{turnSeq: 1}
 	completion := &subagentCompletion{task: claimedTask}
@@ -102,6 +104,7 @@ func TestChildCompletionKickKeepsApplyingTask(t *testing.T) {
 }
 
 func TestChildActivityCompletionAdvancesWithoutOutput(t *testing.T) {
+	t.Parallel()
 	r, task, _ := newIdleChildActivityTask(t)
 	id, _, completion, err := r.prepareChildTaskOutput(t.Context(), task)
 	if err != nil {
@@ -119,6 +122,7 @@ func TestChildActivityCompletionAdvancesWithoutOutput(t *testing.T) {
 }
 
 func TestChildActivityCASConflictPreservesCommittedGeneration(t *testing.T) {
+	t.Parallel()
 	for _, state := range []taskapi.State{taskapi.StateRunning, taskapi.StateCompleted} {
 		for _, sameActivity := range []bool{true, false} {
 			t.Run(string(state)+map[bool]string{true: "/same", false: "/other"}[sameActivity], func(t *testing.T) {
@@ -159,8 +163,9 @@ func TestChildActivityCASConflictPreservesCommittedGeneration(t *testing.T) {
 }
 
 func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := sessions.StartSession(t.Context(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "test", Workspace: session.WorkspaceRef{Key: "workspace", CWD: t.TempDir()},
 	})
@@ -197,7 +202,7 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	wantTask := assertChildContextUsage(t, r, task, 200000, 8000, "gauge-model-only")
 	assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	rebuilt, err := New(testConfigWithACPForwarder(Config{Sessions: reopened, TaskStore: sessionfile.NewTaskStore(reopened), AgentFactory: chat.Factory{}}))
 	if err != nil {
 		t.Fatal(err)
@@ -230,6 +235,7 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 }
 
 func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
+	t.Parallel()
 	for _, terminal := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "terminal"}[terminal], func(t *testing.T) {
 			r, task, _ := newIdleChildActivityTask(t)
@@ -303,6 +309,7 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 }
 
 func TestChildActivityPersistsReplaceableACPUsageGauge(t *testing.T) {
+	t.Parallel()
 	r, task, _ := newIdleChildActivityTask(t)
 	_, observer, completion, err := r.prepareChildTaskOutput(t.Context(), task)
 	if err != nil {
@@ -360,6 +367,7 @@ func TestChildActivityPersistsReplaceableACPUsageGauge(t *testing.T) {
 }
 
 func TestChildSpawnPersistsSynchronousACPUsageGauge(t *testing.T) {
+	t.Parallel()
 	runner := &recordingSubagentRunner{
 		spawnResult:        delegation.Result{State: delegation.StateCompleted, Result: "spawned"},
 		publishOnSpawn:     true,

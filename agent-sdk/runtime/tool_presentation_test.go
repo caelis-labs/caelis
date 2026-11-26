@@ -26,6 +26,7 @@ import (
 )
 
 func TestRuntimePlanPointerPublishesPlan(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
@@ -63,6 +64,7 @@ func TestRuntimePlanPointerPublishesPlan(t *testing.T) {
 }
 
 func TestRuntimeIgnoresPlanPresentationWithoutBuiltinDispatch(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	core, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	if err != nil {
@@ -107,6 +109,7 @@ func TestRuntimeIgnoresPlanPresentationWithoutBuiltinDispatch(t *testing.T) {
 }
 
 func TestCodeModeMutationDisplayAndModelReplay(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"unmodified", "invoke-redacted", "result-redacted", "result-failed", "view-failed"} {
 		t.Run(mode, func(t *testing.T) {
 			const before = "fixture-preimage-only"
@@ -173,7 +176,7 @@ return {write: write.data, patch: patch.data};`
 					t.Fatalf("Patch effect = %q, error = %v", raw, err)
 				}
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)

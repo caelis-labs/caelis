@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 )
 
 var errSandboxCacheProvenance = errors.New("sandbox cache has no exact ACL receipt provenance")
@@ -109,7 +109,7 @@ func (r *runtime) workspaceSetupError() string {
 }
 
 func (r *runtime) workspaceCleanupPaths() []string {
-	return pathutil.Dedupe([]string{
+	return capability.DedupePaths([]string{
 		filepath.Dir(r.manifestPath()),
 		r.sandboxEnvRoot(r.cfg.CWD),
 		r.legacyWorkspaceSandboxEnvRoot(),
@@ -141,11 +141,11 @@ func (r *runtime) legacyManifestPath() string {
 }
 
 func workspaceStateID(workspaceRoot string) string {
-	workspace := pathutil.Normalize(workspaceRoot)
+	workspace := capability.NormalizePath(workspaceRoot)
 	if workspace == "" {
 		return "unknown"
 	}
-	sum := sha256.Sum256([]byte(pathutil.Key(workspace)))
+	sum := sha256.Sum256([]byte(capability.PathKey(workspace)))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
@@ -157,9 +157,9 @@ func (r *runtime) sandboxEnvRoot(workspaceRoot string) string {
 	if r.cfg.ResourceLimits != nil {
 		return filepath.Join(r.cfg.ResourceLimits.WritePaths[0], ".sandbox-env")
 	}
-	workspace := pathutil.Normalize(workspaceRoot)
+	workspace := capability.NormalizePath(workspaceRoot)
 	if workspace == "" {
-		workspace = pathutil.Normalize(r.cfg.CWD)
+		workspace = capability.NormalizePath(r.cfg.CWD)
 	}
 	if workspace == "" {
 		return ""
@@ -190,7 +190,7 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 	var errs []error
 	removed := map[string]struct{}{}
 	for _, entry := range entries {
-		if pathutil.Key(entry.path) == pathutil.Key(activeEnvRoot) || r.stateCoordinator.protectsEnvRoot(entry.path) {
+		if capability.PathKey(entry.path) == capability.PathKey(activeEnvRoot) || r.stateCoordinator.protectsEnvRoot(entry.path) {
 			continue
 		}
 		if now.Sub(entry.modTime) <= windowsCacheMaxAge {
@@ -213,7 +213,7 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 			continue
 		}
 		total -= entry.size
-		removed[pathutil.Key(entry.path)] = struct{}{}
+		removed[capability.PathKey(entry.path)] = struct{}{}
 	}
 	if total > windowsCacheMaxBytes {
 		sort.Slice(entries, func(i, j int) bool {
@@ -223,11 +223,11 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 			if total <= windowsCacheMaxBytes {
 				break
 			}
-			key := pathutil.Key(entry.path)
+			key := capability.PathKey(entry.path)
 			if key == "" {
 				continue
 			}
-			if key == pathutil.Key(activeEnvRoot) || r.stateCoordinator.protectsEnvRoot(entry.path) {
+			if key == capability.PathKey(activeEnvRoot) || r.stateCoordinator.protectsEnvRoot(entry.path) {
 				continue
 			}
 			if _, ok := removed[key]; ok {
@@ -261,9 +261,9 @@ func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string
 }
 
 func (r *runtime) retireAndRemoveSandboxEnv(ctx context.Context, envRoot string) error {
-	envRoot = pathutil.Normalize(envRoot)
-	base := pathutil.Normalize(r.sandboxEnvBase())
-	if envRoot == "" || pathutil.Key(filepath.Dir(envRoot)) != pathutil.Key(base) {
+	envRoot = capability.NormalizePath(envRoot)
+	base := capability.NormalizePath(r.sandboxEnvBase())
+	if envRoot == "" || capability.PathKey(filepath.Dir(envRoot)) != capability.PathKey(base) {
 		return fmt.Errorf("impl/sandbox/windows: refuse unscoped sandbox cache removal %s", envRoot)
 	}
 	return r.withHostReceiptLedger(func(ledger *hostReceiptLedger) error {
@@ -278,7 +278,7 @@ func (r *runtime) retireAndRemoveSandboxEnv(ctx context.Context, envRoot string)
 			}
 			return fmt.Errorf("impl/sandbox/windows: read sandbox cache receipt manifest: %w", err)
 		}
-		if pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(envRoot) {
+		if capability.PathKey(manifest.SandboxEnvRoot) != capability.PathKey(envRoot) {
 			return fmt.Errorf("impl/sandbox/windows: sandbox cache receipt manifest does not own %s", envRoot)
 		}
 		if err := r.retireEnvironmentReceiptsTransaction(ctx, manifestPath, &manifest, envRoot, ledger); err != nil {
@@ -292,7 +292,7 @@ func (r *runtime) retireAndRemoveSandboxEnv(ctx context.Context, envRoot string)
 }
 
 func sandboxEnvCacheEntries(ctx context.Context, base string) ([]sandboxEnvCacheEntry, int64, error) {
-	base = pathutil.Normalize(base)
+	base = capability.NormalizePath(base)
 	if base == "" {
 		return nil, 0, nil
 	}
@@ -354,7 +354,7 @@ func (r *runtime) recordCacheCleanup(at time.Time, bytes int64) {
 }
 
 func (r *runtime) legacyWorkspaceSandboxEnvRoot() string {
-	workspace := pathutil.Normalize(r.cfg.CWD)
+	workspace := capability.NormalizePath(r.cfg.CWD)
 	if workspace == "" {
 		return ""
 	}

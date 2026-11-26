@@ -38,6 +38,7 @@ import (
 // Replaces comparison-only command-in-script approval tests with real JS and
 // an allowed filesystem effect, keeping the original Runtime approval/Journal.
 func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"allow", "generation", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -175,6 +176,7 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 }
 
 func TestIndependentJSExecRegistersTaskWithoutShell(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
@@ -206,6 +208,7 @@ func (s independentFailScriptTerminalStore) Put(ctx context.Context, req taskapi
 }
 
 func TestIndependentJSExecYieldDoesNotHideTerminalPersistenceFailure(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	marker := errors.New("injected-script-terminal-commit-failure")
 	start, release := make(chan struct{}), make(chan struct{})
@@ -267,6 +270,7 @@ func TestIndependentJSExecYieldDoesNotHideTerminalPersistenceFailure(t *testing.
 }
 
 func TestIndependentJSExecReadWhileRunningKeepsTerminalCAS(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	start, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -318,6 +322,7 @@ func TestIndependentJSExecReadWhileRunningKeepsTerminalCAS(t *testing.T) {
 }
 
 func TestCodeModeTaskHandleResolvesOnlyAtHandleBoundary(t *testing.T) {
+	t.Parallel()
 	active := session.SessionRef{SessionID: "session"}
 	tasks := newTaskRuntime(nil, nil)
 	tasks.codeTasks = map[string]*codeModeTask{
@@ -346,6 +351,7 @@ func TestCodeModeTaskHandleResolvesOnlyAtHandleBoundary(t *testing.T) {
 }
 
 func TestLegacyScriptReceiptAllowsNextEffectAndModelStep(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	_, err := sessionfile.NewTaskStore(store).Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{
 		TaskID: "finished", Handle: "script", Kind: taskapi.KindCodeMode, State: taskapi.StateCompleted,
@@ -387,6 +393,7 @@ func TestLegacyScriptReceiptAllowsNextEffectAndModelStep(t *testing.T) {
 }
 
 func TestLiveScriptTaskWaitWithCancelReturnsSelectedResult(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	finish, committed, cancelReturned := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	markCommitted := sync.OnceFunc(func() { close(committed) })
@@ -495,6 +502,7 @@ func TestLiveScriptTaskWaitWithCancelReturnsSelectedResult(t *testing.T) {
 // Repeated real observations must not manufacture durable revisions, including
 // after a nonzero model-output cursor has already committed.
 func TestJSExecCanonicalCursorCommitsOnlyAdvancement(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	tasks := sessionfile.NewTaskStore(store)
 	var effects atomic.Int32
@@ -550,6 +558,7 @@ func TestJSExecCanonicalCursorCommitsOnlyAdvancement(t *testing.T) {
 }
 
 func TestJSExecCanonicalCursorDoesNotRewriteReceiptMetadata(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	tasks := &taskRuntime{store: sessionfile.NewTaskStore(store)}
 	meta := map[string]any{"runtime": map[string]any{
@@ -582,6 +591,7 @@ func (s failCodeModeInitialStore) Put(ctx context.Context, req taskapi.PutReques
 }
 
 func TestJSExecInitialPersistenceFailureDoesNotBindOutput(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	base := sessionfile.NewTaskStore(store)
 	failure := errors.New("initial-script-persistence-failure")
@@ -633,6 +643,7 @@ func TestJSExecInitialPersistenceFailureDoesNotBindOutput(t *testing.T) {
 }
 
 func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	base := sessionfile.NewTaskStore(store)
 	marker := errors.New("terminal-durability-failure")
@@ -720,6 +731,7 @@ func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 }
 
 func TestJSExecSDKOnlyDeclarationCanWaitOriginalTask(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	var original string
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
@@ -756,6 +768,7 @@ func TestJSExecSDKOnlyDeclarationCanWaitOriginalTask(t *testing.T) {
 }
 
 func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
+	t.Parallel()
 	const identifier = `9007199254740993123456789`
 	encodeSnapshot := func(handle string, content []tool.ContentBlock) taskapi.Snapshot {
 		t.Helper()
@@ -808,6 +821,7 @@ func TestTaskCodeModeResultAggregatesStructuredReceipts(t *testing.T) {
 }
 
 func TestTaskResultMetadataKeepsCanonicalHandle(t *testing.T) {
+	t.Parallel()
 	snapshot := taskapi.Snapshot{
 		Ref:      taskapi.Ref{TaskID: "original"},
 		Handle:   "original-script",
@@ -821,6 +835,7 @@ func TestTaskResultMetadataKeepsCanonicalHandle(t *testing.T) {
 }
 
 func TestCodeModeCommandApprovalUsesOriginalOwner(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"allow", "deny", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -929,6 +944,7 @@ func TestCodeModeCommandApprovalUsesOriginalOwner(t *testing.T) {
 func stringJSONForCommandTest(s string) string { raw, _ := json.Marshal(s); return string(raw) }
 
 func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
+	t.Parallel()
 	startErr := errors.New("test sandbox could not start command")
 	persistErr := errors.New("test command terminal write failed")
 	for _, tc := range []struct {
@@ -950,6 +966,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 		{name: "settlement-failure", wantStarts: 1, startErr: startErr},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			store, active, root := codeModeStore(t)
 			native, err := host.New(host.Config{CWD: root})
 			if err != nil {
@@ -1116,7 +1133,7 @@ return {...commandReceipt, wait:commandWait};`
 				t.Fatalf("unexpected command effect = %q, %v", data, err)
 			}
 			if tc.name == "start-failure" {
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 				resumed, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 				if err != nil {
 					t.Fatal(err)
@@ -1167,6 +1184,7 @@ func (s *codeModeCommandFailingStore) Put(ctx context.Context, req taskapi.PutRe
 }
 
 func TestCodeModeRealRunCommand(t *testing.T) {
+	t.Parallel()
 	short, yielding, long := "printf command-done", "sleep 0.2; printf command-done", "sleep 30"
 	if goruntime.GOOS == "windows" {
 		short = "Write-Output command-done"

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 )
 
 func TestWindowsRejectsExplicitReadCeiling(t *testing.T) {
@@ -81,7 +81,7 @@ func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("temporary command write=%+v error=%v", result, err)
 	}
-	if !pathutil.IsUnder(result.Stdout, root) {
+	if !capability.IsPathUnder(result.Stdout, root) {
 		t.Fatalf("process TEMP escaped resource limits: %q", result.Stdout)
 	}
 	if limits.Network != sandbox.NetworkDisabled || limits.WritePaths[0] != outside {

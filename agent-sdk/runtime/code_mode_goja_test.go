@@ -45,6 +45,7 @@ func (s *jsExecSource) Tools() []tool.Tool {
 }
 
 func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -189,6 +190,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 }
 
 func TestJSExecCustomCommandAliasRetainsPolicyDenial(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -256,6 +258,7 @@ func jsExecTaskHandle(request *model.Request) string {
 }
 
 func TestJSExecYieldReturnsControlAndContinuesOriginalTask(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -351,6 +354,7 @@ func TestJSExecYieldReturnsControlAndContinuesOriginalTask(t *testing.T) {
 }
 
 func TestJSExecFinalBoundaryCancelsBeforeJoinAndPreservesUnknown(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -391,6 +395,7 @@ func TestJSExecFinalBoundaryCancelsBeforeJoinAndPreservesUnknown(t *testing.T) {
 }
 
 func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -438,6 +443,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 }
 
 func TestJSExecLeavesNativeRunCommandUsable(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -464,6 +470,7 @@ func TestJSExecLeavesNativeRunCommandUsable(t *testing.T) {
 }
 
 func TestJSExecCannotWriteNativeCommandTask(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	tasks := sessionfile.NewTaskStore(store)
 	_, err := tasks.Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{TaskID: "native-command-receipt", Handle: "innocent-report", Session: active.SessionRef, Kind: taskapi.KindCommand, State: taskapi.StateCompleted, CreatedAt: time.Now(), UpdatedAt: time.Now()}})

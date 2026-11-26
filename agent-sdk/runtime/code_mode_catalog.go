@@ -11,13 +11,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
 )
 
 // This is a hint snapshot, not discovery or authorization. An empty initial
 // ready catalog stays empty; later tools remain discoverable without rewriting
 // a Session's earlier instructions. Raw schemas never enter this snapshot.
-func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, source toolset.Source, metadata map[string]any) (string, error) {
+func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, source tool.Source, metadata map[string]any) (string, error) {
 	state, err := r.sessions.SnapshotState(ctx, ref)
 	if err != nil {
 		return "", err
@@ -49,7 +48,7 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 	var hints []hint
 	var candidates []tool.Tool
 	if len(selected) > 0 && source != nil {
-		if named, ok := source.(toolset.NamedSource); ok {
+		if named, ok := source.(tool.NamedSource); ok {
 			names := make([]string, 0, len(selected))
 			for name := range selected {
 				names = append(names, name)

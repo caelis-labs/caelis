@@ -16,6 +16,7 @@ import (
 )
 
 func TestStoreIndexFailureKeepsWALUntilRestartRepairsIndex(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	at := time.Date(2026, time.July, 13, 8, 9, 10, 0, time.UTC)
 	store := NewStore(Config{
@@ -108,6 +109,7 @@ func TestStoreIndexFailureKeepsWALUntilRestartRepairsIndex(t *testing.T) {
 }
 
 func TestStoreCreateKeepsZeroEventWALUntilIndexRecovery(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	at := time.Date(2026, time.July, 13, 11, 12, 13, 0, time.UTC)
 	store := NewStore(Config{RootDir: root, Clock: func() time.Time { return at }})
@@ -171,6 +173,7 @@ func TestStoreCreateKeepsZeroEventWALUntilIndexRecovery(t *testing.T) {
 }
 
 func TestTransactionRecoveryScanIsAmortizedAndPendingMarkerForcesRecovery(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "recovery-gate-session" }})
 	var scans atomic.Int64
@@ -230,6 +233,7 @@ func TestTransactionRecoveryScanIsAmortizedAndPendingMarkerForcesRecovery(t *tes
 }
 
 func TestRetiredCommittedWALOnlyBlocksItsOwnSession(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root})
@@ -307,6 +311,7 @@ func TestRetiredCommittedWALOnlyBlocksItsOwnSession(t *testing.T) {
 }
 
 func TestRecoveryReservesPhysicalWALPathsAndFinishesCurrentTransaction(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	at := time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC)
 	store := NewStore(Config{RootDir: t.TempDir(), Clock: func() time.Time { return at }})
@@ -385,6 +390,7 @@ func TestRecoveryReservesPhysicalWALPathsAndFinishesCurrentTransaction(t *testin
 }
 
 func TestSameSecondRolloutCollisionPreservesExactOwner(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	at := time.Now()
 	store := NewStore(Config{RootDir: t.TempDir(), Clock: func() time.Time { return at }})

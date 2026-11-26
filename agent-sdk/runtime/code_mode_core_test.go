@@ -77,7 +77,7 @@ func codeModeModel(search bool) *mcpScriptModel {
 func codeModeStore(t *testing.T) (*sessionfile.Store, session.Session, string) {
 	t.Helper()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "fixture", UserID: "fixture", Workspace: session.WorkspaceRef{Key: "fixture", CWD: root}})
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +123,7 @@ func runCodeMode(t *testing.T, store session.Service, active session.Session, sp
 }
 
 func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "code-mode", Version: "1"}, nil)
 	var effects atomic.Int32
@@ -225,7 +226,7 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 	if !seenMirror {
 		t.Fatal("nested tool names/arguments were not published live")
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
@@ -277,6 +278,7 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 }
 
 func TestCodeModeAssembledToolsDoNotRequireSearch(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"without-search", "prior-search"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -323,6 +325,7 @@ func TestCodeModeAssembledToolsDoNotRequireSearch(t *testing.T) {
 }
 
 func TestCodeModeTerminalReceiptsSurviveDiscardedAggregate(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	var effects atomic.Int32
 	completed := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -343,7 +346,7 @@ func TestCodeModeTerminalReceiptsSurviveDiscardedAggregate(t *testing.T) {
 		return nil, errors.New("executor failed after effects")
 	})}
 	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, completed, failed}}, nil, nil)
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
@@ -379,6 +382,7 @@ func (s *codeModeReceiptFailure) AppendEvent(ctx context.Context, req session.Ap
 }
 
 func TestCodeModeReceiptFailureClosesBridgeAndRecoversOriginalUnknown(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	failing := &codeModeReceiptFailure{Service: store}
 	var effects atomic.Int32
@@ -426,6 +430,7 @@ func TestCodeModeReceiptFailureClosesBridgeAndRecoversOriginalUnknown(t *testing
 }
 
 func TestCodeModeSettledFailureStillRequiresDurableReceipt(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	failing := &codeModeReceiptFailure{Service: store, status: "failed"}
 	var effects atomic.Int32
@@ -461,6 +466,7 @@ func TestCodeModeSettledFailureStillRequiresDurableReceipt(t *testing.T) {
 }
 
 func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	source := &runtimeDeferredSource{}
 	effects := 0
@@ -508,7 +514,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 	}
 	// The Store is reopened and a new Runtime is constructed for every run.
 	// Compare rebuilt model context with the actual prior request frontier.
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	resumed := run(reopened, `return await tools.plugins.fixture.docs.read({value:3});`)
 	live := first.requests[len(first.requests)-1].Messages
 	var callIDs, replyIDs []string
@@ -553,6 +559,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 }
 
 func TestCodeModeNativeOwnerSupersedesHistoricalMCPBinding(t *testing.T) {
+	t.Parallel()
 	prior := fixtureMCPDefinition("v1")
 	binding := mcp.BindingForDefinition(prior)
 	current := tool.NamedTool{Def: tool.Definition{Name: prior.Name, InputSchema: map[string]any{"type": "object"}}}
@@ -584,6 +591,7 @@ func TestCodeModeNativeOwnerSupersedesHistoricalMCPBinding(t *testing.T) {
 // Exercise the real encoder, process protocol, Runtime admission and Write tool.
 // The model supplies deterministic source; no live DTW or model is involved.
 func TestCodeModeLargeWriteArguments(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, call  string
 		largeOutput bool
@@ -659,6 +667,7 @@ func TestCodeModeLargeWriteArguments(t *testing.T) {
 }
 
 func TestCodeModeGojaUsesFrozenOccurrence(t *testing.T) {
+	t.Parallel()
 	for _, approve := range []bool{false, true} {
 		t.Run(map[bool]string{false: "allow", true: "approval"}[approve], func(t *testing.T) {
 			files, active, root := codeModeStore(t)
@@ -700,7 +709,7 @@ func TestCodeModeGojaUsesFrozenOccurrence(t *testing.T) {
 			if err = run.Handle.WaitCompletion(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -765,6 +774,7 @@ func TestCodeModeGojaUsesFrozenOccurrence(t *testing.T) {
 }
 
 func TestCodeModeProducerRejectsUnpreparedOrChangedCall(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"caller_identity", "changed_identity", "changed_input", "changed_parent", "changed_binding"} {
 		t.Run(scenario, func(t *testing.T) {
 			called := false
@@ -795,6 +805,7 @@ func TestCodeModeProducerRejectsUnpreparedOrChangedCall(t *testing.T) {
 }
 
 func TestCodeModeEnvironmentAcrossRunsResetAndRelease(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	rt, err := New(Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store), AgentFactory: chat.Factory{}, Hooks: hook.Set{ToolPolicy: mcpFixturePolicy()}, DefaultPolicyMode: "mcp-test"})
 	if err != nil {
@@ -870,6 +881,7 @@ func TestCodeModeEnvironmentAcrossRunsResetAndRelease(t *testing.T) {
 }
 
 func TestCodeModeResetDoesNotWaitForOldHostOrAdmitOldReply(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	old := tool.NamedTool{Def: tool.Definition{Name: "Old", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -924,6 +936,7 @@ func TestCodeModeResetDoesNotWaitForOldHostOrAdmitOldReply(t *testing.T) {
 }
 
 func TestCodeModeRetentionBudgetAccumulatesAcrossScriptsAndReset(t *testing.T) {
+	t.Parallel()
 	r := &Runtime{}
 	def := tool.Definition{}
 	_, first, err := r.acquireCodeMode(t.Context(), session.SessionRef{SessionID: "one"}, &gojaexec.Executor{})
@@ -962,6 +975,7 @@ func TestCodeModeRetentionBudgetAccumulatesAcrossScriptsAndReset(t *testing.T) {
 }
 
 func TestCodeModeResetInterruptsUnresponsiveVM(t *testing.T) {
+	t.Parallel()
 	for _, code := range []string{`await Entered({});while(true){}`, `await Entered({});return {get stuck(){while(true){}}};`} {
 		t.Run(code, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -1034,6 +1048,7 @@ func generationOf(t *testing.T, raw string) string {
 }
 
 func TestCodeModeRealRetentionAcrossScriptsAndFailedProjections(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	var calls int
 	bytesTool := tool.NamedTool{Def: tool.Definition{Name: "Bytes", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"size": map[string]any{"type": "integer"}}}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -1076,6 +1091,7 @@ func TestCodeModeRealRetentionAcrossScriptsAndFailedProjections(t *testing.T) {
 }
 
 func TestCodeModeUnknownOutcomePrecedesJavaScriptError(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -1126,6 +1142,7 @@ func TestCodeModeUnknownOutcomePrecedesJavaScriptError(t *testing.T) {
 }
 
 func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "unknown-effect", Version: "1"}, nil)
 	server.AddTool(&mcpsdk.Tool{Name: "read", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -1202,6 +1219,7 @@ func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
 }
 
 func TestCodeModeKnownReceiptPreservesUnknownOutcomeWhenCaught(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	const diagnostic = "callback receipt"
 	target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -1235,6 +1253,7 @@ func TestCodeModeKnownReceiptPreservesUnknownOutcomeWhenCaught(t *testing.T) {
 }
 
 func TestCodeModeSourceFileChangesOnNextRuntimeExecution(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -1267,6 +1286,7 @@ func TestCodeModeSourceFileChangesOnNextRuntimeExecution(t *testing.T) {
 }
 
 func TestCodeModeRepeatedProviderIDsKeepDistinctChildReceipts(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -1302,6 +1322,7 @@ func TestCodeModeRepeatedProviderIDsKeepDistinctChildReceipts(t *testing.T) {
 }
 
 func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	started, release := make(chan struct{}, 2), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
@@ -1355,6 +1376,7 @@ func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
 }
 
 func TestCodeModeBoundaryReplyBudgets(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	large := tool.NamedTool{Def: tool.Definition{Name: "Large", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{Content: []tool.ContentBlock{tool.Text(strings.Repeat("x", 1024))}}, nil
@@ -1395,6 +1417,7 @@ func TestCodeModeBoundaryReplyBudgets(t *testing.T) {
 }
 
 func TestCodeModeIntentDoesNotHoldConfigurationGuardDuringApprovalOrIO(t *testing.T) {
+	t.Parallel()
 	files, active, _ := codeModeStore(t)
 	var revision sync.RWMutex
 	var stale atomic.Bool
@@ -1441,6 +1464,7 @@ func TestCodeModeIntentDoesNotHoldConfigurationGuardDuringApprovalOrIO(t *testin
 }
 
 func TestCodeModeRunnerJoinsUnresponsiveExecutor(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	started, release := make(chan struct{}), make(chan struct{})
 	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, _ codemode.Host) (json.RawMessage, error) {

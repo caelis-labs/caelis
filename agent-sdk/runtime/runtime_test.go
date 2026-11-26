@@ -426,6 +426,7 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 }
 
 func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) {
+	t.Parallel()
 	sessions, activeSession := newTestSessionService(t, "sess-observer-gap")
 	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, RunIDGenerator: func() string { return "run-observer-gap" }})
 	if err != nil {
@@ -471,6 +472,7 @@ func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) 
 }
 
 func TestRuntimeRequiresSessionIDBeforeAcquiringWriter(t *testing.T) {
+	t.Parallel()
 	rt, err := New(Config{
 		Sessions:     inmemory.NewStore(inmemory.Config{}),
 		AgentFactory: chat.Factory{},
@@ -2109,7 +2111,7 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := newLogicalFileStore(t, sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-file-replay" },
 	})
@@ -2151,7 +2153,7 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 		t.Fatalf("runtime1 runner error = %v", err)
 	}
 
-	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedSessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	runtime2, err := New(Config{
 		Sessions: reopenedSessions,
 		AgentFactory: chat.Factory{
@@ -2213,7 +2215,7 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 
 	root := t.TempDir()
 	workdir := t.TempDir()
-	sessionStore := sessionfile.NewStore(sessionfile.Config{
+	sessionStore := newLogicalFileStore(t, sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-orphan-command" },
 	})
@@ -2261,7 +2263,7 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 		}
 	})
 
-	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedStore := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reopenedSessions := reopenedStore
 	runtime2, err := New(Config{
 		Sessions:  reopenedSessions,
@@ -3123,7 +3125,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "test", UserID: "user-1", Workspace: session.WorkspaceRef{CWD: t.TempDir()},
 	})
@@ -3270,7 +3272,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := &pendingApprovalProbe{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }})}
+	sessions := &pendingApprovalProbe{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }})}
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -3374,7 +3376,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 		t.Fatalf("pause token journal = %v, want %v", pauseStatuses, want)
 	}
 
-	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedStore := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	reopened, err := New(Config{Sessions: reopenedStore, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatalf("New(reopened) error = %v", err)
@@ -4085,6 +4087,7 @@ func TestCompletedCommandObservationKeepsAbsoluteCursorWhenResultIsCapped(t *tes
 }
 
 func TestTaskToolPayloadPreservesCommandWaitingInput(t *testing.T) {
+	t.Parallel()
 	payload := taskToolPayload(taskapi.Snapshot{
 		Kind: taskapi.KindCommand, State: taskapi.StateWaitingInput, Running: true, SupportsInput: true,
 	})
@@ -4094,6 +4097,7 @@ func TestTaskToolPayloadPreservesCommandWaitingInput(t *testing.T) {
 }
 
 func TestTaskToolPayloadReturnsCompletedCommandTerminalStreams(t *testing.T) {
+	t.Parallel()
 	payload := taskToolPayload(taskapi.Snapshot{
 		Ref:      taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
 		Kind:     taskapi.KindCommand,
@@ -5237,6 +5241,7 @@ func TestRuntimeRunCommandToolDoesNotFetchResultWhileStillRunning(t *testing.T) 
 }
 
 func TestNormalizeSpawnAgent(t *testing.T) {
+	t.Parallel()
 	for input, want := range map[string]string{"": "self", "  SELF ": "self", " codex ": "codex"} {
 		if got := normalizeSpawnAgent(input); got != want {
 			t.Errorf("normalizeSpawnAgent(%q) = %q, want %q", input, got, want)

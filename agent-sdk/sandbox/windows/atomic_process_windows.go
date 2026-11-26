@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/jobprocess"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/winproc"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
 )
 
@@ -33,7 +33,7 @@ type atomicJobWaitResult struct {
 }
 
 func runAtomicJobProcess(ctx context.Context, cmd *exec.Cmd, token win32.Token, stdin []byte, stdout, stderr io.Writer, releaseUse func()) (int, error, bool) {
-	process, err := jobprocess.Start(jobprocess.Config{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...), Stdin: len(stdin) > 0})
+	process, err := winproc.StartJobProcess(winproc.JobProcessConfig{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...), Stdin: len(stdin) > 0})
 	_ = token.Close()
 	if err != nil {
 		return -1, err, false

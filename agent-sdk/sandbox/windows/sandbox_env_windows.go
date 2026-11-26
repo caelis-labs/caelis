@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 )
 
 type sandboxCacheEnvMode int
@@ -39,7 +39,7 @@ var sandboxCacheEnvSpecs = []sandboxCacheEnvSpec{
 }
 
 func sandboxEnvDirs(envRoot string) []string {
-	envRoot = pathutil.Normalize(envRoot)
+	envRoot = capability.NormalizePath(envRoot)
 	if envRoot == "" {
 		return nil
 	}
@@ -57,7 +57,7 @@ func sandboxEnvDirs(envRoot string) []string {
 			paths = append(paths, path)
 		}
 	}
-	return pathutil.Dedupe(paths)
+	return capability.DedupePaths(paths)
 }
 
 func sandboxTempRoot(envRoot string) string {
@@ -77,7 +77,7 @@ func sandboxPythonSiteDir(envRoot string) string {
 }
 
 func sandboxSubdir(envRoot string, parts ...string) string {
-	envRoot = pathutil.Normalize(envRoot)
+	envRoot = capability.NormalizePath(envRoot)
 	if envRoot == "" {
 		return ""
 	}
@@ -97,7 +97,7 @@ func sandboxEnvironment(policy workspacePolicy, cfg sandbox.Config, req sandbox.
 	if envRoot == "" {
 		return nil, fmt.Errorf("impl/sandbox/windows: sandbox environment root is required")
 	}
-	envRoot = pathutil.Normalize(envRoot)
+	envRoot = capability.NormalizePath(envRoot)
 	tempRoot := sandboxTempRoot(envRoot)
 	cacheRoot := sandboxCacheRoot(envRoot)
 	psCacheDir := sandboxPowerShellCacheDir(envRoot)

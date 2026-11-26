@@ -20,8 +20,9 @@ import (
 )
 
 func TestInputHooksEarlyCompletionFileReopen(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "early"})
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestInputHooksEarlyCompletionFileReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	reopened, err := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +92,7 @@ func TestInputHooksEarlyCompletionFileReopen(t *testing.T) {
 }
 
 func TestCompletionFeedbackHasSharedBoundAndNoRejectedFinal(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "completion-bound")
 	var calls atomic.Int64
 	llm := scriptedTestModel{generate: func(context.Context, *model.Request) *model.Response {
@@ -132,6 +134,7 @@ func TestCompletionFeedbackHasSharedBoundAndNoRejectedFinal(t *testing.T) {
 }
 
 func TestHooksRejectUnboundModelToolSchemaAndVolatileMessages(t *testing.T) {
+	t.Parallel()
 	for _, mutation := range []string{"model", "tool-schema", "messages"} {
 		t.Run(mutation, func(t *testing.T) {
 			store, active := newTestSessionService(t, "hook-binding")
@@ -171,6 +174,7 @@ func TestHooksRejectUnboundModelToolSchemaAndVolatileMessages(t *testing.T) {
 }
 
 func TestHooksExternalACPRequiredPhaseFailsBeforeInputMutation(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "external-hook")
 	active, err := store.BindController(t.Context(), session.BindControllerRequest{SessionRef: active.SessionRef, Binding: session.ControllerBinding{Kind: session.ControllerKindACP, ControllerID: "remote", EpochID: "epoch", RemoteSessionID: "remote-session"}})
 	if err != nil {
@@ -202,6 +206,7 @@ func TestHooksExternalACPRequiredPhaseFailsBeforeInputMutation(t *testing.T) {
 }
 
 func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"input-message", "input-context", "early-input", "turn-context", "early-turn", "context-append", "cached-response", "model-result", "completion-feedback", "completion-replace"} {
 		t.Run(phase, func(t *testing.T) {
 			store, active := newTestSessionService(t, "forged-context")
@@ -288,6 +293,7 @@ func TestHooksCannotForgeToolResultsOutsideToolOwner(t *testing.T) {
 }
 
 func TestHooksTypedSchemaLateMutationCannotChangeBinding(t *testing.T) {
+	t.Parallel()
 	for _, late := range []bool{false, true} {
 		t.Run(map[bool]string{false: "in-place", true: "after-timeout"}[late], func(t *testing.T) {
 			store, active := newTestSessionService(t, "typed-binding")
@@ -334,6 +340,7 @@ func TestHooksTypedSchemaLateMutationCannotChangeBinding(t *testing.T) {
 }
 
 func TestHooksModelInvokeRetryHasDistinctActualReceipts(t *testing.T) {
+	t.Parallel()
 	for _, explicit := range []bool{false, true} {
 		t.Run(fmt.Sprint(explicit), func(t *testing.T) {
 			store, active := newTestSessionService(t, "hook-attempt")
@@ -405,6 +412,7 @@ func TestHooksModelInvokeRetryHasDistinctActualReceipts(t *testing.T) {
 }
 
 func TestHooksTimedOutProducerRetainsFenceUntilActualDrain(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "hook-drain")
 	expired, release := make(chan struct{}), make(chan struct{})
 	var effects atomic.Int64
@@ -466,6 +474,7 @@ func TestHooksTimedOutProducerRetainsFenceUntilActualDrain(t *testing.T) {
 }
 
 func TestHooksLateInputInvalidatesCompletionDecision(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []hook.CompletionKind{hook.CompletionReject, hook.CompletionContinue, hook.CompletionReplace} {
 		t.Run(string(kind), func(t *testing.T) {
 			store, active := newTestSessionService(t, "late-hook")

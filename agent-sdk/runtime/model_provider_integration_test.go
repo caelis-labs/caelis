@@ -24,6 +24,7 @@ import (
 )
 
 func TestRuntimeGeminiStreamCitationReplay(t *testing.T) {
+	t.Parallel()
 	const wire = `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"你好"}]},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://first.test","title":"第一"}}],"groundingSupports":[{"segment":{"endIndex":6},"groundingChunkIndices":[0]}]}}]}
 
 data: {"candidates":[{"content":{"role":"model","parts":[{"text":" "}]}}]}
@@ -34,7 +35,7 @@ data: {"candidates":[{"groundingMetadata":{"groundingChunks":[{"web":{"uri":"htt
 
 `
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "citations", UserID: "fixture"})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +89,7 @@ data: {"candidates":[{"groundingMetadata":{"groundingChunks":[{"web":{"uri":"htt
 	rt := makeRuntime(store)
 	runTurn(rt, "produce citations")
 	runTurn(rt, "continue before reopen")
-	runTurn(makeRuntime(sessionfile.NewStore(sessionfile.Config{RootDir: root})), "continue after reopen")
+	runTurn(makeRuntime(newLogicalFileStore(t, sessionfile.Config{RootDir: root})), "continue after reopen")
 	first := model.CitationSource{RefID: "grounding-0", URL: "https://first.test", Title: "第一"}
 	second := model.CitationSource{RefID: "grounding-1", URL: "https://second.test", Title: "Café"}
 	third := model.CitationSource{RefID: "grounding-2", URL: "https://third.test", Title: "世界"}
@@ -110,6 +111,7 @@ data: {"candidates":[{"groundingMetadata":{"groundingChunks":[{"web":{"uri":"htt
 }
 
 func TestRuntimeProviderOverflowRecoversAfterCommittedTool(t *testing.T) {
+	t.Parallel()
 	const receipt = "durable effect receipt"
 	const resumed = "recovered after provider overflow"
 	for _, api := range []model.APIType{model.APIAnthropic, model.APIGemini} {
@@ -241,6 +243,7 @@ func providerRecoverySuccess(req *http.Request, api model.APIType, stream, propo
 }
 
 func TestProviderIncrementalTextWithReasoning(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		api  model.APIType
 		wire string
@@ -303,6 +306,7 @@ type responsesPrefixRoute struct {
 }
 
 func TestResponsesPrefixThroughRepairToolFailureAndRecovery(t *testing.T) {
+	t.Parallel()
 	for _, route := range []responsesPrefixRoute{
 		{name: "official-responses-json", api: model.APIOpenAI, ordered: true},
 		{name: "compatible-responses-sse", api: model.APIOpenAIResponses, baseURL: "https://compatible.invalid/v1", stream: true},
@@ -318,7 +322,7 @@ func TestResponsesPrefixThroughRepairToolFailureAndRecovery(t *testing.T) {
 func testResponsesPrefixThroughRepair(t *testing.T, route responsesPrefixRoute) {
 	t.Helper()
 	root := t.TempDir()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "prefix", UserID: "owner"})
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +404,7 @@ func testResponsesPrefixThroughRepair(t *testing.T, route responsesPrefixRoute) 
 		},
 	}}}
 	for _, input := range []string{"seed stable history", "initial turn", "resume turn", "follow-up turn"} {
-		reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+		reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 		rt, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{SystemPrompt: "stable base"}, Hooks: hooks})
 		if err != nil {
 			t.Fatal(err)

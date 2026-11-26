@@ -44,6 +44,7 @@ import (
 // Exercise the complete worker, MCP, model-delivery and durable Task path. The
 // domain receipt is deliberately larger than the former worker diagnostic cap.
 func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, body string
 		yield      bool
@@ -59,6 +60,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 }`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			store, active, root := codeModeStore(t)
 			detail := strings.Repeat("domain-detail-", 160) + "original-domain-tail"
 			domain := map[string]any{
@@ -117,7 +119,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			if !visible.IsError {
 				t.Fatal("failed MCP receipt lost its parent failure disposition")
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			entries, err := sessionfile.NewTaskStore(reopened).ListSession(t.Context(), active.SessionRef)
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("durable script Tasks=%d, error=%v", len(entries), err)
@@ -155,6 +157,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			}
 			for name, parts := range map[string][]model.Part{"next_model": visible.Content, "persisted_task": tool.ModelParts(persisted.Content)} {
 				t.Run(name, func(t *testing.T) {
+					t.Parallel()
 					if name == "next_model" && tc.yield {
 						var snapshot struct{ Result json.RawMessage }
 						if err := json.Unmarshal(parts[0].JSON.Value, &snapshot); err != nil || !json.Valid(snapshot.Result) {
@@ -205,6 +208,7 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 // Validation errors occur before tool invocation and have no public MCP result.
 // Only the redacted worker diagnostic may enter model or Task error output.
 func TestJSExecErrorDeliveryRedactsInternalHostFailure(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		hostError func(string) error
@@ -222,6 +226,7 @@ func TestJSExecErrorDeliveryRedactsInternalHostFailure(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			store, active, root := codeModeStore(t)
 			secret := "https://user:private-password@host/?token=private-token raw-private-network-body"
 			var executing atomic.Bool
@@ -254,7 +259,7 @@ func TestJSExecErrorDeliveryRedactsInternalHostFailure(t *testing.T) {
 				t.Fatal("failed Host validation admitted an effect")
 			}
 			visible := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], "host-error")
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			entries, err := sessionfile.NewTaskStore(reopened).ListSession(t.Context(), active.SessionRef)
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("durable script Tasks=%d, error=%v", len(entries), err)
@@ -346,6 +351,7 @@ func errorDeliveryJSON(t *testing.T, parts []model.Part) []byte {
 // A recoverable MCP failure may carry a diagnostic screenshot and exact JSON.
 // Selecting its original media must deliver the same data as a successful reply.
 func TestJSExecMCPReplyPreservesSelectedMediaAndRawJSON(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		failed   bool
@@ -358,6 +364,7 @@ func TestJSExecMCPReplyPreservesSelectedMediaAndRawJSON(t *testing.T) {
 		{name: "copied_failure_media", failed: true, copied: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			store, active, root := codeModeStore(t)
 			var bitmap bytes.Buffer
 			if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
@@ -423,7 +430,7 @@ return {caught,selected:reply.media[0],raw:reply.text()};`
 			}
 			if tc.uncaught {
 				visible := errorDeliveryModelResult(t, driver.requests[1], "script")
-				reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+				reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 				entries, err := sessionfile.NewTaskStore(reopened).ListSession(t.Context(), active.SessionRef)
 				if err != nil || len(entries) != 1 {
 					t.Fatalf("durable script Tasks=%d, error=%v", len(entries), err)
@@ -512,6 +519,7 @@ return {caught,selected:reply.media[0],raw:reply.text()};`
 }
 
 func TestRuntimeReviewCaughtReadErrorCanContinue(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	backend, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -561,6 +569,7 @@ func TestRuntimeReviewCaughtReadErrorCanContinue(t *testing.T) {
 // This is real JS/Runtime/native Read and real loopback HTTP transport, not a
 // live model. Both failed reads must retain their receipts and summary output.
 func TestCodeModeCaughtReadsReachNextHTTPRequest(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -685,6 +694,7 @@ func (s *reviewGenerationStore) AppendEvent(ctx context.Context, req session.App
 }
 
 func TestReviewCodeModeGenerationGuardCoversDispatch(t *testing.T) {
+	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	var revisionMu sync.RWMutex
 	var stale, staleEffect atomic.Bool
@@ -715,6 +725,7 @@ func TestReviewCodeModeGenerationGuardCoversDispatch(t *testing.T) {
 }
 
 func TestReviewCodeModeDrainRetainsSessionFence(t *testing.T) {
+	t.Parallel()
 	for _, fenced := range []bool{false, true} {
 		name := "unfenced-sdk"
 		if fenced {
@@ -858,6 +869,7 @@ func (r reviewSourceRuntime) FileSystem() sandbox.FileSystem                    
 func (r reviewSourceRuntime) FileSystemFor(sandbox.Constraints) sandbox.FileSystem { return r.fsys }
 
 func TestReviewCodeModeFileSourceUsesReadAuthorization(t *testing.T) {
+	t.Parallel()
 	store, active, root := codeModeStore(t)
 	base, err := host.New(host.Config{CWD: root})
 	if err != nil {

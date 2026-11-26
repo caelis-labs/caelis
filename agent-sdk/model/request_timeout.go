@@ -6,7 +6,7 @@ import (
 	"iter"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 )
 
 // DefaultRequestTimeout bounds one actual generation, never retry waiting or a
@@ -48,7 +48,7 @@ func generateAttempt(parent context.Context, llm LLM, req *Request, allowToolRep
 		ctx, cancel := context.WithTimeout(parent, requestAttemptTimeout(parent, llm))
 		defer cancel()
 		if allowToolRepair {
-			ctx = modelinvocation.WithToolRepair(ctx, req)
+			ctx = sdkctx.WithToolRepair(ctx, req)
 		}
 		completed := false
 		for event, err := range llm.Generate(ctx, req) {

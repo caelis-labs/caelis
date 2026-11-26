@@ -12,6 +12,7 @@ import (
 )
 
 func TestSessionInteractionsProgressWithConcurrentWriterAndReaders(t *testing.T) {
+	t.Parallel()
 	// This stress test proves lock progress and durable logical readback; host
 	// sync latency and crash-boundary classification are tested separately.
 	root := t.TempDir()
@@ -167,6 +168,7 @@ func TestSessionInteractionsProgressWithConcurrentWriterAndReaders(t *testing.T)
 }
 
 func TestSessionStoreRootLockHonorsContextCancellation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	first, err := lockSessionStoreRoot(context.Background(), root)
 	if err != nil {
@@ -194,6 +196,7 @@ func TestSessionStoreRootLockHonorsContextCancellation(t *testing.T) {
 }
 
 func TestSessionStoreRootLockRejectsPreCancelledContextWhenFree(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -209,6 +212,7 @@ func TestSessionStoreRootLockRejectsPreCancelledContextWhenFree(t *testing.T) {
 }
 
 func TestContextMutexRejectsPreCancelledContextWhenFree(t *testing.T) {
+	t.Parallel()
 	var mutex contextMutex
 	for range 256 {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -225,7 +229,8 @@ func TestContextMutexRejectsPreCancelledContextWhenFree(t *testing.T) {
 }
 
 func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
-	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "session-1" }})
+	t.Parallel()
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "session-1" }})
 	ctx := context.Background()
 	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1", CWD: "/tmp/ws-1"},
@@ -360,8 +365,9 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 }
 
 func TestStoreListHonorsContextWhileWaitingForRootFileLock(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := NewStore(Config{RootDir: root})
+	store := newLogicalTestStore(t, Config{RootDir: root})
 	if _, err := store.ListSessions(context.Background(), session.ListSessionsRequest{}); err != nil {
 		t.Fatal(err)
 	}

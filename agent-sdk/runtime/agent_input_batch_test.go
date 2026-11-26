@@ -18,6 +18,7 @@ import (
 )
 
 func TestAgentInputBatchValidatesEverySenderBeforeSingleChildDispatch(t *testing.T) {
+	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	source := session.ParticipantBinding{ID: "sibling", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated, SessionID: "sibling-session", DelegationID: "sibling-task", AttachmentGeneration: "generation-a", AgentName: "sibling"}
 	if _, err := r.participantBindings.PutParticipant(t.Context(), session.PutParticipantRequest{SessionRef: task.sessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeParticipant), Binding: source}); err != nil {
@@ -72,6 +73,7 @@ func (r *blockingBatchRunner) SubmitChildInputBatch(ctx context.Context, req age
 }
 
 func TestBatchAdmissionPinsTargetWithoutHoldingTopologyLock(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		r, child, base := newIdleChildActivityTask(t)
 		r.controllers = stubACPController{}
@@ -112,6 +114,7 @@ func TestBatchAdmissionPinsTargetWithoutHoldingTopologyLock(t *testing.T) {
 }
 
 func TestBatchAdmissionRejectsSingularOnlyRunnerWithoutDispatch(t *testing.T) {
+	t.Parallel()
 	r, child, base := newLocalControllerChildActivityTask(t)
 	child.runner = struct {
 		agent.SubagentRunner
@@ -129,6 +132,7 @@ func TestBatchAdmissionRejectsSingularOnlyRunnerWithoutDispatch(t *testing.T) {
 }
 
 func TestParentReceiptWaitAllowsStartThreadAndOtherRecipient(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		r, child, runner := newIdleChildActivityTask(t)
 		r.controllers = stubACPController{}
@@ -172,6 +176,7 @@ func TestParentReceiptWaitAllowsStartThreadAndOtherRecipient(t *testing.T) {
 }
 
 func TestQueuedChildAdmissionCancellationReleasesOnlyItsPins(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		r, child, base := newIdleChildActivityTask(t)
 		runner := &blockingBatchRunner{runtimeChildInputRunner: base, entered: make(chan struct{}), release: make(chan struct{})}
@@ -206,7 +211,7 @@ func TestRuntimeRunPersistsOrderedAgentCommunicationBatchInOneTurn(t *testing.T)
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "batch-user",
 	})
@@ -244,7 +249,7 @@ func TestRuntimeRunPersistsOrderedAgentCommunicationBatchInOneTurn(t *testing.T)
 		t.Fatalf("runtime-produced model context = %#v, want %#v", got, wantUser)
 	}
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	loaded, err := reopened.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
@@ -319,7 +324,7 @@ func contextEvents(events []*session.Event) []*session.Event {
 func TestRuntimeRunRejectsMixedSingularAndBatchAgentCommunication(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "mixed-user",
 	})
@@ -345,6 +350,7 @@ func TestRuntimeRunRejectsMixedSingularAndBatchAgentCommunication(t *testing.T) 
 }
 
 func TestRuntimeRejectsPartiallyEmptyInputBatchBeforeStarting(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "empty-batch-member")
 	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	if err != nil {

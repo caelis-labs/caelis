@@ -80,6 +80,7 @@ func startSessionCancelChild(t *testing.T, r *Runtime, active session.Session, r
 }
 
 func TestCancelSessionSubagentsRetainsProducerUntilTerminal(t *testing.T) {
+	t.Parallel()
 	for _, synchronousCompletion := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pending producer", true: "synchronous completion"}[synchronousCompletion], func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -128,6 +129,7 @@ func TestCancelSessionSubagentsRetainsProducerUntilTerminal(t *testing.T) {
 }
 
 func TestCancelSessionSubagentsRevokesParentInputAdmissions(t *testing.T) {
+	t.Parallel()
 	for _, batch := range []bool{false, true} {
 		t.Run(map[bool]string{false: "single", true: "batch"}[batch], func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -183,6 +185,7 @@ func TestCancelSessionSubagentsRevokesParentInputAdmissions(t *testing.T) {
 }
 
 func TestCancelSessionSubagentsJoinsSpawnAndReturnsLateIdentity(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		runner := &sessionCancelRunner{entered: make(chan struct{}), release: make(chan struct{})}
 		r, active := newSubagentTaskTestRuntime(t, runner)
@@ -229,6 +232,7 @@ func TestCancelSessionSubagentsJoinsSpawnAndReturnsLateIdentity(t *testing.T) {
 }
 
 func TestCancelSessionSubagentsRecoversRehydratedOrphans(t *testing.T) {
+	t.Parallel()
 	for _, configured := range []bool{false, true} {
 		t.Run(map[bool]string{false: "dormant", true: "configured runner"}[configured], func(t *testing.T) {
 			runner := &sessionCancelRunner{}
@@ -280,6 +284,7 @@ func TestCancelSessionSubagentsRecoversRehydratedOrphans(t *testing.T) {
 }
 
 func TestCancelSessionSubagentsReturnsBindingWithoutTask(t *testing.T) {
+	t.Parallel()
 	r, active := newSubagentTaskTestRuntime(t, nil)
 	binding := session.ParticipantBinding{ID: "child-agent", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleDelegated, SessionID: "child-session", DelegationID: "missing-task"}
 	if _, err := r.participantBindings.PutParticipant(t.Context(), session.PutParticipantRequest{SessionRef: active.SessionRef, Binding: binding}); err != nil {
@@ -292,8 +297,9 @@ func TestCancelSessionSubagentsReturnsBindingWithoutTask(t *testing.T) {
 }
 
 func TestCancelSessionSubagentsFileHistoryAndModelContextRoundTrip(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := sessions.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "cancel-round-trip"})
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +317,7 @@ func TestCancelSessionSubagentsFileHistoryAndModelContextRoundTrip(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	got, err := sessionfile.NewTaskStore(reopened).Get(t.Context(), started.Ref.TaskID)
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("cancelled Task round trip = %#v, %v; want %#v", got, err, want)
@@ -349,6 +355,7 @@ func (s *postSpawnInstallGate) Put(ctx context.Context, req taskapi.PutRequest) 
 }
 
 func TestCancelSessionSubagentsJoinsDurableSpawnBeforeProducerInstallation(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		runner := &sessionCancelRunner{}
 		r, active := newSubagentTaskTestRuntime(t, runner)
@@ -398,6 +405,7 @@ func (r *sessionCancelInputRunner) SubmitChildInput(ctx context.Context, req age
 }
 
 func TestCancelSessionSubagentsJoinsDispatchedFollowupBeforeReceipt(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		runner := &sessionCancelInputRunner{sessionCancelRunner: &sessionCancelRunner{spawnState: delegation.StateCompleted}, inputEntered: make(chan struct{}), inputRelease: make(chan struct{})}
 		r, active := newSubagentTaskTestRuntime(t, runner)
@@ -436,6 +444,7 @@ func TestCancelSessionSubagentsJoinsDispatchedFollowupBeforeReceipt(t *testing.T
 }
 
 func TestCancelSessionSubagentsPreservesUnknownInputOutcome(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		runner := &sessionCancelRunner{spawnState: delegation.StateCompleted}
 		r, active := newSubagentTaskTestRuntime(t, runner)

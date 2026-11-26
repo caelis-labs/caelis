@@ -64,6 +64,7 @@ func (m factSerialModel) Capabilities() model.Capabilities {
 }
 
 func TestToolFactsResultWriteNeverReplaysEffect(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"absent", "warning", "unknown", "different"} {
 		t.Run(kind, func(t *testing.T) {
 			base, active := newToolFactTestSession(t, "result-fault-"+kind)
@@ -156,6 +157,7 @@ func TestToolFactsResultWriteNeverReplaysEffect(t *testing.T) {
 	}
 }
 func TestToolFactsCancellationHoldsFenceUntilProducerEnds(t *testing.T) {
+	t.Parallel()
 	store, active := newToolFactTestSession(t, "slow-tool")
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -195,6 +197,7 @@ func TestToolFactsCancellationHoldsFenceUntilProducerEnds(t *testing.T) {
 	}
 }
 func TestToolFactsCompleteResultAndModelViewRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{"memory", "file"} {
 		t.Run(backend, func(t *testing.T) {
 			var store session.ManagedService
@@ -246,7 +249,7 @@ func TestToolFactsCompleteResultAndModelViewRoundTrip(t *testing.T) {
 				t.Fatal("complete structured/media result changed or summarized")
 			}
 			if backend == "file" {
-				store = sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				store = newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			} else {
 				rawEvents, err := json.Marshal(loaded.Events)
 				if err != nil {
@@ -296,6 +299,7 @@ func (m factImageModel) Capabilities() model.Capabilities {
 }
 
 func TestToolFactsLegacyHalfBatchAndLateRepairRoundTrip(t *testing.T) {
+	t.Parallel()
 	files, active, root := codeModeStore(t)
 	calls := []model.ToolCall{{ID: "A", Name: "Write", Args: `{"large":9007199254740993123456789}`}, {ID: "B", Name: "Write", Args: `{}`}, {ID: "C", Name: "Write", Args: `{}`}}
 
@@ -346,7 +350,7 @@ func TestToolFactsLegacyHalfBatchAndLateRepairRoundTrip(t *testing.T) {
 	if len(probe.messages) < 6 || len(probe.messages[0].ToolCalls()) != 3 || probe.messages[1].ToolResults()[0].ToolUseID != "A" || probe.messages[3].ToolResults()[0].ToolUseID != "C" {
 		t.Fatalf("late result lost original batch: %+v", probe.messages)
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	next, _ := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 	after := &recoveryCaptureModel{}
 	run, err = next.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "again", AgentSpec: agent.AgentSpec{Model: after}})
@@ -362,6 +366,7 @@ func TestToolFactsLegacyHalfBatchAndLateRepairRoundTrip(t *testing.T) {
 }
 
 func TestToolFactsRepeatedProviderIDsAcrossBatchesAndTurns(t *testing.T) {
+	t.Parallel()
 	store, active := newToolFactTestSession(t, "repeated-provider-id")
 	var effects int
 	target := tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -400,6 +405,7 @@ func TestToolFactsRepeatedProviderIDsAcrossBatchesAndTurns(t *testing.T) {
 }
 
 func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
+	t.Parallel()
 	files, active, root := codeModeStore(t)
 	guard := session.ControlMutationGuard(session.ControlMutationPurposeLifecycle)
 	appendFact := func(event *session.Event) *session.Event {
@@ -467,7 +473,7 @@ func TestToolFactsCheckpointCoverageDoesNotReviveCoveredCalls(t *testing.T) {
 			t.Fatal("checkpoint changed during repair")
 		}
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 	next, _ := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 	after := &recoveryCaptureModel{}
 	run, err = next.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "again", AgentSpec: agent.AgentSpec{Model: after}})
@@ -494,6 +500,7 @@ func (repeatedToolContinuation) Invoke(ctx context.Context, _ hook.ToolContext, 
 }
 
 func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
+	t.Parallel()
 	store, active := newToolFactTestSession(t, "repeated-continuation")
 	var effects atomic.Int32
 	target := tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -552,6 +559,7 @@ func (s *conflictingFactRepairStore) AppendEvents(ctx context.Context, req sessi
 	return s.Store.AppendEvents(ctx, req)
 }
 func TestToolFactsRepairRecomputesAfterRevisionConflict(t *testing.T) {
+	t.Parallel()
 	base, active := newToolFactTestSession(t, "repair-cas")
 	store := &conflictingFactRepairStore{Store: base}
 	call := model.ToolCall{ID: "original-protocol-id", Name: "Write", Args: `{}`}
@@ -597,6 +605,7 @@ func (s *planFinalizationStore) AppendEventsAndUpdateState(ctx context.Context, 
 	return s.Store.AppendEventsAndUpdateState(ctx, req)
 }
 func TestToolFactsPlanClearsAfterActualDrainUnderOriginalFence(t *testing.T) {
+	t.Parallel()
 	base, active := newToolFactTestSession(t, "plan-drain")
 	store := &planFinalizationStore{Store: base}
 	started, release := make(chan struct{}), make(chan struct{})
@@ -660,6 +669,7 @@ func TestToolFactsPlanClearsAfterActualDrainUnderOriginalFence(t *testing.T) {
 }
 
 func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.T) {
+	t.Parallel()
 	for _, approve := range []bool{false, true} {
 		t.Run(map[bool]string{false: "direct", true: "approval"}[approve], func(t *testing.T) {
 			files, active, _ := codeModeStore(t)
@@ -713,11 +723,12 @@ func TestToolFactsRepeatedProviderIDsCreateDistinctCommandOperations(t *testing.
 }
 
 func TestResumeSkipsRoutedMCPHistoryFromV0841(t *testing.T) {
+	t.Parallel()
 	for _, complete := range []bool{true, false} {
 		t.Run(map[bool]string{true: "completed", false: "interrupted"}[complete], func(t *testing.T) {
 			root := t.TempDir()
 			// Register the file locator, then reopen a routed batch in the v0.84.1 wire shape.
-			seed := sessionfile.NewStore(sessionfile.Config{RootDir: root,
+			seed := newLogicalFileStore(t, sessionfile.Config{RootDir: root,
 				SessionIDGenerator: func() string { return "routed-mcp" },
 				Clock:              func() time.Time { return time.Unix(1770000000, 0).UTC() },
 			})
@@ -742,7 +753,7 @@ func TestResumeSkipsRoutedMCPHistoryFromV0841(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			ref := session.SessionRef{SessionID: "routed-mcp"}
 			ids := []string{"proposal"}
 			if complete {
@@ -785,6 +796,7 @@ func TestResumeSkipsRoutedMCPHistoryFromV0841(t *testing.T) {
 }
 
 func TestResumeLegacyGroupedResults(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"complete", "missing-sibling", "previously-repaired"} {
 		t.Run(scenario, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -819,7 +831,7 @@ func TestResumeLegacyGroupedResults(t *testing.T) {
 			case "missing-sibling":
 				wantRepairs = 1
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			rt, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 			if err != nil {
 				t.Fatal(err)

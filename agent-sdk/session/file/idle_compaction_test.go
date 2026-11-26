@@ -14,7 +14,7 @@ import (
 func fileIdleCheckpoint(t *testing.T) (*Store, session.AppendIdleCompactionCheckpointRequest, *time.Time) {
 	t.Helper()
 	now := time.Now()
-	store := NewStore(Config{RootDir: t.TempDir(), Clock: func() time.Time { return now }})
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir(), Clock: func() time.Time { return now }})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "idle", UserID: "fixture"})
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +50,7 @@ func fileIdleCheckpoint(t *testing.T) (*Store, session.AppendIdleCompactionCheck
 }
 
 func TestIdleCheckpointWALRecoveryKeepsConsumedGrantAndOriginalIdentity(t *testing.T) {
+	t.Parallel()
 	store, req, now := fileIdleCheckpoint(t)
 	store.transactionFault = func(phase string) error {
 		if phase == "after_commit" {
@@ -62,7 +63,7 @@ func TestIdleCheckpointWALRecoveryKeepsConsumedGrantAndOriginalIdentity(t *testi
 		t.Fatalf("committed result=%v %v", original, err)
 	}
 	*now = now.Add(time.Hour)
-	reopened := NewStore(Config{RootDir: store.rootDir, Clock: func() time.Time { return *now }})
+	reopened := newLogicalTestStore(t, Config{RootDir: store.rootDir, Clock: func() time.Time { return *now }})
 	again, err := reopened.AppendIdleCompactionCheckpoint(t.Context(), req)
 	if err != nil || again.ID != original.ID || again.Seq != original.Seq {
 		t.Fatalf("original readback=%v %v", again, err)
@@ -77,6 +78,7 @@ func TestIdleCheckpointWALRecoveryKeepsConsumedGrantAndOriginalIdentity(t *testi
 }
 
 func TestIdleCheckpointGrantExpiresDuringWALPreparation(t *testing.T) {
+	t.Parallel()
 	store, req, now := fileIdleCheckpoint(t)
 	store.durability.syncFile = func(file *os.File) error {
 		if strings.Contains(file.Name(), transactionSuffix) {

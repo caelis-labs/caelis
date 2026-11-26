@@ -19,6 +19,7 @@ import (
 )
 
 func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "controller")
 	requesterCalls := 0
 	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
@@ -56,6 +57,7 @@ func TestDangerFullAccessResolvesControllerPermissionsBeforeApprovalRequester(t 
 }
 
 func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "participant")
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
@@ -93,6 +95,7 @@ func TestDangerFullAccessResolvesParticipantPermissionsBeforeApprovalRequester(t
 }
 
 func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
+	t.Parallel()
 	for _, cancelApproval := range []bool{false, true} {
 		t.Run(map[bool]string{false: "settle_after_parent_starts", true: "register_and_cancel_during_parent"}[cancelApproval], func(t *testing.T) {
 			store, active := newTestSessionService(t, "parent")
@@ -151,6 +154,7 @@ func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
 }
 
 func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "subagent")
 	requesterCalls := 0
 	requester := approvalRequesterFunc(func(context.Context, approval.Request) (approval.Response, error) {
@@ -180,6 +184,7 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 }
 
 func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T) {
+	t.Parallel()
 	runtime, activeSession := newDangerFullAccessEndpointTestRuntime(t, "malformed-options")
 	requesterCalls := 0
 	bridge := controllerApprovalRequester{
@@ -225,6 +230,7 @@ func TestDangerFullAccessRejectsMalformedEndpointPermissionOptions(t *testing.T)
 }
 
 func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T) {
+	t.Parallel()
 	registry, err := presets.NewRegistry()
 	if err != nil {
 		t.Fatal(err)
@@ -288,6 +294,7 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 }
 
 func TestDangerFullAccessEndpointPolicyRegistryFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	wantErr := errors.New("registry unavailable")
 	runtime := &Runtime{hooks: hook.Set{ToolPolicy: errorPolicyRegistry{err: wantErr}}}
 	_, handled, err := runtime.resolveEndpointApprovalByPolicy(context.Background(), policy.ProfileDangerFullAccess, approval.Request{
@@ -386,6 +393,7 @@ func TestEndpointApprovalRequestersPreserveNamePresence(t *testing.T) {
 }
 
 func TestEndpointIndependentPermissionPreservesMachineContextWithoutFakeTool(t *testing.T) {
+	t.Parallel()
 	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original title", Description: new("Original description"), RawSubject: json.RawMessage(`{"type":"command","command":"exact command","cwd":"/workspace"}`), NativeRequestID: json.RawMessage(`"original-jsonrpc-id"`)}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: " Allow original ", Kind: "allow_once"}}}
 	for _, child := range []bool{false, true} {
 		var observed approval.Request

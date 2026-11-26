@@ -16,8 +16,9 @@ import (
 )
 
 func TestPendingApprovalsUsesPersistedIndexWithoutReadingEventLog(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-indexed" }})
+	service := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "session-indexed" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1"},
@@ -34,7 +35,7 @@ func TestPendingApprovalsUsesPersistedIndexWithoutReadingEventLog(t *testing.T) 
 	if err := os.Rename(eventLogPath(documentPath), eventLogPath(documentPath)+".hidden"); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := NewStore(Config{RootDir: root}).PendingApprovals(ctx)
+	pending, err := newLogicalTestStore(t, Config{RootDir: root}).PendingApprovals(ctx)
 	if err != nil {
 		t.Fatalf("PendingApprovals() error = %v, want persisted-index read", err)
 	}
@@ -44,8 +45,9 @@ func TestPendingApprovalsUsesPersistedIndexWithoutReadingEventLog(t *testing.T) 
 }
 
 func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settled" }})
+	service := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "session-settled" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -61,7 +63,7 @@ func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened := NewStore(Config{RootDir: root})
+	reopened := newLogicalTestStore(t, Config{RootDir: root})
 	pending, err := reopened.PendingApprovals(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +80,7 @@ func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
 }
 
 func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
+	t.Parallel()
 	store, active := newEventPageIndexFixture(t, 8)
 	request := pendingApprovalTestEvent("approval-large-log")
 	if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{
@@ -86,7 +89,7 @@ func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened := NewStore(Config{RootDir: store.rootDir})
+	reopened := newLogicalTestStore(t, Config{RootDir: store.rootDir})
 	reopened.eventLogCacheMaxBytes = 512
 	pending, err := reopened.PendingApprovals(context.Background())
 	if err != nil || len(pending) != 1 {
@@ -121,8 +124,9 @@ func TestSettlePendingApprovalBuildsLargeLogIndexOnlyOnce(t *testing.T) {
 }
 
 func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-legacy-index" }})
+	store := newLogicalTestStore(t, Config{RootDir: root, SessionIDGenerator: func() string { return "session-legacy-index" }})
 	service := store
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -151,14 +155,14 @@ func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T
 	document.PendingApprovals = nil
 	writePersistedDocument(t, documentPath, document)
 
-	pending, err := NewStore(Config{RootDir: root}).PendingApprovals(ctx)
+	pending, err := newLogicalTestStore(t, Config{RootDir: root}).PendingApprovals(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(pending) != 1 || pending[0].Request.ApprovalRequestID != "approval-legacy" {
 		t.Fatalf("legacy PendingApprovals() = %#v, want rebuilt request", pending)
 	}
-	after, err := NewStore(Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	after, err := newLogicalTestStore(t, Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,13 +172,14 @@ func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T
 	if err := os.Rename(eventLogPath(documentPath), eventLogPath(documentPath)+".hidden"); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = NewStore(Config{RootDir: root}).PendingApprovals(ctx)
+	pending, err = newLogicalTestStore(t, Config{RootDir: root}).PendingApprovals(ctx)
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("persisted rebuilt index = %#v, %v, want one without event log", pending, err)
 	}
 }
 
 func TestPendingApprovalIndexRecoversWithCommittedWAL(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-wal-index" }})
 	service := store
@@ -212,8 +217,9 @@ func TestPendingApprovalIndexRecoversWithCommittedWAL(t *testing.T) {
 }
 
 func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	setupStore := NewStore(Config{RootDir: root})
+	setupStore := newLogicalTestStore(t, Config{RootDir: root})
 	setup := setupStore
 	ctx := context.Background()
 	sessions := make([]session.Session, 0, 3)
@@ -252,7 +258,7 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 		writePersistedDocument(t, documentPath, document)
 	}
 
-	recoveryStore := NewStore(Config{RootDir: root})
+	recoveryStore := newLogicalTestStore(t, Config{RootDir: root})
 	firstSessionDone := make(chan struct{})
 	releaseRecovery := make(chan struct{})
 	var pauseOnce sync.Once
@@ -277,7 +283,7 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 		t.Fatal("legacy recovery did not finish its first Session")
 	}
 
-	interactions := NewStore(Config{RootDir: root})
+	interactions := newLogicalTestStore(t, Config{RootDir: root})
 	interactionCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	listed, err := interactions.ListSessions(interactionCtx, session.ListSessionsRequest{
@@ -303,6 +309,7 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 }
 
 func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplification(t *testing.T) {
+	t.Parallel()
 	// This high-cardinality test exercises snapshot/recovery ordering; crash
 	// durability and sync failure classification have dedicated coverage.
 	root := t.TempDir()

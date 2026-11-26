@@ -178,7 +178,7 @@ schema, policy, approval, Guardian, cancellation, tool facts, media and budget
 checks. A stale schema requires a fresh search before a later call; old arguments
 are never automatically executed.
 
-Sources may implement `toolset.NamedSource` for exact name lookup.
+Sources may implement `tool.NamedSource` for exact name lookup.
 Lookup grants no authority; both admission boundaries and the final dispatch check
 remain in the original wrapper chain. Sources without Lookup retain the linear
 fallback; fuzzy search retains its existing selector budgets. No source or

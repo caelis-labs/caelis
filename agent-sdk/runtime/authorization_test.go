@@ -29,6 +29,7 @@ import (
 )
 
 func TestPolicyIsOnlyMCPApprovalDecision(t *testing.T) {
+	t.Parallel()
 	for _, action := range []policy.Action{policy.ActionAllow, policy.ActionDeny, policy.ActionAskApproval} {
 		t.Run(string(action), func(t *testing.T) {
 			var decisions, approvals, effects atomic.Int32
@@ -64,7 +65,7 @@ func TestPolicyIsOnlyMCPApprovalDecision(t *testing.T) {
 
 func authorizationTestSession(t *testing.T) (*Runtime, session.Session, session.Service) {
 	t.Helper()
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	store := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "owner", Workspace: session.WorkspaceRef{Key: "test", CWD: t.TempDir()}})
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +86,7 @@ func authorizationTestRequest(active session.Session, a *session.ApprovalAuthori
 }
 
 func TestAuthorizationFlightSurvivesFirstCallerCancellation(t *testing.T) {
+	t.Parallel()
 	r, active, store := authorizationTestSession(t)
 	root, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -150,6 +152,7 @@ func TestAuthorizationFlightSurvivesFirstCallerCancellation(t *testing.T) {
 }
 
 func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.T) {
+	t.Parallel()
 	r, active, _ := authorizationTestSession(t)
 	a := authorizationTestRequirement(active)
 	permit := &policyDispatchPermit{runtime: r, session: active, decision: policy.Decision{Action: policy.ActionAllow, Authorization: a}}
@@ -178,6 +181,7 @@ func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.
 }
 
 func TestSessionConsentRebuildsFromFileStoreWithoutExecuting(t *testing.T) {
+	t.Parallel()
 	r, active, store := authorizationTestSession(t)
 	a := authorizationTestRequirement(active)
 	request := authorizationTestRequest(active, a)
@@ -212,6 +216,7 @@ func TestSessionConsentRebuildsFromFileStoreWithoutExecuting(t *testing.T) {
 }
 
 func TestAuthorizationLastWaiterAndRevocationRejectLateResolution(t *testing.T) {
+	t.Parallel()
 	for _, revoke := range []bool{false, true} {
 		t.Run(fmt.Sprint(revoke), func(t *testing.T) {
 			r, active, store := authorizationTestSession(t)
@@ -282,6 +287,7 @@ func (s failedConsentSettlement) AppendEvent(ctx context.Context, req session.Ap
 }
 
 func TestAuthorizationCommittedRuleFailedSessionSettlementStopsEffect(t *testing.T) {
+	t.Parallel()
 	r, active, store := authorizationTestSession(t)
 	r.sessions = failedConsentSettlement{Service: store}
 	a := authorizationTestRequirement(active)
@@ -315,6 +321,7 @@ func (s replacedAuthorizationSession) Session(context.Context, session.SessionRe
 	return s.current, nil
 }
 func TestAuthorizationPendingCallRejectsCurrentSessionReplacement(t *testing.T) {
+	t.Parallel()
 	r, active, store := authorizationTestSession(t)
 	a := authorizationTestRequirement(active)
 	for _, replacement := range []session.Session{func() session.Session { v := active; v.CreatedAt = v.CreatedAt.Add(time.Second); return v }(), func() session.Session { v := active; v.CWD += "-other"; return v }()} {
@@ -359,6 +366,7 @@ func (s *committedAuthorizationRevocationStore) Events(ctx context.Context, req 
 }
 
 func TestAuthorizationRevokeReadbackCancelsOriginalFlight(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"confirmed", "unavailable-then-original-id-retry", "conflicting-scope"} {
 		t.Run(mode, func(t *testing.T) {
 			r, active, store := authorizationTestSession(t)
@@ -453,6 +461,7 @@ func (s *refreshAuthorizationAtPermitStore) Session(ctx context.Context, ref ses
 	return s.ManagedService.Session(ctx, ref)
 }
 func TestAuthorizationCodeModeUnrelatedCatalogRefreshBeforeConsume(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fixture", Version: "1"}, &mcpsdk.ServerOptions{Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}})

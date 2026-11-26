@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -618,7 +618,7 @@ func usageWithModelRequestEstimate(
 	// reconcile only that local delta; messages and attachments remain covered
 	// by provider usage plus post-snapshot event estimates.
 	if usage.Source == compact.UsageSourceProvider {
-		currentPrefix := prefixusage.ForRequest(req)
+		currentPrefix := requestmeta.ForRequest(req)
 		previousFingerprint := strings.TrimSpace(providerSnapshot.PromptPrefixFingerprint)
 		prefixChanged := hasProviderSnapshot &&
 			previousFingerprint != "" &&
@@ -714,9 +714,9 @@ func estimateMediaPartTokens(media *model.MediaPart) int {
 		estimateTextTokens(media.Source.LocalRef)
 	switch media.Modality {
 	case model.MediaModalityImage:
-		total += prefixusage.EstimatedImageMediaTokens
+		total += requestmeta.EstimatedImageMediaTokens
 	default:
-		total += prefixusage.EstimatedOtherMediaTokens
+		total += requestmeta.EstimatedOtherMediaTokens
 	}
 	return total
 }

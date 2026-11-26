@@ -26,4 +26,3 @@ github.com/caelis-labs/caelis/agent-sdk/task/subagent
 github.com/caelis-labs/caelis/agent-sdk/task/terminal
 github.com/caelis-labs/caelis/agent-sdk/tool
 github.com/caelis-labs/caelis/agent-sdk/tool/artifact
-github.com/caelis-labs/caelis/agent-sdk/tool/toolset

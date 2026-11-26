@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -151,7 +151,7 @@ type asyncHarness struct {
 func newAsyncHarness(t *testing.T, fault string, workspace ...session.WorkspaceRef) *asyncHarness {
 	t.Helper()
 	root := t.TempDir()
-	store := &asyncFaultStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), fault: fault}
+	store := &asyncFaultStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), fault: fault}
 	start := session.StartSessionRequest{AppName: "async-poc", UserID: "fixture"}
 	if len(workspace) > 0 {
 		start.Workspace = workspace[0]
@@ -250,6 +250,7 @@ func (h *asyncHarness) load(t *testing.T) session.LoadedSession {
 }
 
 func TestAsyncCompactionFrozenRequestMatchesForeground(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	h.source.set(agent.ModelRequestSnapshot{
 		Revision: "epoch-1", Model: h.llm, Tools: []tool.Tool{h.tool},
@@ -271,6 +272,7 @@ func TestAsyncCompactionFrozenRequestMatchesForeground(t *testing.T) {
 }
 
 func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "cas")
 	h.instructions = func(_ context.Context, summaryID string) (string, func(context.Context) error, error) {
 		return "Session instructions from summary=" + summaryID, nil, nil
@@ -367,6 +369,7 @@ func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 }
 
 func TestAsyncCompactionDurabilityAndUnknownWriteReconciliation(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"before", "after", "receipt_after"} {
 		t.Run(fault, func(t *testing.T) {
 			h := newAsyncHarness(t, fault)
@@ -426,6 +429,7 @@ func TestAsyncCompactionDurabilityAndUnknownWriteReconciliation(t *testing.T) {
 }
 
 func TestAsyncCompactionCancelDrainsBeforeCompletionAndSnapshotRelease(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	h.llm.ignoreStop = true
 	var releases atomic.Int64
@@ -468,6 +472,7 @@ func TestAsyncCompactionCancelDrainsBeforeCompletionAndSnapshotRelease(t *testin
 }
 
 func TestAsyncCompactionRejectsChangedSourceAndCutPairs(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -517,6 +522,7 @@ func TestAsyncCompactionRejectsChangedSourceAndCutPairs(t *testing.T) {
 func ptrMessage(message model.Message) *model.Message { return &message }
 
 func TestAsyncCompactionModelAndCatalogEpochChange(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"revision", "model", "schema", "revoke"} {
 		t.Run(change, func(t *testing.T) {
 			h := newAsyncHarness(t, "")
@@ -564,6 +570,7 @@ type renamedAsyncProbe struct{ *asyncProbeModel }
 func (*renamedAsyncProbe) Name() string { return "changed-model" }
 
 func TestAsyncCompactionDefaultOffAndThresholds(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"default_off", "invalid_ratio", "above_sync", "below_threshold"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAsyncHarness(t, "")
@@ -599,6 +606,7 @@ func TestAsyncCompactionDefaultOffAndThresholds(t *testing.T) {
 }
 
 func TestAsyncCompactionPendingHardGateCancelsThenFallsBack(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -642,6 +650,7 @@ func TestAsyncCompactionPendingHardGateCancelsThenFallsBack(t *testing.T) {
 }
 
 func TestAsyncCompactionBudgetAfterAdoption(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name      string
 		largeTail bool
@@ -725,6 +734,7 @@ func TestAsyncCompactionBudgetAfterAdoption(t *testing.T) {
 }
 
 func TestAsyncCompactionRejectsLostFence(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -748,6 +758,7 @@ func TestAsyncCompactionRejectsLostFence(t *testing.T) {
 }
 
 func TestAsyncCompactionTailParallelPairsAndUnknownResults(t *testing.T) {
+	t.Parallel()
 	event := func(kind session.EventType, id string) *session.Event {
 		return &session.Event{Type: kind, Tool: &session.EventTool{ID: id, Output: map[string]any{"status": "unknown_outcome"}}}
 	}
@@ -761,6 +772,7 @@ func TestAsyncCompactionTailParallelPairsAndUnknownResults(t *testing.T) {
 }
 
 func TestAsyncCompactionAppendAfterAssemblyRemainsInTail(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	const marker = "canonical input raced request assembly: never publish COBALT"
 	calls := 0
@@ -806,6 +818,7 @@ func TestAsyncCompactionAppendAfterAssemblyRemainsInTail(t *testing.T) {
 }
 
 func TestAsyncCompactionToolRequestHasNoEffectAndKeepsOriginalContext(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -839,6 +852,7 @@ func TestAsyncCompactionToolRequestHasNoEffectAndKeepsOriginalContext(t *testing
 }
 
 func TestAsyncCompactionCoverageContractCannotAdvanceOrRegress(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -869,6 +883,7 @@ func TestAsyncCompactionCoverageContractCannotAdvanceOrRegress(t *testing.T) {
 }
 
 func TestAsyncCompactionRevokedAuthorityDoesNotAdoptOrDispatch(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	run := h.run(t)
 	next := h.startCandidate(t)
@@ -892,6 +907,7 @@ func TestAsyncCompactionRevokedAuthorityDoesNotAdoptOrDispatch(t *testing.T) {
 }
 
 func TestAsyncCompactionValidationGuardsEpochThroughDurableCommit(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	entered, finish := make(chan struct{}), make(chan struct{})
 	h.store.beforeCheckpoint = func() { close(entered); <-finish }
@@ -930,6 +946,7 @@ func asyncMessagesText(messages []model.Message) string {
 }
 
 func TestAsyncCompactionActualDrainPrecedesCanonicalFinal(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	h.llm.ignoreStop = true
 	h.llm.cancelObserved = make(chan struct{})
@@ -956,6 +973,7 @@ func TestAsyncCompactionActualDrainPrecedesCanonicalFinal(t *testing.T) {
 }
 
 func TestAsyncCompactionStartsWithNormalizedToolHistory(t *testing.T) {
+	t.Parallel()
 	h := newAsyncHarness(t, "")
 	call := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "invalid", Name: "work", Args: `{"input":`}}, "")
 	result := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("invalid", "work", map[string]any{"error": "invalid arguments"}, true))
@@ -1024,6 +1042,7 @@ func writeAsyncMeasurements(t *testing.T, measurements []asyncMeasurement) {
 // This measures controlled scheduling, not provider performance. A 300 ms
 // summary delay is inserted in both runs; input/output usage is synthetic.
 func TestAsyncCompactionFixtureMeasurement(t *testing.T) {
+	t.Parallel()
 	var measurements []asyncMeasurement
 	for _, mode := range []string{"synchronous", "async"} {
 		h := newAsyncHarness(t, "")
@@ -1101,6 +1120,7 @@ func (m *asyncLiveModel) Generate(ctx context.Context, req *model.Request) iter.
 // configuration or production Session is opened. All transmitted text is the
 // synthetic fixture below, the fixed compaction prompt, and inert tool specs.
 func TestAsyncCompactionLiveProvider(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("CAELIS_ASYNC_LIVE") != "1" {
 		t.Skip("opt-in provider experiment")
 	}
@@ -1236,6 +1256,7 @@ func (m *asyncAssemblyModel) Generate(ctx context.Context, req *model.Request) i
 }
 
 func TestAsyncCompactionFailedInContextNeverGeneratesColdCheckpoint(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"empty", "length", "tools"} {
 		t.Run(failure, func(t *testing.T) {
 			h := newAsyncHarness(t, "")
@@ -1276,6 +1297,7 @@ func TestAsyncCompactionFailedInContextNeverGeneratesColdCheckpoint(t *testing.T
 }
 
 func TestAsyncCompactionRejectsUnboundOrChangedRequest(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"unbound", "source_hash", "messages_hash", "open_call", "parallel_open_call"} {
 		t.Run(scenario, func(t *testing.T) {
 			h := newAsyncHarness(t, "")
@@ -1302,7 +1324,7 @@ func TestAsyncCompactionRejectsUnboundOrChangedRequest(t *testing.T) {
 						calls = append(calls, model.ToolCall{ID: "open-b", Name: "work", Args: "{}"})
 					}
 					req.Messages = append(req.Messages, model.MessageFromToolCalls(model.RoleAssistant, calls, ""))
-					req.Source.MessagesHash, _ = requestsource.Fingerprint(req.Messages)
+					req.Source.MessagesHash, _ = requestmeta.Fingerprint(req.Messages)
 				}
 			}}
 			run := h.run(t)

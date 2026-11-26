@@ -11,7 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
-	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -215,7 +215,7 @@ func (r *Runtime) nextID(prefix string, custom func() string) string {
 			return id
 		}
 	}
-	return identity.New(prefix)
+	return sdkctx.NewID(prefix)
 }
 
 func (r *Runtime) now() time.Time {

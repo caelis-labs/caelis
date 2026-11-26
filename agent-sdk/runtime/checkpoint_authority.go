@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/toolset"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // Retain a request snapshot while background generation or synchronous recovery
@@ -15,7 +15,7 @@ type modelRequestAuthority struct {
 	epoch         string
 	admit         func(context.Context, agent.ModelRequestAdmission) error
 	validate      func(context.Context) (func(), error)
-	deferredTools toolset.Source
+	deferredTools tool.Source
 	resolveIdle   agent.ModelRequestResolver
 	mu            sync.Mutex
 	refs          int

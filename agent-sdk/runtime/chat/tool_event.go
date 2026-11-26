@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -62,13 +62,13 @@ func responseMeta(resp *model.Response) map[string]any {
 	}
 }
 
-func responseInvocation(resp *model.Response, requestPrefix ...prefixusage.Snapshot) *session.EventInvocation {
+func responseInvocation(resp *model.Response, requestPrefix ...requestmeta.Snapshot) *session.EventInvocation {
 	if resp == nil {
 		return nil
 	}
 	provider := strings.TrimSpace(resp.Provider)
 	modelName := strings.TrimSpace(resp.Model)
-	prefix := prefixusage.Snapshot{}
+	prefix := requestmeta.Snapshot{}
 	if len(requestPrefix) > 0 {
 		prefix = requestPrefix[0]
 	}
@@ -87,7 +87,7 @@ func responseInvocation(resp *model.Response, requestPrefix ...prefixusage.Snaps
 func responseInvocationForModel(
 	resp *model.Response,
 	invocationModel model.LLM,
-	requestPrefix ...prefixusage.Snapshot,
+	requestPrefix ...requestmeta.Snapshot,
 ) *session.EventInvocation {
 	invocation := responseInvocation(resp, requestPrefix...)
 	if invocation == nil || invocationModel == nil {

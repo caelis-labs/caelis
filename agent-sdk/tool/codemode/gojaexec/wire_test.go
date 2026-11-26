@@ -11,6 +11,7 @@ import (
 )
 
 func TestRPCCallFrameIndependentOfOutputBudget(t *testing.T) {
+	t.Parallel()
 	data, err := json.Marshal(callRequest{Method: "call", Name: "Write", Arguments: json.RawMessage(`{"path":"records.json","content":"` + strings.Repeat("x", 1<<20) + `"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +44,7 @@ func (r *headerOnly) Read(p []byte) (int, error) {
 }
 
 func TestRPCSizeRejectsBeforePayloadRead(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []byte{frameResult, frameError, frameFatal, frameReply, frameSource} {
 		if _, err := readFrame(&headerOnly{kind: kind}, 1024, true); err == nil {
 			t.Fatalf("oversize frame %d was not rejected at header", kind)

@@ -73,6 +73,7 @@ func releaseIdleJob(t *testing.T, h *asyncHarness, job *IdleCompactionJob) sessi
 }
 
 func TestIdleCompactionCompletedSourceAndFileReplay(t *testing.T) {
+	t.Parallel()
 	h, actual := completedIdleSource(t)
 	var releases atomic.Int64
 	snapshot := h.source.current
@@ -118,7 +119,7 @@ func TestIdleCompactionCompletedSourceAndFileReplay(t *testing.T) {
 	if releases.Load() != 1 {
 		t.Fatalf("independent snapshot release count=%d", releases.Load())
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: h.root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: h.root})
 	loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: h.active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +147,7 @@ func TestIdleCompactionCompletedSourceAndFileReplay(t *testing.T) {
 }
 
 func TestIdleCompactionSourceAndCacheEligibility(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"queued_tail", "failed_final", "elapsed", "backwards_clock", "codex_never_expires"} {
 		t.Run(scenario, func(t *testing.T) {
 			h, _ := completedIdleSource(t)
@@ -176,6 +178,7 @@ func TestIdleCompactionSourceAndCacheEligibility(t *testing.T) {
 }
 
 func TestIdleCompactionForegroundCancelsCheckpointButKeepsReceipt(t *testing.T) {
+	t.Parallel()
 	h, _ := completedIdleSource(t)
 	h.llm.ignoreStop = true
 	job := prepareIdleJob(t, h)
@@ -224,9 +227,11 @@ func (s *idleGrantRaceStore) IssueIdleCompactionGrant(ctx context.Context, req s
 	return s.asyncFaultStore.IssueIdleCompactionGrant(ctx, req)
 }
 func TestIdleReadyCandidateAdoptsUnderNewForegroundFenceAndKeepsTail(t *testing.T) {
+	t.Parallel()
 	testIdleReadyCandidate(t, false)
 }
 func TestIdleReadyCandidateExpiresBeforeForegroundAdoption(t *testing.T) {
+	t.Parallel()
 	testIdleReadyCandidate(t, true)
 }
 func testIdleReadyCandidate(t *testing.T, expired bool) {
@@ -287,6 +292,7 @@ func testIdleReadyCandidate(t *testing.T, expired bool) {
 }
 
 func TestIdleCompactionTerminalFailuresPreserveContextAndAccountOnce(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []model.FinishReason{model.FinishReasonLength, model.FinishReasonContentFilter, model.FinishReasonRefusal, model.FinishReasonUnknown} {
 		t.Run(string(reason), func(t *testing.T) {
 			h, _ := completedIdleSource(t)
@@ -330,6 +336,7 @@ func TestIdleCompactionTerminalFailuresPreserveContextAndAccountOnce(t *testing.
 }
 
 func TestIdleCommitDoesNotQueueBehindForegroundWriter(t *testing.T) {
+	t.Parallel()
 	h, _ := completedIdleSource(t)
 	job := prepareIdleJob(t, h)
 	window := releaseIdleJob(t, h, job)
@@ -367,6 +374,7 @@ func (m *idleRetryProviderToolModel) UsesProviderExecutedTools(*model.Request) b
 }
 
 func TestRuntimeIdleCompactionChecksRetryWrappedProviderTools(t *testing.T) {
+	t.Parallel()
 	for _, usesProviderTools := range []bool{false, true} {
 		t.Run(fmt.Sprintf("provider-tools=%v", usesProviderTools), func(t *testing.T) {
 			h := newAsyncHarness(t, "")

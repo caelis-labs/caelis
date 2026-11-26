@@ -21,6 +21,7 @@ import (
 )
 
 func TestWindowsReplaceFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "replacement.tmp")
 	to := filepath.Join(dir, "document.json")
@@ -49,6 +50,7 @@ func TestWindowsReplaceFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
 }
 
 func TestWindowsRemoveFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "session.txn.json")
 	if err := os.WriteFile(path, []byte("committed"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -68,6 +70,7 @@ func TestWindowsRemoveFileRecoversAfterDeleteShareHandleCloses(t *testing.T) {
 }
 
 func TestWindowsReplaceFileCancellationPreservesBothFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "replacement.tmp")
 	to := filepath.Join(dir, "document.json")
@@ -98,6 +101,7 @@ func TestWindowsReplaceFileCancellationPreservesBothFiles(t *testing.T) {
 }
 
 func TestWindowsAccessDeniedRetryRequiresAccessibleFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	from := filepath.Join(dir, "replacement.tmp")
 	to := filepath.Join(dir, "document.json")
@@ -139,6 +143,7 @@ func TestWindowsAccessDeniedRetryRequiresAccessibleFiles(t *testing.T) {
 }
 
 func TestWindowsPathClassDistinguishesUNCAndExtendedLocalPaths(t *testing.T) {
+	t.Parallel()
 	tests := map[string]string{
 		`C:\store\sessions`:             "local",
 		`\\?\C:\store\sessions`:         "local",
@@ -155,6 +160,7 @@ func TestWindowsPathClassDistinguishesUNCAndExtendedLocalPaths(t *testing.T) {
 }
 
 func TestWindowsCommittedDocumentReplaceKeepsWALAndRecoversOneModelFact(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	at := time.Date(2026, time.August, 1, 2, 3, 4, 0, time.UTC)
 	store := NewStore(Config{RootDir: root, Clock: func() time.Time { return at }})
@@ -216,6 +222,7 @@ func TestWindowsCommittedDocumentReplaceKeepsWALAndRecoversOneModelFact(t *testi
 }
 
 func TestWindowsCancellationAfterWALRemainsCommittedAndRecoverable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	at := time.Date(2026, time.August, 2, 2, 3, 4, 0, time.UTC)
 	store := NewStore(Config{RootDir: root, Clock: func() time.Time { return at }})
@@ -288,6 +295,7 @@ func TestWindowsCancellationAfterWALRemainsCommittedAndRecoverable(t *testing.T)
 }
 
 func TestWindowsFileDiagnosticOmitsPathsAndSessionIdentity(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, nil))
 	attempts := 0

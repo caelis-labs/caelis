@@ -23,17 +23,14 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policyfs"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/conpty"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/outputwait"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/sessionrun"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/consoleoutput"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/winproc"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/winps"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/jobprocess"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/winps"
 )
 
 const (
@@ -104,7 +101,7 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	if err != nil {
 		return nil, fmt.Errorf("impl/sandbox/windows: normalize Host user SID: %w", err)
 	}
-	authorityRoot = pathutil.Normalize(authorityRoot)
+	authorityRoot = capability.NormalizePath(authorityRoot)
 	if authorityRoot == "" || !filepath.IsAbs(authorityRoot) {
 		return nil, fmt.Errorf("impl/sandbox/windows: canonical absolute Host ACL receipt authority is required")
 	}
@@ -134,7 +131,7 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	r.registeredEnvRoot = r.sandboxEnvRoot(cfg.CWD)
 	configuredWriteRoots := []string{r.registeredEnvRoot}
 	for _, root := range cfg.WritableRoots {
-		normalized, normalizeErr := pathutil.NormalizeWithBase(cfg.CWD, root)
+		normalized, normalizeErr := capability.NormalizePathWithBase(cfg.CWD, root)
 		if normalizeErr == nil && normalized != "" {
 			configuredWriteRoots = append(configuredWriteRoots, normalized)
 		}
@@ -153,9 +150,9 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 }
 
 func validateHostAuthorityOutsideWriteRoots(authorityRoot string, writeRoots []string) error {
-	authorityRoot = pathutil.Normalize(authorityRoot)
-	for _, root := range pathutil.Dedupe(writeRoots) {
-		if pathutil.IsUnder(authorityRoot, root) {
+	authorityRoot = capability.NormalizePath(authorityRoot)
+	for _, root := range capability.DedupePaths(writeRoots) {
+		if capability.IsPathUnder(authorityRoot, root) {
 			return fmt.Errorf(
 				"impl/sandbox/windows: Host ACL receipt authority %s must remain outside sandbox writable root %s",
 				authorityRoot,
@@ -175,7 +172,7 @@ func defaultHostReceiptAuthorityRoot(hostUserSID string) (string, error) {
 }
 
 func hostReceiptAuthorityRootAt(base, hostUserSID string) (string, error) {
-	base = pathutil.Normalize(base)
+	base = capability.NormalizePath(base)
 	if base == "" || !filepath.IsAbs(base) {
 		return "", fmt.Errorf("canonical absolute Host authority base is required")
 	}
@@ -264,7 +261,7 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		if err != nil {
 			return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindows, ExitCode: -1}, err
 		}
-		return sessionrun.Wait(ctx, session, req.Stdin)
+		return executil.WaitSession(ctx, session, req.Stdin)
 	}
 	result := sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindows, ExitCode: -1}
 	releaseUse, err := r.beginRuntimeUse()
@@ -362,7 +359,7 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		return nil, err
 	}
 	if req.TTY {
-		process, startErr := conpty.Start(conpty.Config{
+		process, startErr := winproc.StartConPTY(winproc.ConPTYConfig{
 			Token:       uintptr(token),
 			Application: cmd.Path,
 			Args:        append([]string(nil), cmd.Args[1:]...),
@@ -404,7 +401,7 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		keepUse = true
 		return session, nil
 	}
-	process, err := jobprocess.Start(jobprocess.Config{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...)})
+	process, err := winproc.StartJobProcess(winproc.JobProcessConfig{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...)})
 	_ = token.Close()
 	if err != nil {
 		cancel()
@@ -613,11 +610,11 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: permission mode %q is unsupported by the Windows workspace-write sandbox", constraints.Permission)
 	}
 	base := firstNonEmpty(req.Dir, r.cfg.CWD)
-	workspaceRoot, err := pathutil.NormalizeWithBase("", r.cfg.CWD)
+	workspaceRoot, err := capability.NormalizePathWithBase("", r.cfg.CWD)
 	if err != nil {
 		return workspacePolicy{}, err
 	}
-	commandDir, err := pathutil.NormalizeWithBase(workspaceRoot, base)
+	commandDir, err := capability.NormalizePathWithBase(workspaceRoot, base)
 	if err != nil {
 		return workspacePolicy{}, err
 	}
@@ -625,9 +622,9 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 	fullUserWriteRoots := []string{}
 	commandSpecificWriteRoots := []string{}
 	for _, root := range r.cfg.WritableRoots {
-		if normalized, err := pathutil.NormalizeWithBase(workspaceRoot, root); err == nil && normalized != "" {
+		if normalized, err := capability.NormalizePathWithBase(workspaceRoot, root); err == nil && normalized != "" {
 			fullUserWriteRoots = append(fullUserWriteRoots, normalized)
-			if pathutil.IsUnder(commandDir, normalized) || pathutil.IsUnder(normalized, commandDir) {
+			if capability.IsPathUnder(commandDir, normalized) || capability.IsPathUnder(normalized, commandDir) {
 				coreUserWriteRoots = append(coreUserWriteRoots, normalized)
 			}
 		}
@@ -636,13 +633,13 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 		if rule.Access != sandbox.PathAccessReadWrite {
 			continue
 		}
-		if normalized, err := pathutil.NormalizeWithBase(commandDir, rule.Path); err == nil && normalized != "" {
+		if normalized, err := capability.NormalizePathWithBase(commandDir, rule.Path); err == nil && normalized != "" {
 			fullUserWriteRoots = append(fullUserWriteRoots, normalized)
 			commandSpecificWriteRoots = append(commandSpecificWriteRoots, normalized)
 		}
 	}
-	fullUserWriteRoots = pathutil.Dedupe(fullUserWriteRoots)
-	coreUserWriteRoots = pathutil.Dedupe(append(coreUserWriteRoots, commandSpecificWriteRoots...))
+	fullUserWriteRoots = capability.DedupePaths(fullUserWriteRoots)
+	coreUserWriteRoots = capability.DedupePaths(append(coreUserWriteRoots, commandSpecificWriteRoots...))
 	fullUserWriteRoots = safeWritableRoots(fullUserWriteRoots)
 	coreUserWriteRoots = safeWritableRoots(coreUserWriteRoots)
 	if err := validateHostAuthorityOutsideWriteRoots(r.hostReceiptAuthorityRoot, fullUserWriteRoots); err != nil {
@@ -660,12 +657,12 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 	if envRoot != "" {
 		writeRoots = append(writeRoots, envRoot)
 	}
-	writeRoots = pathutil.Dedupe(writeRoots)
+	writeRoots = capability.DedupePaths(writeRoots)
 	writeRoots, err = existingWritableRoots(writeRoots)
 	if err != nil {
 		return workspacePolicy{}, err
 	}
-	writeRoots = pathutil.CompactCovered(writeRoots)
+	writeRoots = capability.CompactCoveredPaths(writeRoots)
 	if len(writeRoots) == 0 {
 		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: at least one writable root is required")
 	}
@@ -708,7 +705,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 			return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: inspect protected Git metadata %s: %w", path, err)
 		}
 	}
-	denyWrite = pathutil.Dedupe(denyWrite)
+	denyWrite = capability.DedupePaths(denyWrite)
 	hash, err := hashWorkspacePolicyFields(workspaceRoot, commandDir, envRoot, writeRoots, denyWrite)
 	if err != nil {
 		return workspacePolicy{}, err
@@ -787,12 +784,12 @@ func existingWritableRoots(roots []string) ([]string, error) {
 		}
 		out = append(out, root)
 	}
-	return pathutil.Dedupe(out), nil
+	return capability.DedupePaths(out), nil
 }
 
 func safeWritableRoots(roots []string) []string {
 	out := make([]string, 0, len(roots))
-	for _, root := range pathutil.Dedupe(roots) {
+	for _, root := range capability.DedupePaths(roots) {
 		if unsafeWritableRootReasonForCurrentUser(root) == "" {
 			out = append(out, root)
 		}
@@ -809,8 +806,8 @@ func unsafeWritableRootReasonForCurrentUser(root string) string {
 }
 
 func unsafeWritableRootReason(root string, userHome string) string {
-	root = pathutil.Normalize(root)
-	userHome = pathutil.Normalize(userHome)
+	root = capability.NormalizePath(root)
+	userHome = capability.NormalizePath(userHome)
 	if root == "" || userHome == "" {
 		return ""
 	}
@@ -819,7 +816,7 @@ func unsafeWritableRootReason(root string, userHome string) string {
 		return "UNC roots are not supported by the Windows workspace-write sandbox"
 	case isVolumeRoot(root):
 		return "it is a volume root"
-	case pathutil.IsUnder(userHome, root):
+	case capability.IsPathUnder(userHome, root):
 		return "it is the host user profile root or one of its ancestors"
 	case isKnownSystemPath(root):
 		return "it is under a Windows system or shared program data root"
@@ -847,9 +844,9 @@ func (r *runtime) prepareSandboxEnvRoot(workspaceRoot string, create bool) (stri
 }
 
 func (p workspacePolicy) sidForWriteRoot(root string) string {
-	key := pathutil.Key(root)
+	key := capability.PathKey(root)
 	for candidate, sid := range p.WriteRootCapabilitySIDs {
-		if pathutil.Key(candidate) == key {
+		if capability.PathKey(candidate) == key {
 			return strings.TrimSpace(sid)
 		}
 	}
@@ -904,7 +901,7 @@ func (r *runtime) migrateLegacyManifestLocked() error {
 	}
 	destination := r.manifestPathForWorkspace(legacy.WorkspaceRoot)
 	if existing, readErr := readWorkspaceManifest(destination); readErr == nil {
-		if pathutil.Key(existing.WorkspaceRoot) != pathutil.Key(legacy.WorkspaceRoot) {
+		if capability.PathKey(existing.WorkspaceRoot) != capability.PathKey(legacy.WorkspaceRoot) {
 			return fmt.Errorf("impl/sandbox/windows: legacy workspace manifest destination belongs to a different workspace")
 		}
 		legacy = mergeWorkspaceManifests(existing, legacy)
@@ -939,7 +936,7 @@ func readWorkspaceManifest(path string) (workspaceManifest, error) {
 func validateWorkspaceManifestReceipts(manifest workspaceManifest) error {
 	for _, group := range [][]manifestReceipt{manifest.ManagedReceipts, manifest.RetiringReceipts} {
 		for _, managed := range group {
-			if pathutil.Key(managed.Path) != pathutil.Key(managed.Receipt.Path) {
+			if capability.PathKey(managed.Path) != capability.PathKey(managed.Receipt.Path) {
 				return fmt.Errorf("impl/sandbox/windows: receipt manifest path mismatch for %s", managed.Path)
 			}
 			if err := acl.ValidateACEReceiptEntry(managed.Receipt, managed.Entry); err != nil {
@@ -967,8 +964,8 @@ func workspaceManifestForPolicy(policy workspacePolicy) workspaceManifest {
 }
 
 func mergeWorkspaceManifests(existing workspaceManifest, current workspaceManifest) workspaceManifest {
-	if pathutil.Key(existing.WorkspaceRoot) != pathutil.Key(current.WorkspaceRoot) ||
-		pathutil.Key(existing.SandboxEnvRoot) != pathutil.Key(current.SandboxEnvRoot) {
+	if capability.PathKey(existing.WorkspaceRoot) != capability.PathKey(current.WorkspaceRoot) ||
+		capability.PathKey(existing.SandboxEnvRoot) != capability.PathKey(current.SandboxEnvRoot) {
 		return current
 	}
 	if existing.Version == workspaceManifestVersion && current.Version != workspaceManifestVersion {
@@ -978,14 +975,14 @@ func mergeWorkspaceManifests(existing workspaceManifest, current workspaceManife
 	}
 	out := current
 	out.CapabilitySIDs = dedupeStrings(append(append([]string(nil), existing.CapabilitySIDs...), current.CapabilitySIDs...))
-	out.WriteRoots = pathutil.Dedupe(append(append([]string(nil), existing.WriteRoots...), current.WriteRoots...))
-	out.DenyWritePaths = pathutil.Dedupe(append(append([]string(nil), existing.DenyWritePaths...), current.DenyWritePaths...))
+	out.WriteRoots = capability.DedupePaths(append(append([]string(nil), existing.WriteRoots...), current.WriteRoots...))
+	out.DenyWritePaths = capability.DedupePaths(append(append([]string(nil), existing.DenyWritePaths...), current.DenyWritePaths...))
 	out.WriteRootCapabilitySIDs = cloneStringMap(existing.WriteRootCapabilitySIDs)
 	if out.WriteRootCapabilitySIDs == nil {
 		out.WriteRootCapabilitySIDs = map[string]string{}
 	}
 	for root, sid := range current.WriteRootCapabilitySIDs {
-		out.WriteRootCapabilitySIDs[pathutil.Normalize(root)] = strings.TrimSpace(sid)
+		out.WriteRootCapabilitySIDs[capability.NormalizePath(root)] = strings.TrimSpace(sid)
 	}
 	out.ACEs = mergeManifestACEs(existing.ACEs, current.ACEs)
 	return out
@@ -997,7 +994,7 @@ func mergeManifestACEs(existing []manifestACE, current []manifestACE) []manifest
 	seen := map[string]struct{}{}
 	for _, ace := range values {
 		key := strings.Join([]string{
-			pathutil.Key(ace.Path),
+			capability.PathKey(ace.Path),
 			strings.ToUpper(strings.TrimSpace(ace.Principal)),
 			strings.ToLower(strings.TrimSpace(ace.Mode)),
 			strings.ToLower(strings.TrimSpace(ace.Rights)),
@@ -1054,23 +1051,23 @@ func persistWorkspaceManifest(path string, manifest workspaceManifest) error {
 }
 
 func normalizeManifest(in workspaceManifest) workspaceManifest {
-	in.WorkspaceRoot = pathutil.Normalize(in.WorkspaceRoot)
-	in.SandboxEnvRoot = pathutil.Normalize(in.SandboxEnvRoot)
-	in.DeletingEnvRoot = pathutil.Normalize(in.DeletingEnvRoot)
-	in.WriteRoots = pathutil.Dedupe(in.WriteRoots)
-	in.DenyWritePaths = pathutil.Dedupe(in.DenyWritePaths)
+	in.WorkspaceRoot = capability.NormalizePath(in.WorkspaceRoot)
+	in.SandboxEnvRoot = capability.NormalizePath(in.SandboxEnvRoot)
+	in.DeletingEnvRoot = capability.NormalizePath(in.DeletingEnvRoot)
+	in.WriteRoots = capability.DedupePaths(in.WriteRoots)
+	in.DenyWritePaths = capability.DedupePaths(in.DenyWritePaths)
 	in.CapabilitySIDs = dedupeStrings(in.CapabilitySIDs)
 	in.LegacyACEs = mergeManifestACEs(nil, in.LegacyACEs)
 	for i := range in.ManagedReceipts {
-		in.ManagedReceipts[i].Path = pathutil.Normalize(in.ManagedReceipts[i].Path)
+		in.ManagedReceipts[i].Path = capability.NormalizePath(in.ManagedReceipts[i].Path)
 	}
 	for i := range in.RetiringReceipts {
-		in.RetiringReceipts[i].Path = pathutil.Normalize(in.RetiringReceipts[i].Path)
+		in.RetiringReceipts[i].Path = capability.NormalizePath(in.RetiringReceipts[i].Path)
 	}
 	if len(in.WriteRootCapabilitySIDs) > 0 {
 		out := map[string]string{}
 		for root, sid := range in.WriteRootCapabilitySIDs {
-			root = pathutil.Normalize(root)
+			root = capability.NormalizePath(root)
 			sid = strings.TrimSpace(sid)
 			if root != "" && sid != "" {
 				out[root] = sid
@@ -1091,10 +1088,10 @@ func manifestFresh(manifest workspaceManifest, policy workspacePolicy) bool {
 	if manifest.PolicyHash != policy.PolicyHash {
 		return false
 	}
-	if pathutil.Key(manifest.WorkspaceRoot) != pathutil.Key(policy.WorkspaceRoot) {
+	if capability.PathKey(manifest.WorkspaceRoot) != capability.PathKey(policy.WorkspaceRoot) {
 		return false
 	}
-	if pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(policy.SandboxEnvRoot) {
+	if capability.PathKey(manifest.SandboxEnvRoot) != capability.PathKey(policy.SandboxEnvRoot) {
 		return false
 	}
 	if !sameStringSet(manifest.CapabilitySIDs, policy.CapabilitySIDs) {
@@ -1134,8 +1131,8 @@ type windowsSession struct {
 	terminal sandbox.TerminalRef
 
 	cmd              *exec.Cmd
-	conpty           *conpty.Process
-	jobProcess       *jobprocess.Process
+	conpty           *winproc.ConPTYProcess
+	jobProcess       *winproc.JobProcess
 	stdin            io.WriteCloser
 	stdoutReader     io.Closer
 	stderrReader     io.Closer
@@ -1216,11 +1213,11 @@ func (s *windowsSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarke
 }
 
 func (s *windowsSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCursor) (sandbox.OutputObservation, error) {
-	observation, err := outputwait.Await(ctx, cursor, func() outputwait.Snapshot[sandbox.SessionStatus] {
+	observation, err := executil.AwaitOutput(ctx, cursor, func() executil.OutputSnapshot[sandbox.SessionStatus] {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		status := s.statusLocked()
-		return outputwait.Snapshot[sandbox.SessionStatus]{
+		return executil.OutputSnapshot[sandbox.SessionStatus]{
 			Signal:    s.outputSignal,
 			Published: sandbox.OutputCursor{Stdout: s.stdoutCursor, Stderr: s.stderrCursor},
 			Available: sandbox.OutputCursor{Stdout: s.stdoutTotal, Stderr: s.stderrTotal},
@@ -1629,7 +1626,7 @@ func (s *windowsSession) notifyOutputLocked() {
 }
 
 func existingControlDirs(root string) []string {
-	root = pathutil.Normalize(root)
+	root = capability.NormalizePath(root)
 	if root == "" {
 		return nil
 	}
@@ -1645,7 +1642,7 @@ func existingControlDirs(root string) []string {
 
 func resolveStateRoot(raw string) (string, error) {
 	if strings.TrimSpace(raw) != "" {
-		root, err := pathutil.NormalizeWithBase("", raw)
+		root, err := capability.NormalizePathWithBase("", raw)
 		if err != nil {
 			return "", err
 		}
@@ -1658,7 +1655,7 @@ func resolveStateRoot(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("impl/sandbox/windows: resolve user home: %w", err)
 	}
-	root, err := pathutil.NormalizeWithBase("", filepath.Join(home, ".caelis"))
+	root, err := capability.NormalizePathWithBase("", filepath.Join(home, ".caelis"))
 	if err != nil {
 		return "", fmt.Errorf("impl/sandbox/windows: resolve default state root: %w", err)
 	}
@@ -1693,16 +1690,16 @@ func cloneStringMap(in map[string]string) map[string]string {
 }
 
 func samePathSet(a, b []string) bool {
-	return slices.Equal(pathutil.Dedupe(a), pathutil.Dedupe(b))
+	return slices.Equal(capability.DedupePaths(a), capability.DedupePaths(b))
 }
 
 func pathListContains(paths []string, want string) bool {
-	wantKey := pathutil.Key(want)
+	wantKey := capability.PathKey(want)
 	if wantKey == "" {
 		return false
 	}
 	for _, path := range paths {
-		if pathutil.Key(path) == wantKey {
+		if capability.PathKey(path) == wantKey {
 			return true
 		}
 	}
@@ -1720,7 +1717,7 @@ func sameRootSIDMap(a, b map[string]string) bool {
 	for root, sid := range a {
 		found := false
 		for candidate, candidateSID := range b {
-			if pathutil.Key(root) == pathutil.Key(candidate) && strings.TrimSpace(sid) == strings.TrimSpace(candidateSID) {
+			if capability.PathKey(root) == capability.PathKey(candidate) && strings.TrimSpace(sid) == strings.TrimSpace(candidateSID) {
 				found = true
 				break
 			}

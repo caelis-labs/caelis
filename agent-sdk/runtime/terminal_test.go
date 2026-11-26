@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/cmdsession"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
@@ -54,7 +53,7 @@ func (r *gatedCmdsessionRunner) Run(ctx context.Context, req sandbox.CommandRequ
 }
 
 func (r *gatedCmdsessionRunner) StartAsync(_ context.Context, req sandbox.CommandRequest) (string, error) {
-	forward := runnerruntime.UTF8OutputForwarder(req.OnOutput)
+	forward := cmdsession.UTF8OutputForwarder(req.OnOutput)
 	session, err := r.manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:     req.Command,
 		Dir:         req.Dir,
@@ -115,12 +114,13 @@ func (r *gatedCmdsessionRunner) Close() error {
 // code with the tail output, and the ordinary Task read must still receive the
 // retained result.
 func TestTerminalReadPublishesCommandExitOnlyAfterOutputCompletes(t *testing.T) {
+	t.Parallel()
 	runner := newGatedCmdsessionRunner()
 	t.Cleanup(runner.close)
 
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 	terminals := &terminalService{tasks: tm}
-	sandboxRuntime := runnerruntime.New(runnerruntime.Config{
+	sandboxRuntime := cmdsession.NewRuntime(cmdsession.RuntimeConfig{
 		Backend: sandbox.BackendHost,
 		Runner:  runner,
 	})
@@ -215,6 +215,7 @@ func TestTerminalReadPublishesCommandExitOnlyAfterOutputCompletes(t *testing.T) 
 }
 
 func TestTerminalReadObservesExitWithoutConsumingTaskResult(t *testing.T) {
+	t.Parallel()
 	for _, code := range []int{0, 7, -1} {
 		running := false
 		process := &yieldProbeSandboxSession{statusRunning: &running, result: sandbox.CommandResult{Stdout: "retained output", ExitCode: code, Backend: sandbox.BackendHost}}
@@ -245,6 +246,7 @@ func TestTerminalReadObservesExitWithoutConsumingTaskResult(t *testing.T) {
 }
 
 func TestTerminalReadPreservesCommittedTaskOutcome(t *testing.T) {
+	t.Parallel()
 	for _, state := range []taskapi.State{taskapi.StateCancelled, taskapi.StateFailed, taskapi.StateCompleted, taskapi.StateUnknownOutcome} {
 		t.Run(string(state), func(t *testing.T) {
 			running := false
@@ -265,6 +267,7 @@ func TestTerminalReadPreservesCommittedTaskOutcome(t *testing.T) {
 }
 
 func TestTerminalWaitCancellationAndConcurrentObservationDoNotConsumeTask(t *testing.T) {
+	t.Parallel()
 	process := newConcurrentCommandWaitSession()
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 	task := &commandTask{ref: taskapi.Ref{TaskID: "command", SessionID: "session"}, sessionRef: session.SessionRef{SessionID: "session"},
@@ -311,6 +314,7 @@ func TestTerminalWaitCancellationAndConcurrentObservationDoNotConsumeTask(t *tes
 }
 
 func TestTerminalWaitDoesNotInventExitForUnknownOutcome(t *testing.T) {
+	t.Parallel()
 	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
 	task := &commandTask{ref: taskapi.Ref{TaskID: "unknown", SessionID: "session"}, sessionRef: session.SessionRef{SessionID: "session"},
 		state: taskapi.StateUnknownOutcome, metadata: map[string]any{"command_phase": commandPhaseUnknown}, result: map[string]any{"error": "unconfirmed"}}

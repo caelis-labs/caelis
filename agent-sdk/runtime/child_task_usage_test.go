@@ -17,6 +17,7 @@ import (
 )
 
 func TestChildUsagePersistsLiveInitialAndFollowup(t *testing.T) {
+	t.Parallel()
 	for _, initial := range []bool{true, false} {
 		t.Run(map[bool]string{true: "initial", false: "followup"}[initial], func(t *testing.T) {
 			r, task, activity, completion := newUsageTestActivity(t, initial)
@@ -40,6 +41,7 @@ func TestChildUsagePersistsLiveInitialAndFollowup(t *testing.T) {
 }
 
 func TestChildUsageReplacesGaugeDuringBlockedWrite(t *testing.T) {
+	t.Parallel()
 	r, task, activity, completion := newUsageTestActivity(t, true)
 	base := r.tasks.store
 	started, release := make(chan struct{}), make(chan struct{})
@@ -76,6 +78,7 @@ func TestChildUsageReplacesGaugeDuringBlockedWrite(t *testing.T) {
 }
 
 func TestChildUsageRetainsGaugeAcrossWriteFailure(t *testing.T) {
+	t.Parallel()
 	for _, conflict := range []bool{false, true} {
 		t.Run(map[bool]string{false: "io_failure", true: "cas_conflict"}[conflict], func(t *testing.T) {
 			r, task, activity, completion := newUsageTestActivity(t, true)
@@ -105,6 +108,7 @@ func TestChildUsageRetainsGaugeAcrossWriteFailure(t *testing.T) {
 }
 
 func TestChildUsageTerminalJoinsBlockedWriter(t *testing.T) {
+	t.Parallel()
 	r, task, activity, completion := newUsageTestActivity(t, true)
 	base := r.tasks.store
 	started, release := make(chan struct{}), make(chan struct{})
@@ -157,6 +161,7 @@ func TestChildUsageTerminalJoinsBlockedWriter(t *testing.T) {
 }
 
 func TestChildCompletionRetainsUsageAcrossCASConflict(t *testing.T) {
+	t.Parallel()
 	for _, initial := range []bool{true, false} {
 		for _, terminal := range []bool{false, true} {
 			name := map[bool]string{true: "initial", false: "followup"}[initial] + "/" + map[bool]string{true: "terminal", false: "running"}[terminal]
@@ -203,6 +208,7 @@ func TestChildCompletionRetainsUsageAcrossCASConflict(t *testing.T) {
 }
 
 func TestChildUsageCannotOverwriteReplacementActivity(t *testing.T) {
+	t.Parallel()
 	for _, nextGeneration := range []bool{false, true} {
 		t.Run(map[bool]string{false: "same_generation", true: "next_generation"}[nextGeneration], func(t *testing.T) {
 			r, task, activity, completion := newUsageTestActivity(t, true)
@@ -238,6 +244,7 @@ func TestChildUsageCannotOverwriteReplacementActivity(t *testing.T) {
 }
 
 func TestChildUsageDiscardJoinsUninstalledWriter(t *testing.T) {
+	t.Parallel()
 	r, task, _, _ := newUsageTestActivity(t, true)
 	before, err := r.tasks.store.Get(t.Context(), task.ref.TaskID)
 	if err != nil {
@@ -256,6 +263,7 @@ func TestChildUsageDiscardJoinsUninstalledWriter(t *testing.T) {
 }
 
 func TestChildUsageWaitsForSpawnInstallation(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "installed", true: "failed"}[fail], func(t *testing.T) {
 			release := make(chan struct{})

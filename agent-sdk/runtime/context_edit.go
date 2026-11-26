@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -129,10 +129,10 @@ func contextSourceEventsEqual(a, b []*session.Event) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
-	x, err := requestsource.Fingerprint(a)
+	x, err := requestmeta.Fingerprint(a)
 	if err != nil {
 		return false
 	}
-	y, err := requestsource.Fingerprint(b)
+	y, err := requestmeta.Fingerprint(b)
 	return err == nil && x == y
 }

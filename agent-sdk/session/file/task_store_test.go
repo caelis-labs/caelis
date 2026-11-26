@@ -17,7 +17,8 @@ import (
 )
 
 func TestSessionOpensTaskTableOnlyOnTaskAccess(t *testing.T) {
-	store := NewStore(Config{RootDir: t.TempDir()})
+	t.Parallel()
+	store := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "owner"})
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +55,7 @@ func TestTaskStoreRevisionCAS(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	backing := NewStore(Config{RootDir: root})
+	backing := newLogicalTestStore(t, Config{RootDir: root})
 	store := NewTaskStore(backing)
 	created, err := store.Put(context.Background(), task.PutRequest{
 		Entry: &task.Entry{
@@ -97,7 +98,7 @@ func TestTaskStoreRevisionCAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reopenedStore := NewTaskStore(NewStore(Config{RootDir: root}))
+	reopenedStore := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root}))
 	reopened, err := reopenedStore.Get(context.Background(), "task-cas")
 	if err != nil {
 		t.Fatalf("reopened Get() error = %v", err)
@@ -117,9 +118,10 @@ func TestTaskStoreRevisionCAS(t *testing.T) {
 }
 
 func TestTaskStoreDetachedSubagentActivityRequiresNextGeneration(t *testing.T) {
+	t.Parallel()
 	for _, invalid := range []string{"", "same_generation", "skipped_generation", "missing_identity", "terminal", "foreign_session", "running_predecessor"} {
 		t.Run(invalid, func(t *testing.T) {
-			store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+			store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 			seed := &task.Entry{
 				TaskID: "child", Kind: task.KindSubagent, Session: taskSessionRef("external-session"),
 				State: task.StateCompleted, Spec: map[string]any{"turn_seq": int64(1)},
@@ -161,10 +163,11 @@ func TestTaskStoreDetachedSubagentActivityRequiresNextGeneration(t *testing.T) {
 }
 
 func TestTaskStoreDetachedSubagentUsagePreservesActivity(t *testing.T) {
+	t.Parallel()
 	for _, state := range []task.State{task.StateRunning, task.StateCompleted, task.StateUnknownOutcome} {
 		for _, mutation := range []string{"", "identity", "generation", "state", "running", "result", "cancel", "spec", "cursor", "no_gauge"} {
 			t.Run(string(state)+"/"+mutation, func(t *testing.T) {
-				store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+				store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 				seed := &task.Entry{
 					TaskID: "child", Kind: task.KindSubagent, Session: taskSessionRef("external-session"),
 					State: state, Running: state == task.StateRunning,
@@ -231,7 +234,7 @@ func TestTaskStoreDetachedSubagentUsagePreservesActivity(t *testing.T) {
 func TestTaskStoreAllowsOnlySubagentCompletionWithoutLocalSessionDocument(t *testing.T) {
 	t.Parallel()
 
-	store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 	completionCtx := session.ContextWithControlMutation(
 		context.Background(),
 		session.ControlMutationPurposeSubagentCompletion,
@@ -315,7 +318,7 @@ func TestTaskStorePersistsTypedFailureDiagnostic(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root}))
 	created, err := store.Put(context.Background(), task.PutRequest{
 		Entry: &task.Entry{
 			TaskID:            "failed-subagent",
@@ -336,7 +339,7 @@ func TestTaskStorePersistsTypedFailureDiagnostic(t *testing.T) {
 		t.Fatalf("created FailureDiagnostic = %q, want bounded diagnostic", got)
 	}
 
-	reopened, err := NewTaskStore(NewStore(Config{RootDir: root})).Get(context.Background(), created.TaskID)
+	reopened, err := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root})).Get(context.Background(), created.TaskID)
 	if err != nil {
 		t.Fatalf("reopened Get() error = %v", err)
 	}
@@ -438,7 +441,7 @@ func TestTaskStoreRejectsStaleSessionFenceAfterTakeover(t *testing.T) {
 
 func TestTaskStoreReturnsCommittedEntryAfterPostCommitFailure(t *testing.T) {
 	t.Parallel()
-	backing := NewStore(Config{RootDir: t.TempDir()})
+	backing := newLogicalTestStore(t, Config{RootDir: t.TempDir()})
 	tasks := NewTaskStore(backing)
 	backing.transactionFault = func(phase string) error {
 		if phase == "task_index_post_commit" {
@@ -466,7 +469,7 @@ func TestTaskStoreUpsertCompletedTaskKeepsCanonicalResultInIndex(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	entry := &task.Entry{
 		TaskID:    "task-1",
 		Kind:      task.KindCommand,
@@ -553,7 +556,7 @@ func TestTaskStoreUpsertCompletedTaskDropsWhitespaceOnlyStreams(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	entry := &task.Entry{
 		TaskID:    "task-blank",
 		Kind:      task.KindCommand,
@@ -595,7 +598,7 @@ func TestTaskStoreUpsertRunningTaskKeepsSQLiteOnly(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	entry := &task.Entry{
 		TaskID:  "task-running",
 		Kind:    task.KindCommand,
@@ -637,7 +640,7 @@ func TestTaskStoreGetIgnoresLegacyTaskJSON(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	entry := &task.Entry{
 		TaskID:    "task-target",
 		Kind:      task.KindCommand,
@@ -689,7 +692,7 @@ func TestTaskStoreGetSessionTaskByHandleUsesIndexedHandle(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	ref := taskSessionRef("sess-handle")
 	if err := store.Upsert(context.Background(), &task.Entry{
 		TaskID:  "task-command-decoy",
@@ -737,13 +740,13 @@ func TestTaskStoreScopedReadsVerifyOwningSession(t *testing.T) {
 	root := t.TempDir()
 	ref := taskSessionRef("session")
 	ref.WorkspaceKey = "workspace"
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	if err := store.Upsert(t.Context(), &task.Entry{
 		TaskID: "task-original", Session: ref, Handle: "reviewer", State: task.StateCompleted,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	reopened := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	reopened := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 
 	for _, tt := range []struct {
 		name string
@@ -788,7 +791,7 @@ func TestTaskStoreRejectsDuplicateSessionHandle(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := NewTaskStore(NewStore(Config{RootDir: root, Clock: fixedTaskClock}))
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: root, Clock: fixedTaskClock}))
 	ref := taskSessionRef("sess-ambiguous")
 	for index, id := range []string{"task-a", "task-b"} {
 		kind := task.KindSubagent
@@ -872,7 +875,8 @@ func assertNoTransientTaskResultKeys(t *testing.T, result map[string]any) {
 }
 
 func TestTaskStateReadsSelectSessionAndTaskWithoutPayloads(t *testing.T) {
-	store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+	t.Parallel()
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 	ref := taskSessionRef("state-session")
 	for _, entry := range []*task.Entry{
 		{TaskID: "completed", Session: ref, State: task.StateCompleted},
@@ -929,6 +933,7 @@ func TestTaskStateReadsSelectSessionAndTaskWithoutPayloads(t *testing.T) {
 }
 
 func TestTaskStateSteeringMatchesFullMetadataDecoder(t *testing.T) {
+	t.Parallel()
 	for _, metadata := range []string{
 		`null`, ``, " \n\t ", "\u00a0{\"supports_steering\":true}\u00a0", `{}`, `{"supports_steering":true}`,
 		`{"supports_steering":false}`, `{"supports_steering":"true"}`, `{"supports_steering":1}`,
@@ -937,7 +942,7 @@ func TestTaskStateSteeringMatchesFullMetadataDecoder(t *testing.T) {
 		`{"supports_steering":{}}`, `{"supports_steering":1e10000}`, `{"supports_steering":true,"unrelated":1e10000}`, `{"unrelated":1e10000}`, `[]`, `true`, `"text"`, `{"supports_steering":`,
 	} {
 		t.Run(metadata, func(t *testing.T) {
-			store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+			store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 			ref := taskSessionRef("metadata")
 			if err := store.Upsert(t.Context(), &task.Entry{TaskID: "target", Kind: task.KindSubagent, Session: ref, State: task.StateRunning}); err != nil {
 				t.Fatal(err)
@@ -967,7 +972,8 @@ func TestTaskStateSteeringMatchesFullMetadataDecoder(t *testing.T) {
 }
 
 func TestTaskStateReadHonorsCanceledStoreAcquisition(t *testing.T) {
-	store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+	t.Parallel()
+	store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 	if err := store.store.mu.LockContext(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -985,9 +991,10 @@ func TestTaskStateReadHonorsCanceledStoreAcquisition(t *testing.T) {
 }
 
 func TestTaskStoreSubagentCancellationPreservesIdentityAndGeneration(t *testing.T) {
+	t.Parallel()
 	for _, mutation := range []string{"", "identity", "generation", "activity", "spec", "retired_result", "cursor", "missing_journal", "foreign_session", "stale_revision", "reopen"} {
 		t.Run(mutation, func(t *testing.T) {
-			store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+			store := NewTaskStore(newLogicalTestStore(t, Config{RootDir: t.TempDir()}))
 			current, err := store.Put(t.Context(), task.PutRequest{Entry: &task.Entry{
 				TaskID: "child", Kind: task.KindSubagent, Session: taskSessionRef("parent"), State: task.StateRunning, Running: true,
 				Spec:     map[string]any{"turn_seq": int64(1), "agent_id": "agent", "session_id": "child-session", "prompt": "retained"},

@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/google/uuid"
 )
 
@@ -128,8 +128,8 @@ func GenerateWithRequestTransform(ctx context.Context, llm LLM, req *Request, tr
 	}
 	transformed := CloneRequest(req)
 	transform(transformed)
-	if modelinvocation.AllowsToolRepair(ctx, req) {
-		ctx = modelinvocation.WithToolRepair(ctx, transformed)
+	if sdkctx.AllowsToolRepair(ctx, req) {
+		ctx = sdkctx.WithToolRepair(ctx, transformed)
 	}
 	return Generate(ctx, llm, transformed)
 }
@@ -147,11 +147,11 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
 	}
-	allowToolRepair := modelinvocation.AllowsToolRepair(ctx, req)
+	allowToolRepair := sdkctx.AllowsToolRepair(ctx, req)
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
-	middleware, _ := ctx.Value(modelinvocation.MiddlewareKey{}).(func(context.Context, Invocation, *Request, func(context.Context) error) error)
+	middleware, _ := ctx.Value(sdkctx.MiddlewareKey{}).(func(context.Context, Invocation, *Request, func(context.Context) error) error)
 	if admit == nil && observer == nil && start == nil && middleware == nil {
 		return generatePrepared(ctx, llm, CloneRequest(req), allowToolRepair)
 	}

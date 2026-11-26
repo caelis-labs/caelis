@@ -25,6 +25,7 @@ import (
 )
 
 func TestApprovalReviewFinalSettlementReachesModel(t *testing.T) {
+	t.Parallel()
 	options := []session.ProtocolApprovalOption{
 		{ID: "allow-execution", Kind: "reject_once", Name: "Do not allow execution"},
 		{ID: "stop", Kind: "allow_once", Name: "Do not reject execution"},
@@ -121,6 +122,7 @@ func (r settlementReviewer) ReviewApproval(context.Context, approval.ReviewReque
 }
 
 func TestApprovalOriginBuiltinNoOptionsNormalizationAndReason(t *testing.T) {
+	t.Parallel()
 	var captured approval.Request
 	invoked := false
 	wrapped := policyAdmission{session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}}, tool: tool.NamedTool{Def: tool.Definition{Name: "Probe"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { invoked = true; return tool.Result{}, nil }}, approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
@@ -141,6 +143,7 @@ func TestApprovalOriginBuiltinNoOptionsNormalizationAndReason(t *testing.T) {
 }
 
 func TestApprovalOriginEndpointRoleOrthogonality(t *testing.T) {
+	t.Parallel()
 	for _, endpoint := range []approval.Endpoint{approval.EndpointBuiltin, approval.EndpointExternalACP} {
 		var captured approval.Request
 		bridge := subagentApprovalRequester{sessionRef: session.SessionRef{SessionID: "parent"}, requester: approvalRequesterFunc(func(_ context.Context, req approval.Request) (approval.Response, error) {
@@ -171,6 +174,7 @@ func TestApprovalOriginEndpointRoleOrthogonality(t *testing.T) {
 }
 
 func TestNativeApprovalDirectRequestersCannotChangeOriginalPermission(t *testing.T) {
+	t.Parallel()
 	for _, role := range []string{"builtin", "controller", "subagent"} {
 		for _, test := range []struct {
 			name                 string
@@ -218,6 +222,7 @@ func TestNativeApprovalDirectRequestersCannotChangeOriginalPermission(t *testing
 }
 
 func TestNativeApprovalResolutionValidatesPrivateRecoveredOptionsBeforeCommit(t *testing.T) {
+	t.Parallel()
 	for _, backend := range []string{"memory", "file"} {
 		for _, choice := range []string{"native-allow", "native-reject", "cancelled"} {
 			t.Run(backend+"/"+choice, func(t *testing.T) {
@@ -225,7 +230,7 @@ func TestNativeApprovalResolutionValidatesPrivateRecoveredOptionsBeforeCommit(t 
 				if backend == "memory" {
 					sessions = inmemory.NewStore(inmemory.Config{})
 				} else {
-					sessions = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+					sessions = newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 				}
 				active, err := sessions.StartSession(t.Context(), session.StartSessionRequest{AppName: "native", UserID: "owner"})
 				if err != nil {
@@ -307,6 +312,7 @@ func TestNativeApprovalResolutionValidatesPrivateRecoveredOptionsBeforeCommit(t 
 }
 
 func TestRuntimeApprovalStepWaitsForPolicyAdmissionNotEffectCompletion(t *testing.T) {
+	t.Parallel()
 	sessions, active := newTestSessionService(t, "mixed-approval-step")
 	rt, err := New(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, DefaultPolicyMode: "mixed",

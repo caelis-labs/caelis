@@ -38,6 +38,7 @@ import (
 )
 
 func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"allow", "deny", "schema", "revoke", "generation", "missing-validator"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active := newTestSessionService(t, "approval-revalidation")
@@ -137,6 +138,7 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 }
 
 func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"responsive-unknown", "unresponsive-unknown", "unresponsive-success"} {
 		responsive := outcome == "responsive-unknown"
 		wantStatus := "unknown_outcome"
@@ -220,7 +222,7 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 			if _, err := retained.Call(t.Context(), "Write", []byte(`{}`)); err == nil {
 				t.Fatal("retained Host accepted work after cancellation")
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			before, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -315,6 +317,7 @@ func (s *changingBindingSource) publish(one tool.Tool) {
 // Session scripts are serial. A compatible replacement still needs explicit
 // discovery; a retained VM does not refresh canonical binding authority.
 func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
+	t.Parallel()
 	for _, refresh := range []bool{false, true} {
 		t.Run(map[bool]string{false: "without-search", true: "explicit-search"}[refresh], func(t *testing.T) {
 			files, active, root := codeModeStore(t)
@@ -385,7 +388,7 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 					t.Fatal(raw)
 				}
 			}
-			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
 			reloaded, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
@@ -399,6 +402,7 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 }
 
 func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
+	t.Parallel()
 	files, active, _ := codeModeStore(t)
 	source := &changingBindingSource{}
 	var oldEffects, newEffects atomic.Int32
@@ -475,6 +479,7 @@ func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
 // The Host can resolve v1, then a sibling can commit a v2 search before the old
 // intent reaches the writer. That late intent must not roll discovery back.
 func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
+	t.Parallel()
 	files, active, _ := codeModeStore(t)
 	rt, _ := New(Config{Sessions: files, AgentFactory: chat.Factory{}})
 	fence, err := files.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "interleaved-host"})
@@ -514,6 +519,7 @@ func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
 }
 
 func TestCodeModeSourceInputAndUserDiagnostics(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		args    map[string]any
@@ -707,6 +713,7 @@ func assertScriptSearchOmitsDefinitionMetadata(t *testing.T, events []*session.E
 }
 
 func TestJSExecSearchOmitsDefinitionMetadataNativeAndMCPRebuild(t *testing.T) {
+	t.Parallel()
 	var nativePrefix, mcpPrefix []byte
 	for _, private := range []bool{false, true} {
 		t.Run(fmt.Sprint("native-", private), func(t *testing.T) {
@@ -766,10 +773,12 @@ func TestJSExecSearchOmitsDefinitionMetadataNativeAndMCPRebuild(t *testing.T) {
 }
 
 func TestJSExecSameTargetCallsOverlapByDefault(t *testing.T) {
+	t.Parallel()
 	testJSExecConcurrentTargets(t, true)
 }
 
 func TestJSExecDistinctDefaultTargetsOverlap(t *testing.T) {
+	t.Parallel()
 	testJSExecConcurrentTargets(t, false)
 }
 

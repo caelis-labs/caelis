@@ -7,6 +7,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -106,7 +107,7 @@ func TestResultProjectionSurvivesModelRefreshAndReplay(t *testing.T) {
 			}
 
 			config := sessionfile.Config{RootDir: t.TempDir()}
-			sessions := sessionfile.NewStore(config)
+			sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(config))
 			active, err := sessions.StartSession(ctx, session.StartSessionRequest{
 				AppName: "test", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 			})
@@ -148,7 +149,7 @@ func TestResultProjectionSurvivesModelRefreshAndReplay(t *testing.T) {
 				t.Fatal("custom store did not retain the original or publish its reference")
 			}
 
-			loaded, err := sessionfile.NewStore(config).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+			loaded, err := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(config)).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -245,10 +246,10 @@ func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.
 	resultEvent := toolResultEvent(call, canonical, nil, &message, eventMeta)
 
 	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{
+	sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-forged-artifact-replay" },
-	})
+	}))
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 	})
@@ -321,7 +322,7 @@ func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
 	}
 	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
 
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-mixed-result" }})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-mixed-result" }}))
 	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 	})
@@ -378,7 +379,7 @@ func TestLargeInlineImageResultSurvivesSessionFileReload(t *testing.T) {
 	canonical, _ := (tool.ResultProjection{}).Project(t.Context(), result)
 	message := toolbinding.ResultMessage(call, canonical, nil)
 	event := toolResultEvent(call, canonical, nil, &message)
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-large-result" }})
+	store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-large-result" }}))
 	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 	})
@@ -540,7 +541,7 @@ func TestCanonicalToolResultUsesSerializedOutputBudget(t *testing.T) {
 				t.Fatal("missing canonical truncation provenance")
 			}
 
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+			store := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
 			active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 				AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 			})
@@ -656,7 +657,7 @@ func TestCanonicalMultipartResultRetainsCompleteArtifactAndMedia(t *testing.T) {
 			if err := session.ValidateDurableCoreEvent(event); err != nil {
 				t.Fatal(err)
 			}
-			sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+			sessions := sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
 			active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 				AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 			})

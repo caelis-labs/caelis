@@ -17,6 +17,7 @@ import (
 )
 
 func TestControllerSpawnUsesCanonicalTaskPlacementAndLiveFence(t *testing.T) {
+	t.Parallel()
 	t.Run("active", func(t *testing.T) { testControllerSpawn(t, false) })
 	t.Run("restored", func(t *testing.T) { testControllerSpawn(t, true) })
 }
@@ -25,7 +26,7 @@ func testControllerSpawn(t *testing.T, recoverController bool) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	child := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "child result"}}
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+	sessions := newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "test", PreferredSessionID: "controller-spawn", Workspace: session.WorkspaceRef{Key: "work", CWD: t.TempDir()}})
 	if err != nil {
 		t.Fatal(err)

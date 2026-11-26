@@ -33,6 +33,7 @@ func (s *preferredCatalogSource) Tools() []tool.Tool       { s.toolsCalls++; ret
 func (s *preferredCatalogSource) SearchTools() []tool.Tool { s.searchCalls++; return s.ready }
 
 func TestDeferredToolsUsesDispatchableCatalogWithoutDiscardedEnumeration(t *testing.T) {
+	t.Parallel()
 	calls, wraps := 0, 0
 	remote := tool.NamedTool{Def: fixtureMCPDefinition("catalog-v1"), Invoke: func(context.Context, tool.Call) (tool.Result, error) { calls++; return tool.Result{}, nil }}
 	source := &preferredCatalogSource{ready: []tool.Tool{nil, tool.NamedTool{Def: tool.Definition{Name: "native_injection"}}, remote}}

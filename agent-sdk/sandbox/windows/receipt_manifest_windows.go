@@ -16,7 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
 )
 
@@ -83,7 +82,7 @@ func (r *runtime) activateReceiptPolicyTransactionLocked(ctx context.Context, po
 			return err
 		}
 	}
-	if err == nil && manifest.Version == workspaceManifestVersion && pathutil.Key(manifest.WorkspaceRoot) != pathutil.Key(policy.WorkspaceRoot) {
+	if err == nil && manifest.Version == workspaceManifestVersion && capability.PathKey(manifest.WorkspaceRoot) != capability.PathKey(policy.WorkspaceRoot) {
 		return fmt.Errorf("impl/sandbox/windows: workspace receipt manifest belongs to %s", manifest.WorkspaceRoot)
 	}
 	if err == nil && manifest.Version == workspaceManifestVersion && manifest.Phase == manifestPhaseDeleting {
@@ -307,7 +306,7 @@ func (r *runtime) retireEnvironmentReceiptsTransaction(ctx context.Context, mani
 	}
 	kept := manifest.ManagedReceipts[:0]
 	for _, managed := range manifest.ManagedReceipts {
-		if pathutil.IsUnder(managed.Path, envRoot) {
+		if capability.IsPathUnder(managed.Path, envRoot) {
 			manifest.RetiringReceipts = appendReceipt(manifest.RetiringReceipts, managed)
 			continue
 		}
@@ -402,7 +401,7 @@ func (r *runtime) preflightLegacyMigrationElevation(plan legacyMigrationPlan, po
 	for _, retiring := range plan.Receipts {
 		paths = append(paths, retiring.Path)
 	}
-	for _, path := range pathutil.Dedupe(paths) {
+	for _, path := range capability.DedupePaths(paths) {
 		if err := probeFileDACLWriteAccess(path); err != nil {
 			return fmt.Errorf("impl/sandbox/windows: legacy ACL on %s uses a SID that elevated repair cannot independently derive; refusing replacement before any ACL effect: %w", path, err)
 		}
@@ -434,15 +433,15 @@ func (r *runtime) prepareLegacyMigration(manifest workspaceManifest, policy work
 		return legacyMigrationPlan{}, fmt.Errorf("impl/sandbox/windows: legacy ACL manifest has no trusted SID Store provenance; refusing v2 activation")
 	}
 	rootSIDs := map[string]string{}
-	workspaceKey := pathutil.Key(policy.WorkspaceRoot)
+	workspaceKey := capability.PathKey(policy.WorkspaceRoot)
 	if sid := strings.TrimSpace(legacy.WorkspaceByCWD[workspaceKey]); sid != "" {
-		rootSIDs[pathutil.Normalize(policy.WorkspaceRoot)] = sid
+		rootSIDs[capability.NormalizePath(policy.WorkspaceRoot)] = sid
 		plan.Consumed.WorkspaceByCWD[workspaceKey] = sid
 	}
 	for _, root := range append(append([]string(nil), manifest.WriteRoots...), manifest.SandboxEnvRoot) {
-		key := pathutil.Key(root)
+		key := capability.PathKey(root)
 		if sid := strings.TrimSpace(legacy.WritableRootByPath[key]); sid != "" {
-			rootSIDs[pathutil.Normalize(root)] = sid
+			rootSIDs[capability.NormalizePath(root)] = sid
 			plan.Consumed.WritableRootByPath[key] = sid
 		}
 	}
@@ -481,7 +480,7 @@ func (r *runtime) prepareLegacyMigration(manifest workspaceManifest, policy work
 }
 
 func trustedLegacyEntry(legacy manifestACE, rootSIDs map[string]string) (acl.Entry, error) {
-	path := pathutil.Normalize(legacy.Path)
+	path := capability.NormalizePath(legacy.Path)
 	principal := strings.TrimSpace(legacy.Principal)
 	var matchedRoot bool
 	var matchedPrincipal bool
@@ -489,7 +488,7 @@ func trustedLegacyEntry(legacy manifestACE, rootSIDs map[string]string) (acl.Ent
 		if strings.EqualFold(sid, principal) {
 			matchedPrincipal = true
 		}
-		if pathutil.IsUnder(path, root) {
+		if capability.IsPathUnder(path, root) {
 			matchedRoot = true
 			if strings.EqualFold(sid, principal) && strings.EqualFold(legacy.Mode, string(acl.Grant)) && strings.EqualFold(legacy.Rights, string(acl.Modify)) {
 				return acl.Entry{Principal: principal, Mode: acl.Grant, Rights: acl.Modify, Inherit: legacy.Inherit}, nil
@@ -620,7 +619,7 @@ func protectHostAuthorityObject(path, hostUserSID string, inherit bool) error {
 }
 
 func validateNoReparseAncestors(path string) error {
-	path = pathutil.Normalize(path)
+	path = capability.NormalizePath(path)
 	volume := filepath.VolumeName(path)
 	if path == "" || volume == "" {
 		return fmt.Errorf("impl/sandbox/windows: canonical local authority path is required")
@@ -652,7 +651,7 @@ func (r *runtime) registerHostRuntime() error {
 			ID:              r.runtimeID,
 			Process:         r.hostProcessIdentity,
 			StateRoot:       r.stateRoot,
-			WorkspaceRoot:   pathutil.Normalize(r.cfg.CWD),
+			WorkspaceRoot:   capability.NormalizePath(r.cfg.CWD),
 			SandboxEnvRoot:  r.registeredEnvRoot,
 			LastUpdatedTime: time.Now().UTC(),
 		})
@@ -725,8 +724,8 @@ func (r *runtime) recoverDeletingEnvironmentBeforeUse(ctx context.Context) error
 	if err != nil {
 		return err
 	}
-	target := pathutil.Normalize(manifest.DeletingEnvRoot)
-	if target == "" || pathutil.Key(target) != pathutil.Key(r.registeredEnvRoot) {
+	target := capability.NormalizePath(manifest.DeletingEnvRoot)
+	if target == "" || capability.PathKey(target) != capability.PathKey(r.registeredEnvRoot) {
 		return fmt.Errorf("impl/sandbox/windows: invalid pending sandbox environment deletion %s", target)
 	}
 	if !r.stateCoordinator.canPruneACLs() {
@@ -1198,12 +1197,12 @@ func receiptEffects(policy workspacePolicy) []receiptEffect {
 }
 
 func (p workspacePolicy) sidForCoveredPath(path string) string {
-	path = pathutil.Normalize(path)
+	path = capability.NormalizePath(path)
 	bestRoot := ""
 	bestSID := ""
 	for root, sid := range p.WriteRootCapabilitySIDs {
-		root = pathutil.Normalize(root)
-		if root != "" && pathutil.IsUnder(path, root) && len(root) > len(bestRoot) {
+		root = capability.NormalizePath(root)
+		if root != "" && capability.IsPathUnder(path, root) && len(root) > len(bestRoot) {
 			bestRoot, bestSID = root, strings.TrimSpace(sid)
 		}
 	}

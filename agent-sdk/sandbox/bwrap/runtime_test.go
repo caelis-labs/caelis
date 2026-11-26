@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/executil"
 )
 
 func TestBuildBwrapArgsPreservesHostReadsAndManagedMounts(t *testing.T) {
@@ -329,7 +329,7 @@ func TestBwrapProbeUsesFixedExecutableWithoutLoginShell(t *testing.T) {
 			if started.WaitDelay != bwrapProbeWaitDelay {
 				t.Fatalf("WaitDelay = %v, want %v", started.WaitDelay, bwrapProbeWaitDelay)
 			}
-			if _, ok := started.Stderr.(*procutil.BoundedWriter); !ok {
+			if _, ok := started.Stderr.(*executil.BoundedWriter); !ok {
 				t.Fatalf("Stderr type = %T, want bounded writer", started.Stderr)
 			}
 		})

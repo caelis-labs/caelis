@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -19,19 +20,11 @@ import (
 // operation directly.
 func newLogicalTestStore(t testing.TB, cfg Config) *Store {
 	t.Helper()
-	store := NewStore(cfg)
-	store.durability = durabilityOps{
-		syncFile:      func(*os.File) error { return nil },
-		syncDirectory: func(string) error { return nil },
-		configureSQLite: func(db *sql.DB) error {
-			_, err := db.Exec(`PRAGMA synchronous = OFF`)
-			return err
-		},
-	}
-	return store
+	return sdkctx.UseLogicalFileStore(t, NewStore(cfg))
 }
 
 func TestWriteDocumentDurabilityBoundaries(t *testing.T) {
+	t.Parallel()
 	t.Run("temporary file sync failure is not committed", func(t *testing.T) {
 		fault := errors.New("sync temporary document")
 		store := NewStore(Config{RootDir: t.TempDir()})
@@ -79,6 +72,7 @@ func TestWriteDocumentDurabilityBoundaries(t *testing.T) {
 }
 
 func TestAppendEventLogDurabilityRollback(t *testing.T) {
+	t.Parallel()
 	t.Run("append sync failure resyncs the truncated log", func(t *testing.T) {
 		fault := errors.New("sync appended event")
 		store := NewStore(Config{RootDir: t.TempDir()})
@@ -133,6 +127,7 @@ func TestAppendEventLogDurabilityRollback(t *testing.T) {
 }
 
 func TestWriteTransactionDurabilityBoundaries(t *testing.T) {
+	t.Parallel()
 	t.Run("temporary file sync failure is not committed", func(t *testing.T) {
 		fault := errors.New("sync temporary transaction")
 		store := NewStore(Config{RootDir: t.TempDir()})
@@ -189,6 +184,7 @@ func TestWriteTransactionDurabilityBoundaries(t *testing.T) {
 }
 
 func TestOpenSessionIndexPropagatesDurabilityConfigurationFailure(t *testing.T) {
+	t.Parallel()
 	fault := errors.New("configure SQLite durability")
 	store := NewStore(Config{RootDir: t.TempDir()})
 	store.durability.configureSQLite = func(*sql.DB) error { return fault }

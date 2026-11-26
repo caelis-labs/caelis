@@ -448,7 +448,7 @@ func TestRuntimeRecoveryCommandRepairFileStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	ref := session.SessionRef{SessionID: "command-recovery-file-roundtrip"}
-	store := sessionfile.NewTaskStore(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	store := sessionfile.NewTaskStore(newLogicalFileStore(t, sessionfile.Config{RootDir: root}))
 	entry, err := store.Put(ctx, taskapi.PutRequest{Entry: &taskapi.Entry{
 		TaskID: "task-file-roundtrip", Kind: taskapi.KindCommand, Session: ref,
 		State: taskapi.StateRunning, Running: true,
@@ -468,7 +468,7 @@ func TestRuntimeRecoveryCommandRepairFileStoreRoundTrip(t *testing.T) {
 		t.Fatalf("recoverRuntimeState() error = %v", err)
 	}
 
-	reopened := sessionfile.NewTaskStore(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopened := sessionfile.NewTaskStore(newLogicalFileStore(t, sessionfile.Config{RootDir: root}))
 	got, err := reopened.Get(ctx, entry.TaskID)
 	if err != nil {
 		t.Fatal(err)

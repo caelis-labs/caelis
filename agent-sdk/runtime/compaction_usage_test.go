@@ -6,7 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestmeta"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"io"
 	"net/http"
@@ -16,6 +16,7 @@ import (
 )
 
 func TestSnapshotUsageIncludesEstimatedPromptPrefix(t *testing.T) {
+	t.Parallel()
 	msg := model.NewTextMessage(model.RoleUser, "hello")
 	events := []*session.Event{{
 		ID:         "u1",
@@ -41,6 +42,7 @@ func TestSnapshotUsageIncludesEstimatedPromptPrefix(t *testing.T) {
 }
 
 func TestSnapshotUsageDoesNotDoubleCountPrefixWithProviderBaseline(t *testing.T) {
+	t.Parallel()
 	user := model.NewTextMessage(model.RoleUser, "hello")
 	assistant := model.NewTextMessage(model.RoleAssistant, "world")
 	events := []*session.Event{
@@ -81,6 +83,7 @@ func TestSnapshotUsageDoesNotDoubleCountPrefixWithProviderBaseline(t *testing.T)
 }
 
 func TestSnapshotUsageIncludesAnthropicCachedInputBaseline(t *testing.T) {
+	t.Parallel()
 	user := model.NewTextMessage(model.RoleUser, "hello")
 	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
 	events := []*session.Event{
@@ -498,7 +501,7 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 			model.NewTextMessage(model.RoleUser, strings.Repeat("request text ", 64)),
 		},
 	}
-	prefix := prefixusage.ForRequest(req)
+	prefix := requestmeta.ForRequest(req)
 	assistant := assistantEvent("provider baseline")
 	assistant.ID = "a1"
 	assistant.Invocation = &session.EventInvocation{
@@ -546,7 +549,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 	previousRequest := &model.Request{
 		Instructions: []model.Part{model.NewTextPart("short system prompt")},
 	}
-	previousPrefix := prefixusage.ForRequest(previousRequest)
+	previousPrefix := requestmeta.ForRequest(previousRequest)
 	assistant := assistantEvent("provider baseline")
 	assistant.ID = "a1"
 	assistant.Invocation = &session.EventInvocation{
@@ -571,7 +574,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 			),
 		},
 	}
-	currentPrefix := prefixusage.ForRequest(currentRequest)
+	currentPrefix := requestmeta.ForRequest(currentRequest)
 	modelIdentity := identifiedCompactionModel{
 		staticModel:  staticModel{text: "ok"},
 		providerName: "openai-codex",
@@ -601,7 +604,7 @@ func TestUsageForModelRequestAdjustsOnlyChangedPrefix(t *testing.T) {
 	if usage.TotalTokens != want {
 		t.Fatalf("usage total = %d, want provider total plus prefix delta %d", usage.TotalTokens, want)
 	}
-	if requestTokens := estimateModelRequestTokens(currentRequest); requestTokens < prefixusage.EstimatedImageMediaTokens {
+	if requestTokens := estimateModelRequestTokens(currentRequest); requestTokens < requestmeta.EstimatedImageMediaTokens {
 		t.Fatalf("request estimate = %d, want bounded attachment budget retained for estimated-only paths", requestTokens)
 	}
 }
@@ -676,7 +679,7 @@ func TestEstimateModelRequestTokensBoundsInlineMediaPayload(t *testing.T) {
 	if large != small {
 		t.Fatalf("large inline media estimate = %d, want bounded estimate %d independent of base64 length", large, small)
 	}
-	wantAtLeast := prefixusage.EstimatedImageMediaTokens +
+	wantAtLeast := requestmeta.EstimatedImageMediaTokens +
 		estimateTextTokens(string(jsonPayload)) +
 		estimateTextTokens("report.pdf") +
 		estimateTextTokens("https://example.com/report.pdf") +
@@ -705,11 +708,11 @@ func TestEstimateModelRequestTokensChargesEachInlineImage(t *testing.T) {
 		),
 	}})
 
-	if one < prefixusage.EstimatedImageMediaTokens {
-		t.Fatalf("one image estimate = %d, want at least %d", one, prefixusage.EstimatedImageMediaTokens)
+	if one < requestmeta.EstimatedImageMediaTokens {
+		t.Fatalf("one image estimate = %d, want at least %d", one, requestmeta.EstimatedImageMediaTokens)
 	}
-	if three < prefixusage.EstimatedImageMediaTokens*3 {
-		t.Fatalf("three image estimate = %d, want at least %d", three, prefixusage.EstimatedImageMediaTokens*3)
+	if three < requestmeta.EstimatedImageMediaTokens*3 {
+		t.Fatalf("three image estimate = %d, want at least %d", three, requestmeta.EstimatedImageMediaTokens*3)
 	}
 	if three >= 50000 {
 		t.Fatalf("three image estimate = %d, want bounded attachment estimate below 50000", three)
@@ -759,6 +762,7 @@ func TestEvaluateModelRequestBudgetUsesOneFullyAssembledRequest(t *testing.T) {
 }
 
 func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, route := range []struct {
 		api      model.APIType
 		provider string
@@ -864,6 +868,7 @@ func TestAPICacheAccountingSurvivesContextRoundTrip(t *testing.T) {
 }
 
 func TestCompactionFullCacheReadBaselineCountsReadOnce(t *testing.T) {
+	t.Parallel()
 	for _, provider := range []string{"anthropic", "deepseek", "minimax"} {
 		for _, nested := range []bool{false, true} {
 			usage := map[string]any{"prompt_tokens": 0, "cached_input_tokens": 6000, "completion_tokens": 20, "total_tokens": 6020, "cache_write_tokens": 0}
@@ -884,6 +889,7 @@ func TestCompactionFullCacheReadBaselineCountsReadOnce(t *testing.T) {
 }
 
 func TestCompactionPrefixSafe(t *testing.T) {
+	t.Parallel()
 	calls := func(ids ...string) model.Message {
 		parts := make([]model.Part, 0, len(ids))
 		for _, id := range ids {
@@ -967,6 +973,7 @@ func TestCompactionPrefixSafe(t *testing.T) {
 }
 
 func TestContextUsageProjectionMatchesFullHistoryAtEveryCut(t *testing.T) {
+	t.Parallel()
 	message := func(role model.Role, parts ...model.Part) *model.Message {
 		value := model.NewMessage(role, parts...)
 		return &value

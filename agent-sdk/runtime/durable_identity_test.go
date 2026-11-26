@@ -20,7 +20,7 @@ func TestDefaultDurableIdentitiesSurviveThreeRuntimeRestarts(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	service := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	service := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "identity-user"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -29,7 +29,7 @@ func TestDefaultDurableIdentitiesSurviveThreeRuntimeRestarts(t *testing.T) {
 	var previousContext []model.Message
 	seenRunIDs := map[string]bool{}
 	for index := 1; index <= 3; index++ {
-		service = sessionfile.NewStore(sessionfile.Config{RootDir: root})
+		service = newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 		probe := &durableIdentityModel{text: "assistant-" + string(rune('0'+index))}
 		runtime, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}})
 		if err != nil {
@@ -59,7 +59,7 @@ func TestDefaultDurableIdentitiesSurviveThreeRuntimeRestarts(t *testing.T) {
 		previousContext = append(wantContext, model.NewTextMessage(model.RoleAssistant, probe.text))
 	}
 
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	events, err := reopened.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
@@ -85,7 +85,7 @@ func TestDefaultApprovalRecordIdentitySurvivesRuntimeRestart(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	service := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	service := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "pause-user"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -93,7 +93,7 @@ func TestDefaultApprovalRecordIdentitySurvivesRuntimeRestart(t *testing.T) {
 	decision := approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}
 	seenTokens := map[string]bool{}
 	for index := 0; index < 2; index++ {
-		service = sessionfile.NewStore(sessionfile.Config{RootDir: root})
+		service = newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 		runtime, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}})
 		if err != nil {
 			t.Fatalf("New(runtime %d) error = %v", index, err)

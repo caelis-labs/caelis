@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -24,7 +25,7 @@ func TestReferenceParticipantStoresConform(t *testing.T) {
 		t.Parallel()
 
 		sessiontest.ParticipantLifecycleConformance(t, func(t *testing.T) sessiontest.ParticipantStore {
-			return &committedFaultParticipantStore{participantBackend: sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})}
+			return &committedFaultParticipantStore{participantBackend: sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))}
 		})
 	})
 }

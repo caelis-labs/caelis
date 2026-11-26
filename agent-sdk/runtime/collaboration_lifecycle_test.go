@@ -35,6 +35,7 @@ func (r *collaborationLifecycleRunner) Wait(context.Context, delegation.Anchor, 
 	return delegation.Result{State: delegation.StateRunning, Running: true}, nil
 }
 func TestSubagentWaitObservesFollowupAfterReadingFirstResult(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		r, child, base := newIdleChildActivityTaskWithRole(t, session.ParticipantRoleSidecar)
 		first, err := r.tasks.Read(t.Context(), child.sessionRef, task.ControlRequest{TaskID: child.ref.TaskID, Principal: session.ActorKindUser})
@@ -73,6 +74,7 @@ func TestSubagentWaitObservesFollowupAfterReadingFirstResult(t *testing.T) {
 	})
 }
 func TestSettledDetachSerializesWithAdmittedFollowup(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		r, child, base := newIdleChildActivityTask(t)
 		r.controllers = stubACPController{}
@@ -112,6 +114,7 @@ func TestSettledDetachSerializesWithAdmittedFollowup(t *testing.T) {
 }
 
 func TestSettledDetachRejectsRunningAndUnknownTasks(t *testing.T) {
+	t.Parallel()
 	for _, state := range []task.State{task.StateRunning, task.StateUnknownOutcome} {
 		t.Run(string(state), func(t *testing.T) {
 			r, child, _ := newIdleChildActivityTask(t)

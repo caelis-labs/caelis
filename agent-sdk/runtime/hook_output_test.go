@@ -77,12 +77,13 @@ func hookTextDelta(text string) *model.StreamEvent {
 }
 
 func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"buffered-replacement", "incremental-unicode-empty-reset", "incremental-repeated-chunks-final-snapshot"} {
 		incremental := mode != "buffered-replacement"
 		repeated := mode == "incremental-repeated-chunks-final-snapshot"
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
-			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "stream"})
 			if err != nil {
 				t.Fatal(err)
@@ -160,7 +161,7 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+			reopened, err := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -210,6 +211,7 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 }
 
 func TestHooksIncrementalRetryPreservesCompletedToolStep(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "incremental-retry")
 	var requests [][]model.Message
 	driver := &hookStreamModel{
@@ -295,6 +297,7 @@ func TestHooksIncrementalRetryPreservesCompletedToolStep(t *testing.T) {
 }
 
 func TestHooksIncrementalIrreversibleOutputPreventsRetry(t *testing.T) {
+	t.Parallel()
 	store, active := newTestSessionService(t, "irreversible")
 	driver := &hookStreamModel{emit: func(_ int, yield func(*model.StreamEvent, error) bool) {
 		if yield(hookTextDelta("accepted"), nil) {
@@ -326,11 +329,12 @@ func (r *finalOutputRedactor) Finish(ctx context.Context) (string, error) {
 }
 
 func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []hook.StreamMode{hook.StreamBuffered, hook.StreamIncremental} {
 		for _, branch := range []string{"provider", "cache", "input-early", "turn-early", "model-result", "completion-replace"} {
 			t.Run(string(mode)+"/"+branch, func(t *testing.T) {
 				root := t.TempDir()
-				store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+				store := newLogicalFileStore(t, sessionfile.Config{RootDir: root})
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "sources"})
 				if err != nil {
 					t.Fatal(err)
@@ -418,7 +422,7 @@ func TestHooksFinalOutputCoversEverySourceAndReplacement(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				reopened, err := sessionfile.NewStore(sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+				reopened, err := newLogicalFileStore(t, sessionfile.Config{RootDir: root}).LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 				if err != nil || !reflect.DeepEqual(live.Events, reopened.Events) {
 					t.Fatalf("full replay changed: %v", err)
 				}
@@ -500,9 +504,10 @@ func (s *feedbackAckStore) AppendEvent(ctx context.Context, r session.AppendEven
 	return s.Store.AppendEvent(ctx, r)
 }
 func TestHooksFeedbackBudgetConsumesOnlyConfirmedCommits(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"committed", "failed", "conflict"} {
 		t.Run(mode, func(t *testing.T) {
-			store := &feedbackAckStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}), mode: mode}
+			store := &feedbackAckStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: t.TempDir()}), mode: mode}
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "feedback"})
 			if err != nil {
 				t.Fatal(err)

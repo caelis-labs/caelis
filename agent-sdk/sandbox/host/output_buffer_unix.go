@@ -3,8 +3,8 @@
 package host
 
 import (
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/consoleoutput"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/textstream"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/consoleoutput"
 )
 
 // hostOutputDecoder preserves raw bytes in non-Windows host storage and uses a
