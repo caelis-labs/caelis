@@ -487,6 +487,12 @@ type TurnEventObserver interface {
 	ObserveTurnEvent(context.Context, eventstream.Envelope) error
 }
 
+// TurnAdmissionObserver prepares a main Turn after validation and before the
+// Runtime starts. Returning an error prevents the Turn from producing events.
+type TurnAdmissionObserver interface {
+	ObserveTurnAdmission(context.Context, string) error
+}
+
 // TurnResultObserver consumes committed visible result positions even when the
 // live feed omits their duplicate narrative. Callbacks are serialized per Turn.
 type TurnResultObserver interface {

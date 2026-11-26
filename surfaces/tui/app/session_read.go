@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 type sessionReadState struct {
@@ -46,14 +45,14 @@ func (m *Model) trackSessionResult(event TranscriptEvent, blockID string) {
 	}
 }
 
-func (m *Model) trackTerminalSessionResult(env eventstream.Envelope) {
+// trackTerminalSessionResult associates the Host's receipt with narrative
+// already applied for the same Turn, including exact history with only deltas.
+func (m *Model) trackTerminalSessionResult(turnID string, sequence uint64) {
 	state := &m.sessionRead
-	if env.TurnID == "" || env.TurnID != state.narrativeTurn || state.sessionID != m.currentSessionID {
+	if sequence <= state.sequence || turnID == "" || turnID != state.narrativeTurn || state.sessionID != m.currentSessionID {
 		return
 	}
-	if seq := eventstream.TerminalSessionResultSequence(env); seq > state.sequence {
-		state.sequence, state.blockID = seq, state.narrativeBlock
-	}
+	state.sequence, state.blockID = sequence, state.narrativeBlock
 }
 
 func (m *Model) sessionResultCanBeRead() bool {

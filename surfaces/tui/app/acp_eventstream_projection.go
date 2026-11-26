@@ -13,11 +13,13 @@ func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEve
 }
 
 func markSessionResultProjection(env eventstream.Envelope, events []TranscriptEvent) []TranscriptEvent {
-	if seq := eventstream.SessionResultSequence(env); seq != 0 {
-		for i := range events {
-			if events[i].NarrativeKind == TranscriptNarrativeAssistant {
-				events[i].ResultSequence = seq
-			}
+	for i := range events {
+		event := &events[i]
+		switch {
+		case event.Kind == TranscriptEventNarrative && event.NarrativeKind == TranscriptNarrativeAssistant:
+			event.ResultSequence = eventstream.SessionResultSequence(env)
+		case event.Kind == TranscriptEventLifecycle:
+			event.ResultSequence = eventstream.TerminalSessionResultSequence(env)
 		}
 	}
 	return events

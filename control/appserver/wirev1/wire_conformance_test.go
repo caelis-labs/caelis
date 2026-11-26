@@ -334,6 +334,8 @@ func TestEnvelopeSchemaAcceptsCursorlessTerminalResult(t *testing.T) {
 	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(100, 0).UTC())
 	terminal.SessionID = "session-1"
 	terminal.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	const resultSeq = 9007199254740993
+	eventstream.SetSessionResultSequence(&terminal, resultSeq)
 	validateWireValue(t, "Envelope", terminal)
 
 	raw, err := MarshalEnvelope(terminal)
@@ -346,6 +348,10 @@ func TestEnvelopeSchemaAcceptsCursorlessTerminalResult(t *testing.T) {
 	}
 	if generatedEnvelope.Cursor != nil || generatedEnvelope.Position != nil {
 		t.Fatalf("terminal result became resumable: %#v", generatedEnvelope)
+	}
+	decoded, err := UnmarshalEnvelope(raw)
+	if err != nil || eventstream.TerminalSessionResultSequence(decoded) != resultSeq {
+		t.Fatalf("terminal result position did not round trip: %s, %v", raw, err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -19,6 +20,8 @@ type sessionWorkbenchObserver struct {
 	store       *appserver.SessionWorkbenchStore
 	ref         session.SessionRef
 	diagnostics *slog.Logger
+	turn        appserver.SessionWorkbenchTurn
+	admitted    bool
 	lastResult  uint64
 }
 
@@ -32,28 +35,39 @@ func (s *runtimeComposition) controlMainTurnObserver(ref session.SessionRef, ope
 	}, release
 }
 
+func (o *sessionWorkbenchObserver) ObserveTurnAdmission(ctx context.Context, turnID string) error {
+	turn, err := o.store.BeginTurn(ctx, o.ref, turnID)
+	if err != nil {
+		return appserver.NewOutcomeError(appserver.OutcomeRejected,
+			errorcode.Wrap(errorcode.Unavailable, "could not record Session Turn admission", err))
+	}
+	o.turn, o.admitted = turn, true
+	return nil
+}
+
 func (o *sessionWorkbenchObserver) ObserveTurnResult(ctx context.Context, seq uint64) {
-	if seq <= o.lastResult {
+	if !o.admitted || seq <= o.lastResult {
 		return
 	}
 	o.lastResult = seq
 	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
-	if err := o.store.RecordResult(write, o.ref.SessionID, o.ref.UserID, seq); err != nil && o.diagnostics != nil {
+	if err := o.store.RecordResult(write, o.turn, seq); err != nil && o.diagnostics != nil {
 		o.diagnostics.Warn("Session workbench could not record result", "session_id", o.ref.SessionID, "error", err)
 	}
 }
 
 func (o *sessionWorkbenchObserver) ObserveTurnEvent(ctx context.Context, env eventstream.Envelope) error {
 	if eventstream.IsTurnTerminalLifecycle(env) && env.Scope == eventstream.ScopeMain {
-		write, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-		err := o.store.RecordTurn(write, o.ref.SessionID, o.ref.UserID, o.lastResult, env.Lifecycle.State == eventstream.LifecycleStateFailed)
-		cancel()
 		seq := uint64(0)
-		if err == nil {
-			seq = o.lastResult
-		} else if o.diagnostics != nil {
-			o.diagnostics.Warn("Session workbench could not record terminal outcome", "session_id", o.ref.SessionID, "error", err)
+		if o.admitted {
+			write, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			result, err := o.store.FinishTurn(write, o.turn, o.lastResult, env.Lifecycle.State)
+			cancel()
+			seq = max(result, o.lastResult)
+			if err != nil && o.diagnostics != nil {
+				o.diagnostics.Warn("Session workbench could not record terminal outcome", "session_id", o.ref.SessionID, "error", err)
+			}
 		}
 		eventstream.SetSessionResultSequence(&env, seq)
 	}

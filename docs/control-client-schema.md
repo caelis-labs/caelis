@@ -47,14 +47,17 @@ Turn target requirement.
 
 The optional `session-workbench-v1` capability exposes the authorized
 cross-workspace directory at `GET /session-workbench`. Its opaque cursor pages
-active and unread Sessions before remaining history. A request may refresh
-specific mounted rows by ID. Listing samples activity without creating Session
-observations.
+active and unread Sessions before remaining history. When that priority set
+changes, a continuation returns `409 Conflict` and the client starts a new
+traversal without a cursor. A request may refresh specific mounted rows by ID.
+Listing samples activity without creating Session observations.
 
 `PUT /sessions/{session_id}/read-position` acknowledges a visible result for
 the authenticated principal. The decimal `through_seq` identifies a durable
-Session position. Repeated or older acknowledgments preserve the highest
-accepted position. Acknowledgments leave Session history and ordering intact.
+Session position. A terminal Turn Envelope can carry the result position in
+`lifecycle.result_through_seq` when the narrative arrived as streaming chunks.
+Repeated or older acknowledgments preserve the highest accepted position.
+Acknowledgments leave Session history and ordering intact.
 
 ## Peer versions
 

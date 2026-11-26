@@ -118,6 +118,12 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 			return BeginTurnResult{}, err
 		}
 	}
+	if err := handle.observeTurnAdmission(ctx); err != nil {
+		cancelFn()
+		handle.finish()
+		g.releaseActive(activeSession.SessionID, handle)
+		return BeginTurnResult{}, err
+	}
 	g.mu.Lock()
 	if g.active[activeSession.SessionID] == handle {
 		g.noteActiveHandleLocked(activeSession.SessionID, handle)
@@ -131,6 +137,16 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		Session: activeSession,
 		Handle:  handle,
 	}, nil
+}
+
+func (h *turnHandle) observeTurnAdmission(ctx context.Context) error {
+	observer, ok := h.observer.(TurnAdmissionObserver)
+	if !ok {
+		return nil
+	}
+	h.observerMu.Lock()
+	defer h.observerMu.Unlock()
+	return observer.ObserveTurnAdmission(ctx, h.TurnID())
 }
 
 func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Session, req BeginTurnRequest) (ResolvedTurn, error) {

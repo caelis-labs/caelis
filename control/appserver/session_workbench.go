@@ -2,6 +2,10 @@ package appserver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,7 +17,8 @@ import (
 const CapabilitySessionWorkbench = "session-workbench-v1"
 
 // SessionWorkbenchRequest pages through the authorized Session directory.
-// RefreshIDs rechecks already mounted rows without walking earlier pages.
+// A continuation returns a conflict if the visible set of active or unread Sessions
+// changes. An empty Cursor starts a new traversal. RefreshIDs rechecks mounted rows.
 type SessionWorkbenchRequest struct {
 	Cursor     string
 	Limit      int
@@ -83,11 +88,11 @@ func (c *Client) ListSessionWorkbench(ctx context.Context, principal Principal, 
 	if limit < 1 || limit > 100 || len(req.RefreshIDs) > 100 {
 		return SessionWorkbenchPage{}, errorcode.New(errorcode.InvalidArgument, "invalid Session workbench page size")
 	}
-	lane, cursor := "priority", ""
+	lane, cursor, cursorMembership := "priority", "", ""
 	if req.Cursor != "" {
 		var ok bool
-		lane, cursor, ok = strings.Cut(req.Cursor, ":")
-		if !ok || cursor == "" || lane != "priority" && lane != "recent" {
+		lane, cursorMembership, cursor, ok = parseSessionWorkbenchCursor(req.Cursor)
+		if !ok {
 			return SessionWorkbenchPage{}, errorcode.New(errorcode.InvalidArgument, "invalid Session workbench cursor")
 		}
 	}
@@ -104,7 +109,25 @@ func (c *Client) ListSessionWorkbench(ctx context.Context, principal Principal, 
 	if err != nil {
 		return SessionWorkbenchPage{}, err
 	}
-	priorityIDs := append(activeIDs, unreadIDs...)
+	var priorityIDs []string
+	if candidates := slices.Concat(activeIDs, unreadIDs); len(candidates) != 0 {
+		// IncludeIDs bounds this lookup and the directory applies principal and visibility filters.
+		visible, err := c.listSessionDirectory(ctx, principal, session.ListSessionsRequest{IncludeIDs: candidates})
+		if err != nil {
+			return SessionWorkbenchPage{}, err
+		}
+		priorityIDs = make([]string, 0, len(visible.Sessions))
+		for _, row := range visible.Sessions {
+			priorityIDs = append(priorityIDs, row.SessionID)
+		}
+		slices.Sort(priorityIDs)
+		priorityIDs = slices.Compact(priorityIDs)
+	}
+	membership := sessionWorkbenchPriorityFingerprint(priorityIDs)
+	if req.Cursor != "" && cursorMembership != membership {
+		return SessionWorkbenchPage{}, errorcode.New(errorcode.Conflict, "Session workbench priority membership changed")
+	}
+
 	var summaries []session.SessionSummary
 	next := ""
 	if lane == "priority" && len(priorityIDs) != 0 {
@@ -116,7 +139,7 @@ func (c *Client) ListSessionWorkbench(ctx context.Context, principal Principal, 
 		}
 		summaries = list.Sessions
 		if list.NextCursor != "" {
-			next = "priority:" + list.NextCursor
+			next = "priority:" + membership + ":" + list.NextCursor
 		}
 	}
 	if next == "" {
@@ -136,7 +159,7 @@ func (c *Client) ListSessionWorkbench(ctx context.Context, principal Principal, 
 			}
 			summaries = append(summaries, list.Sessions...)
 			if list.NextCursor != "" {
-				next = "recent:" + list.NextCursor
+				next = "recent:" + membership + ":" + list.NextCursor
 			}
 		} else {
 			list, err := c.listSessionDirectory(ctx, principal, session.ListSessionsRequest{ExcludeIDs: priorityIDs, Limit: 1})
@@ -144,7 +167,7 @@ func (c *Client) ListSessionWorkbench(ctx context.Context, principal Principal, 
 				return SessionWorkbenchPage{}, err
 			}
 			if len(list.Sessions) != 0 {
-				next = "recent:start"
+				next = "recent:" + membership + ":start"
 			}
 		}
 	}
@@ -181,6 +204,37 @@ func (c *Client) ListSessionWorkbench(ctx context.Context, principal Principal, 
 		return result
 	}
 	return SessionWorkbenchPage{Sessions: project(summaries), Refreshed: project(refreshed), NextCursor: next}, nil
+}
+
+// SessionWorkbenchPriorityChanged reports whether two recognized cursors carry
+// different visible active or unread Session membership.
+func SessionWorkbenchPriorityChanged(previous, current string) bool {
+	_, previousMembership, _, previousOK := parseSessionWorkbenchCursor(previous)
+	_, currentMembership, _, currentOK := parseSessionWorkbenchCursor(current)
+	return previousOK && currentOK && previousMembership != currentMembership
+}
+
+func parseSessionWorkbenchCursor(value string) (lane, membership, cursor string, ok bool) {
+	lane, rest, _ := strings.Cut(value, ":")
+	membership, cursor, _ = strings.Cut(rest, ":")
+	if cursor == "" || lane != "priority" && lane != "recent" || len(membership) != hex.EncodedLen(sha256.Size) {
+		return "", "", "", false
+	}
+	_, err := hex.DecodeString(membership)
+	return lane, membership, cursor, err == nil
+}
+
+// sessionWorkbenchPriorityFingerprint hashes sorted unique IDs. Length prefixes
+// keep different ID boundaries distinct regardless of the characters in the IDs.
+func sessionWorkbenchPriorityFingerprint(ids []string) string {
+	digest := sha256.New()
+	var length [8]byte
+	for _, id := range ids {
+		binary.BigEndian.PutUint64(length[:], uint64(len(id)))
+		_, _ = digest.Write(length[:])
+		_, _ = digest.Write([]byte(id))
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 // AcknowledgeSessionRead records an authorized, monotonic read position.

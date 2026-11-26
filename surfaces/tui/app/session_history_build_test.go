@@ -147,8 +147,18 @@ func TestNewCommandCommitsEmptySessionView(t *testing.T) {
 	assertPhysicalFullscreenFrame(t, m.width, m.height, frames[1], updates)
 }
 
-func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
-	m := NewModel(Config{NoColor: true, NoAnimation: true})
+func TestSessionHistoryAcknowledgesExactNarrativeOnlyWhenReady(t *testing.T) {
+	var receipts []appserver.SessionReadReceipt
+	m := NewModel(Config{
+		NoColor: true, NoAnimation: true,
+		AcknowledgeSessionRead: func(_ context.Context, id string, receipt appserver.SessionReadReceipt) error {
+			if id != "restored" {
+				t.Fatalf("acknowledgement targeted Session %q, want restored", id)
+			}
+			receipts = append(receipts, receipt)
+			return nil
+		},
+	})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 32})
 	m.handleUserMessageMsg(UserMessageMsg{Text: "previous view"})
 	previous := m.doc
@@ -162,7 +172,13 @@ func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 		want += chunk
 		feed.publish(eventstream.Envelope{Kind: eventstream.KindSessionUpdate, SessionID: "restored", TurnID: "turn", Scope: eventstream.ScopeMain, Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}, Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "final", Content: eventstream.TextContent{Type: "text", Text: chunk}}})
 	}
-	feed.publish(eventstream.Envelope{Kind: eventstream.KindLifecycle, SessionID: "restored", TurnID: "turn", Scope: eventstream.ScopeMain, Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}, Lifecycle: &eventstream.Lifecycle{State: "completed"}, OccurredAt: started.Add(time.Second)})
+	terminal := eventstream.Envelope{
+		Kind: eventstream.KindLifecycle, SessionID: "restored", TurnID: "turn", Scope: eventstream.ScopeMain,
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted}, OccurredAt: started.Add(time.Second),
+	}
+	eventstream.SetSessionResultSequence(&terminal, 17)
+	feed.publish(terminal)
 	feed.feed <- appserver.FeedDelivery{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact}
 	batches := 0
 	sender := &ProgramSender{Send: func(msg tea.Msg) {
@@ -171,6 +187,9 @@ func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 			batches++
 			if m.doc != previous || !strings.Contains(ansi.Strip(m.View().Content), "previous view") {
 				t.Fatal("history was exposed before sync")
+			}
+			if m.acknowledgeRenderedSessionResult(sessionReadCheckMsg{generation: m.viewGeneration}) != nil {
+				t.Fatal("history was acknowledged before sync")
 			}
 		}
 	}}
@@ -194,6 +213,17 @@ func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.View().Content), "139") {
 		t.Fatal("final response is not in the physical viewport")
+	}
+	if !m.sessionRead.scheduled {
+		t.Fatal("committing the exact-history response did not schedule an acknowledgement")
+	}
+	_, cmd := m.Update(sessionReadCheckMsg{generation: m.viewGeneration})
+	if cmd == nil {
+		t.Fatal("rendering the exact-history response did not permit an acknowledgement")
+	}
+	m.Update(cmd())
+	if len(receipts) != 1 || receipts[0].ThroughSeq != 17 {
+		t.Fatalf("read receipts = %+v, want one receipt through sequence 17", receipts)
 	}
 }
 

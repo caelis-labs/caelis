@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
@@ -75,7 +76,8 @@ func TestSessionWorkbenchHTTPBackgroundResultAndReadPosition(t *testing.T) {
 	if err != nil || len(page.Sessions) != 1 || page.Sessions[0].SessionID != a || !page.Sessions[0].Active || page.NextCursor == "" {
 		t.Fatalf("priority page = %+v, %v", page, err)
 	}
-	page, err = workbench.ListSessionWorkbench(ctx, appserver.SessionWorkbenchRequest{Limit: 1, Cursor: page.NextCursor})
+	priorityCursor := page.NextCursor
+	page, err = workbench.ListSessionWorkbench(ctx, appserver.SessionWorkbenchRequest{Limit: 1, Cursor: priorityCursor})
 	if err != nil || len(page.Sessions) != 1 || page.Sessions[0].SessionID != b || page.Sessions[0].WorkspaceKey != "b" {
 		t.Fatalf("recent page = %+v, %v", page, err)
 	}
@@ -90,8 +92,16 @@ func TestSessionWorkbenchHTTPBackgroundResultAndReadPosition(t *testing.T) {
 		return row.Unread && !row.Active && !row.Failed
 	})
 
-	// The first result was produced without any client ever observing Session A.
-	// Reopening the Host preserves both the result and its unread position.
+	// The first result was produced without any client observing Session A.
+	// Its exact history carries streamed text plus the terminal read position.
+	exact, terminal := workbenchReplayPositions(t, ctx, api, a)
+	if terminal == 0 {
+		t.Fatal("exact replay omitted the terminal result position")
+	}
+	if exact != 0 && exact != terminal {
+		t.Fatalf("exact replay positions disagree: canonical=%d terminal=%d", exact, terminal)
+	}
+	// Reopening the Host preserves the result and its unread position.
 	if err := other.Subscription.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -110,13 +120,19 @@ func TestSessionWorkbenchHTTPBackgroundResultAndReadPosition(t *testing.T) {
 		t.Fatalf("unauthorized directory page = %+v, %v", page, err)
 	}
 
-	first := workbenchResultSequence(t, ctx, api, a)
+	first, _ := workbenchReplayPositions(t, ctx, api, a)
+	if first == 0 || first != terminal {
+		t.Fatalf("canonical replay result position = %d, want %d", first, terminal)
+	}
 	receipt := appserver.SessionReadReceipt{ThroughSeq: first}
 	if err := foreign.AcknowledgeSessionRead(ctx, a, receipt); errorcode.CodeOf(err) != errorcode.PermissionDenied {
 		t.Fatalf("another principal acknowledged the result: %v", err)
 	}
 	if err := workbench.AcknowledgeSessionRead(ctx, a, receipt); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := workbench.ListSessionWorkbench(ctx, appserver.SessionWorkbenchRequest{Limit: 1, Cursor: priorityCursor}); !errorcode.Is(err, errorcode.Conflict) {
+		t.Fatalf("HTTP continuation after priority membership changed = %v, want conflict", err)
 	}
 	secondReader := newWorkspaceRuntimeHTTPClient(t, stack, "local-user").(appserver.SessionWorkbenchClient)
 	waitWorkbenchRow(t, ctx, secondReader, a, func(row appserver.SessionWorkbenchRow) bool {
@@ -133,6 +149,96 @@ func TestSessionWorkbenchHTTPBackgroundResultAndReadPosition(t *testing.T) {
 
 	prompt(b, "prompt-failed", "fail this turn")
 	waitWorkbenchRow(t, ctx, workbench, b, func(row appserver.SessionWorkbenchRow) bool { return row.Failed && !row.Active })
+}
+
+func TestSessionWorkbenchHTTPTracksMailboxWake(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	provider := newHostedChildInputTestProvider(t, false)
+	host := newHostedChildInputTestStack(t, provider)
+	parent, _, _ := newHostedChildInputTestTopology(t, host, "workbench-mailbox")
+	api := newWorkspaceRuntimeHTTPClient(t, host, parent.UserID)
+	msg, err := host.CollaborationService().Send(ctx, collaboration.Identity{Session: parent.SessionID, Member: "orbit"}, "parent", "workbench mailbox result", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitHostedChildInputEvent(t, host, parent.SessionRef, msg.Text)
+	waitWorkbenchRow(t, ctx, api.(appserver.SessionWorkbenchClient), parent.SessionID, func(row appserver.SessionWorkbenchRow) bool {
+		return row.Unread && !row.Active && !row.Failed
+	})
+}
+
+func TestSessionWorkbenchHTTPRecoversAfterIndexWriteFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	provider := newHostedChildInputTestProvider(t, false)
+	host := newHostedChildInputTestStack(t, provider)
+	active, err := startGatewayAppTestSession(ctx, host, "workbench-recover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := newWorkspaceRuntimeHTTPClient(t, host, active.UserID)
+	if _, err := host.workbenchDB.ExecContext(ctx, `
+CREATE TRIGGER fail_workbench_write BEFORE INSERT ON session_workbench_results
+BEGIN SELECT RAISE(FAIL, 'injected workbench index failure'); END
+`); err != nil {
+		t.Fatal(err)
+	}
+	prompt := func(client appserver.SessionClient, operation, input string) {
+		t.Helper()
+		if _, err := client.Prompt(ctx, appserver.PromptRequest{
+			WriteBase: appserver.WriteBase{SessionID: active.SessionID, OperationID: operation}, Input: input,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prompt(api, "before-workbench-recovery", "include this input in the resumed model context")
+	waitHostedChildParentIdle(t, host, active.SessionID)
+	page, err := api.(appserver.SessionWorkbenchClient).ListSessionWorkbench(ctx, appserver.SessionWorkbenchRequest{RefreshIDs: []string{active.SessionID}})
+	if err != nil || len(page.Refreshed) != 1 || page.Refreshed[0].Unread {
+		t.Fatalf("injected failure left an indexed result: %+v, %v", page.Refreshed, err)
+	}
+	storeDir, workspace := host.composition.authorities.storeDir, host.composition.workspace
+	if err := host.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, _, err := openControlStoreDatabase(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, dropErr := db.ExecContext(ctx, `DROP TRIGGER fail_workbench_write`)
+	if err := db.Close(); err != nil || dropErr != nil {
+		t.Fatalf("clear database fault: drop=%v close=%v", dropErr, err)
+	}
+	reopened, err := newGatewayAppTestStack(t, Config{
+		StoreDir: storeDir, WorkspaceKey: workspace.Key, WorkspaceCWD: workspace.CWD,
+		ResolveProviderHTTPClient: func(context.Context, ModelConfig) (*http.Client, error) { return provider.Client(), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api = newWorkspaceRuntimeHTTPClient(t, reopened, active.UserID)
+	workbench := api.(appserver.SessionWorkbenchClient)
+	page, err = workbench.ListSessionWorkbench(ctx, appserver.SessionWorkbenchRequest{RefreshIDs: []string{active.SessionID}})
+	if err != nil || len(page.Refreshed) != 1 || !page.Refreshed[0].Unread || page.Refreshed[0].Failed {
+		t.Fatalf("workbench did not recover the unread result: %+v, %v", page.Refreshed, err)
+	}
+	seq, _ := workbenchReplayPositions(t, ctx, api, active.SessionID)
+	if seq == 0 {
+		t.Fatal("canonical replay omitted the recovered result")
+	}
+	if err := workbench.AcknowledgeSessionRead(ctx, active.SessionID, appserver.SessionReadReceipt{ThroughSeq: seq}); err != nil {
+		t.Fatal(err)
+	}
+	waitWorkbenchRow(t, ctx, workbench, active.SessionID, func(row appserver.SessionWorkbenchRow) bool { return !row.Unread })
+
+	prompt(api, "after-workbench-recovery", "continue after Host restart")
+	waitWorkbenchRow(t, ctx, workbench, active.SessionID, func(row appserver.SessionWorkbenchRow) bool {
+		return row.Unread && !row.Active && !row.Failed
+	})
+	if messages := string(provider.LastMessages()); !strings.Contains(messages, "include this input in the resumed model context") || !strings.Contains(messages, "reply-1") {
+		t.Fatalf("resumed model context lost the prior dialogue: %s", messages)
+	}
 }
 
 func waitWorkbenchRow(t *testing.T, ctx context.Context, client appserver.SessionWorkbenchClient, id string, matches func(appserver.SessionWorkbenchRow) bool) {
@@ -155,25 +261,22 @@ func waitWorkbenchRow(t *testing.T, ctx context.Context, client appserver.Sessio
 	}
 }
 
-func workbenchResultSequence(t *testing.T, ctx context.Context, client appserver.SessionClient, id string) uint64 {
+func workbenchReplayPositions(t *testing.T, ctx context.Context, client appserver.SessionClient, id string) (durable, terminal uint64) {
 	t.Helper()
 	result, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: id, HistoryTurns: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer result.Subscription.Close()
-	var seq uint64
 	for delivery := range result.Subscription.Deliveries() {
 		for _, env := range delivery.Events {
-			seq = max(seq, eventstream.SessionResultSequence(env))
+			durable = max(durable, eventstream.SessionResultSequence(env))
+			terminal = max(terminal, eventstream.TerminalSessionResultSequence(env))
 		}
 		if delivery.Kind == appserver.FeedDeliverySync {
-			if seq == 0 {
-				t.Fatal("replay contained no durable visible result")
-			}
-			return seq
+			return durable, terminal
 		}
 	}
 	t.Fatalf("replay ended before sync: %v", result.Subscription.Err())
-	return 0
+	return 0, 0
 }

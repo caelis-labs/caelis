@@ -63,16 +63,13 @@ func (g *Gateway) observeSourceValue(ctx context.Context, activeSession session.
 
 func (h *turnHandle) observeSessionResult(ctx context.Context, event *session.Event) {
 	observer, ok := h.observer.(TurnResultObserver)
-	if !ok || h.activeKind != ActiveTurnKindKernel || event.Seq == 0 || session.EventTypeOf(event) != session.EventTypeAssistant {
+	if !ok || h.activeKind != ActiveTurnKindKernel {
 		return
 	}
-	for _, env := range projectSessionACPEvent(h.sessionRef, event, h.handleID, h.runID, h.turnID) {
-		if seq := eventstream.SessionResultSequence(env); seq != 0 {
-			h.observerMu.Lock()
-			observer.ObserveTurnResult(ctx, seq)
-			h.observerMu.Unlock()
-			return
-		}
+	if seq := acpprojector.DurableSessionResultSequence(h.sessionRef, event); seq != 0 {
+		h.observerMu.Lock()
+		observer.ObserveTurnResult(ctx, seq)
+		h.observerMu.Unlock()
 	}
 }
 

@@ -966,6 +966,7 @@ export interface LifecycleEnvelope {
 
 export interface LifecycleEvent {
   reason?: string;
+  result_through_seq?: Uint64Decimal;
   state: string;
   stopReason?: string;
 }

@@ -1007,9 +1007,10 @@ type LifecycleEnvelope struct {
 }
 
 type LifecycleEvent struct {
-	Reason     *string `json:"reason,omitempty"`
-	State      string  `json:"state"`
-	StopReason *string `json:"stopReason,omitempty"`
+	Reason           *string        `json:"reason,omitempty"`
+	ResultThroughSeq *Uint64Decimal `json:"result_through_seq,omitempty"`
+	State            string         `json:"state"`
+	StopReason       *string        `json:"stopReason,omitempty"`
 }
 
 type MCPServerSnapshot struct {

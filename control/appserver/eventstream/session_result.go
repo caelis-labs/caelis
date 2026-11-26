@@ -1,11 +1,6 @@
 package eventstream
 
-import (
-	"strconv"
-	"strings"
-)
-
-const sessionResultSequenceKey = "session_result_seq"
+import "strings"
 
 // SessionResultSequence identifies a committed, nonempty main Assistant
 // response. Replaying thought, tools and transient text cannot advance it.
@@ -43,16 +38,15 @@ func HasAssistantContent(env Envelope) bool {
 	}
 }
 
-// SetSessionResultSequence annotates the producer's terminal Envelope with a
-// committed result already presented through the Turn's live narrative lane.
+// SetSessionResultSequence records a committed result on a terminal Envelope
+// whose narrative may have been delivered through a separate lane.
 func SetSessionResultSequence(env *Envelope, seq uint64) {
-	if env.Meta == nil {
-		env.Meta = make(map[string]any)
+	if !IsTurnTerminalLifecycle(*env) {
+		return
 	}
-	delete(env.Meta, sessionResultSequenceKey)
-	if seq != 0 {
-		env.Meta[sessionResultSequenceKey] = strconv.FormatUint(seq, 10)
-	}
+	lifecycle := *env.Lifecycle
+	lifecycle.ResultThroughSeq = seq
+	env.Lifecycle = &lifecycle
 }
 
 // TerminalSessionResultSequence returns the Host's confirmed result at Turn end.
@@ -60,7 +54,5 @@ func TerminalSessionResultSequence(env Envelope) uint64 {
 	if !IsTurnTerminalLifecycle(env) {
 		return 0
 	}
-	raw, _ := env.Meta[sessionResultSequenceKey].(string)
-	seq, _ := strconv.ParseUint(raw, 10, 64)
-	return seq
+	return env.Lifecycle.ResultThroughSeq
 }

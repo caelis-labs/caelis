@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -32,6 +33,7 @@ type sessionPickerState struct {
 	paged            bool
 	err              string
 	failedCursor     string
+	headCursor       string // First continuation of the current traversal.
 	nextCursor       string
 	request          uint64
 	refresh          uint64
@@ -137,6 +139,15 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 		state.cancel()
 		state.cancel = nil
 	}
+	if msg.cursor != "" && errorcode.Is(msg.err, errorcode.Conflict) {
+		// Keep the mounted rows and selection while replacing the stale traversal.
+		state.headCursor = ""
+		state.nextCursor = ""
+		state.paged = false
+		state.err = ""
+		state.failedCursor = ""
+		return m.loadSessionPicker("")
+	}
 	if msg.err != nil {
 		state.err = msg.err.Error()
 		state.failedCursor = msg.cursor
@@ -147,11 +158,13 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 		if len(state.rows) == 0 {
 			selected = m.currentSessionID
 		}
-		if msg.cursor != "" || !state.paged {
-			state.nextCursor = msg.next
-		}
 		if msg.cursor != "" {
+			state.nextCursor = msg.next
 			state.paged = true
+		} else if !state.paged || msg.next == "" || appserver.SessionWorkbenchPriorityChanged(state.headCursor, msg.next) {
+			state.headCursor = msg.next
+			state.nextCursor = msg.next
+			state.paged = false
 		}
 		if m.cfg.SessionWorkbench == nil {
 			state.rows = msg.rows

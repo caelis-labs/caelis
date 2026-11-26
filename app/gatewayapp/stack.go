@@ -601,7 +601,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	}
 	stack.composition.placementCache = newPlacementSnapshot(doc)
 	configStore.savedHook = stack.composition.invalidateOwnPlacementSnapshot
-	controlAssembly, err := assembleHostControlServices(stack, cfg, storeDir, cursorSecret)
+	controlAssembly, err := assembleHostControlServices(stack, cfg, storeDir, cursorSecret, sessionStore)
 	if err != nil {
 		_ = stack.Close()
 		return nil, err
