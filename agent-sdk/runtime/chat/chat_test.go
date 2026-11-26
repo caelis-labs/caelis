@@ -2756,7 +2756,7 @@ func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
 		Content: []tool.ContentBlock{tool.StructuredContent{Value: mustJSON(map[string]any{
 			"state": "cancelled",
 		})}},
-	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command"}}}}, toolbinding.TaskResultSourceMeta(true))
+	}, nil, nil, map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"kind": "command", "state": "cancelled"}}}}, toolbinding.TaskResultSourceMeta(true))
 
 	if event.Tool == nil {
 		t.Fatalf("event tool = nil, want tool update")

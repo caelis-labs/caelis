@@ -133,7 +133,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	case <-ctx.Done():
 		t.Fatal("model did not continue while approval was pending")
 	}
-	if state := mustFindTaskState(t, pendingRequest, mustFindTaskHandle(t, pendingRequest)); state != taskapi.StateWaitingApproval {
+	if state := mustFindTaskState(t, pendingRequest, mustFindTaskHandle(t, pendingRequest)); state != "in_progress" {
 		t.Fatalf("state = %s", state)
 	}
 	// The model has received the durable Task handle and is paused. Approval
@@ -150,7 +150,8 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		pendingResults++
 		fact := event.Tool
 		if fact == nil || fact.ID != approval.Call.ID || fact.Execution != identity ||
-			fact.Status != string(taskapi.StateWaitingApproval) || fact.Output["handle"] != handle {
+			fact.Status != string(taskapi.StateWaitingApproval) || fact.Output["handle"] != handle ||
+			fact.Output["state"] != "in_progress" || taskRuntimeMetaString(event.Meta, "task", "state") != string(taskapi.StateWaitingApproval) {
 			t.Fatalf("unexpected tool result before approval: %+v", fact)
 		}
 	}
@@ -169,7 +170,8 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		t.Fatal(err)
 	}
 	spec, err := commandExecutionFromEntry(entry)
-	if err != nil || spec.Approval.RequestID != approval.ApprovalRequestID || spec.Approval.Deadline.IsZero() || entry.Handle != mustFindTaskHandle(t, pendingRequest) {
+	if err != nil || spec.Approval.RequestID != approval.ApprovalRequestID || spec.Approval.Deadline.IsZero() ||
+		entry.State != taskapi.StateWaitingApproval || entry.Handle != mustFindTaskHandle(t, pendingRequest) {
 		t.Fatalf("durable intent = %#v, %#v, %v", entry, spec, err)
 	}
 	close(approve)
@@ -244,6 +246,112 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)
 }
 
+func TestCommandApprovalYieldAllowsIndependentCommandAndOptionalWait(t *testing.T) {
+	for _, scenario := range []string{"wait for result", "finish without result"} {
+		t.Run(scenario, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				sessions, active, r := newRuntimeRunCommandToolTestHarness(t)
+				r.tasks.store = newSagaTaskStore()
+				running := false
+				backend := newCommandStartProbe(&yieldProbeSandboxSession{statusRunning: &running}, nil)
+				approve := make(chan struct{})
+				requester := approvalRequesterFunc(func(ctx context.Context, req approval.Request) (approval.Response, error) {
+					if err := req.OnAdmission(ctx); err != nil {
+						return approval.Response{}, err
+					}
+					if req.Call.ID == "first" {
+						select {
+						case <-approve:
+						case <-ctx.Done():
+							return approval.Response{}, ctx.Err()
+						}
+					}
+					return approval.Response{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
+				})
+				command := func(id, text string, yieldMS int) model.Message {
+					return model.NewMessage(model.RoleAssistant, model.NewToolUsePart(id, shell.RunCommandToolName, mustJSONRaw(map[string]any{
+						"command": text, "yield_time_ms": yieldMS, "sandbox_permissions": "require_escalated", "justification": "Requested test command",
+					})))
+				}
+				var calls int
+				var handle string
+				const final = "Independent work is done."
+				m := &commandApprovalModel{generate: func(_ context.Context, req *model.Request) model.Message {
+					calls++
+					switch calls {
+					case 1:
+						return command("first", "echo first", 0)
+					case 2:
+						var err error
+						handle, err = latestApprovalTaskHandle(req, "first", "in_progress")
+						if err != nil {
+							t.Error(err)
+						}
+						return command("independent", "echo independent", 1000)
+					case 3:
+						if _, err := latestApprovalTaskHandle(req, "independent", taskapi.StateCompleted); err != nil {
+							t.Error(err)
+						}
+						if scenario == "wait for result" {
+							return model.NewMessage(model.RoleAssistant, model.NewToolUsePart("snapshot", tasktool.ToolName, mustJSONRaw(map[string]any{
+								"action": "wait", "handle": handle, "yield_time_ms": 0,
+							})))
+						}
+					case 4:
+						if got, err := latestApprovalTaskHandle(req, "snapshot", "in_progress"); err != nil || got != handle {
+							t.Errorf("pending snapshot handle = %q, want %q, error = %v", got, handle, err)
+						}
+						return model.NewMessage(model.RoleAssistant, model.NewToolUsePart("wait", tasktool.ToolName, mustJSONRaw(map[string]any{
+							"action": "wait", "handle": handle,
+						})))
+					case 5:
+						if got, err := latestApprovalTaskHandle(req, "wait", taskapi.StateCompleted); err != nil || got != handle {
+							t.Errorf("terminal wait handle = %q, want %q, error = %v", got, handle, err)
+						}
+					}
+					return model.NewTextMessage(model.RoleAssistant, final)
+				}}
+				run, err := r.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "Run two independent commands", ApprovalRequester: requester,
+					AgentSpec: agent.AgentSpec{Name: "chat", Model: m, Tools: []tool.Tool{mustRuntimeRunCommandTool(t, backend), tasktool.New()}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer run.Handle.Cancel()
+				synctest.Wait()
+				wantCallsBefore, wantCallsAfter := 3, 3
+				if scenario == "wait for result" {
+					wantCallsBefore, wantCallsAfter = 4, 5
+				}
+				if calls != wantCallsBefore || backend.startCalls() != 1 {
+					t.Errorf("with first approval pending: model calls=%d, want %d; command starts=%d, want 1", calls, wantCallsBefore, backend.startCalls())
+				}
+				close(approve)
+				if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				entries, err := r.tasks.store.ListSession(t.Context(), active.SessionRef)
+				if err != nil || len(entries) != 2 {
+					t.Fatalf("expected two settled command Tasks: %+v, %v", entries, err)
+				}
+				for _, entry := range entries {
+					if entry.Running || entry.State != taskapi.StateCompleted {
+						t.Errorf("command %q did not settle: %+v", entry.Handle, entry)
+					}
+				}
+				if calls != wantCallsAfter || backend.startCalls() != 2 {
+					t.Errorf("after completion: model calls=%d, want %d; command starts=%d, want 2", calls, wantCallsAfter, backend.startCalls())
+				}
+				events, err := sessions.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+				if err != nil || lastAssistantText(events) != final {
+					t.Fatalf("final answer = %q, error = %v", lastAssistantText(events), err)
+				}
+			})
+		})
+	}
+}
+
 func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 	for _, delay := range []time.Duration{3 * time.Second, 25 * time.Second, 60 * time.Second, 89 * time.Second, 91 * time.Second} {
 		t.Run(delay.String(), func(t *testing.T) {
@@ -278,7 +386,7 @@ func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {
 				if raw, _ := result.Structured(); json.Unmarshal(raw, &payload) != nil {
 					t.Fatal("invalid structured Task payload")
 				}
-				if delay > 10*time.Second && payload["state"] != string(taskapi.StateWaitingApproval) {
+				if delay > 10*time.Second && payload["state"] != "in_progress" {
 					t.Fatalf("payload = %#v", payload)
 				}
 				if err := scope.join(); err != nil {
