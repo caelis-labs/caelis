@@ -151,8 +151,10 @@ func TestTerminalTaskStillRunning(t *testing.T) {
 	if !TerminalTaskStillRunning(map[string]any{"running": "true"}, nil) {
 		t.Fatal("TerminalTaskStillRunning(raw running) = false, want true")
 	}
-	if !TerminalTaskStillRunning(map[string]any{"state": " running "}, nil) {
-		t.Fatal("TerminalTaskStillRunning(raw state) = false, want true")
+	for _, state := range []string{" running ", "in_progress"} {
+		if !TerminalTaskStillRunning(map[string]any{"state": state}, nil) {
+			t.Fatalf("TerminalTaskStillRunning(raw state %q) = false, want true", state)
+		}
 	}
 	meta := map[string]any{
 		"caelis": map[string]any{

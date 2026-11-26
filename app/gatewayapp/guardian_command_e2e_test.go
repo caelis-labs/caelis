@@ -394,7 +394,7 @@ func (m *guardianCommandMainModel) Generate(_ context.Context, req *model.Reques
 			m.firstResultMS = time.Since(m.started).Milliseconds()
 			m.initialState, _ = latest["state"].(string)
 		}
-		if state := latest["state"]; state == "running" || state == "waiting_approval" {
+		if latest["state"] == "in_progress" {
 			raw, _ := json.Marshal(map[string]any{"action": "wait", "handle": latest["handle"]})
 			message = model.NewMessage(model.RoleAssistant, model.NewToolUsePart(fmt.Sprintf("wait-%d", m.calls), tasktool.ToolName, raw))
 		}

@@ -33,7 +33,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 		"tty":           true,
 	})
 	running := testToolResultPayload(t, runResult)
-	if running["state"] != string(taskapi.StateRunning) || running["supports_input"] != true {
+	if running["state"] != "in_progress" || running["supports_input"] != true {
 		t.Fatalf("RunCommand payload = %#v, want running input-capable task", running)
 	}
 	handle, _ := running["handle"].(string)
@@ -62,7 +62,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 	for {
 		latest, _ := readyPayload["latest_output"].(string)
 		readyOutput.WriteString(latest)
-		if readyPayload["state"] != string(taskapi.StateRunning) {
+		if readyPayload["state"] != "in_progress" {
 			t.Fatalf("Task readiness payload = %#v, want running raw TTY", readyPayload)
 		}
 		if strings.Contains(readyOutput.String(), "tty-ready") {
@@ -86,7 +86,7 @@ func TestRuntimeCommandTTYSupportsExactTaskInputAndPersistsCapability(t *testing
 		"append_newline": false,
 	})
 	completed := testToolResultPayload(t, writeResult)
-	if completed["state"] == string(taskapi.StateRunning) {
+	if completed["state"] == "in_progress" {
 		waitResult := callRuntimeTaskTool(t, taskTool, map[string]any{
 			"action": "wait",
 			"handle": handle,

@@ -1415,7 +1415,7 @@ func (m *approveEscalatedCommandRuntimeModel) Generate(ctx context.Context, req 
 				})),
 			}}, "")
 		case 2:
-			handle, err := latestApprovalTaskHandle(req, commandID, taskapi.StateWaitingApproval)
+			handle, err := latestApprovalTaskHandle(req, commandID, "in_progress")
 			if err != nil {
 				yield(nil, err)
 				return
@@ -2359,8 +2359,8 @@ func assertRunningTaskSnapshot(t *testing.T, result structuredResult) {
 	t.Helper()
 
 	payload := testToolResultPayload(t, result)
-	if got, _ := payload["state"].(string); got != string(taskapi.StateRunning) {
-		t.Fatalf("snapshot state = %q, want %q", got, taskapi.StateRunning)
+	if got, _ := payload["state"].(string); got != "in_progress" {
+		t.Fatalf("snapshot state = %q, want in_progress", got)
 	}
 	if strings.TrimSpace(testStringValue(payload["handle"])) == "" {
 		t.Fatalf("snapshot handle missing: %#v", payload)

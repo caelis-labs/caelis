@@ -16,7 +16,7 @@ type trustedTaskResultTool struct {
 func (trustedTaskResultTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
 
 func (t trustedTaskResultTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	toolbinding.Observed(ctx).TaskEvent = map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"task_id": "task-7", "kind": "command"}}}}
+	toolbinding.Observed(ctx).TaskEvent = map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"task_id": "task-7", "kind": "command", "state": "running"}}}}
 	return t.NamedTool.Call(ctx, call)
 }
 func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
@@ -24,7 +24,7 @@ func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
 
 	result := func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{
-			Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"handle":"command-7","state":"running"}`)}},
+			Content: []tool.ContentBlock{tool.StructuredContent{Value: []byte(`{"handle":"command-7","state":"in_progress"}`)}},
 		}, nil
 	}
 	for _, test := range []struct {

@@ -3649,7 +3649,7 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 		if strings.Contains(readyOutput.String(), "stdin-eof") {
 			break
 		}
-		if readyPayload["state"] != string(taskapi.StateRunning) {
+		if readyPayload["state"] != "in_progress" {
 			t.Fatalf("task readiness result = %#v, want command running until stdin EOF is observed", readyPayload)
 		}
 		if time.Now().After(readyDeadline) {
@@ -3717,7 +3717,7 @@ func TestRuntimeTaskZeroWaitIsImmediateAndPositiveWaitIgnoresNewOutputUntilTermi
 		t.Fatalf("TASK read elapsed = %v, want an immediate snapshot", elapsed)
 	}
 	payload := testToolResultPayload(t, taskResult)
-	if payload["state"] != string(taskapi.StateRunning) {
+	if payload["state"] != "in_progress" {
 		t.Fatalf("task read result = %#v, want command still running", payload)
 	}
 	if latest, _ := payload["latest_output"].(string); strings.Contains(latest, "wait-ready") {
@@ -4081,6 +4081,15 @@ func TestCompletedCommandObservationKeepsAbsoluteCursorWhenResultIsCapped(t *tes
 	wantCursor := int64(len([]byte(exact)))
 	if replayCursor, ok := taskInt64Value(entry.Metadata[commandStreamOutputCursorMeta]); !ok || replayCursor != wantCursor {
 		t.Fatalf("durable stream replay cursor = %d/%v, want %d", replayCursor, ok, wantCursor)
+	}
+}
+
+func TestTaskToolPayloadPreservesCommandWaitingInput(t *testing.T) {
+	payload := taskToolPayload(taskapi.Snapshot{
+		Kind: taskapi.KindCommand, State: taskapi.StateWaitingInput, Running: true, SupportsInput: true,
+	})
+	if payload["state"] != "waiting_input" || payload["supports_input"] != true {
+		t.Fatalf("Task result = %#v, want waiting_input with input support", payload)
 	}
 }
 
@@ -4580,7 +4589,7 @@ func TestRuntimeCommandTaskBatchWaitDoesNotTreatOutputAsWinner(t *testing.T) {
 	}
 	longSnapshot, _ := items[0].(map[string]any)
 	shortSnapshot, _ := items[1].(map[string]any)
-	if longSnapshot["state"] != string(taskapi.StateRunning) {
+	if longSnapshot["state"] != "in_progress" {
 		t.Fatalf("long command snapshot = %#v, want current running loser", longSnapshot)
 	}
 	if shortSnapshot["state"] != string(taskapi.StateCompleted) {

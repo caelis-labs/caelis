@@ -141,7 +141,8 @@ func TerminalTaskStillRunning(rawOutput map[string]any, meta map[string]any) boo
 	if rawBool(rawOutput["running"]) {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(rawDisplayString(rawOutput["state"])), "running") {
+	switch strings.ToLower(strings.TrimSpace(rawDisplayString(rawOutput["state"]))) {
+	case "running", "in_progress":
 		return true
 	}
 	taskMeta := RuntimeTaskMeta(meta)

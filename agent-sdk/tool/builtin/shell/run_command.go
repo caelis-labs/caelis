@@ -81,7 +81,7 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command for repository inspection, tests, builds, formatting, version-control operations, or work unavailable through file tools. Use it when the command may complete now or continue as an async Task; prefer dedicated file tools for file operations.",
+		Description: "Run a shell command for repository inspection, tests, builds, formatting, or version control. Prefer dedicated file tools for file operations. An async Task in state in_progress has been accepted and advances automatically. Call Task with action wait and the original handle only when you need to use or report the result.",
 		OutputSchema: map[string]any{"type": "object", "properties": map[string]any{
 			"handle": map[string]any{"type": "string"}, "state": map[string]any{"type": "string"}, "result": map[string]any{"type": "string"}, "stdout": map[string]any{"type": "string"}, "stderr": map[string]any{"type": "string"}, "exit_code": map[string]any{"type": []string{"integer", "null"}},
 		}},
@@ -100,7 +100,7 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"minimum":     0,
-					"description": "Wait before yielding an async Task; not the command timeout. 10000 ms default. Use shorter (1000 ms) for servers/watchers, longer for finite jobs. waiting_approval means not started: keep the handle and yield control.",
+					"description": "Time before yielding an async Task, including approval and startup. Default 10000 ms. Use shorter waits for servers and watchers and longer waits for finite jobs. The command timeout starts at process launch.",
 				},
 				"tty": map[string]any{
 					"type":        "boolean",

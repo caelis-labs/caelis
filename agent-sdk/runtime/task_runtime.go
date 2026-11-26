@@ -360,9 +360,12 @@ func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	payload := map[string]any{
 		"handle": taskPublicHandle(snapshot),
+		"state":  string(snapshot.State),
 	}
 	if snapshot.Running {
-		payload["state"] = string(snapshot.State)
+		if snapshot.State == taskapi.StateWaitingApproval || snapshot.State == taskapi.StateRunning {
+			payload["state"] = "in_progress"
+		}
 		payload["supports_input"] = snapshot.SupportsInput
 		if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
 			payload["error"] = strings.TrimSpace(errText)
@@ -372,7 +375,6 @@ func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 		}
 		return payload
 	}
-	payload["state"] = string(snapshot.State)
 	if code, _ := snapshot.Result["error_code"].(string); code != "" {
 		payload["error_code"] = code
 	}

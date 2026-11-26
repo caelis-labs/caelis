@@ -152,6 +152,7 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 		{name: "allow", wantStarts: 1, wantState: taskapi.StateCompleted},
 		{name: "reset", wantStarts: 1, wantState: taskapi.StateCompleted},
 		{name: "nonzero", wantStarts: 1, wantState: taskapi.StateFailed, exitCode: 7},
+		{name: "deny", wantState: taskapi.StateFailed, wantError: "approval_denied"},
 		{name: "start-failure", wantStarts: 1, wantState: taskapi.StateFailed, startErr: startErr},
 		{name: "stale", wantState: taskapi.StateFailed, wantError: "stale_revision"},
 		{name: "cancel", wantState: taskapi.StateCancelled},
@@ -185,6 +186,9 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 				}
 				select {
 				case <-approve:
+					if tc.name == "deny" {
+						return approval.Response{Outcome: "selected", OptionID: "reject_once", Reason: "test approval denied"}, nil
+					}
 					return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 				case <-ctx.Done():
 					return approval.Response{}, ctx.Err()
@@ -194,13 +198,20 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 			var pending struct {
 				Handle string
 				State  taskapi.State
+				Wait   struct {
+					Handle string
+					State  taskapi.State
+				}
 			}
 			target := filepath.Join(root, "command-effect.txt")
 			commandText := shellWriteFileForTest(target, "once")
 			if tc.exitCode != 0 {
 				commandText = "exit 7"
 			}
-			script := "let retainedCommandState = 41; return (await RunCommand({command:" + stringJSONForCommandTest(commandText) + ",yield_time_ms:0})).data;"
+			script := `let retainedCommandState = 41;
+const commandReceipt = (await RunCommand({command:` + stringJSONForCommandTest(commandText) + `,yield_time_ms:0})).data;
+const commandWait = (await Task({action:"wait",handle:commandReceipt.handle,yield_time_ms:0})).data;
+return {...commandReceipt, wait:commandWait};`
 			driver := &mcpScriptModel{steps: func(step int, req *model.Request) []model.ToolCall {
 				switch step {
 				case 0:
@@ -212,7 +223,8 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 						raw = result.Content[0].JSONValue()
 					}
 					if result.IsError || json.Unmarshal(raw, &pending) != nil ||
-						pending.State != taskapi.StateWaitingApproval || pending.Handle == "" || backend.starts.Load() != 0 {
+						pending.State != "in_progress" || pending.Handle == "" || pending.Wait.State != "in_progress" ||
+						pending.Wait.Handle != pending.Handle || backend.starts.Load() != 0 {
 						t.Errorf("script did not finish with a pending command and no effect: %s", raw)
 						close(approve)
 						return nil
@@ -250,8 +262,9 @@ func TestCodeModeCommandApprovalAfterScriptExit(t *testing.T) {
 					if result.IsError || len(result.Content) != 1 || json.Unmarshal(result.Content[0].JSONValue(), &payload) != nil ||
 						payload.Handle != pending.Handle || payload.State != tc.wantState ||
 						payload.Code != tc.wantError || payload.ExitCode != tc.exitCode ||
+						(tc.name == "deny" && payload.Error != "test approval denied") ||
 						(tc.startErr != nil && payload.Error != tc.startErr.Error()) {
-						t.Errorf("model did not receive the original command outcome: %+v", result)
+						t.Errorf("model did not receive the original command outcome: %+v", payload)
 					}
 				}
 				return nil

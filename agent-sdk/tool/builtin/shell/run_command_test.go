@@ -31,6 +31,8 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"tests, builds",
 		"async Task",
 		"file tools",
+		"in_progress has been accepted and advances automatically",
+		"action wait and the original handle only when you need to use or report the result",
 	} {
 		if !strings.Contains(definition.Description, required) {
 			t.Fatalf("Description missing %q: %q", required, definition.Description)
@@ -43,7 +45,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	wantDescriptions := map[string]string{
 		"command":             "Shell command to execute.",
 		"workdir":             "Working directory; defaults to the session cwd. Set this instead of prefixing command with cd.",
-		"yield_time_ms":       "Wait before yielding an async Task; not the command timeout. 10000 ms default. Use shorter (1000 ms) for servers/watchers, longer for finite jobs. waiting_approval means not started: keep the handle and yield control.",
+		"yield_time_ms":       "Time before yielding an async Task, including approval and startup. Default 10000 ms. Use shorter waits for servers and watchers and longer waits for finite jobs. The command timeout starts at process launch.",
 		"tty":                 "Allocate a terminal for interactive commands. Leave false for ordinary commands so stdin is closed and output streams remain separate.",
 		"sandbox_permissions": "Execution route. Use use_default when the trusted runtime boundary permits the command or is uncertain. Use require_escalated directly when it proves Host is required, or once after a matching sandbox denial; approval is one-shot.",
 		"justification":       "Required for require_escalated: one short sentence with command intent, the trusted boundary or matching denial, and task relevance.",

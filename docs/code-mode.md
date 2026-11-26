@@ -242,8 +242,9 @@ A yielded script observes its original Task even while its source or child list
 is folded. Original Task terminal updates settle the script without requiring a
 Task observation. Returned business data, including a running inner command Task,
 does not own the outer script's lifecycle. Commands and scripts have distinct
-Task handles. An admitted RunCommand can wait for approval or run after the
-script returns. Use the command's original handle to observe or cancel it.
+Task handles. An admitted `RunCommand` with `in_progress` advances independently
+of the script. Use `Task.wait` with the command's original handle if its result
+is needed. Cancellation also uses the command handle.
 Closing a script's Host or resetting the VM leaves an already submitted command
 under its original Run and Task authority.
 

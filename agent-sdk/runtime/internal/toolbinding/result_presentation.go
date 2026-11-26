@@ -100,18 +100,12 @@ func toolCallStatus(call model.ToolCall, meta map[string]any, err error, rawOutp
 	if err != nil {
 		return "failed"
 	}
-	// A returned result completes the invocation. Only the RunCommand producer
-	// owns the process state carried in its payload. Other tools, including
-	// Spawn, Task, and SendMessage, do not transfer their invocation lifecycle
-	// to the target they address or observe.
+	// Only command and script producers own the Task lifecycle of their
+	// invocation. Their model-visible payload can summarize or return data
+	// from another Task, so the event status follows trusted Runtime metadata.
 	if trustedTaskResult &&
 		((strings.EqualFold(strings.TrimSpace(call.Name), names.RunCommand) && runtimeTaskKind(meta) == "command") || (call.Name == "js_exec" && runtimeTaskKind(meta) == "code_mode")) {
-		state, _ := rawOutput["state"].(string)
-		if call.Name == "js_exec" {
-			// Returned business data may itself contain a running inner Task.
-			// Only the original outer Task producer owns this invocation state.
-			state, _ = runtimeTaskMetadata(meta)["state"].(string)
-		}
+		state, _ := runtimeTaskMetadata(meta)["state"].(string)
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
 				return "failed"
