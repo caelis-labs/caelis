@@ -48,6 +48,7 @@ commands with arguments remain available.
 a running turn. Left Arrow also opens it from the main conversation when the
 composer is empty. The workbench groups visible Sessions by workspace. Up/Down
 selects, Enter or Right Arrow opens, and Esc returns to the conversation.
+Scrolling down to the last loaded Session loads the next page when available.
 `n` starts a fresh conversation in the current workspace. Switching observation
 preserves Session drafts and leaves running work on the Host.
 

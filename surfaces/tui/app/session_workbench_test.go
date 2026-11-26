@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"image/color"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 				{SessionID: "fourth-id", WorkspaceKey: "b", CWD: "/workspace/b", Title: "Earlier result"},
 			}}, nil
 		}
-		return appserver.SessionWorkbenchPage{Refreshed: []appserver.SessionWorkbenchRow{
+		return appserver.SessionWorkbenchPage{NextCursor: "more", Refreshed: []appserver.SessionWorkbenchRow{
 			{SessionID: "second-id", WorkspaceKey: "b", CWD: "/workspace/b", Title: "New result"},
 		}}, nil
 	}})
@@ -52,8 +53,8 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 			previous = index
 		}
 	}
-	inOrder("\n a ", "近期活跃", "Active", "Confirmed error", "Failed", "\n b ", "New result", "Ready", "Show more")
-	if strings.Contains(frame, "first-id") || strings.Contains(frame, "Unread") || !strings.Contains(frame, "n New") ||
+	inOrder("\n a ", "近期活跃", "Active", "Confirmed error", "Failed", "\n b ", "New result", "Ready")
+	if strings.Contains(frame, "first-id") || strings.Contains(frame, "Unread") || strings.Contains(frame, "Show more") || !strings.Contains(frame, "n New") ||
 		!strings.Contains(frame, "● 近期活跃") || !strings.Contains(frame, "Details") {
 		t.Fatalf("unexpected workbench frame:\n%s", frame)
 	}
@@ -71,11 +72,15 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 			break
 		}
 	}
-	model.Update(keyPress("end"))
-	_, load := model.Update(keyPress("enter"))
-	model.Update(load())
-	model.Update(keyPress("up"))
+	_, load := model.Update(keyPress("end"))
 	before := model.sessionPicker.selectionID()
+	if load == nil || before != "second-id" || !strings.Contains(ansi.Strip(model.View().Content), "Loading more…") {
+		t.Fatal("reaching the last Session must load the next page with a real Session selected")
+	}
+	if _, duplicate := model.Update(keyPress("down")); duplicate != nil {
+		t.Fatal("another Down requested the same page while it was loading")
+	}
+	model.Update(load())
 	_, refresh := model.Update(keyPress("r"))
 	model.Update(refresh())
 	if model.sessionPicker.selectionID() != before || model.sessionPicker.nextCursor != "" {
@@ -84,6 +89,59 @@ func TestSessionWorkbenchGroupsRowsAndKeepsSelectionOnRefresh(t *testing.T) {
 	frame = ansi.Strip(model.View().Content)
 	if strings.Contains(frame, "Ready") || !strings.Contains(frame, "Earlier result") {
 		t.Fatalf("stale readiness or lost older page:\n%s", frame)
+	}
+	if _, load := model.Update(keyPress("end")); load != nil || model.sessionPicker.selectionID() != "fourth-id" {
+		t.Fatal("exhausted pagination should stop on the last Session")
+	}
+	if _, load := model.Update(keyPress("down")); load != nil || calls != 3 {
+		t.Fatal("an exhausted list must not request another page")
+	}
+}
+
+func TestSessionWorkbenchScrollLoadsNextPageAfterRefreshAndCanRetry(t *testing.T) {
+	pageCalls := 0
+	model := NewModel(Config{NoAnimation: true, NoColor: true, SessionWorkbench: func(_ context.Context, req appserver.SessionWorkbenchRequest) (appserver.SessionWorkbenchPage, error) {
+		if req.Cursor == "" {
+			return appserver.SessionWorkbenchPage{NextCursor: "next", Sessions: []appserver.SessionWorkbenchRow{
+				{SessionID: "one", Title: "First Session"},
+				{SessionID: "two", Title: "Second Session"},
+			}}, nil
+		}
+		if req.Cursor != "next" {
+			t.Fatalf("unexpected cursor %q", req.Cursor)
+		}
+		pageCalls++
+		if pageCalls == 1 {
+			return appserver.SessionWorkbenchPage{}, errors.New("next page temporarily unavailable")
+		}
+		return appserver.SessionWorkbenchPage{Sessions: []appserver.SessionWorkbenchRow{
+			{SessionID: "three", Title: "Third Session"},
+		}}, nil
+	}})
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 16})
+	openSessionPickerForTest(t, model)
+	model.View()
+	_, refresh := model.Update(keyPress("r"))
+	wheel := tea.MouseWheelMsg{X: sessionPickerInset + 1, Y: sessionPickerTop + 1, Button: tea.MouseWheelDown}
+	if _, cmd := model.Update(wheel); cmd != nil || model.sessionPicker.selectionID() != "two" {
+		t.Fatal("scrolling to the last Session should wait for the current refresh")
+	}
+	_, load := model.Update(refresh())
+	if load == nil || model.sessionPicker.loadingCursor != "next" {
+		t.Fatal("the refresh did not start the requested next page")
+	}
+	model.Update(load())
+	frame := ansi.Strip(model.View().Content)
+	if !strings.Contains(frame, "Could not load more") || model.sessionPicker.selectionID() != "two" {
+		t.Fatalf("page failure lost the selection or its retry hint:\n%s", frame)
+	}
+	_, retry := model.Update(keyPress("r"))
+	if retry == nil {
+		t.Fatal("r did not retry the failed page")
+	}
+	model.Update(retry())
+	if _, cmd := model.Update(wheel); cmd != nil || model.sessionPicker.selectionID() != "three" || pageCalls != 2 {
+		t.Fatal("scroll should reach the retried Session and stop at the end")
 	}
 }
 

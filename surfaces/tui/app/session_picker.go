@@ -16,7 +16,7 @@ const sessionPickerPageSize = 40
 
 type sessionPickerLine struct {
 	heading string
-	row     int // -1 for a heading or spacer, len(rows) for Show more.
+	row     int // -1 for a heading or spacer.
 }
 
 type sessionPickerState struct {
@@ -26,8 +26,11 @@ type sessionPickerState struct {
 	index            int
 	offset           int
 	loading          bool
+	loadingCursor    string
+	morePending      bool
 	paged            bool
 	err              string
+	failedCursor     string
 	nextCursor       string
 	request          uint64
 	refresh          uint64
@@ -79,6 +82,7 @@ func (m *Model) loadSessionPicker(cursor string) tea.Cmd {
 		return nil
 	}
 	state.loading = true
+	state.loadingCursor = cursor
 	state.refresh++
 	ctx, cancel := context.WithCancel(contextOrBackground(m.cfg.Context))
 	state.cancel = cancel
@@ -125,14 +129,19 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 		return nil
 	}
 	state.loading = false
+	state.loadingCursor = ""
+	morePending := state.morePending
+	state.morePending = false
 	if state.cancel != nil {
 		state.cancel()
 		state.cancel = nil
 	}
 	if msg.err != nil {
 		state.err = msg.err.Error()
+		state.failedCursor = msg.cursor
 	} else {
 		state.err = ""
+		state.failedCursor = ""
 		selected := state.selectionID()
 		if len(state.rows) == 0 {
 			selected = m.currentSessionID
@@ -146,10 +155,7 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 		if m.cfg.SessionWorkbench == nil {
 			state.rows = msg.rows
 		} else {
-			firstAdded := state.mergeRows(msg.rows, msg.refreshed, msg.checked)
-			if selected == sessionPickerMore && msg.cursor != "" && firstAdded != "" {
-				selected = firstAdded
-			}
+			state.mergeRows(msg.rows, msg.refreshed, msg.checked)
 		}
 		state.groupRows()
 		state.index = clampInt(state.index, 0, max(0, state.lastIndex()))
@@ -159,16 +165,16 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 				break
 			}
 		}
-		if selected == sessionPickerMore && msg.cursor == "" && state.nextCursor != "" {
-			state.index = len(state.rows)
-		}
 		state.visible = nil
+		if morePending && state.index == state.lastIndex() && state.nextCursor != "" {
+			return m.loadSessionPicker(state.nextCursor)
+		}
 	}
 	refresh := sessionPickerRefreshMsg{request: msg.request, refresh: state.refresh}
 	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return refresh })
 }
 
-func (s *sessionPickerState) mergeRows(rows, refreshed []ResumeCandidate, checked []string) string {
+func (s *sessionPickerState) mergeRows(rows, refreshed []ResumeCandidate, checked []string) {
 	missing := make(map[string]bool, len(checked))
 	for _, id := range checked {
 		missing[id] = true
@@ -179,7 +185,6 @@ func (s *sessionPickerState) mergeRows(rows, refreshed []ResumeCandidate, checke
 	for _, row := range rows {
 		delete(missing, row.SessionID)
 	}
-	var firstAdded string
 	index := make(map[string]int, len(s.rows)+len(rows))
 	kept := s.rows[:0]
 	for _, row := range s.rows {
@@ -193,9 +198,6 @@ func (s *sessionPickerState) mergeRows(rows, refreshed []ResumeCandidate, checke
 		if i, ok := index[row.SessionID]; ok {
 			s.rows[i] = row
 		} else {
-			if firstAdded == "" {
-				firstAdded = row.SessionID
-			}
 			index[row.SessionID] = len(s.rows)
 			s.rows = append(s.rows, row)
 		}
@@ -205,7 +207,6 @@ func (s *sessionPickerState) mergeRows(rows, refreshed []ResumeCandidate, checke
 			s.rows[i] = row
 		}
 	}
-	return firstAdded
 }
 
 func (s *sessionPickerState) groupRows() {
@@ -241,16 +242,7 @@ func (s *sessionPickerState) groupRows() {
 			s.rows = append(s.rows, row)
 		}
 	}
-	if s.nextCursor != "" {
-		if len(s.rows) != 0 {
-			s.lines = append(s.lines, sessionPickerLine{row: -1})
-		}
-		s.positions = append(s.positions, len(s.lines))
-		s.lines = append(s.lines, sessionPickerLine{row: len(s.rows)})
-	}
 }
-
-const sessionPickerMore = "\x00more"
 
 func (s *sessionPickerState) lastIndex() int { return len(s.positions) - 1 }
 
@@ -288,10 +280,26 @@ func (s *sessionPickerState) selectionID() string {
 	if s.index < len(s.rows) {
 		return s.rows[s.index].SessionID
 	}
-	if s.nextCursor != "" {
-		return sessionPickerMore
-	}
 	return ""
+}
+
+func (m *Model) moveSessionPicker(next int) tea.Cmd {
+	state := m.sessionPicker
+	forward := next > state.index
+	last := state.lastIndex()
+	state.index = clampInt(next, 0, max(0, last))
+	if state.index != last {
+		state.morePending = false
+		return nil
+	}
+	if !forward || state.nextCursor == "" {
+		return nil
+	}
+	if state.loading {
+		state.morePending = state.loadingCursor == ""
+		return nil
+	}
+	return m.loadSessionPicker(state.nextCursor)
 }
 
 func (m *Model) selectSessionPicker() tea.Cmd {
@@ -301,8 +309,6 @@ func (m *Model) selectSessionPicker() tea.Cmd {
 		return m.loadSessionPicker("")
 	case id == "":
 		return nil
-	case id == sessionPickerMore:
-		return m.loadSessionPicker(state.nextCursor)
 	case id == m.currentSessionID && !m.sessionHistoryFailed && !m.sessionObservationRecovering:
 		m.closeSessionPicker()
 		return m.scheduleSessionRead()
@@ -341,7 +347,7 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 	case "home":
 		next = 0
 	case "end":
-		next = state.lastIndex()
+		next = state.lastIndex() + 1
 	case "enter", "right":
 		return m.selectSessionPicker()
 	case "n":
@@ -351,12 +357,11 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 		m.closeSessionPicker()
 		return m.executeLineCmd(Submission{Text: "/new"})
 	case "r":
-		return m.loadSessionPicker("")
+		return m.loadSessionPicker(state.failedCursor)
 	default:
 		return nil
 	}
-	state.index = clampInt(next, 0, max(0, state.lastIndex()))
-	return nil
+	return m.moveSessionPicker(next)
 }
 
 func sessionPickerAge(updatedAt, now time.Time) string {
@@ -398,7 +403,7 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 			delta = 1
 		}
 		if inside {
-			state.index = clampInt(state.index+delta, 0, max(0, state.lastIndex()))
+			return m.moveSessionPicker(state.index + delta)
 		} else if mouse.X >= state.listWidth-sessionPickerInset {
 			state.scrollDetails(delta)
 		}

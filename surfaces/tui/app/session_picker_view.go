@@ -113,7 +113,12 @@ func (m *Model) renderSessionPicker() string {
 	hint := tokens.ListMeta
 	footer := key.Render("↑↓") + hint.Render(" Select   ") + key.Render("Enter/→") + hint.Render(" Open   ") +
 		key.Render("Esc") + hint.Render(" Back")
-	if state.err != "" && len(state.rows) != 0 {
+	switch {
+	case state.loadingCursor != "":
+		footer += "   " + hint.Render("Loading more…")
+	case state.failedCursor != "":
+		footer = hint.Render("Could not load more   r Retry   Esc Back")
+	case state.err != "" && len(state.rows) != 0:
 		footer = hint.Render("Refresh failed   r Retry   Esc Back")
 	}
 	footer += "   " + key.Render("n") + hint.Render(" New")
@@ -135,14 +140,6 @@ func (m *Model) renderSessionPickerRow(state *sessionPickerState, index, titleWi
 		style = m.theme.ListSelectionStyle()
 		muted = style
 	}
-	if index == len(state.rows) {
-		label := "Show more"
-		if state.loading {
-			label = "Loading sessions…"
-		}
-		return style.Render(pickerCell(prefix+"  "+label, titleWidth) + strings.Repeat(" ", statusWidth+ageWidth+2*len(gap)))
-	}
-
 	row := state.rows[index]
 	dot := " "
 	if row.Unread {
