@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type modelPickerDraft struct {
@@ -123,37 +124,19 @@ func (m *Model) handleModelPickerKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 
 func (m *Model) renderModelPicker(geometry completionOverlayGeometry, candidates []SlashArgCandidate) string {
 	width := m.completionRowInnerWidth()
-	muted := m.theme.HelpHintTextStyle()
-	noun := "models"
-	if len(candidates) == 1 {
-		noun = "model"
-	}
-	label := fmt.Sprintf("/model  ·  %d %s", len(candidates), noun)
-	if geometry.scroll.CanUp {
-		label += "  ↑ more"
-	}
-	if geometry.scroll.CanDown {
-		label += "  ↓ more"
-	}
-	lines := []string{" " + muted.Render(truncateTailDisplay(label, width))}
+	label := modelPickerCountLabel("/model", len(candidates), geometry.scroll)
+	lines := []string{" " + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, width))}
 	rows := make([]completionTableRow, 0, geometry.candidateCount)
 	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
 		candidate := candidates[i]
-		marker := "· "
-		if i == geometry.selected {
-			marker = "› "
-		}
+		mark := ""
 		if candidate.ModelSelection != nil && candidate.ModelSelection.Current {
-			marker += "● "
+			mark = "●"
 		}
 		identity := firstNonEmpty(candidate.Display, candidate.Value)
-		if note := firstNonEmpty(candidate.Detail, slashArgPickerHint("model", candidates, i)); note != "" {
-			identity += "  " + m.theme.HelpHintTextStyle().Bold(false).Render(note)
-		}
-		rows = append(rows, completionTableRow{
-			identity: marker + identity,
-			hint:     m.modelPickerControls(candidate, i == geometry.selected, width),
-		})
+		note := firstNonEmpty(candidate.Detail, slashArgPickerHint("model", candidates, i))
+		selected := i == geometry.selected
+		rows = append(rows, m.modelPickerRow(identity, note, m.modelPickerControls(candidate, selected, width), mark, selected))
 	}
 	identityWidth := completionTableIdentityWidth(rows, width)
 	for i, row := range rows {
@@ -181,11 +164,48 @@ func (m *Model) renderModelPicker(geometry completionOverlayGeometry, candidates
 			}
 		}
 	}
-	if geometry.chrome.detailRows > 1 {
-		lines = append(lines, " "+muted.Render(strings.Repeat("─", width)))
-	}
-	lines = append(lines, " "+muted.Render(truncateTailDisplay(detail, width)))
+	lines = m.appendModelPickerDetail(lines, geometry.chrome, detail, m.theme.HelpHintTextStyle())
 	return m.renderCompletionOverlay(geometry, lines)
+}
+
+func modelPickerCountLabel(path string, count int, scroll completionScrollAffordance) string {
+	noun := "models"
+	if count == 1 {
+		noun = "model"
+	}
+	label := fmt.Sprintf("%s  ·  %d %s", path, count, noun)
+	if scroll.CanUp {
+		label += "  ↑ more"
+	}
+	if scroll.CanDown {
+		label += "  ↓ more"
+	}
+	return label
+}
+
+func (m *Model) modelPickerRow(label, note, controls, mark string, selected bool) completionTableRow {
+	marker := "· "
+	if selected {
+		marker = "› "
+	}
+	if mark != "" {
+		marker += mark + " "
+	}
+	if note != "" {
+		label += "  " + m.theme.HelpHintTextStyle().Bold(false).Render(note)
+	}
+	return completionTableRow{identity: marker + label, hint: controls}
+}
+
+func (m *Model) appendModelPickerDetail(lines []string, chrome completionOverlayChrome, detail string, style lipgloss.Style) []string {
+	width := m.completionRowInnerWidth()
+	if chrome.detailRows > 1 {
+		lines = append(lines, " "+m.theme.HelpHintTextStyle().Render(strings.Repeat("─", width)))
+	}
+	if chrome.detailRows > 0 {
+		lines = append(lines, " "+style.Render(truncateTailDisplay(detail, width)))
+	}
+	return lines
 }
 
 func (m *Model) modelPickerControls(candidate SlashArgCandidate, selected bool, width int) string {
@@ -216,17 +236,20 @@ func (m *Model) renderModelPickerFooter() string {
 		label = "type search  ↑↓ select  tab field  ←→ change  enter apply  esc cancel"
 		compact = "↑↓ select  tab field  ←→ change  enter apply  esc"
 	}
+	return m.renderPickerFooter(label, compact, "↑↓  ←→  tab  enter  esc")
+}
+
+func (m *Model) renderPickerFooter(label, compact, minimal string) string {
 	width := m.completionOverlayInnerWidth() - m.completionOverlayFooterIndent()
 	if displayColumns(label) > width {
 		label = compact
 	}
 	if displayColumns(label) > width {
-		label = "↑↓  ←→  tab  enter  esc"
+		label = minimal
 	}
 	return m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, max(1, width)))
 }
 
-// pickerEffortControl is shared by model selection and role bindings.
 func pickerEffortControl(efforts []string, effort string, focused bool, width int) string {
 	value := effort
 	if focused && len(efforts) > 1 {

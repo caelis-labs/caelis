@@ -38,7 +38,10 @@ func (s AgentBindingService) AgentBindingStatus(ctx context.Context) (agentbindi
 	if err != nil {
 		return agentbinding.Status{}, err
 	}
-	return agentBindingStatusFromConfig(doc.AgentBindings, doc.ModelProfiles), nil
+	status := agentBindingStatusFromConfig(doc.AgentBindings, doc.ModelProfiles)
+	revision := doc.ConfigurationRevision
+	status.ConfigurationRevision = &revision
+	return status, nil
 }
 
 func agentBindingStatusFromConfig(

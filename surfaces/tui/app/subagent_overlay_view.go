@@ -1,264 +1,288 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strings"
 
-	"charm.land/lipgloss/v2"
-
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func (m *Model) renderSubagentOverlay() string {
-	if m == nil || m.subagentOverlay == nil {
+	state := m.subagentOverlay
+	if state == nil {
 		return ""
 	}
-	state := m.subagentOverlay
-	width := min(max(48, m.fixedRowWidth()-4), 120, max(20, m.width-4))
-	innerWidth := max(16, width-m.overlayBorderChromeWidth())
 	m.refreshSubagentRows("")
-	muted := m.theme.HelpHintTextStyle()
-	body := []string{m.renderSubagentTitle(innerWidth)}
+	width := m.completionRowInnerWidth()
+	chrome := m.modelPickerChrome()
+	detail := m.subagentOverlayDetail()
+	if state.page == subagentPageMain && detail == "" {
+		chrome.detailRows = 0
+	}
+	limit := completionOverlayVisibleItems
+	if state.guardianPicker() {
+		limit += 5 // Two headings, a separator, and two classifier choices.
+	}
+	budget := m.completionOverlayBodyLimitFor(chrome, limit)
+	var primary, classifier subagentRenderedList
+	body := []string{""}
 
-	body = append(body, muted.Render(strings.Repeat("─", innerWidth)))
-	if state.searchable() && state.query != "" {
-		body = append(body, muted.Render("/ "+truncateDisplayCellsFromEnd(state.query, innerWidth-3)+"▏"))
-	}
-	if state.page == subagentPageBinding && len(state.rows) > 0 && !state.loading {
-		modelWidth, effortWidth, fastWidth := m.subagentBindingColumns(innerWidth - 2)
-		header := padRightDisplay(sliceByDisplayColumns("  Model", 0, modelWidth), modelWidth)
-		if effortWidth > 0 {
-			header += " " + padRightDisplay(sliceByDisplayColumns("Effort", 0, effortWidth), effortWidth)
+	switch {
+	case state.loading:
+		body = append(body, " "+m.theme.HelpHintTextStyle().Render("Loading team…"))
+	case state.err != "" && len(state.status.Handles) == 0:
+		body = append(body, " "+m.theme.HelpHintTextStyle().Render("Could not load team."))
+	case state.guardianPicker() && budget >= 4:
+		review, screening := &state.subagentList, &state.other
+		if state.classifierFocused {
+			review, screening = screening, review
 		}
-		if fastWidth > 0 {
-			header += " " + sliceByDisplayColumns("Fast", 0, fastWidth)
+		gap := 0
+		if budget >= 5 {
+			gap = 1
 		}
-		body = append(body, " "+muted.Render(header))
-	}
-	footer := m.subagentFooterLines(innerWidth)
-	borderInset, contentInset := 0, 0
-	if m.overlayUsesBorder() {
-		borderInset, contentInset = 1, 2
-	}
-	maxHeight := max(8, m.height-4)
-	rowBudget := max(1, maxHeight-2*borderInset-len(body)-len(footer))
-	rowLines, rowOffsets := m.renderSubagentRows(state.rows, innerWidth, len(body), rowBudget)
-	body = append(body, rowLines...)
-	body = append(body, footer...)
-	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
-		Body: body, Width: width, UseBorder: m.overlayUsesBorder(),
-	})
-	renderedWidth, renderedHeight := lipgloss.Width(frame), lipgloss.Height(frame)
-	startX, startY := max(0, (m.width-renderedWidth)/2), max(0, (m.height-renderedHeight)/2)
-	screenRows := make([]int, len(rowOffsets))
-	for i, offset := range rowOffsets {
-		screenRows[i] = -1
-		if offset >= 0 {
-			screenRows[i] = startY + borderInset + offset
-		}
-	}
-	state.geometry = subagentOverlayGeometry{
-		x: startX, y: startY, closeX: overlayCloseX(startX+contentInset, innerWidth),
-		closeY: startY + borderInset, width: renderedWidth, height: renderedHeight, rows: screenRows,
-	}
-	state.geometry.cells = make([][]subagentCell, len(state.rows))
-	for i, row := range state.rows {
-		cells := m.subagentCells(row, innerWidth-2)
-		for j := range cells {
-			cells[j].x += startX + contentInset + 1
-		}
-		state.geometry.cells[i] = cells
-	}
-	return frame
-}
+		rowsBudget := budget - 2 - gap
+		classifierBudget := min(max(1, len(screening.rows)), max(1, rowsBudget/3))
+		reviewBudget := min(max(1, len(review.rows)), rowsBudget-classifierBudget)
+		classifierBudget = min(max(1, len(screening.rows)), rowsBudget-reviewBudget)
 
-func (m *Model) renderSubagentTitle(width int) string {
-	state := m.subagentOverlay
-	path := []string{"/team"}
-	title := "Team Configuration"
-	switch state.page {
-	case subagentPageBinding:
-		role := string(state.bindingHandle)
-		title = "Choose model"
-		switch state.bindingHandle {
-		case agentbinding.HandleGuardian:
-			role = "Guardian"
-		case agentbinding.HandleGuardianScreen:
-			role = "Guardian"
-			title = "Choose classifier"
+		body = append(body, m.subagentPaneTitle("Review model", width, !state.classifierFocused))
+		primary = m.renderSubagentList(review, !state.classifierFocused, width, len(body), reviewBudget)
+		body = append(body, primary.lines...)
+		if gap > 0 {
+			body = append(body, "")
 		}
-		path = append(path, role)
-	case subagentPageSets:
-		title = "Binding sets"
-	case subagentPageNewRole:
-		title = "New role"
-	case subagentPageSaveSet:
-		path = append(path, "Binding sets")
-		title = "Save binding set"
-	case subagentPageConfirm:
-		title = "Delete " + state.confirmLabel + "?"
+		body = append(body, m.subagentPaneTitle("Classifier", width, state.classifierFocused))
+		classifier = m.renderSubagentList(screening, state.classifierFocused, width, len(body), classifierBudget)
+		body = append(body, classifier.lines...)
+	default:
+		if state.guardianPicker() && budget > 1 {
+			title := "Review model"
+			if state.classifierFocused {
+				title = "Classifier"
+			}
+			body = append(body, m.subagentPaneTitle(title, width, true))
+			budget--
+		}
+		list := m.renderSubagentList(&state.subagentList, true, width, len(body), budget)
+		body = append(body, list.lines...)
+		if state.classifierFocused {
+			classifier = list
+		} else {
+			primary = list
+		}
 	}
-	return m.overlayHeader(width, path, title, state.closeButton, !state.pending && !state.loading)
-}
 
-// A row's section heading consumes the same viewport budget as its cells.
-// Keep the window fixed while its selection remains visible, including hover.
-func subagentWindowEnd(rows []subagentOverlayRow, start, budget int) int {
-	used := 0
-	section := ""
-	for i := start; i < len(rows); i++ {
-		cost := 1
-		if budget >= 4 && rows[i].section != "" && rows[i].section != section {
-			cost++
-		}
-		if used+cost > budget {
-			return i
-		}
-		used += cost
-		section = rows[i].section
+	scroll := primary.scroll
+	if state.classifierFocused {
+		scroll = classifier.scroll
 	}
-	return len(rows)
-}
+	body[0] = m.renderSubagentTitle(width+2, scroll)
 
-func (m *Model) renderSubagentRows(rows []subagentOverlayRow, width, bodyOffset, budget int) ([]string, []int) {
-	state := m.subagentOverlay
-	offsets := make([]int, len(rows))
-	for i := range offsets {
-		offsets[i] = -1
-	}
-	if state.loading || (state.err != "" && len(state.status.Handles) == 0) {
-		text := "Loading team configuration…"
-		if !state.loading {
-			text = "Could not load team configuration."
-		}
-		return []string{m.theme.HelpHintTextStyle().Render(truncateTailDisplay(text, width))}, offsets
-	}
-	if len(rows) == 0 {
-		text := "No matches. Edit the search or ctrl+w to clear."
-		if state.page == subagentPageBinding && state.query == "" {
-			text = "No compatible models. Use /connect to add one."
-		}
-		return []string{m.theme.HelpHintTextStyle().Render(truncateTailDisplay(text, width))}, offsets
-	}
-	start := clampInt(state.windowStart, 0, len(rows)-1)
-	if state.index < start {
-		start = state.index
-	}
-	for state.index >= subagentWindowEnd(rows, start, budget) && start < state.index {
-		start++
-	}
-	end := subagentWindowEnd(rows, start, budget)
-	state.windowStart = start
-	lines := make([]string, 0, budget)
-	section := ""
-	for i := start; i < end; i++ {
-		row := rows[i]
-		if budget >= 4 && row.section != "" && row.section != section {
-			lines = append(lines, m.theme.HelpHintTextStyle().Render(truncateTailDisplay("  "+row.section, width)))
-		}
-		section = row.section
-		offsets[i] = bodyOffset + len(lines)
-		lines = append(lines, m.renderSubagentRow(row, i == state.index, width))
-	}
-	return lines, offsets
-}
-
-func (m *Model) subagentFooterLines(width int) []string {
-	state := m.subagentOverlay
-	row := m.currentSubagentRow()
-	muted := m.theme.HelpHintTextStyle()
-	detail := ""
-	if state.page == subagentPageBinding && state.query == "" && len(state.rows) == 1 && row.reset {
-		detail = "Use /connect to add a compatible model."
-	}
-	if state.searchable() && state.query != "" {
-		detail = fmt.Sprintf("%d results", len(state.rows))
-	}
-	if row.nameConflict {
-		detail = row.detail
-	}
-	if state.notice != "" {
-		detail = state.notice
-	}
-	if state.pending {
-		detail = "Saving configuration…"
-	}
-	if state.loading {
-		detail = "Loading configuration…"
-	}
-	style := muted
+	geometry := m.completionOverlayFrameGeometry(chrome, len(body)-chrome.headerRows)
+	style := m.theme.HelpHintTextStyle()
 	if state.err != "" {
-		detail, style = state.err, m.theme.ErrorStyle()
-	} else if row.nameConflict {
 		style = m.theme.ErrorStyle()
 	}
-	lines := []string{muted.Render(strings.Repeat("─", width))}
-	if detail != "" {
-		lines = append(lines, style.Render(truncateTailDisplay(detail, width)))
+	body = m.appendModelPickerDetail(body, chrome, detail, style)
+	frame := m.renderCompletionFrame(geometry, body)
+	firstLine, _, _ := strings.Cut(frame, "\n")
+
+	contentX := geometry.left
+	if chrome.useBorder {
+		contentX += 2
 	}
-	help := "↑↓ select  enter choose  esc back"
-	compact := "↑↓  enter  esc"
-	switch state.page {
-	case subagentPageMain:
-		help = "↑↓ select  enter edit  esc close"
-		if row.companion != nil {
-			help, compact = "↑↓ row  tab model/"+strings.ToLower(row.companion.label)+"  enter edit  esc close", "↑↓  tab  enter  esc"
-		}
-		if state.field == subagentFieldModel && (len(row.efforts) > 1 || row.fastSupported) {
-			help = "↑↓ row  tab field  ←→ effort"
-			if row.fastSupported {
-				help += "  f fast"
-			}
-			help += "  enter edit  esc close"
-		}
-	case subagentPageBinding:
-		help, compact = "↑↓ model", "↑↓  tab  ←→  enter  esc"
-		if len(m.subagentFields()) > 1 {
-			help += "  tab field"
-		}
-		if len(row.efforts) > 1 {
-			help += "  ←→ effort"
-		}
-		if row.fastSupported {
-			help += "  f fast"
-		}
-		if state.creatingRole {
-			help += "  enter choose"
-		} else {
-			help += "  enter apply"
-		}
-		help += "  esc back"
-	case subagentPageNewRole, subagentPageSaveSet:
-		help = "tab field  type to edit  enter next  esc back"
-		if !m.editingSubagentField() {
-			help = "tab field  enter choose  esc back"
-		}
-	}
-	if state.err != "" && len(state.status.Handles) == 0 {
-		help = "enter retry  esc close"
-	}
-	if state.pending {
-		help = "Saving…"
-	}
-	if displayColumns(help) > width {
-		help = compact
-	}
-	lines = append(lines, muted.Render(truncateTailDisplay(help, width)))
-	if (state.page == subagentPageMain || state.page == subagentPageSets) && m.height >= 20 {
-		shortcuts := "ctrl+n new  ctrl+p sets  ctrl+s save  del delete"
-		if state.page == subagentPageSets {
-			shortcuts = "ctrl+s save  del delete"
-		}
-		if displayColumns(shortcuts) > width {
-			shortcuts = "ctrl+n new  ctrl+p sets"
-		}
-		if row.custom || strings.HasPrefix(row.key, "set:") {
-			if width < 48 {
-				shortcuts = "del delete  ctrl+s save"
+	contentY := geometry.top + chrome.topBorderRows + chrome.topInsetRows
+	for _, list := range [][]int{primary.rows, classifier.rows} {
+		for i, offset := range list {
+			if offset >= 0 {
+				list[i] = contentY + offset
 			}
 		}
-		lines = append(lines, muted.Render(truncateTailDisplay(shortcuts, width)))
 	}
-	return lines
+	for i := range primary.efforts {
+		primary.efforts[i].x += contentX
+		primary.efforts[i].midpoint += contentX
+	}
+	state.geometry = subagentOverlayGeometry{
+		x: geometry.left, y: geometry.top, closeX: overlayCloseX(contentX, width+2),
+		closeY: contentY, width: displayColumns(firstLine), height: geometry.height,
+		rows: primary.rows, classifierRows: classifier.rows, efforts: primary.efforts,
+	}
+	return m.attachCompletionFooter(frame, m.subagentOverlayFooter())
+}
+
+func (m *Model) renderSubagentTitle(width int, scroll completionScrollAffordance) string {
+	state := m.subagentOverlay
+	labelWidth := max(1, width-len(overlayCloseLabel)-2)
+	label := "/team"
+	if state.page == subagentPageBinding {
+		role := string(state.bindingHandle)
+		for _, item := range state.status.Handles {
+			if item.Definition.Handle == state.bindingHandle && item.Definition.Class == agentbinding.HandleClassSystem {
+				role = firstNonEmpty(item.Definition.Name, role)
+				break
+			}
+		}
+		count := 0
+		for _, list := range [][]subagentOverlayRow{state.rows, state.other.rows} {
+			for _, row := range list {
+				if !row.reset {
+					count++
+				}
+			}
+		}
+		path := label + " › " + role
+		label = modelPickerCountLabel(path, count, scroll)
+		if displayColumns(label) > labelWidth {
+			label = path
+			if displayColumns(label) > labelWidth {
+				label = role
+			}
+		}
+	}
+	close := m.overlayButtonStyle(!state.pending && !state.loading, state.closeButton.hovered || state.closeButton.pressed).Render(overlayCloseLabel)
+	return padRightDisplay(" "+m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, labelWidth)), width-len(overlayCloseLabel)) + close
+}
+
+type subagentRenderedList struct {
+	lines   []string
+	rows    []int
+	efforts []subagentEffortSpan
+	scroll  completionScrollAffordance
+}
+
+func (m *Model) renderSubagentList(list *subagentList, focused bool, width, offset, budget int) subagentRenderedList {
+	if len(list.rows) == 0 {
+		text := "No configurable roles."
+		if list.query != "" {
+			text = "No matches. Ctrl+W clears."
+		}
+		return subagentRenderedList{lines: []string{" " + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(text, width))}}
+	}
+	start, end, rows := subagentViewport(list, budget)
+	rendered := subagentRenderedList{rows: rows, lines: make([]string, 0, end-start),
+		scroll: completionScrollFromWindow(start, end, len(rows), list.index == len(rows)-1, false)}
+	if m.subagentOverlay.page == subagentPageMain {
+		cols := subagentOverviewColumns(width+2, list.rows)
+		for i := start; i < end; i++ {
+			row := list.rows[i]
+			if i > start && budget > end-start && agentbinding.IsSystem(row.handle) && !agentbinding.IsSystem(list.rows[i-1].handle) {
+				rendered.lines = append(rendered.lines, "")
+			}
+			rows[i] = offset + len(rendered.lines)
+			rendered.lines = append(rendered.lines, m.renderSubagentOverviewRow(row, i == list.index, width+2, cols))
+		}
+		return rendered
+	}
+
+	table := make([]completionTableRow, 0, end-start)
+	for i := start; i < end; i++ {
+		row := list.rows[i]
+		selected := focused && i == list.index
+		// A fixed marker column keeps model names aligned across both sections.
+		mark := " "
+		if row.current {
+			mark = "●"
+		} else if !focused && row.binding == list.draft {
+			mark = "○"
+		}
+		table = append(table, m.modelPickerRow(row.label, row.detail, subagentPickerEffort(row, selected, width), mark, selected))
+	}
+	identityWidth := completionTableIdentityWidth(table, width)
+	rendered.efforts = make([]subagentEffortSpan, len(list.rows))
+	for i, row := range table {
+		index := start + i
+		rows[index] = offset + len(rendered.lines)
+		rendered.lines = append(rendered.lines, m.renderTeamModelRow(row, identityWidth, width, focused, index == list.index))
+		model := list.rows[index]
+		if len(model.efforts) > 1 {
+			hintStart := identityWidth + 2
+			unfocused := subagentPickerEffort(model, false, width)
+			focusedWidth := displayColumns(subagentPickerEffort(model, true, width))
+			if available := width - hintStart; available > 0 {
+				rendered.efforts[index] = subagentEffortSpan{
+					x: hintStart + 1, width: min(available, focusedWidth),
+					midpoint: hintStart + 1 + displayColumns(unfocused) - (displayColumns(model.binding.Effort)+1)/2,
+				}
+			}
+		}
+	}
+	return rendered
+}
+
+func (m *Model) renderTeamModelRow(row completionTableRow, identityWidth, width int, focused, selected bool) string {
+	if focused {
+		return m.renderCompletionColumnsLine(row.identity, row.hint, identityWidth, selected)
+	}
+	style := m.theme.SecondaryTextStyle()
+	if selected {
+		style = m.theme.TextStyle()
+	}
+	if row.hint == "" || width <= identityWidth+2 {
+		return m.renderCompletionUnselectedLine(width, style.Render(truncateTailDisplay(row.identity, width)))
+	}
+	identity := padRightDisplay(truncateTailDisplay(row.identity, identityWidth), identityWidth)
+	effort := m.theme.MutedTextStyle().Render(truncateTailDisplay(row.hint, width-identityWidth-2))
+	return m.renderCompletionUnselectedLine(width, style.Render(identity), "  ", effort)
+}
+
+func subagentPickerEffort(row subagentOverlayRow, selected bool, width int) string {
+	if row.reset || row.handle == agentbinding.HandleGuardianScreen {
+		return ""
+	}
+	if width >= 22 && width < 28 && selected && len(row.efforts) > 1 {
+		return "‹" + row.binding.Effort + "›"
+	}
+	return pickerEffortControl(row.efforts, row.binding.Effort, selected, width)
+}
+
+func (m *Model) subagentOverlayDetail() string {
+	state := m.subagentOverlay
+	row := m.currentSubagentRow()
+	switch {
+	case state.err != "":
+		return state.err
+	case state.notice != "":
+		return state.notice
+	case state.page == subagentPageMain:
+		if subagentOverviewColumns(m.completionRowInnerWidth()+2, state.rows).purpose == 0 {
+			return subagentPurpose(row.handle)
+		}
+	case state.query == "" && len(state.rows) == 1 && row.reset:
+		return "Use /connect to add a model."
+	case row.key == "":
+		return "Type to search models"
+	default:
+		parts := []string{row.label}
+		if row.detail != "" {
+			parts = append(parts, row.detail)
+		}
+		if row.current {
+			parts = append(parts, "current")
+		}
+		return strings.Join(parts, "  ·  ")
+	}
+	return ""
+}
+
+func (m *Model) subagentOverlayFooter() string {
+	state := m.subagentOverlay
+	full, compact, minimal := "type search  ↑↓ select  enter edit  esc close", "↑↓ select  enter edit  esc", "↑↓  enter  esc"
+	if state.page == subagentPageBinding {
+		full, compact, minimal = "type search  ↑↓ select  ←→ effort  enter apply  esc back", "↑↓ select  ←→ effort  enter apply  esc", "↑↓  ←→  enter  esc"
+		if state.guardianPicker() {
+			full = "type search  ↑↓ select  ←→ effort  enter apply both  esc back"
+		}
+	}
+	switch {
+	case state.loading:
+		full = "esc close"
+	case state.pending:
+		full = "Saving…"
+	case state.reloadRequired:
+		full, compact, minimal = "enter reload  esc close", "enter reload  esc", "enter reload"
+	case state.err != "" && len(state.status.Handles) == 0:
+		full = "enter retry  esc close"
+	}
+	return m.renderPickerFooter(full, compact, minimal)
 }

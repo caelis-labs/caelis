@@ -113,9 +113,12 @@ func ProjectBoundDirectNames(base []string, status Status) []string {
 // Targets contains standard ModelProfiles. Each handle projects its eligible
 // target IDs using SupportsProfile so remote surfaces use the same rules.
 type Status struct {
-	Handles []HandleStatus
-	Targets []modelprofile.ModelProfile
-	Sets    []BindingSetStatus
+	// ConfigurationRevision identifies the Host snapshot used for these bindings
+	// and targets. Older HTTP Hosts omit it.
+	ConfigurationRevision *uint64 `json:"configuration_revision,string,omitempty"`
+	Handles               []HandleStatus
+	Targets               []modelprofile.ModelProfile
+	Sets                  []BindingSetStatus
 }
 
 // BindingSetStatus is the detached availability view of one persisted binding
@@ -152,6 +155,12 @@ type Service interface {
 	AgentBindingStatus(context.Context) (Status, error)
 	BindAgentBinding(context.Context, Binding) (Status, error)
 	ResetAgentBinding(context.Context, Handle) (Status, error)
+}
+
+// DraftService applies one binding or the Guardian pair against the revision
+// from the status that seeded the draft. A handle-only binding resets it.
+type DraftService interface {
+	ApplyAgentBindingDraft(context.Context, uint64, []Binding) (Status, error)
 }
 
 // ConfigurationService extends binding mutation with user-created roles and

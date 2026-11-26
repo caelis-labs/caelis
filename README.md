@@ -66,8 +66,7 @@ and ACP agents:
 1. Use `/connect` to add the providers or ACP agents you want. For an external
    agent, install its executable separately and make it available on the Host's
    `PATH`; choose **Custom** for another ACP stdio command.
-2. Open `/team` to configure participant profiles such as `breeze`, `orbit`,
-   and `zenith`, or create a custom role in the Team overlay.
+2. Open `/team` to configure `breeze`, `orbit`, and `zenith`.
 3. Ask the main agent to coordinate the work, for example:
 
    ```text

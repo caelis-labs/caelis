@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"image/color"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,11 +21,12 @@ func TestSubagentConfigurationOverlayPaintsOneBackgroundAcrossStyledRows(t *test
 
 	frame := model.renderSubagentOverlay()
 	geometry := model.subagentOverlay.geometry
+	panel := frame[:strings.LastIndexByte(frame, '\n')]
 	assertOverlayCellBackgrounds(
 		t,
-		frame,
+		panel,
 		geometry.width,
-		geometry.height,
+		geometry.height-1,
 		model.theme.ModalBg,
 		model.theme.SelectionBg,
 	)

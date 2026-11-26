@@ -22,6 +22,11 @@ func (m *Model) enqueuePrompt(req PromptRequestMsg) {
 		return
 	}
 	if m.activePrompt == nil {
+		if team := m.subagentOverlay; team != nil {
+			team.geometry = subagentOverlayGeometry{}
+			team.pressedKey = ""
+			team.closeButton = overlayCloseButton{}
+		}
 		m.activePrompt = newPromptState(req)
 		return
 	}

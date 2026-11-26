@@ -51,13 +51,18 @@ func (c completionOverlayChrome) candidateOffset() int {
 }
 
 func (m *Model) completionChrome() completionOverlayChrome {
-	chrome := completionOverlayChromeFor(m.overlayUsesBorder())
 	if m.isModelPicker() {
-		chrome.headerRows = 1
-		chrome.detailRows = 2
-		if m.height > 0 && m.height < 20 {
-			chrome.detailRows = 1
-		}
+		return m.modelPickerChrome()
+	}
+	return completionOverlayChromeFor(m.overlayUsesBorder())
+}
+
+func (m *Model) modelPickerChrome() completionOverlayChrome {
+	chrome := completionOverlayChromeFor(m.overlayUsesBorder())
+	chrome.headerRows = 1
+	chrome.detailRows = 2
+	if m.height > 0 && m.height < 20 {
+		chrome.detailRows = 1
 	}
 	return chrome
 }
@@ -88,14 +93,13 @@ type completionOverlayRow struct {
 }
 
 func (m *Model) completionOverlayBodyLimit() int {
-	limit := completionOverlayVisibleItems
+	return m.completionOverlayBodyLimitFor(m.completionChrome(), completionOverlayVisibleItems)
+}
+
+func (m *Model) completionOverlayBodyLimitFor(chrome completionOverlayChrome, limit int) int {
 	if m.height > 0 {
-		chrome := m.completionChrome()
 		available := m.workspaceLayout().main.height - m.bottomSectionHeight() - chrome.rowCount()
-		if available < 1 {
-			available = 1
-		}
-		limit = minInt(limit, available)
+		limit = min(limit, max(1, available))
 	}
 	return limit
 }
@@ -151,32 +155,30 @@ func (m *Model) buildCompletionOverlayGeometry(snapshot completionSnapshot) comp
 		bodyRows = len(groupedRows)
 	}
 
-	chrome := m.completionChrome()
+	geometry := m.completionOverlayFrameGeometry(m.completionChrome(), bodyRows)
+	atBottom := selected >= total-1
+	geometry.kind = snapshot.kind
+	geometry.selected = selected
+	geometry.windowStart, geometry.windowEnd = start, end
+	geometry.total = total
+	geometry.candidateCount = end - start
+	geometry.groupedRows = groupedRows
+	geometry.scroll = completionScrollFromWindow(start, end, total, atBottom, snapshot.canLoadMore)
+	return geometry
+}
+
+func (m *Model) completionOverlayFrameGeometry(chrome completionOverlayChrome, bodyRows int) completionOverlayGeometry {
 	height := bodyRows + chrome.rowCount()
 	main := m.workspaceLayout().main
-	top := main.y + main.height - m.bottomSectionHeight() - height
-	if top < main.y {
-		top = main.y
-	}
-	candidateTop := top + chrome.candidateOffset()
-	atBottom := selected >= total-1
-	scroll := completionScrollFromWindow(start, end, total, atBottom, snapshot.canLoadMore)
+	top := max(main.y, main.y+main.height-m.bottomSectionHeight()-height)
 	return completionOverlayGeometry{
-		kind:           snapshot.kind,
-		selected:       selected,
-		windowStart:    start,
-		windowEnd:      end,
-		total:          total,
-		left:           m.mainColumnX() + inputHorizontalInset,
-		top:            top,
-		width:          m.completionOverlayRenderedRowWidth(),
-		height:         height,
-		innerWidth:     m.completionOverlayInnerWidth(),
-		candidateTop:   candidateTop,
-		candidateCount: end - start,
-		groupedRows:    groupedRows,
-		chrome:         chrome,
-		scroll:         scroll,
+		left:         m.mainColumnX() + inputHorizontalInset,
+		top:          top,
+		width:        m.completionOverlayRenderedRowWidth(),
+		height:       height,
+		innerWidth:   m.completionOverlayInnerWidth(),
+		candidateTop: top + chrome.candidateOffset(),
+		chrome:       chrome,
 	}
 }
 

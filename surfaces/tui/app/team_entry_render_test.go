@@ -8,6 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
+
+	"github.com/caelis-labs/caelis/control/uipreferences"
 )
 
 func TestTeamEntryPhysicalFrames(t *testing.T) {
@@ -40,8 +42,17 @@ func TestTeamEntryPhysicalFrames(t *testing.T) {
 			}
 			_, _ = model.Update(cmd())
 			frames = append(frames, model.View().Content)
-			if !strings.Contains(ansi.Strip(frames[2]), "Team Configuration") {
+			if plain := ansi.Strip(frames[2]); !strings.Contains(plain, "/team") || !strings.Contains(plain, "Guardian") {
 				t.Fatalf("configuration frame omitted title:\n%s", ansi.Strip(frames[2]))
+			}
+			g := model.subagentOverlay.geometry
+			rows := strings.Split(ansi.Strip(frames[2]), "\n")
+			bottom := size[1] - model.bottomSectionHeight()
+			if g.x != inputHorizontalInset || g.y+g.height != bottom ||
+				!strings.Contains(rows[g.closeY], "/team") ||
+				g.rows[3] < 0 || !strings.Contains(rows[g.rows[3]], "Guardian") ||
+				!strings.Contains(strings.Join(rows[bottom:], "\n"), "> /team ") {
+				t.Fatalf("team picker did not paint above the composer at its hit-test coordinates: %+v\n%s", g, strings.Join(rows, "\n"))
 			}
 			_, _ = model.Update(subagentSpecialKey(tea.KeyEscape))
 			for _, ch := range "/ex" {
@@ -71,5 +82,38 @@ func TestTeamEntryPhysicalFrames(t *testing.T) {
 				t.Logf("frame %d:\n%s", i, got)
 			}
 		})
+	}
+}
+
+func TestTeamPickerUsesMainPaneComposer(t *testing.T) {
+	model, _ := newPaneTestModel(t)
+	model.cfg.ControlService = &subagentDelegationStub{status: subagentTestStatus()}
+	runTeaCmds(t, model, model.setSubagentLayout(uipreferences.Up))
+	model.setInputText("saved draft")
+	model.syncTextareaFromInput()
+	load := model.openSubagentOverlay()
+	if load == nil {
+		t.Fatal("team overlay did not open")
+	}
+	_, _ = model.Update(load())
+	selectSubagentTestRow(t, model, "handle:orbit")
+	_, _ = model.Update(subagentSpecialKey(tea.KeyEnter))
+	for _, ch := range "sol" {
+		_, _ = model.Update(keyPress(string(ch)))
+	}
+	frame := model.View()
+	geometry := model.subagentOverlay.geometry
+	main := model.workspaceLayout().main
+	rows := strings.Split(ansi.Strip(frame.Content), "\n")
+	if geometry.x != main.x+inputHorizontalInset || geometry.y < main.y ||
+		geometry.y+geometry.height != main.y+main.height-model.bottomSectionHeight() ||
+		frame.Cursor == nil || !main.contains(frame.Cursor.X, frame.Cursor.Y) ||
+		!strings.Contains(rows[frame.Cursor.Y], "> /team sol") {
+		t.Fatalf("team picker or search cursor outside main pane: overlay %+v, pane %+v, cursor %+v\n%s", geometry, main, frame.Cursor, strings.Join(rows, "\n"))
+	}
+	_, _ = model.Update(subagentSpecialKey(tea.KeyEscape))
+	_, _ = model.Update(subagentSpecialKey(tea.KeyEscape))
+	if model.subagentOverlay != nil || !strings.Contains(ansi.Strip(model.View().Content), "> saved draft") {
+		t.Fatal("closing team picker did not restore the composer draft")
 	}
 }

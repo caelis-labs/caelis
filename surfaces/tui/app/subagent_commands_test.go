@@ -15,11 +15,10 @@ import (
 
 type subagentDelegationStub struct {
 	ControlServices
-	status      agentbinding.Status
-	bindRequest agentbinding.Binding
-	reset       agentbinding.Handle
-	createdRole agentbinding.Role
-	savedSet    string
+	status           agentbinding.Status
+	bindRequest      agentbinding.Binding
+	reset            agentbinding.Handle
+	guardianBindings []agentbinding.Binding
 }
 
 func (s *subagentDelegationStub) AgentBindingStatus(context.Context) (agentbinding.Status, error) {
@@ -40,29 +39,18 @@ func (s *subagentDelegationStub) ResetAgentBinding(_ context.Context, handle age
 	return s.status, nil
 }
 
-func (s *subagentDelegationStub) CreateAgentRole(_ context.Context, role agentbinding.Role, binding agentbinding.Binding) (agentbinding.Status, error) {
-	s.createdRole = role
-	s.bindRequest = binding
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) DeleteAgentRole(_ context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
-	s.reset = handle
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) SaveAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
-	s.savedSet = name
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) ApplyAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
-	s.savedSet = name
-	return s.status, nil
-}
-
-func (s *subagentDelegationStub) DeleteAgentBindingSet(_ context.Context, name string) (agentbinding.Status, error) {
-	s.savedSet = name
+func (s *subagentDelegationStub) ApplyAgentBindingDraft(ctx context.Context, revision uint64, bindings []agentbinding.Binding) (agentbinding.Status, error) {
+	if s.status.ConfigurationRevision == nil || revision != *s.status.ConfigurationRevision {
+		panic("Team did not submit the displayed configuration revision")
+	}
+	if len(bindings) == 1 {
+		binding := bindings[0]
+		if binding.ProfileID == "" {
+			return s.ResetAgentBinding(ctx, binding.Handle)
+		}
+		return s.BindAgentBinding(ctx, binding)
+	}
+	s.guardianBindings = bindings
 	return s.status, nil
 }
 
@@ -183,7 +171,8 @@ func TestProfileSlashDescriptionIncludesBoundProviderModelAndEffort(t *testing.T
 }
 
 func subagentTestStatus() agentbinding.Status {
-	status := agentbinding.Status{Targets: []modelprofile.ModelProfile{testProviderModelProfile(), testACPModelProfile()}}
+	revision := uint64(7)
+	status := agentbinding.Status{ConfigurationRevision: &revision, Targets: []modelprofile.ModelProfile{testProviderModelProfile(), testACPModelProfile()}}
 	for _, definition := range agentbinding.Definitions() {
 		item := agentbinding.HandleStatus{Definition: definition, Binding: agentbinding.Binding{Handle: definition.Handle}}
 		switch definition.Handle {

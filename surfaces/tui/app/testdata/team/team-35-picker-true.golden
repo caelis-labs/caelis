@@ -1,7 +1,11 @@
-/team › Gua… › Choose model [x]
-───────────────────────────────
-   Model   Effort     Fast
-   Default · Use the Main Age…
- ● openai… ‹ xhigh ›  Fast off
-───────────────────────────────
-↑↓  tab  ←→  enter  esc
+ /team › Guardian         [x]
+ ▎ Review model
+ ·   Default  Main Agent
+ › ● openai-cod...  ‹xhigh›
+
+   Classifier
+ · ● Disabled
+ ·   Jev
+ ───────────────────────────
+ openai-codex/gpt-5.6-sol...
+ ↑↓  ←→  enter  esc

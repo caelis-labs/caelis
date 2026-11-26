@@ -34,42 +34,32 @@ func teamCellTestModel(t *testing.T) (*Model, *subagentDelegationStub) {
 	return m, service
 }
 
-func TestTeamCellFocusKeyboardCyclesFieldsAndSkipsUnsupported(t *testing.T) {
+func TestTeamPickerArrowsEditEffortWithoutTab(t *testing.T) {
 	m, service := teamCellTestModel(t)
 	selectSubagentTestRow(t, m, "handle:orbit")
 	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	key := m.currentSubagentRow().key
-	for _, field := range []subagentField{subagentFieldEffort, subagentFieldFast, subagentFieldModel} {
-		m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
-		if m.subagentOverlay.field != field || m.currentSubagentRow().key != key {
-			t.Fatalf("Tab moved model or focused wrong field: %v %s", m.subagentOverlay.field, m.currentSubagentRow().key)
-		}
-		assertTeamSingleCellHighlight(t, m)
-	}
-	m.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
-	if m.subagentOverlay.field != subagentFieldFast {
-		t.Fatal("Shift+Tab did not reverse field order")
+	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyRight))
+	if m.currentSubagentRow().binding.Effort != "xhigh" {
+		t.Fatal("right did not adjust the selected model's effort")
 	}
 	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyDown))
-	if m.currentSubagentRow().binding.ProfileID != "acp:claude:opus" || m.subagentOverlay.field != subagentFieldModel {
-		t.Fatal("unsupported Fast focus did not fall back to Model")
+	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyLeft))
+	if binding := m.currentSubagentRow().binding; binding.ProfileID != "acp:claude:opus" || binding.Effort != "none" {
+		t.Fatalf("arrows did not select ACP or changed its fixed effort: %+v", binding)
 	}
-	for range 3 {
-		m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
-	}
-	if m.subagentOverlay.field != subagentFieldModel || m.currentSubagentRow().binding.ProfileID != "acp:claude:opus" {
-		t.Fatal("fixed-effort model exposed a phantom Tab stop")
+	frame := strings.Split(ansi.Strip(m.renderSubagentOverlay()), "\n")
+	geometry := m.subagentOverlay.geometry
+	row := geometry.rows[m.subagentOverlay.index] - geometry.y
+	if line := frame[row]; !strings.Contains(line, "none") {
+		t.Fatalf("model picker omitted the fixed effort: %q", line)
 	}
 	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyUp))
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyRight))
-	m.handleSubagentOverlayKey(keyPress("f"))
-	if m.currentSubagentRow().binding.Effort != "xhigh" || !m.currentSubagentRow().fastMode {
-		t.Fatal("quick controls did not edit the draft")
+	if m.currentSubagentRow().binding.Effort != "xhigh" {
+		t.Fatal("model navigation lost the effort draft")
 	}
 	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEscape))
 	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	if m.currentSubagentRow().binding.Effort != "high" || m.currentSubagentRow().fastMode || service.bindRequest.ProfileID != "" {
+	if m.currentSubagentRow().binding.Effort != "high" || service.bindRequest.ProfileID != "" {
 		t.Fatal("Escape persisted a draft")
 	}
 }
@@ -82,7 +72,7 @@ func clickTeamText(t *testing.T, m *Model, rowText, text string) tea.Cmd {
 		if !strings.Contains(line, rowText) {
 			continue
 		}
-		index := strings.Index(line, text)
+		index := strings.LastIndex(line, text)
 		if index < 0 {
 			continue
 		}
@@ -98,95 +88,42 @@ func clickTeamText(t *testing.T, m *Model, rowText, text string) tea.Cmd {
 	return nil
 }
 
-func TestTeamCellFocusSingleClickEditsControlsAndAppliesModel(t *testing.T) {
+func TestTeamPickerMouseEditsEffortAndAppliesModel(t *testing.T) {
 	m, service := teamCellTestModel(t)
+	alternate := testProviderModelProfile()
+	alternate.ID, alternate.DisplayName = "provider:flash", "deepseek/deepseek-flash"
+	m.subagentOverlay.status.Targets = append(m.subagentOverlay.status.Targets, alternate)
 	clickTeamText(t, m, "orbit", "openai-codex")
 	if m.subagentOverlay.page != subagentPageBinding {
 		t.Fatal("single click did not open model picker")
 	}
-	clickTeamText(t, m, "openai-codex", "›")
+	clickTeamText(t, m, "openai-codex", " ›")
 	if m.currentSubagentRow().binding.Effort != "xhigh" || m.subagentOverlay.pending {
 		t.Fatal("effort click applied or missed draft")
 	}
-	assertTeamSingleCellHighlight(t, m)
-	clickTeamText(t, m, "openai-codex", "Fast off")
-	if !m.currentSubagentRow().fastMode || m.subagentOverlay.pending {
-		t.Fatal("Fast click applied or missed draft")
+	if cmd := clickTeamText(t, m, alternate.DisplayName, "gh"); cmd != nil || m.currentSubagentRow().binding.Effort != "xhigh" {
+		t.Fatal("clicking effort on an unselected model did not edit its draft")
 	}
-	assertTeamSingleCellHighlight(t, m)
-	cmd := clickTeamText(t, m, "openai-codex", "openai-codex")
+	cmd := clickTeamText(t, m, alternate.DisplayName, alternate.DisplayName)
 	if cmd == nil {
 		t.Fatal("single model click did not apply")
 	}
 	m.Update(cmd())
-	if service.bindRequest.Handle != agentbinding.HandleOrbit || service.bindRequest.Speed != "fast" || service.bindRequest.Effort != "xhigh" {
+	if service.bindRequest.Handle != agentbinding.HandleOrbit || service.bindRequest.ProfileID != alternate.ID || service.bindRequest.Effort != "xhigh" {
 		t.Fatalf("wrong typed binding: %+v", service.bindRequest)
 	}
 }
 
-func TestTeamCellFocusMainQuickControlsUseTypedBinding(t *testing.T) {
+func TestTeamOverviewHorizontalArrowsDoNotEdit(t *testing.T) {
 	m, service := teamCellTestModel(t)
 	selectSubagentTestRow(t, m, "handle:orbit")
-	cmd := m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyRight))
-	if cmd == nil {
-		t.Fatal("main effort shortcut did not save")
-	}
-	msg := cmd().(subagentOverlayResultMsg)
-	for i := range msg.status.Handles {
-		if msg.status.Handles[i].Definition.Handle == agentbinding.HandleOrbit {
-			msg.status.Handles[i].Binding = service.bindRequest
+	for _, key := range []rune{tea.KeyRight, tea.KeyLeft} {
+		if cmd := m.handleSubagentOverlayKey(subagentSpecialKey(key)); cmd != nil {
+			t.Fatal("overview effort shortcut dispatched a mutation")
 		}
 	}
-	m.Update(msg)
-	if service.bindRequest.Handle != agentbinding.HandleOrbit || service.bindRequest.Effort != "xhigh" || m.subagentOverlay.page != subagentPageMain {
-		t.Fatal("wrong quick-edit binding or navigation")
-	}
-	// The stub's read refresh does not retain synthetic capabilities.
-	for i := range m.subagentOverlay.status.Handles {
-		if m.subagentOverlay.status.Handles[i].Definition.Handle == agentbinding.HandleOrbit {
-			m.subagentOverlay.status.Handles[i].Profile.Speed = modelprofile.SpeedCapability{Choices: []modelprofile.SpeedChoice{{Canonical: "standard"}, {Canonical: "fast"}}}
-		}
-	}
-	m.refreshSubagentRows("handle:orbit")
-	cmd = m.handleSubagentOverlayKey(keyPress("f"))
-	if cmd == nil {
-		t.Fatal("main Fast shortcut did not save")
-	}
-	cmd()
-	if service.bindRequest.Speed != "fast" || service.bindRequest.Effort != "xhigh" {
-		t.Fatal("Fast changed effort")
-	}
-}
-
-func assertTeamSingleCellHighlight(t *testing.T, m *Model) {
-	t.Helper()
-	frame := m.renderSubagentOverlay()
-	g := m.subagentOverlay.geometry
-	row := m.subagentOverlay.index
-	screen := uv.NewScreenBuffer(g.width, g.height)
-	screen.Method = ansi.GraphemeWidth
-	uv.NewStyledString(frame).Draw(screen, screen.Bounds())
-	var focused subagentCell
-	for _, cell := range g.cells[row] {
-		if cell.field == m.subagentOverlay.field {
-			focused = cell
-		}
-	}
-	if focused.width == 0 {
-		t.Fatal("focused field has no visible cell")
-	}
-	for y := range g.height {
-		for x := range g.width {
-			cell := screen.CellAt(x, y)
-			if cell == nil || cell.Width == 0 {
-				continue
-			}
-			selected := colorInSet(cell.Style.Bg, []color.Color{m.theme.SelectionBg})
-			want := y+g.y == g.rows[row] && x+g.x >= focused.x && x+g.x < focused.x+focused.width
-			if selected != want {
-				t.Fatalf("focus leaked or missing at (%d,%d), field=%v want=%v selected=%v\n%s", x, y, m.subagentOverlay.field, want, selected, ansi.Strip(frame))
-			}
-		}
+	if m.currentSubagentRow().binding.Effort != "high" || service.bindRequest.ProfileID != "" {
+		t.Fatal("overview arrows altered the binding")
 	}
 }
 
@@ -194,14 +131,87 @@ func TestTeamCellFocusLightTheme(t *testing.T) {
 	m, _ := teamCellTestModel(t)
 	m.theme = tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	selectSubagentTestRow(t, m, "handle:guardian")
-	assertTeamSingleCellHighlight(t, m)
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
-	assertTeamSingleCellHighlight(t, m)
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	for range 3 {
-		assertTeamSingleCellHighlight(t, m)
-		m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
+	frame := m.renderSubagentOverlay()
+	if plain := ansi.Strip(frame); strings.Contains(plain, "Purpose") || !strings.Contains(plain, "Quick checks") {
+		t.Fatalf("overview did not display role descriptions without a heading:\n%s", plain)
+	}
+	g := m.subagentOverlay.geometry
+	screen := uv.NewScreenBuffer(g.width, g.height)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+	y := g.rows[m.subagentOverlay.index] - g.y
+	line := strings.Split(ansi.Strip(frame), "\n")[y]
+	if !strings.Contains(line, "openai-codex/gpt-5.6-sol [xhigh]") {
+		t.Fatalf("effort is separated from the model: %q", line)
+	}
+	right := g.closeX - g.x + len("[x]") - 1
+	if !colorInSet(screen.CellAt(right, y).Style.Bg, []color.Color{m.theme.SelectionBg}) {
+		t.Fatal("selection stops short of the divider edge")
+	}
+	var colors []color.Color
+	for _, value := range []string{"openai-codex", "[xhigh]", "Tool approvals"} {
+		column := strings.Index(line, value)
+		if column < 0 {
+			t.Fatalf("selected Guardian row omitted %q: %q", value, line)
+		}
+		colors = append(colors, screen.CellAt(displayColumns(line[:column]), y).Style.Fg)
+	}
+	if colors[0] == nil || colors[1] == nil || colors[2] == nil ||
+		colorInSet(colors[0], colors[1:]) || colorInSet(colors[1], colors[2:]) {
+		t.Fatal("model, effort, and purpose must remain visually distinct on the selected row")
+	}
+}
+
+func TestTeamGuardianPaneFocusAndAlignment(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		for _, width := range []int{35, 120} {
+			t.Run(fmt.Sprintf("dark=%t/width=%d", dark, width), func(t *testing.T) {
+				m, _ := teamCellTestModel(t)
+				m.theme = tuikit.ResolveThemeWithState(dark, false, colorprofile.TrueColor)
+				m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+				selectSubagentTestRow(t, m, "handle:guardian")
+				m.Update(subagentSpecialKey(tea.KeyEnter))
+				assertFrame := func(focused, inactive, selected, other string) {
+					t.Helper()
+					frame := m.renderSubagentOverlay()
+					g := m.subagentOverlay.geometry
+					screen := uv.NewScreenBuffer(g.width, g.height)
+					screen.Method = ansi.GraphemeWidth
+					uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+					lines := strings.Split(ansi.Strip(frame), "\n")
+					cell := func(value string) (int, *uv.Cell) {
+						t.Helper()
+						for y, line := range lines {
+							if x := strings.Index(line, value); x >= 0 {
+								column := displayColumns(line[:x])
+								return column, screen.CellAt(column, y)
+							}
+						}
+						t.Fatalf("missing %q in frame:\n%s", value, ansi.Strip(frame))
+						return 0, nil
+					}
+					_, active := cell(focused)
+					_, passive := cell(inactive)
+					if colorInSet(active.Style.Fg, []color.Color{passive.Style.Fg}) {
+						t.Fatal("focused and inactive headings share a foreground")
+					}
+					for _, heading := range []*uv.Cell{active, passive} {
+						if corrected := m.theme.ReadableTextColor(heading.Style.Fg, heading.Style.Bg); !colorInSet(heading.Style.Fg, []color.Color{corrected}) {
+							t.Fatal("a section heading is not readable on the panel")
+						}
+					}
+					activeX, activeModel := cell(selected)
+					passiveX, passiveModel := cell(other)
+					if activeX != passiveX || !colorInSet(activeModel.Style.Bg, []color.Color{m.theme.CommandActiveStyle().GetBackground()}) ||
+						colorInSet(passiveModel.Style.Bg, []color.Color{m.theme.CommandActiveStyle().GetBackground()}) {
+						t.Fatalf("model alignment/highlight mismatch: active=%d inactive=%d", activeX, passiveX)
+					}
+				}
+				assertFrame("Review model", "Classifier", "openai-", "Disabled")
+				m.Update(subagentSpecialKey(tea.KeyDown))
+				assertFrame("Classifier", "Review model", "Disabled", "openai-")
+			})
+		}
 	}
 }
 
@@ -215,8 +225,14 @@ func TestTeamCellFocusRenderedFrames(t *testing.T) {
 				if picker {
 					m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 				}
-				m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
-				assertTeamSingleCellHighlight(t, m)
+				if !picker {
+					for i := range m.subagentOverlay.status.Handles {
+						item := &m.subagentOverlay.status.Handles[i]
+						if item.Definition.Handle == agentbinding.HandleGuardianScreen {
+							item.Binding = agentbinding.Binding{Handle: agentbinding.HandleGuardianScreen, ProfileID: "provider:jev", Effort: "none"}
+						}
+					}
+				}
 				frame := m.renderSubagentOverlay()
 				plain := ansi.Strip(frame)
 				for _, line := range strings.Split(plain, "\n") {
@@ -224,7 +240,7 @@ func TestTeamCellFocusRenderedFrames(t *testing.T) {
 						t.Fatalf("overflow: %q", line)
 					}
 				}
-				if strings.Contains(plain, "7/12") || strings.Contains(plain, "Choose Agent model") {
+				if strings.Contains(plain, "7/12") || strings.Contains(plain, "Choose Agent model") || strings.Contains(plain, "▽") {
 					t.Fatal("obsolete menu text")
 				}
 				// Keep reviewable full frames for both menus at wide and narrow sizes.

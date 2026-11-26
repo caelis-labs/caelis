@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -457,7 +458,10 @@ func validateCommandRequest(action Action, request any) error {
 	case SandboxRequest:
 		return validateSandboxCommandRequest(action, typed)
 	case BindAgentBindingRequest:
-		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.Binding.Handle, "")
+		if len(typed.GuardianBindings) > 0 && typed.Binding != (agentbinding.Binding{}) {
+			return errors.New("controlclient: Guardian update cannot include a single binding")
+		}
+		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.targetHandle(), "")
 	case ResetAgentBindingRequest:
 		return validateAgentBindingCommandRequest(action, typed.WriteBase, typed.Handle, "")
 	case CreateAgentRoleRequest:

@@ -38,7 +38,9 @@ type legacyBindingStatus struct {
 }
 
 func TestAgentBindingStatusNegotiatesEligibilityWithoutBreakingStrictClients(t *testing.T) {
+	revision := uint64(9007199254740993)
 	status := agentbinding.Status{
+		ConfigurationRevision: &revision,
 		Handles: []agentbinding.HandleStatus{
 			{Definition: agentbinding.Definition{Handle: agentbinding.HandleGuardian, Configurable: true}, EligibleProfileIDs: []string{"provider:model"}},
 			{Definition: agentbinding.Definition{Handle: agentbinding.HandleSelf}, EligibleProfileIDs: []string{}},
@@ -78,10 +80,14 @@ func TestAgentBindingStatusNegotiatesEligibilityWithoutBreakingStrictClients(t *
 	if err := wirev1.Unmarshal(raw, &legacy); code != http.StatusOK || err != nil || len(legacy.Handles) != 2 {
 		t.Fatalf("strict legacy client could not read new Host: status %d, error %v, body %s", code, err, raw)
 	}
-	if strings.Contains(string(raw), "eligible_profile_ids") {
+	if strings.Contains(string(raw), "eligible_profile_ids") || strings.Contains(string(raw), "configuration_revision") {
 		t.Fatalf("unrequested eligibility entered legacy response: %s", raw)
 	}
 	code, raw = readStatus("?include=eligible_profile_ids")
+	if code != http.StatusOK || strings.Contains(string(raw), "configuration_revision") {
+		t.Fatalf("eligibility-only client received the revision: status %d, body %s", code, raw)
+	}
+	code, raw = readStatus("?include=eligible_profile_ids&configuration_revision=true")
 	var expanded agentbinding.Status
 	if err := wirev1.Unmarshal(raw, &expanded); code != http.StatusOK || err != nil || !reflect.DeepEqual(expanded, status) {
 		t.Fatalf("negotiated response = %+v, status %d, error %v; want %+v", expanded, code, err, status)
@@ -97,7 +103,7 @@ func TestAgentBindingStatusNegotiatesEligibilityWithoutBreakingStrictClients(t *
 	if err != nil || !reflect.DeepEqual(got, status) {
 		t.Fatalf("current HTTP client did not request eligibility: %+v, %v", got, err)
 	}
-	for _, query := range []string{"?include=unknown", "?include=", "?include=eligible_profile_ids&include=eligible_profile_ids"} {
+	for _, query := range []string{"?include=unknown", "?include=", "?include=eligible_profile_ids&include=eligible_profile_ids", "?configuration_revision=false", "?configuration_revision=true&configuration_revision=true"} {
 		if code, raw := readStatus(query); code != http.StatusBadRequest {
 			t.Errorf("unsupported selection %q returned %d: %s", query, code, raw)
 		}
@@ -106,7 +112,7 @@ func TestAgentBindingStatusNegotiatesEligibilityWithoutBreakingStrictClients(t *
 
 func TestAgentBindingStatusClientReadsLegacyHostWithoutInventingEligibility(t *testing.T) {
 	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != apiPrefix+"/agents/binding-status" || r.URL.Query().Get("include") != "eligible_profile_ids" {
+		if r.Method != http.MethodPost || r.URL.Path != apiPrefix+"/agents/binding-status" || r.URL.Query().Get("include") != "eligible_profile_ids" || r.URL.Query().Get("configuration_revision") != "true" {
 			t.Errorf("unexpected status request: %s %s", r.Method, r.URL)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -118,7 +124,7 @@ func TestAgentBindingStatusClientReadsLegacyHostWithoutInventingEligibility(t *t
 		t.Fatal(err)
 	}
 	status, err := client.AgentBindingStatus(t.Context(), appserver.AgentRequest{})
-	if err != nil || len(status.Handles) != 1 || status.Handles[0].EligibleProfileIDs != nil {
+	if err != nil || len(status.Handles) != 1 || status.Handles[0].EligibleProfileIDs != nil || status.ConfigurationRevision != nil {
 		t.Fatalf("old Host eligibility should remain unknown: %+v, %v", status, err)
 	}
 }

@@ -1,21 +1,21 @@
 package tuiapp
 
-import "strings"
+import (
+	"strings"
 
-func (s *subagentOverlayState) searchable() bool {
-	return s.page == subagentPageMain || s.page == subagentPageBinding || s.page == subagentPageSets
-}
+	"github.com/caelis-labs/caelis/control/agentbinding"
+)
 
 func (m *Model) subagentRows() []subagentOverlayRow {
 	rows := m.allSubagentRows()
 	state := m.subagentOverlay
-	if state == nil || !state.searchable() || strings.TrimSpace(state.query) == "" {
+	if state == nil || strings.TrimSpace(state.query) == "" {
 		return rows
 	}
 	query := strings.ToLower(strings.TrimSpace(state.query))
 	filtered := make([]subagentOverlayRow, 0, len(rows))
 	for _, row := range rows {
-		text := strings.ToLower(row.label + " " + row.detail + " " + row.companion.searchText() + " " + row.search + " " + string(row.handle))
+		text := strings.ToLower(row.label + " " + row.detail + " " + row.binding.Effort + " " + row.search + " " + string(row.handle))
 		if strings.Contains(text, query) {
 			filtered = append(filtered, row)
 		}
@@ -33,7 +33,6 @@ func (m *Model) refreshSubagentRows(key string) {
 			break
 		}
 	}
-	m.normalizeSubagentField()
 }
 
 func (m *Model) searchSubagentRows(query string) {
@@ -47,30 +46,58 @@ func (m *Model) searchSubagentRows(query string) {
 	m.refreshSubagentRows(key)
 }
 
-func (m *Model) openSubagentPage(page subagentOverlayPage, index int) {
+func (m *Model) openSubagentBinding(handle agentbinding.Handle) {
 	state := m.subagentOverlay
-	if state == nil {
-		return
+	state.parent = subagentOverlayNav{
+		index: state.index, key: m.currentSubagentRow().key, query: state.query,
 	}
-	state.parents = append(state.parents, subagentOverlayNav{
-		page: state.page, index: state.index, query: state.query,
-		key: m.currentSubagentRow().key, depth: len(state.parents), field: state.field,
-	})
-	m.restoreSubagentPage(subagentOverlayNav{page: page, index: index, depth: len(state.parents)})
-	if page == subagentPageBinding {
-		for i, row := range state.rows {
-			if row.current {
-				state.index = i
-				break
-			}
+	state.bindingHandle = handle
+	m.restoreSubagentPage(subagentPageBinding, subagentOverlayNav{})
+	state.selectCurrent()
+	if handle == agentbinding.HandleGuardian {
+		rows := m.subagentBindingRows(agentbinding.HandleGuardianScreen)
+		if len(rows) > 1 {
+			state.classifierAvailable = true
+			state.draft = m.currentSubagentRow().binding
+			state.other = subagentList{rows: rows}
+			state.other.selectCurrent()
+			state.other.draft = state.other.rows[state.other.index].binding
 		}
 	}
 }
 
-func (m *Model) restoreSubagentPage(nav subagentOverlayNav) {
+func (list *subagentList) selectCurrent() {
+	for i, row := range list.rows {
+		if row.current {
+			list.index = i
+			return
+		}
+	}
+}
+
+func (m *Model) focusSubagentClassifier(focus bool) {
 	state := m.subagentOverlay
-	state.parents = state.parents[:min(nav.depth, len(state.parents))]
-	state.page, state.index, state.query, state.field = nav.page, nav.index, nav.query, nav.field
+	if !state.guardianPicker() || state.classifierFocused == focus {
+		return
+	}
+	// The filter belongs to the focused section. Restore the previous
+	// section's draft to view before moving focus to the other section.
+	state.query = ""
+	m.refreshSubagentRows("")
+	for i, row := range state.rows {
+		if row.binding == state.draft {
+			state.index = i
+			break
+		}
+	}
+	state.subagentList, state.other = state.other, state.subagentList
+	state.classifierFocused = focus
+	state.pressedKey = ""
+}
+
+func (m *Model) restoreSubagentPage(page subagentOverlayPage, nav subagentOverlayNav) {
+	state := m.subagentOverlay
+	state.page, state.index, state.query = page, nav.index, nav.query
 	state.windowStart = 0
 	state.err, state.notice, state.pressedKey = "", "", ""
 	m.refreshSubagentRows(nav.key)
@@ -81,24 +108,14 @@ func (m *Model) backSubagentOverlay() {
 	if state == nil || state.pending {
 		return
 	}
-	if len(state.parents) == 0 {
+	if state.page == subagentPageMain {
 		m.subagentOverlay = nil
 		return
 	}
-	if state.page == subagentPageBinding {
-		state.creatingRole = false
-		state.selectedEffortByProfile = nil
-	}
-	m.restoreSubagentPage(state.parents[len(state.parents)-1])
-}
-
-func (s *subagentOverlayState) navigateAfterMutation(page subagentOverlayPage, index int) {
-	s.afterMutation = &subagentOverlayNav{page: page, index: index, depth: len(s.parents)}
-	for i := len(s.parents) - 1; i >= 0; i-- {
-		if s.parents[i].page == page {
-			nav := s.parents[i]
-			s.afterMutation = &nav
-			return
-		}
-	}
+	state.selectedEffortByProfile = nil
+	state.draft = agentbinding.Binding{}
+	state.other = subagentList{}
+	state.classifierFocused = false
+	state.classifierAvailable = false
+	m.restoreSubagentPage(subagentPageMain, state.parent)
 }

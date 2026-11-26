@@ -75,6 +75,16 @@ type DisconnectCandidatesSnapshot struct {
 type BindAgentBindingRequest struct {
 	WriteBase
 	Binding agentbinding.Binding `json:"binding"`
+	// GuardianBindings selects an atomic two-handle update. Binding must be zero
+	// so older Hosts reject the request before making a single-handle change.
+	GuardianBindings []agentbinding.Binding `json:"guardian_bindings,omitempty"`
+}
+
+func (req BindAgentBindingRequest) targetHandle() agentbinding.Handle {
+	if len(req.GuardianBindings) > 0 {
+		return agentbinding.HandleGuardian
+	}
+	return agentbinding.NormalizeHandle(req.Binding.Handle)
 }
 
 type ResetAgentBindingRequest struct {
