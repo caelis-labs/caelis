@@ -186,7 +186,7 @@ func (c *Client) AgentBindingStatus(ctx context.Context, req appserver.AgentRequ
 	if strings.TrimSpace(req.SessionID) != "" {
 		return agentbinding.Status{}, errors.New("control http client: Agent binding status is Host-scoped")
 	}
-	return doFocusedQueryJSON[agentbinding.Status](ctx, c, http.MethodPost, "/agents/binding-status", url.Values{"include": {"eligible_profile_ids"}}, req)
+	return doFocusedQueryJSON[agentbinding.Status](ctx, c, http.MethodPost, "/agents/binding-status", url.Values{"include": {"eligible_profile_ids"}, "configuration_revision": {"true"}}, req)
 }
 func (c *Client) BindAgentBinding(ctx context.Context, req appserver.BindAgentBindingRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/agents/bind", req.WriteBase, req)

@@ -45,13 +45,13 @@ func (m *Model) renderSubagentOverlay() string {
 		reviewBudget := min(max(1, len(review.rows)), rowsBudget-classifierBudget)
 		classifierBudget = min(max(1, len(screening.rows)), rowsBudget-reviewBudget)
 
-		body = append(body, m.subagentPaneTitle("Review model", width))
+		body = append(body, m.subagentPaneTitle("Review model", width, !state.classifierFocused))
 		primary = m.renderSubagentList(review, !state.classifierFocused, width, len(body), reviewBudget)
 		body = append(body, primary.lines...)
 		if gap > 0 {
 			body = append(body, "")
 		}
-		body = append(body, m.subagentPaneTitle("Classifier", width))
+		body = append(body, m.subagentPaneTitle("Classifier", width, state.classifierFocused))
 		classifier = m.renderSubagentList(screening, state.classifierFocused, width, len(body), classifierBudget)
 		body = append(body, classifier.lines...)
 	default:
@@ -60,7 +60,7 @@ func (m *Model) renderSubagentOverlay() string {
 			if state.classifierFocused {
 				title = "Classifier"
 			}
-			body = append(body, m.subagentPaneTitle(title, width))
+			body = append(body, m.subagentPaneTitle(title, width, true))
 			budget--
 		}
 		list := m.renderSubagentList(&state.subagentList, true, width, len(body), budget)
@@ -113,6 +113,7 @@ func (m *Model) renderSubagentOverlay() string {
 
 func (m *Model) renderSubagentTitle(width int, scroll completionScrollAffordance) string {
 	state := m.subagentOverlay
+	labelWidth := max(1, width-len(overlayCloseLabel)-2)
 	label := "/team"
 	if state.page == subagentPageBinding {
 		role := string(state.bindingHandle)
@@ -130,10 +131,17 @@ func (m *Model) renderSubagentTitle(width int, scroll completionScrollAffordance
 				}
 			}
 		}
-		label = modelPickerCountLabel(label+" › "+role, count, scroll)
+		path := label + " › " + role
+		label = modelPickerCountLabel(path, count, scroll)
+		if displayColumns(label) > labelWidth {
+			label = path
+			if displayColumns(label) > labelWidth {
+				label = role
+			}
+		}
 	}
 	close := m.overlayButtonStyle(!state.pending && !state.loading, state.closeButton.hovered || state.closeButton.pressed).Render(overlayCloseLabel)
-	return padRightDisplay(" "+m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, width-len(overlayCloseLabel)-2)), width-len(overlayCloseLabel)) + close
+	return padRightDisplay(" "+m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, labelWidth)), width-len(overlayCloseLabel)) + close
 }
 
 type subagentRenderedList struct {
@@ -171,10 +179,11 @@ func (m *Model) renderSubagentList(list *subagentList, focused bool, width, offs
 	for i := start; i < end; i++ {
 		row := list.rows[i]
 		selected := focused && i == list.index
-		mark := ""
+		// A fixed marker column keeps model names aligned across both sections.
+		mark := " "
 		if row.current {
 			mark = "●"
-		} else if !focused && i == list.index {
+		} else if !focused && row.binding == list.draft {
 			mark = "○"
 		}
 		table = append(table, m.modelPickerRow(row.label, row.detail, subagentPickerEffort(row, selected, width), mark, selected))
@@ -184,7 +193,7 @@ func (m *Model) renderSubagentList(list *subagentList, focused bool, width, offs
 	for i, row := range table {
 		index := start + i
 		rows[index] = offset + len(rendered.lines)
-		rendered.lines = append(rendered.lines, m.renderCompletionColumnsLine(row.identity, row.hint, identityWidth, focused && index == list.index))
+		rendered.lines = append(rendered.lines, m.renderTeamModelRow(row, identityWidth, width, focused, index == list.index))
 		model := list.rows[index]
 		if len(model.efforts) > 1 {
 			hintStart := identityWidth + 2
@@ -201,9 +210,28 @@ func (m *Model) renderSubagentList(list *subagentList, focused bool, width, offs
 	return rendered
 }
 
+func (m *Model) renderTeamModelRow(row completionTableRow, identityWidth, width int, focused, selected bool) string {
+	if focused {
+		return m.renderCompletionColumnsLine(row.identity, row.hint, identityWidth, selected)
+	}
+	style := m.theme.SecondaryTextStyle()
+	if selected {
+		style = m.theme.TextStyle()
+	}
+	if row.hint == "" || width <= identityWidth+2 {
+		return m.renderCompletionUnselectedLine(width, style.Render(truncateTailDisplay(row.identity, width)))
+	}
+	identity := padRightDisplay(truncateTailDisplay(row.identity, identityWidth), identityWidth)
+	effort := m.theme.MutedTextStyle().Render(truncateTailDisplay(row.hint, width-identityWidth-2))
+	return m.renderCompletionUnselectedLine(width, style.Render(identity), "  ", effort)
+}
+
 func subagentPickerEffort(row subagentOverlayRow, selected bool, width int) string {
 	if row.reset || row.handle == agentbinding.HandleGuardianScreen {
 		return ""
+	}
+	if width >= 22 && width < 28 && selected && len(row.efforts) > 1 {
+		return "‹" + row.binding.Effort + "›"
 	}
 	return pickerEffortControl(row.efforts, row.binding.Effort, selected, width)
 }
@@ -251,6 +279,8 @@ func (m *Model) subagentOverlayFooter() string {
 		full = "esc close"
 	case state.pending:
 		full = "Saving…"
+	case state.reloadRequired:
+		full, compact, minimal = "enter reload  esc close", "enter reload  esc", "enter reload"
 	case state.err != "" && len(state.status.Handles) == 0:
 		full = "enter retry  esc close"
 	}

@@ -293,6 +293,7 @@ export interface AgentBindingStatus {
   Handles: Array<AgentHandleStatus>;
   Sets: Array<AgentBindingSetStatus>;
   Targets: Array<ModelProfile>;
+  configuration_revision?: Uint64Decimal;
   [key: string]: JSONValue;
 }
 

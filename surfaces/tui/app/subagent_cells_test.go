@@ -160,26 +160,58 @@ func TestTeamCellFocusLightTheme(t *testing.T) {
 		colorInSet(colors[0], colors[1:]) || colorInSet(colors[1], colors[2:]) {
 		t.Fatal("model, effort, and purpose must remain visually distinct on the selected row")
 	}
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	review := m.renderSubagentOverlay()
-	g = m.subagentOverlay.geometry
-	screen = uv.NewScreenBuffer(g.width, g.height)
-	screen.Method = ansi.GraphemeWidth
-	uv.NewStyledString(review).Draw(screen, screen.Bounds())
-	for y, line := range strings.Split(ansi.Strip(review), "\n") {
-		for _, title := range []string{"Review model", "Classifier"} {
-			if start := strings.Index(line, title); start >= 0 {
-				fg := screen.CellAt(displayColumns(line[:start]), y).Style.Fg
-				if !colorInSet(fg, []color.Color{m.theme.MutedTextStyle().GetForeground()}) {
-					t.Fatalf("%s heading does not use the muted text color", title)
+}
+
+func TestTeamGuardianPaneFocusAndAlignment(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		for _, width := range []int{35, 120} {
+			t.Run(fmt.Sprintf("dark=%t/width=%d", dark, width), func(t *testing.T) {
+				m, _ := teamCellTestModel(t)
+				m.theme = tuikit.ResolveThemeWithState(dark, false, colorprofile.TrueColor)
+				m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+				selectSubagentTestRow(t, m, "handle:guardian")
+				m.Update(subagentSpecialKey(tea.KeyEnter))
+				assertFrame := func(focused, inactive, selected, other string) {
+					t.Helper()
+					frame := m.renderSubagentOverlay()
+					g := m.subagentOverlay.geometry
+					screen := uv.NewScreenBuffer(g.width, g.height)
+					screen.Method = ansi.GraphemeWidth
+					uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+					lines := strings.Split(ansi.Strip(frame), "\n")
+					cell := func(value string) (int, *uv.Cell) {
+						t.Helper()
+						for y, line := range lines {
+							if x := strings.Index(line, value); x >= 0 {
+								column := displayColumns(line[:x])
+								return column, screen.CellAt(column, y)
+							}
+						}
+						t.Fatalf("missing %q in frame:\n%s", value, ansi.Strip(frame))
+						return 0, nil
+					}
+					_, active := cell(focused)
+					_, passive := cell(inactive)
+					if colorInSet(active.Style.Fg, []color.Color{passive.Style.Fg}) {
+						t.Fatal("focused and inactive headings share a foreground")
+					}
+					for _, heading := range []*uv.Cell{active, passive} {
+						if corrected := m.theme.ReadableTextColor(heading.Style.Fg, heading.Style.Bg); !colorInSet(heading.Style.Fg, []color.Color{corrected}) {
+							t.Fatal("a section heading is not readable on the panel")
+						}
+					}
+					activeX, activeModel := cell(selected)
+					passiveX, passiveModel := cell(other)
+					if activeX != passiveX || !colorInSet(activeModel.Style.Bg, []color.Color{m.theme.CommandActiveStyle().GetBackground()}) ||
+						colorInSet(passiveModel.Style.Bg, []color.Color{m.theme.CommandActiveStyle().GetBackground()}) {
+						t.Fatalf("model alignment/highlight mismatch: active=%d inactive=%d", activeX, passiveX)
+					}
 				}
-			}
+				assertFrame("Review model", "Classifier", "openai-", "Disabled")
+				m.Update(subagentSpecialKey(tea.KeyDown))
+				assertFrame("Classifier", "Review model", "Disabled", "openai-")
+			})
 		}
-	}
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyDown))
-	classifier := m.renderSubagentOverlay()
-	if review == classifier || ansi.Strip(review) == review || ansi.Strip(classifier) == classifier {
-		t.Fatal("light theme did not distinguish active panes")
 	}
 }
 

@@ -34,6 +34,10 @@ For a paired Guardian update, the Agent binding request sends
 `guardian_bindings` with both handles and an empty `binding` object. Control
 validates the pair and commits one Host configuration revision. A Host that
 only understands single-handle binding rejects the empty handle before writing.
+Binding-status clients can request `configuration_revision=true` to receive the
+revision of the same Host snapshot as the bindings and targets, as a decimal
+string. This opt-in preserves the response shape for existing strict clients.
+The Team picker uses that revision for saves and requires a Host that returns it.
 
 ## Session interrupt
 

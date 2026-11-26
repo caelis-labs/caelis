@@ -39,7 +39,17 @@ func (s *subagentDelegationStub) ResetAgentBinding(_ context.Context, handle age
 	return s.status, nil
 }
 
-func (s *subagentDelegationStub) BindGuardian(_ context.Context, bindings []agentbinding.Binding) (agentbinding.Status, error) {
+func (s *subagentDelegationStub) ApplyAgentBindingDraft(ctx context.Context, revision uint64, bindings []agentbinding.Binding) (agentbinding.Status, error) {
+	if s.status.ConfigurationRevision == nil || revision != *s.status.ConfigurationRevision {
+		panic("Team did not submit the displayed configuration revision")
+	}
+	if len(bindings) == 1 {
+		binding := bindings[0]
+		if binding.ProfileID == "" {
+			return s.ResetAgentBinding(ctx, binding.Handle)
+		}
+		return s.BindAgentBinding(ctx, binding)
+	}
 	s.guardianBindings = bindings
 	return s.status, nil
 }
@@ -161,7 +171,8 @@ func TestProfileSlashDescriptionIncludesBoundProviderModelAndEffort(t *testing.T
 }
 
 func subagentTestStatus() agentbinding.Status {
-	status := agentbinding.Status{Targets: []modelprofile.ModelProfile{testProviderModelProfile(), testACPModelProfile()}}
+	revision := uint64(7)
+	status := agentbinding.Status{ConfigurationRevision: &revision, Targets: []modelprofile.ModelProfile{testProviderModelProfile(), testACPModelProfile()}}
 	for _, definition := range agentbinding.Definitions() {
 		item := agentbinding.HandleStatus{Definition: definition, Binding: agentbinding.Binding{Handle: definition.Handle}}
 		switch definition.Handle {

@@ -18,7 +18,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.sessionPicker != nil {
 		return m, m.handleSessionPickerMouse(msg)
 	}
-	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {
+	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt {
 		return m, m.handleThemePickerMouse(msg)
 	}
 	if m.wizardOverlay != nil && (m.activePrompt == nil || m.isWizardAuthChoice()) {

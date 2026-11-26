@@ -101,3 +101,31 @@ func TestTeamGuardianWithoutConnectedClassifier(t *testing.T) {
 		t.Fatal("cancel changed Guardian configuration")
 	}
 }
+
+func TestTeamGuardianFilterDoesNotChooseInactiveDraft(t *testing.T) {
+	for _, query := range []string{"alternative-review", "no review matches"} {
+		t.Run(query, func(t *testing.T) {
+			m, service := teamCellTestModel(t)
+			alt := testProviderModelProfile()
+			alt.ID, alt.DisplayName = "provider:alt-review", "alternative-review"
+			m.subagentOverlay.status.Targets = append(m.subagentOverlay.status.Targets, alt)
+			selectSubagentTestRow(t, m, "handle:guardian")
+			m.Update(subagentSpecialKey(tea.KeyEnter))
+			m.Update(tea.PasteMsg{Content: query})
+			if cmd := clickTeamText(t, m, "Jev", "Jev"); cmd != nil {
+				t.Fatal("classifier selection submitted before Enter")
+			}
+			if m.subagentOverlay.other.query != "" || m.subagentOverlay.other.draft.ProfileID != "provider:sol" {
+				t.Fatalf("inactive section lost its original draft: %+v", m.subagentOverlay.other)
+			}
+			_, cmd := m.Update(subagentSpecialKey(tea.KeyEnter))
+			if cmd == nil {
+				t.Fatal("Enter did not apply the classifier")
+			}
+			m.Update(cmd())
+			if got := service.bindRequest; got.Handle != agentbinding.HandleGuardianScreen || got.ProfileID != "provider:jev" || len(service.guardianBindings) != 0 {
+				t.Fatalf("expected only the classifier write, got single=%+v pair=%+v", got, service.guardianBindings)
+			}
+		})
+	}
+}

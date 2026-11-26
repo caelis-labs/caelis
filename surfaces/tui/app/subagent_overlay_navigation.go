@@ -58,8 +58,10 @@ func (m *Model) openSubagentBinding(handle agentbinding.Handle) {
 		rows := m.subagentBindingRows(agentbinding.HandleGuardianScreen)
 		if len(rows) > 1 {
 			state.classifierAvailable = true
+			state.draft = m.currentSubagentRow().binding
 			state.other = subagentList{rows: rows}
 			state.other.selectCurrent()
+			state.other.draft = state.other.rows[state.other.index].binding
 		}
 	}
 }
@@ -73,12 +75,24 @@ func (list *subagentList) selectCurrent() {
 	}
 }
 
-func (s *subagentOverlayState) focusClassifier(focus bool) {
-	if s.guardianPicker() && s.classifierFocused != focus {
-		s.subagentList, s.other = s.other, s.subagentList
-		s.classifierFocused = focus
-		s.pressedKey = ""
+func (m *Model) focusSubagentClassifier(focus bool) {
+	state := m.subagentOverlay
+	if !state.guardianPicker() || state.classifierFocused == focus {
+		return
 	}
+	// The filter belongs to the focused section. Restore the previous
+	// section's draft to view before moving focus to the other section.
+	state.query = ""
+	m.refreshSubagentRows("")
+	for i, row := range state.rows {
+		if row.binding == state.draft {
+			state.index = i
+			break
+		}
+	}
+	state.subagentList, state.other = state.other, state.subagentList
+	state.classifierFocused = focus
+	state.pressedKey = ""
 }
 
 func (m *Model) restoreSubagentPage(page subagentOverlayPage, nav subagentOverlayNav) {
@@ -99,6 +113,7 @@ func (m *Model) backSubagentOverlay() {
 		return
 	}
 	state.selectedEffortByProfile = nil
+	state.draft = agentbinding.Binding{}
 	state.other = subagentList{}
 	state.classifierFocused = false
 	state.classifierAvailable = false

@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"context"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,6 +17,15 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	key := msg.Key()
+	if state.reloadRequired {
+		switch key.Code {
+		case tea.KeyEnter:
+			return m.openSubagentOverlay()
+		case tea.KeyEscape:
+			m.subagentOverlay = nil
+		}
+		return nil
+	}
 	if state.loading || (state.err != "" && len(state.status.Handles) == 0) {
 		if key.Code == tea.KeyEscape {
 			m.backSubagentOverlay()
@@ -58,7 +66,7 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handleSubagentOverlayPaste(msg tea.PasteMsg) tea.Cmd {
-	if m == nil || m.subagentOverlay == nil || m.subagentOverlay.pending || m.subagentOverlay.loading {
+	if m == nil || m.subagentOverlay == nil || m.subagentOverlay.pending || m.subagentOverlay.loading || m.subagentOverlay.reloadRequired {
 		return nil
 	}
 	text := strings.ReplaceAll(normalizeClipboardText(msg.String()), "\n", " ")
@@ -68,7 +76,7 @@ func (m *Model) handleSubagentOverlayPaste(msg tea.PasteMsg) tea.Cmd {
 
 func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	state := m.subagentOverlay
-	if state == nil {
+	if state == nil || m.activePrompt != nil {
 		return false, nil
 	}
 	if state.pending || state.loading {
@@ -83,11 +91,21 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	}
+	if state.reloadRequired {
+		return true, nil
+	}
 	inside := mouse.X >= g.x && mouse.X < g.x+g.width && mouse.Y >= g.y && mouse.Y < g.y+g.height
 	index := subagentRowAtY(g.classifierRows, mouse.Y)
 	classifier := index >= 0
 	if !classifier {
 		index = subagentRowAtY(g.rows, mouse.Y)
+	}
+	list := &state.subagentList
+	if classifier != state.classifierFocused {
+		list = &state.other
+	}
+	if index >= len(list.rows) {
+		index = -1
 	}
 	delta := 0
 	if !classifier && index >= 0 && index < len(g.efforts) {
@@ -112,17 +130,20 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	case tea.MouseClickMsg:
 		state.pressedKey = ""
 		if mouse.Button == tea.MouseLeft && inside && index >= 0 {
-			state.focusClassifier(classifier)
-			state.index = index
-			state.notice = ""
-			state.pressedKey, state.pressedClassifier, state.pressedDelta = m.currentSubagentRow().key, classifier, delta
+			state.pressedKey, state.pressedClassifier, state.pressedDelta = list.rows[index].key, classifier, delta
 		}
 	case tea.MouseReleaseMsg:
 		pressed := state.pressedKey
 		state.pressedKey = ""
-		row := m.currentSubagentRow()
-		if inside && index >= 0 && index == state.index && pressed != "" && row.key == pressed &&
+		if inside && index >= 0 && pressed != "" && list.rows[index].key == pressed &&
 			classifier == state.pressedClassifier && delta == state.pressedDelta {
+			row := list.rows[index]
+			m.focusSubagentClassifier(classifier)
+			state.index = index
+			state.notice = ""
+			if state.guardianPicker() {
+				state.draft = row.binding
+			}
 			if delta != 0 && len(row.efforts) > 1 {
 				m.adjustSubagentEffort(delta)
 			} else if !state.guardianPicker() {
@@ -158,9 +179,12 @@ func (m *Model) moveSubagentSelection(delta int) {
 	next := state.index + delta
 	if (next < 0 || next >= len(state.rows)) && state.guardianPicker() {
 		// Enter the adjacent section on its current draft, without changing it.
-		state.focusClassifier(!state.classifierFocused)
+		m.focusSubagentClassifier(!state.classifierFocused)
 	} else if len(state.rows) > 0 {
 		state.index = (next + len(state.rows)) % len(state.rows)
+		if state.guardianPicker() {
+			state.draft = state.rows[state.index].binding
+		}
 	}
 	state.notice = ""
 	state.pressedKey = ""
@@ -182,6 +206,9 @@ func (m *Model) adjustSubagentEffort(delta int) {
 	row.effortIndex, row.binding.Effort = index, row.efforts[index]
 	state.selectedEffortByProfile[row.binding.ProfileID] = row.binding.Effort
 	state.rows[state.index] = row
+	if state.guardianPicker() {
+		state.draft = row.binding
+	}
 	state.err = ""
 }
 
@@ -195,44 +222,21 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 		return nil
 	}
 	if !state.guardianPicker() {
-		return m.applySubagentBinding(row.binding)
-	}
-	if len(state.other.rows) == 0 {
-		return nil
+		return m.runSubagentMutation([]agentbinding.Binding{row.binding})
 	}
 	var changes []agentbinding.Binding
-	for _, draft := range []agentbinding.Binding{row.binding, state.other.rows[state.other.index].binding} {
+	for _, draft := range []agentbinding.Binding{row.binding, state.other.draft} {
 		current := state.currentBinding(draft.Handle)
 		current.Handle = draft.Handle
 		if agentbinding.Normalize(draft) != agentbinding.Normalize(current) {
 			changes = append(changes, draft)
 		}
 	}
-	switch len(changes) {
-	case 0:
+	if len(changes) == 0 {
 		m.backSubagentOverlay()
-	case 1:
-		return m.applySubagentBinding(changes[0])
-	case 2:
-		service, ok := m.cfg.ControlService.(agentbinding.GuardianBindingService)
-		if !ok {
-			state.err = "Guardian configuration is unavailable."
-			return nil
-		}
-		return m.runSubagentMutation(func(ctx context.Context, _ agentbinding.Service) (agentbinding.Status, error) {
-			return service.BindGuardian(ctx, changes)
-		})
+		return nil
 	}
-	return nil
-}
-
-func (m *Model) applySubagentBinding(binding agentbinding.Binding) tea.Cmd {
-	return m.runSubagentMutation(func(ctx context.Context, service agentbinding.Service) (agentbinding.Status, error) {
-		if binding.ProfileID == "" {
-			return service.ResetAgentBinding(ctx, binding.Handle)
-		}
-		return service.BindAgentBinding(ctx, binding)
-	})
+	return m.runSubagentMutation(changes)
 }
 
 func truncateRunes(value string, limit int) string {

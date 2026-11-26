@@ -1411,6 +1411,36 @@ func TestSessionClientAdapterAgentBindingMutationUsesHostRevisionAndObservesOnly
 	}
 }
 
+func TestSessionClientAdapterAgentBindingDraftUsesDisplayedRevision(t *testing.T) {
+	const revision = 51
+	for _, binding := range []agentbinding.Binding{
+		{Handle: agentbinding.HandleOrbit, ProfileID: "provider:mimo", Effort: "high"},
+		{Handle: agentbinding.HandleOrbit},
+	} {
+		statusClient := &sandboxStatusClientProbe{}
+		agents := &agentBindingClientProbe{result: appserver.CommandResult{Outcome: appserver.OutcomeCommitted}}
+		adapter := &SessionClientAdapter{statusClient: statusClient, agentClient: agents}
+		if _, err := adapter.ApplyAgentBindingDraft(t.Context(), revision, []agentbinding.Binding{binding}); err != nil {
+			t.Fatal(err)
+		}
+		var write appserver.WriteBase
+		if binding.ProfileID == "" {
+			write = agents.resetRequest.WriteBase
+			if agents.resetRequest.Handle != binding.Handle || agents.bindCalls != 0 {
+				t.Fatalf("reset draft sent wrong command: %+v", agents.resetRequest)
+			}
+		} else {
+			write = agents.bindRequest.WriteBase
+			if agents.bindRequest.Binding != binding || agents.bindCalls != 1 {
+				t.Fatalf("binding draft sent wrong command: %+v", agents.bindRequest)
+			}
+		}
+		if len(statusClient.requests) != 0 || write.ExpectedRevision == nil || *write.ExpectedRevision != revision || agents.statusCalls != 1 {
+			t.Fatalf("draft write=%+v, Host reads=%d, Agent readbacks=%d", write, len(statusClient.requests), agents.statusCalls)
+		}
+	}
+}
+
 func TestSessionClientAdapterDisconnectUsesRevisionBoundCandidateAndReceipt(t *testing.T) {
 	agents := &disconnectAgentClientProbe{
 		snapshot: appserver.DisconnectCandidatesSnapshot{

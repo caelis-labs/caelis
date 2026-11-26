@@ -123,8 +123,12 @@ func subagentCellText(text string, width int) string {
 	return padRightDisplay(ansi.Truncate(strings.TrimSpace(text), width, "…"), width)
 }
 
-func (m *Model) subagentPaneTitle(title string, width int) string {
-	return " " + m.theme.MutedTextStyle().Render(truncateTailDisplay(title, width))
+func (m *Model) subagentPaneTitle(title string, width int, focused bool) string {
+	prefix, style := "  ", m.theme.SecondaryTextStyle()
+	if focused {
+		prefix, style = "▎ ", m.theme.TextStyle().Bold(true)
+	}
+	return " " + style.Render(prefix+truncateTailDisplay(title, max(1, width-2)))
 }
 
 func subagentViewport(list *subagentList, budget int) (int, int, []int) {

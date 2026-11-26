@@ -296,9 +296,10 @@ type AgentBindingSetStatus struct {
 }
 
 type AgentBindingStatus struct {
-	Handles []AgentHandleStatus     `json:"Handles"`
-	Sets    []AgentBindingSetStatus `json:"Sets"`
-	Targets []ModelProfile          `json:"Targets"`
+	Handles               []AgentHandleStatus     `json:"Handles"`
+	Sets                  []AgentBindingSetStatus `json:"Sets"`
+	Targets               []ModelProfile          `json:"Targets"`
+	ConfigurationRevision *Uint64Decimal          `json:"configuration_revision,omitempty"`
 }
 
 type AgentCandidate struct {

@@ -2,11 +2,13 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
@@ -53,6 +55,7 @@ type subagentList struct {
 	rows        []subagentOverlayRow
 	query       string
 	windowStart int
+	draft       agentbinding.Binding
 }
 
 type subagentOverlayState struct {
@@ -61,6 +64,7 @@ type subagentOverlayState struct {
 	status            agentbinding.Status
 	loading           bool
 	pending           bool
+	reloadRequired    bool
 	err               string
 	request           uint64
 	geometry          subagentOverlayGeometry
@@ -113,25 +117,22 @@ func (m *Model) openSubagentOverlay() tea.Cmd {
 	}
 }
 
-func (m *Model) runSubagentMutation(
-	action func(context.Context, agentbinding.Service) (agentbinding.Status, error),
-) tea.Cmd {
-	if m == nil || m.subagentOverlay == nil || action == nil {
+func (m *Model) runSubagentMutation(bindings []agentbinding.Binding) tea.Cmd {
+	state := m.subagentOverlay
+	service, ok := m.cfg.ControlService.(agentbinding.DraftService)
+	if !ok || state.status.ConfigurationRevision == nil {
+		state.err = "This Host cannot save Team drafts. Update the Host and reopen /team."
 		return nil
 	}
-	service := m.cfg.ControlService
-	if service == nil {
-		m.subagentOverlay.err = "participant and system-agent configuration is unavailable"
-		return nil
-	}
-	m.subagentOverlay.pending = true
-	m.subagentOverlay.err = ""
+	revision := *state.status.ConfigurationRevision
+	state.pending = true
+	state.err = ""
 	m.subagentRequestSeq++
 	request := m.subagentRequestSeq
-	m.subagentOverlay.request = request
+	state.request = request
 	ctx := contextOrBackground(m.cfg.Context)
 	return func() tea.Msg {
-		status, err := action(ctx, service)
+		status, err := service.ApplyAgentBindingDraft(ctx, revision, bindings)
 		return subagentOverlayResultMsg{request: request, status: status, err: err}
 	}
 }
@@ -146,6 +147,11 @@ func (m *Model) handleSubagentOverlayResult(msg subagentOverlayResultMsg) tea.Cm
 	state.pending = false
 	if msg.err != nil {
 		state.err = strings.TrimSpace(msg.err.Error())
+		var receipt *appserver.CommandReceiptError
+		if errors.As(msg.err, &receipt) && receipt.Receipt.Outcome == appserver.OutcomeConflicted {
+			state.reloadRequired = true
+			state.err = "Team changed on the Host. Press Enter to reload."
+		}
 		return nil
 	}
 	state.status = msg.status

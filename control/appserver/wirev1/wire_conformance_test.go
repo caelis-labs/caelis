@@ -106,6 +106,10 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			})
 		})
 	}
+	validateWireValue(t, "AgentBindingStatus", agentbinding.Status{
+		ConfigurationRevision: &revision, Handles: []agentbinding.HandleStatus{},
+		Targets: []modelprofile.ModelProfile{}, Sets: []agentbinding.BindingSetStatus{},
+	})
 	validateWireValue(t, "ErrorResponse", map[string]any{
 		"error": "invalid request", "code": errorcode.FailedPrecondition, "kind": appserver.ErrorKindSessionClosed,
 	})

@@ -103,32 +103,51 @@ func (a *SessionClientAdapter) AgentBindingStatus(ctx context.Context) (agentbin
 }
 
 func (a *SessionClientAdapter) BindAgentBinding(ctx context.Context, binding agentbinding.Binding) (agentbinding.Status, error) {
-	return a.runAgentBindingMutation(ctx, "Agent binding", "agent-binding", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+	return a.bindAgentBinding(ctx, binding, nil)
+}
+
+func (a *SessionClientAdapter) bindAgentBinding(ctx context.Context, binding agentbinding.Binding, expectedRevision *uint64) (agentbinding.Status, error) {
+	return a.runAgentBindingMutation(ctx, "Agent binding", "agent-binding", expectedRevision, func(base appserver.WriteBase) (appserver.CommandResult, error) {
 		return a.agentClient.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{WriteBase: base, Binding: binding})
 	})
 }
 
-// BindGuardian applies both draft bindings in one Host configuration revision.
-func (a *SessionClientAdapter) BindGuardian(ctx context.Context, bindings []agentbinding.Binding) (agentbinding.Status, error) {
-	return a.runAgentBindingMutation(ctx, "Guardian configuration", "guardian-binding", func(base appserver.WriteBase) (appserver.CommandResult, error) {
-		return a.agentClient.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{WriteBase: base, GuardianBindings: bindings})
-	})
+// ApplyAgentBindingDraft commits against the Host revision that seeded the draft.
+func (a *SessionClientAdapter) ApplyAgentBindingDraft(ctx context.Context, revision uint64, bindings []agentbinding.Binding) (agentbinding.Status, error) {
+	switch len(bindings) {
+	case 1:
+		binding := bindings[0]
+		if binding.ProfileID == "" {
+			return a.resetAgentBinding(ctx, binding.Handle, &revision)
+		}
+		return a.bindAgentBinding(ctx, binding, &revision)
+	case 2:
+		return a.runAgentBindingMutation(ctx, "Guardian configuration", "guardian-binding", &revision, func(base appserver.WriteBase) (appserver.CommandResult, error) {
+			return a.agentClient.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{WriteBase: base, GuardianBindings: bindings})
+		})
+	default:
+		return agentbinding.Status{}, errors.New("agent binding draft requires one binding or the Guardian pair")
+	}
 }
 
 func (a *SessionClientAdapter) ResetAgentBinding(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
-	return a.runAgentBindingMutation(ctx, "Agent binding reset", "agent-binding-reset", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+	return a.resetAgentBinding(ctx, handle, nil)
+}
+
+func (a *SessionClientAdapter) resetAgentBinding(ctx context.Context, handle agentbinding.Handle, expectedRevision *uint64) (agentbinding.Status, error) {
+	return a.runAgentBindingMutation(ctx, "Agent binding reset", "agent-binding-reset", expectedRevision, func(base appserver.WriteBase) (appserver.CommandResult, error) {
 		return a.agentClient.ResetAgentBinding(ctx, appserver.ResetAgentBindingRequest{WriteBase: base, Handle: handle})
 	})
 }
 
 func (a *SessionClientAdapter) CreateAgentRole(ctx context.Context, role agentbinding.Role, binding agentbinding.Binding) (agentbinding.Status, error) {
-	return a.runAgentBindingMutation(ctx, "Agent role creation", "agent-role-create", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+	return a.runAgentBindingMutation(ctx, "Agent role creation", "agent-role-create", nil, func(base appserver.WriteBase) (appserver.CommandResult, error) {
 		return a.agentClient.CreateAgentRole(ctx, appserver.CreateAgentRoleRequest{WriteBase: base, Role: role, Binding: binding})
 	})
 }
 
 func (a *SessionClientAdapter) DeleteAgentRole(ctx context.Context, handle agentbinding.Handle) (agentbinding.Status, error) {
-	return a.runAgentBindingMutation(ctx, "Agent role deletion", "agent-role-delete", func(base appserver.WriteBase) (appserver.CommandResult, error) {
+	return a.runAgentBindingMutation(ctx, "Agent role deletion", "agent-role-delete", nil, func(base appserver.WriteBase) (appserver.CommandResult, error) {
 		return a.agentClient.DeleteAgentRole(ctx, appserver.DeleteAgentRoleRequest{WriteBase: base, Handle: handle})
 	})
 }
@@ -152,7 +171,7 @@ func (a *SessionClientAdapter) runAgentBindingSetMutation(
 	name string,
 	command func(context.Context, appserver.AgentBindingSetRequest) (appserver.CommandResult, error),
 ) (agentbinding.Status, error) {
-	return a.runAgentBindingMutation(ctx, label, operationPrefix, func(base appserver.WriteBase) (appserver.CommandResult, error) {
+	return a.runAgentBindingMutation(ctx, label, operationPrefix, nil, func(base appserver.WriteBase) (appserver.CommandResult, error) {
 		return command(ctx, appserver.AgentBindingSetRequest{WriteBase: base, SetName: strings.TrimSpace(name)})
 	})
 }
@@ -161,19 +180,22 @@ func (a *SessionClientAdapter) runAgentBindingMutation(
 	ctx context.Context,
 	label string,
 	operationPrefix string,
+	expectedRevision *uint64,
 	command func(appserver.WriteBase) (appserver.CommandResult, error),
 ) (agentbinding.Status, error) {
 	if a == nil || a.agentClient == nil || a.statusClient == nil {
 		return agentbinding.Status{}, errors.New("app/gatewayapp/controladapter: Agent binding clients are unavailable")
 	}
-	before, err := a.addressedStatus(ctx, "", false)
-	if err != nil {
-		return agentbinding.Status{}, fmt.Errorf("app/gatewayapp/controladapter: read Host configuration revision: %w", err)
+	if expectedRevision == nil {
+		before, err := a.addressedStatus(ctx, "", false)
+		if err != nil {
+			return agentbinding.Status{}, fmt.Errorf("app/gatewayapp/controladapter: read Host configuration revision: %w", err)
+		}
+		expectedRevision = &before.Configuration.Revision
 	}
-	revision := before.Configuration.Revision
 	result, commandErr := command(appserver.WriteBase{
 		OperationID:      operationPrefix + "-" + uuid.NewString(),
-		ExpectedRevision: &revision,
+		ExpectedRevision: expectedRevision,
 	})
 	if result.Outcome != appserver.OutcomeCommitted {
 		if commandErr == nil {

@@ -173,3 +173,78 @@ func TestTeamPickerLongListGeometryAndMouseStayAligned(t *testing.T) {
 		})
 	}
 }
+
+func TestTeamApprovalPromptCannotClickHiddenBinding(t *testing.T) {
+	for _, pressBeforePrompt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("press-before-prompt=%t", pressBeforePrompt), func(t *testing.T) {
+			m, service := newSubagentOverlayTestModel(t)
+			m.Update(tea.WindowSizeMsg{Width: 100, Height: 18})
+			selectSubagentTestRow(t, m, "handle:orbit")
+			m.Update(subagentSpecialKey(tea.KeyEnter))
+			before := strings.Split(ansi.Strip(m.View().Content), "\n")
+			const y = 8
+			teamX := strings.Index(before[y], "Claude — Opus")
+			if teamX < 0 {
+				t.Fatalf("expected an actionable Team row at y=%d:\n%s", y, strings.Join(before, "\n"))
+			}
+			mouse := tea.Mouse{X: displayColumns(before[y][:teamX]), Y: y, Button: tea.MouseLeft}
+			teamGeometry := m.subagentOverlay.geometry
+			if pressBeforePrompt {
+				m.Update(tea.MouseClickMsg(mouse))
+			}
+			m.Update(PromptRequestMsg{
+				Title: "Approval Required", ApprovalRequestID: "fixture-approval",
+				Choices: []PromptChoice{
+					{Label: "Approval option 1", Value: "allow"},
+					{Label: "Approval option 2", Value: "deny"},
+					{Label: "Approval option 3", Value: "ask"},
+				},
+				Response: make(chan PromptResponse, 1),
+			})
+			approval := strings.Split(ansi.Strip(m.View().Content), "\n")
+			approvalX := strings.Index(approval[y], "Approval option 1")
+			if approvalX < 0 {
+				t.Fatalf("approval did not cover the previous Team row:\n%s", strings.Join(approval, "\n"))
+			}
+			click := mouse
+			if !pressBeforePrompt {
+				click.X = displayColumns(approval[y][:approvalX])
+				if click.X < teamGeometry.x || click.X >= teamGeometry.x+teamGeometry.width {
+					t.Fatal("approval option does not overlap the Team hit area")
+				}
+				m.Update(tea.MouseClickMsg(click))
+			}
+			if _, cmd := m.Update(tea.MouseReleaseMsg(click)); cmd != nil || m.subagentOverlay.pending {
+				t.Fatal("clicking a visible approval option dispatched a hidden Team mutation")
+			}
+			m.dismissApproval("fixture-approval")
+			m.View()
+			if _, cmd := m.Update(tea.MouseReleaseMsg(mouse)); cmd != nil || m.subagentOverlay.pending {
+				t.Fatal("prompt dismissal restored a stale Team press")
+			}
+			m.Update(tea.MouseClickMsg(mouse))
+			_, cmd := m.Update(tea.MouseReleaseMsg(mouse))
+			if cmd == nil {
+				t.Fatal("fresh click after prompt dismissal did not use restored Team geometry")
+			}
+			m.Update(cmd())
+			if service.bindRequest.ProfileID != "acp:claude:opus" {
+				t.Fatalf("fresh click selected the wrong binding: %+v", service.bindRequest)
+			}
+		})
+	}
+}
+
+func TestTeamLegacyHostCanReadButCannotApplyUnversionedDraft(t *testing.T) {
+	m, service := newSubagentOverlayTestModel(t)
+	m.subagentOverlay.status.ConfigurationRevision = nil
+	selectSubagentTestRow(t, m, "handle:orbit")
+	m.Update(subagentSpecialKey(tea.KeyEnter))
+	m.Update(subagentSpecialKey(tea.KeyRight))
+	if _, cmd := m.Update(subagentSpecialKey(tea.KeyEnter)); cmd != nil || service.bindRequest.Handle != "" {
+		t.Fatal("unversioned draft dispatched a mutation")
+	}
+	if frame := ansi.Strip(m.View().Content); !strings.Contains(frame, "Update the Host and reopen /team") {
+		t.Fatalf("missing Host compatibility message:\n%s", frame)
+	}
+}
