@@ -10,8 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 // SubmitChildInput resolves one topology address to an exact delegated child
@@ -183,7 +181,7 @@ func (r *Runtime) submitChildTaskInput(ctx context.Context, ref session.SessionR
 	}
 	if endpointBinder, ok := task.runner.(agent.ChildEndpointBinder); ok && endpointBinder != nil {
 		task.mu.Lock()
-		spawn := agent.SubagentSpawnContext{
+		spawn := taskapi.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(active),
 			CWD: strings.TrimSpace(active.CWD), TaskID: strings.TrimSpace(task.ref.TaskID), ActivityID: activityID,
 			Handle: strings.TrimSpace(task.handle), Role: subagentParticipantRole(task),
@@ -223,9 +221,9 @@ func (r *Runtime) submitChildTaskInput(ctx context.Context, ref session.SessionR
 	return result, err
 }
 
-func (r *Runtime) prepareChildTaskOutput(ctx context.Context, task *subagentTask) (string, output.Observer, delegation.CompletionSink, error) {
+func (r *Runtime) prepareChildTaskOutput(ctx context.Context, task *subagentTask) (string, taskapi.OutputObserver, taskapi.CompletionSink, error) {
 	if r == nil || r.tasks == nil || task == nil {
-		return "", output.Nop(), nil, errorcode.New(errorcode.FailedPrecondition, "Target Agent Task is unavailable")
+		return "", taskapi.NopOutputObserver(), nil, errorcode.New(errorcode.FailedPrecondition, "Target Agent Task is unavailable")
 	}
 	task.mu.Lock()
 	activityID := strings.TrimSpace(task.activityID)

@@ -10,17 +10,11 @@ import (
 	"strings"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
-	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
 
@@ -76,18 +70,18 @@ func (tm *taskRuntime) StartSubagent(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
-	runner subagent.Runner,
+	runner taskapi.SubagentRunner,
 	req taskapi.SubagentStartRequest,
 ) (taskapi.Snapshot, error) {
-	return tm.startSubagentTarget(ctx, activeSession, ref, runner, delegation.AgentTarget(req.Agent), req, true)
+	return tm.startSubagentTarget(ctx, activeSession, ref, runner, taskapi.AgentTarget(req.Agent), req, true)
 }
 
 func (tm *taskRuntime) StartSubagentTarget(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
-	runner subagent.Runner,
-	target delegation.Target,
+	runner taskapi.SubagentRunner,
+	target taskapi.Target,
 	req taskapi.SubagentStartRequest,
 ) (taskapi.Snapshot, error) {
 	return tm.startSubagentTarget(ctx, activeSession, ref, runner, target, req, false)
@@ -97,8 +91,8 @@ func (tm *taskRuntime) startSubagentTarget(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
-	runner subagent.Runner,
-	target delegation.Target,
+	runner taskapi.SubagentRunner,
+	target taskapi.Target,
 	req taskapi.SubagentStartRequest,
 	legacyDigest bool,
 ) (taskapi.Snapshot, error) {
@@ -118,16 +112,16 @@ func (tm *taskRuntime) startSubagentTarget(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	target = delegation.NormalizeTarget(target)
-	if err := delegation.ValidateTarget(target); err != nil {
+	target = taskapi.NormalizeTarget(target)
+	if err := taskapi.ValidateTarget(target); err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	if delegationTargetRequiresPlacementRunner(target) {
-		if _, ok := runner.(subagent.PlacementRunner); !ok {
+		if _, ok := runner.(taskapi.PlacementRunner); !ok {
 			return taskapi.Snapshot{}, fmt.Errorf("subagent execution does not support typed placements")
 		}
 	}
-	requestedHandle, err := agenthandle.CanonicalRequested(req.Handle)
+	requestedHandle, err := taskapi.CanonicalRequestedHandle(req.Handle)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -182,14 +176,14 @@ func (tm *taskRuntime) startSubagentTarget(
 				spawnActivity.discard()
 			}
 		}()
-		childPrompt := contextprompt.ComposeTextPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
+		childPrompt := session.ComposeContextTransferPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
 		parts := append([]model.ContentPart(nil), req.ContentParts...)
 		if len(parts) > 0 {
-			if background := contextprompt.RenderBackground(spawnContextFromSpec(outcome.Entry.Spec)); background != "" {
+			if background := session.RenderContextTransferBackground(spawnContextFromSpec(outcome.Entry.Spec)); background != "" {
 				parts = append(parts, model.ContentPart{Type: model.ContentPartText, Text: background})
 			}
 		}
-		spawnContext := subagent.SpawnContext{
+		spawnContext := taskapi.SpawnContext{
 			ContentParts: parts,
 			SessionRef:   session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ActivityID: activityID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
@@ -199,7 +193,7 @@ func (tm *taskRuntime) startSubagentTarget(
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
-			if subagent.SpawnProvenNotStarted(err) {
+			if taskapi.SpawnProvenNotStarted(err) {
 				closeTaskOutputProducer(context.WithoutCancel(ctx), outputObserver)
 				persistErr := tm.failSubagentSpawnBeforeCreation(ctx, outcome.Entry)
 				return taskapi.Snapshot{}, errors.Join(err, persistErr)
@@ -214,8 +208,8 @@ func (tm *taskRuntime) startSubagentTarget(
 			persistErr := tm.persistSpawnEntry(context.WithoutCancel(ctx), outcome.Entry)
 			return taskapi.Snapshot{}, errors.Join(err, persistErr)
 		}
-		anchor = delegation.CloneAnchor(anchor)
-		result = delegation.CloneResult(result)
+		anchor = taskapi.CloneAnchor(anchor)
+		result = taskapi.CloneDelegationResult(result)
 		if anchor.TaskID == "" {
 			anchor.TaskID = taskID
 		}
@@ -290,11 +284,11 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	taskID string,
 	spawnID string,
 	requestDigest string,
-	target delegation.Target,
+	target taskapi.Target,
 	req taskapi.SubagentStartRequest,
 	mode string,
 	role session.ParticipantRole,
-	runner subagent.Runner,
+	runner taskapi.SubagentRunner,
 ) (spawnBeginOutcome, error) {
 	if tm == nil || tm.store == nil {
 		return spawnBeginOutcome{}, errors.New("durable Task store is required before subagent spawn")
@@ -327,7 +321,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 			"content_parts":       req.ContentParts,
 			"include_context":     req.IncludeContext,
 			"context_unsupported": req.ContextUnsupported,
-			"context":             agent.CloneContextTransfer(req.Context),
+			"context":             session.CloneContextTransfer(req.Context),
 			"mode":                strings.TrimSpace(mode),
 			"approval_mode":       strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
 			"participant_role": string(role),
@@ -363,18 +357,18 @@ func (tm *taskRuntime) bindSubagentOutput(
 	terminalID string,
 	activityID string,
 	originComplete bool,
-) output.Observer {
+) taskapi.OutputObserver {
 	if tm == nil || tm.runtime == nil || tm.runtime.taskOutput == nil {
-		return output.Nop()
+		return taskapi.NopOutputObserver()
 	}
-	return tm.runtime.taskOutput.BindTaskOutput(ctx, output.Binding{
+	return tm.runtime.taskOutput.BindTaskOutput(ctx, taskapi.OutputBinding{
 		SessionID: strings.TrimSpace(ref.SessionID), TaskID: strings.TrimSpace(taskID),
 		TerminalID: strings.TrimSpace(terminalID), ActivityID: strings.TrimSpace(activityID),
-		Kind: output.TaskKindSubagent, StartsAtTaskOrigin: originComplete,
+		Kind: taskapi.KindSubagent, StartsAtTaskOrigin: originComplete,
 	})
 }
 
-func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskapi.Entry, spawnID string, runner subagent.Runner) (spawnBeginOutcome, error) {
+func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskapi.Entry, spawnID string, runner taskapi.SubagentRunner) (spawnBeginOutcome, error) {
 	if taskStringValue(existing.Metadata[subagentCancelPhaseKey]) != "" {
 		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true}, context.Canceled
 	}
@@ -470,7 +464,7 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 		Agent        string                  `json:"agent"`
 		Prompt       string                  `json:"prompt"`
 		Handle       string                  `json:"handle,omitempty"`
-		Context      agent.ContextTransfer   `json:"context"`
+		Context      session.ContextTransfer `json:"context"`
 		Mode         string                  `json:"mode"`
 		ApprovalMode string                  `json:"approval_mode"`
 		ParentCall   string                  `json:"parent_call"`
@@ -478,16 +472,16 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 	}{
 		ContentParts: req.ContentParts,
 		Agent:        strings.TrimSpace(req.Agent), Prompt: strings.TrimSpace(req.Prompt),
-		Handle: strings.TrimSpace(req.Handle), Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
+		Handle: strings.TrimSpace(req.Handle), Context: session.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
 	return hashSubagentSpawnPayload(payload)
 }
 
-func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
+func subagentSpawnTargetRequestDigest(target taskapi.Target, req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
 	payload := struct {
 		ContentParts   []model.ContentPart     `json:"content_parts,omitempty"`
-		Target         delegation.Target       `json:"target"`
+		Target         taskapi.Target          `json:"target"`
 		Prompt         string                  `json:"prompt"`
 		Handle         string                  `json:"handle,omitempty"`
 		IncludeContext bool                    `json:"include_context"`
@@ -497,32 +491,32 @@ func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.Suba
 		Role           session.ParticipantRole `json:"role"`
 	}{
 		ContentParts: req.ContentParts,
-		Target:       delegation.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
+		Target:       taskapi.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
 		Handle: strings.TrimSpace(req.Handle), IncludeContext: req.IncludeContext, Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
 	return hashSubagentSpawnPayload(payload)
 }
 
-func spawnContextFromSpec(spec map[string]any) agent.ContextTransfer {
+func spawnContextFromSpec(spec map[string]any) session.ContextTransfer {
 	if spec == nil {
-		return agent.ContextTransfer{}
+		return session.ContextTransfer{}
 	}
 	switch typed := spec["context"].(type) {
-	case agent.ContextTransfer:
-		return agent.CloneContextTransfer(typed)
+	case session.ContextTransfer:
+		return session.CloneContextTransfer(typed)
 	case map[string]any:
 		raw, err := json.Marshal(typed)
 		if err != nil {
-			return agent.ContextTransfer{}
+			return session.ContextTransfer{}
 		}
-		var transfer agent.ContextTransfer
+		var transfer session.ContextTransfer
 		if err := json.Unmarshal(raw, &transfer); err != nil {
-			return agent.ContextTransfer{}
+			return session.ContextTransfer{}
 		}
-		return agent.CloneContextTransfer(transfer)
+		return session.CloneContextTransfer(transfer)
 	default:
-		return agent.ContextTransfer{}
+		return session.ContextTransfer{}
 	}
 }
 
@@ -540,27 +534,27 @@ func newSubagentTaskFromSpawn(
 	taskID string,
 	spawnID string,
 	requestDigest string,
-	target delegation.Target,
+	target taskapi.Target,
 	req taskapi.SubagentStartRequest,
 	mode string,
 	role session.ParticipantRole,
 	handle string,
-	runner subagent.Runner,
-	anchor delegation.Anchor,
-	result delegation.Result,
+	runner taskapi.SubagentRunner,
+	anchor taskapi.Anchor,
+	result taskapi.DelegationResult,
 	revision uint64,
 	now time.Time,
 	phase spawnPhase,
 ) *subagentTask {
-	target = delegation.NormalizeTarget(target)
+	target = taskapi.NormalizeTarget(target)
 	agentName := strings.TrimSpace(target.Selector)
 	task := &subagentTask{
 		ref:        taskapi.Ref{TaskID: taskID, SessionID: strings.TrimSpace(anchor.SessionID), TerminalID: subagentTerminalID(taskID)},
-		sessionRef: session.NormalizeSessionRef(ref), anchor: delegation.CloneAnchor(anchor), runner: runner,
+		sessionRef: session.NormalizeSessionRef(ref), anchor: taskapi.CloneAnchor(anchor), runner: runner,
 		agent: agentName, target: target, handle: handle, title: spawn.ToolName + " " + agentName,
 		prompt: strings.TrimSpace(req.Prompt), contentParts: append([]model.ContentPart(nil), req.ContentParts...), mode: strings.TrimSpace(mode),
 		approvalMode: strings.TrimSpace(req.ApprovalMode), createdAt: now, revision: revision,
-		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, producerLive: true, turnSeq: 1,
+		state: taskStateFromDelegation(result.State), running: result.State == taskapi.StateRunning, producerLive: true, turnSeq: 1,
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
 			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
@@ -573,26 +567,26 @@ func newSubagentTaskFromSpawn(
 	return task
 }
 
-func delegationTargetRequiresPlacementRunner(target delegation.Target) bool {
-	target = delegation.NormalizeTarget(target)
+func delegationTargetRequiresPlacementRunner(target taskapi.Target) bool {
+	target = taskapi.NormalizeTarget(target)
 	return target.Placement.Kind == placement.KindModel ||
 		target.Placement.ConfigFingerprint != "" || target.Placement.Fingerprint != ""
 }
 
 func spawnSubagentTarget(
 	ctx context.Context,
-	runner subagent.Runner,
-	spawnContext subagent.SpawnContext,
-	target delegation.Target,
+	runner taskapi.SubagentRunner,
+	spawnContext taskapi.SpawnContext,
+	target taskapi.Target,
 	prompt string,
-) (delegation.Anchor, delegation.Result, error) {
-	if placed, ok := runner.(subagent.PlacementRunner); ok {
-		return placed.SpawnTarget(ctx, spawnContext, delegation.TargetRequest{Target: target, Prompt: prompt})
+) (taskapi.Anchor, taskapi.DelegationResult, error) {
+	if placed, ok := runner.(taskapi.PlacementRunner); ok {
+		return placed.SpawnTarget(ctx, spawnContext, taskapi.TargetRequest{Target: target, Prompt: prompt})
 	}
-	return runner.Spawn(ctx, spawnContext, delegation.Request{Agent: strings.TrimSpace(target.Placement.Agent), Prompt: prompt})
+	return runner.Spawn(ctx, spawnContext, taskapi.DelegationRequest{Agent: strings.TrimSpace(target.Placement.Agent), Prompt: prompt})
 }
 
-func validateSubagentSpawnResult(taskID string, anchor delegation.Anchor, result delegation.Result) error {
+func validateSubagentSpawnResult(taskID string, anchor taskapi.Anchor, result taskapi.DelegationResult) error {
 	if strings.TrimSpace(anchor.SessionID) == "" {
 		return errors.New("spawned subagent anchor requires session_id")
 	}
@@ -606,8 +600,8 @@ func validateSubagentSpawnResult(taskID string, anchor delegation.Anchor, result
 		return fmt.Errorf("spawned subagent result task_id %q does not match %q", resultTaskID, taskID)
 	}
 	switch result.State {
-	case delegation.StateRunning, delegation.StateCompleted, delegation.StateFailed, delegation.StateCancelled,
-		delegation.StateInterrupted, delegation.StateUnknownOutcome, delegation.StateWaitingApproval:
+	case taskapi.StateRunning, taskapi.StateCompleted, taskapi.StateFailed, taskapi.StateCancelled,
+		taskapi.StateInterrupted, taskapi.StateUnknownOutcome, taskapi.StateWaitingApproval:
 		return nil
 	default:
 		return fmt.Errorf("spawned subagent result has invalid state %q", result.State)
@@ -789,7 +783,7 @@ func (tm *taskRuntime) compensateSubagentSpawn(ctx context.Context, task *subage
 func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task *subagentTask, cause error) error {
 	phase := spawnPhaseOfTask(task)
 	if phase == spawnPhaseCompensating {
-		cancelErr := task.runner.Cancel(context.WithoutCancel(ctx), delegation.CloneAnchor(task.anchor))
+		cancelErr := task.runner.Cancel(context.WithoutCancel(ctx), taskapi.CloneAnchor(task.anchor))
 		if cancelErr != nil {
 			task.mu.Lock()
 			task.running = false
@@ -829,11 +823,11 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 	return errors.Join(cause, fmt.Errorf("cannot resume compensation from phase %q", phase))
 }
 
-func closeTaskOutputProducer(ctx context.Context, observer output.Observer) {
+func closeTaskOutputProducer(ctx context.Context, observer taskapi.OutputObserver) {
 	if observer == nil {
 		return
 	}
-	_ = observer.ObserveTaskOutput(ctx, output.Event{ProducerClosed: true})
+	_ = observer.ObserveTaskOutput(ctx, taskapi.OutputEvent{ProducerClosed: true})
 }
 
 func (tm *taskRuntime) closeSubagentOutputProducer(ctx context.Context, ref session.SessionRef, taskID string) {

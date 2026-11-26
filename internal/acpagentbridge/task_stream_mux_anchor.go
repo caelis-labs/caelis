@@ -3,11 +3,11 @@ package acpagentbridge
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/display"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
 

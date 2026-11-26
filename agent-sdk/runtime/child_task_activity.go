@@ -9,8 +9,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 // childTaskActivity binds a child producer to its Task generation. Follow-up
@@ -24,7 +22,7 @@ type childTaskActivity struct {
 	taskID         string
 	activityID     string
 	turnSeq        int64
-	observer       output.Observer
+	observer       taskapi.OutputObserver
 	needsOpen      bool
 	started        sync.Once
 	observed       atomic.Bool
@@ -50,7 +48,7 @@ func newChildTaskActivity(
 	taskID string,
 	activityID string,
 	turnSeq int64,
-	observer output.Observer,
+	observer taskapi.OutputObserver,
 	needsOpen bool,
 	waitInstall bool,
 ) *childTaskActivity {
@@ -78,7 +76,7 @@ func newChildTaskActivity(
 	return a
 }
 
-func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.Event) error {
+func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event taskapi.OutputEvent) error {
 	// Recipient-visible input is admission evidence, not child execution.
 	if a.needsOpen && !session.IsAgentCommunicationProtocol(event.Event) &&
 		(event.Event != nil || event.Text != "" || event.Running || event.Closed || event.State != "") {
@@ -185,7 +183,7 @@ func (a *childTaskActivity) openLocked(task *subagentTask) bool {
 	task.stdout, task.stderr = "", ""
 	task.stdoutCursor, task.stderrCursor = 0, 0
 	task.contextUsage = nil
-	task.applyResult(delegation.Result{TaskID: a.taskID, State: delegation.StateRunning, Running: true})
+	task.applyResult(taskapi.DelegationResult{TaskID: a.taskID, State: taskapi.StateRunning, Running: true})
 	task.metadata[subagentActivityIDMeta] = a.activityID
 	task.metadata[subagentActivityGenerationMeta] = a.turnSeq
 	if !cancelScoped || cancelTurn != a.turnSeq {
@@ -249,7 +247,7 @@ func (a *childTaskActivity) persist() error {
 
 // ReplaceTaskHistory forwards recovery observations without opening an activity.
 func (a *childTaskActivity) ReplaceTaskHistory(ctx context.Context, events []*session.Event) error {
-	if observer, ok := a.observer.(output.HistoryObserver); ok {
+	if observer, ok := a.observer.(taskapi.HistoryObserver); ok {
 		return observer.ReplaceTaskHistory(ctx, events)
 	}
 	return nil

@@ -13,8 +13,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
@@ -27,7 +26,7 @@ func TestWithCollaborationPromptSliceAppendsControlInstruction(t *testing.T) {
 	runner := &Runner{}
 	prompt := acputil.BuildPromptParts("review the diff", nil)
 	got := runner.withCollaborationPromptSlice(&childRun{
-		spawn:            tasksubagent.SpawnContext{Handle: "@orbit", Role: session.ParticipantRoleSidecar},
+		spawn:            taskapi.SpawnContext{Handle: "@orbit", Role: session.ParticipantRoleSidecar},
 		supportsSteering: false,
 	}, prompt, true)
 	if len(got) != 2 {
@@ -38,7 +37,7 @@ func TestWithCollaborationPromptSliceAppendsControlInstruction(t *testing.T) {
 		Handle: "orbit", Role: "sidecar", Tools: collaboration.Definitions(false),
 	}, "review the diff")
 	steering := runner.withCollaborationPromptSlice(&childRun{
-		spawn:            tasksubagent.SpawnContext{Handle: "orbit", Role: session.ParticipantRoleDelegated},
+		spawn:            taskapi.SpawnContext{Handle: "orbit", Role: session.ParticipantRoleDelegated},
 		supportsSteering: true,
 	}, prompt, false)
 	assertCollaborationSlice(t, string(steering[1]), collaboration.PromptSlice{
@@ -57,12 +56,12 @@ func TestACPChildPromptInjectsIdentityWithoutUninstalledTools(t *testing.T) {
 	spawn := childInputSpawnContext(t, "task-collab-initial", events)
 	spawn.Handle = "orbit"
 	spawn.Role = session.ParticipantRoleSidecar
-	_, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "review the diff"})
+	_, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "review the diff"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	frames, terminal := waitSpawnInputProjectionFrames(t, ctx, events, spawn.ActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State != taskapi.StateCompleted {
 		t.Fatalf("terminal = %#v, want completed", terminal.Result)
 	}
 	input := frames[0].Event
@@ -94,7 +93,7 @@ func TestACPChildIdleFollowupOmitsIdentitySlice(t *testing.T) {
 	events := make(chan childInputTestEvent, 8)
 	spawn := childInputSpawnContext(t, "task-collab-followup", events)
 	spawn.Handle = "orbit"
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "first"})
+	anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "first"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +145,7 @@ func TestACPChildSteeringOmitsCollaborationSlice(t *testing.T) {
 	events := make(chan childInputTestEvent, 8)
 	spawn := childInputSpawnContext(t, "task-collab-steer", events)
 	spawn.Handle = "orbit"
-	anchor, initial, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "first"})
+	anchor, initial, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "first"})
 	if err != nil || !initial.Running {
 		t.Fatalf("Spawn() = (%#v, %v), want running", initial, err)
 	}

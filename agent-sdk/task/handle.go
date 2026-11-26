@@ -1,4 +1,4 @@
-package agenthandle
+package task
 
 import (
 	"crypto/rand"
@@ -23,7 +23,7 @@ var reservedRequestedHandles = map[string]struct{}{
 	"parent": {},
 }
 
-var namePool = []string{
+var handleNamePool = []string{
 	"emun", "ari", "aria", "ava", "ben", "cai", "cleo", "dana",
 	"eden", "eli", "emma", "finn", "gia", "hugo", "ivy", "jane",
 	"juno", "kai", "kira", "lena", "leo", "lina", "luca", "maya",
@@ -40,17 +40,17 @@ var namePool = []string{
 	"willa", "xavi", "yori", "ziva",
 }
 
-// Allocate returns a short human handle that is unique within used. It prefers
-// the shared human-name pool and falls back to a normalized agent-derived base
-// only after the pool is exhausted.
-func Allocate(used map[string]struct{}, agent string) string {
+// AllocateHandle returns a short human handle that is unique within used. It
+// prefers the shared human-name pool and falls back to a normalized
+// agent-derived base only after the pool is exhausted.
+func AllocateHandle(used map[string]struct{}, agent string) string {
 	if used == nil {
 		used = map[string]struct{}{}
 	}
-	if len(namePool) > 0 {
-		offset := randomOffset(len(namePool))
-		for i := 0; i < len(namePool); i++ {
-			candidate := Normalize(namePool[(offset+i)%len(namePool)])
+	if len(handleNamePool) > 0 {
+		offset := randomHandleOffset(len(handleNamePool))
+		for i := 0; i < len(handleNamePool); i++ {
+			candidate := NormalizeHandle(handleNamePool[(offset+i)%len(handleNamePool)])
 			if candidate == "" {
 				continue
 			}
@@ -59,7 +59,7 @@ func Allocate(used map[string]struct{}, agent string) string {
 			}
 		}
 	}
-	for _, base := range fallbackBases(agent) {
+	for _, base := range fallbackHandleBases(agent) {
 		for i := 0; i < 1000; i++ {
 			candidate := base
 			if i > 0 {
@@ -73,50 +73,45 @@ func Allocate(used map[string]struct{}, agent string) string {
 	return "agent"
 }
 
-// ContainsPoolName reports whether name matches a normalized entry from the
-// shared human-name pool.
-func ContainsPoolName(name string) bool {
-	name = Normalize(name)
+// ContainsHandlePoolName reports whether name matches a normalized entry from
+// the shared human-name pool.
+func ContainsHandlePoolName(name string) bool {
+	name = NormalizeHandle(name)
 	if name == "" {
 		return false
 	}
-	for _, candidate := range namePool {
-		if Normalize(candidate) == name {
+	for _, candidate := range handleNamePool {
+		if NormalizeHandle(candidate) == name {
 			return true
 		}
 	}
 	return false
 }
 
-// CanonicalRequested normalizes a model-supplied handle. Empty input remains
-// empty so callers can fall back to Allocate. Non-empty values must use the
-// shared handle charset and must not use reserved routing names.
-func CanonicalRequested(value string) (string, error) {
-	handle := Normalize(value)
+// CanonicalRequestedHandle normalizes a model-supplied handle. Empty input
+// remains empty so callers can fall back to AllocateHandle. Non-empty values
+// must use the shared handle charset and must not use reserved routing names.
+func CanonicalRequestedHandle(value string) (string, error) {
+	handle := NormalizeHandle(value)
 	if handle == "" {
 		return "", nil
 	}
 	if len(handle) > MaxRequestedHandleLength {
-		return "", fmt.Errorf("agent-sdk/task/agenthandle: handle %q exceeds %d characters", handle, MaxRequestedHandleLength)
+		return "", fmt.Errorf("agent-sdk/task: handle %q exceeds %d characters", handle, MaxRequestedHandleLength)
 	}
 	if !requestedHandlePattern.MatchString(handle) {
-		return "", fmt.Errorf("agent-sdk/task/agenthandle: handle %q must start with a letter and use only lowercase letters, numbers, or hyphens", handle)
+		return "", fmt.Errorf("agent-sdk/task: handle %q must start with a letter and use only lowercase letters, numbers, or hyphens", handle)
 	}
 	if _, reserved := reservedRequestedHandles[handle]; reserved {
-		return "", fmt.Errorf("agent-sdk/task/agenthandle: handle %q is reserved", handle)
+		return "", fmt.Errorf("agent-sdk/task: handle %q is reserved", handle)
 	}
 	return handle, nil
 }
 
-// Normalize lowercases value and strips a leading @ mention prefix.
-func Normalize(value string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
-}
-
-// NormalizeBase derives a stable handle base from value by lowercasing,
+// NormalizeHandleBase derives a stable handle base from value by lowercasing,
 // stripping @, and replacing separators with dashes.
-func NormalizeBase(value string) string {
-	value = Normalize(value)
+func NormalizeHandleBase(value string) string {
+	value = NormalizeHandle(value)
 	var b strings.Builder
 	lastDash := false
 	for _, r := range value {
@@ -145,7 +140,7 @@ func NormalizeBase(value string) string {
 	return strings.Trim(b.String(), "-_")
 }
 
-func randomOffset(n int) int {
+func randomHandleOffset(n int) int {
 	if n <= 1 {
 		return 0
 	}
@@ -156,10 +151,10 @@ func randomOffset(n int) int {
 	return int(value.Int64())
 }
 
-func fallbackBases(agent string) []string {
+func fallbackHandleBases(agent string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, 2)
-	for _, base := range []string{NormalizeBase(agent), "agent"} {
+	for _, base := range []string{NormalizeHandleBase(agent), "agent"} {
 		if base == "" {
 			continue
 		}

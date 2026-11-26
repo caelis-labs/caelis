@@ -11,9 +11,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 func TestChildUsagePersistsLiveInitialAndFollowup(t *testing.T) {
@@ -128,7 +125,7 @@ func TestChildUsageTerminalJoinsBlockedWriter(t *testing.T) {
 	_ = activity.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "gpt-test"))
 	done := make(chan struct{})
 	go func() {
-		completion.PublishSubagentCompletion(delegation.Result{State: delegation.StateCompleted, Result: "done"})
+		completion.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "done"})
 		close(done)
 	}()
 	t.Cleanup(func() {
@@ -188,7 +185,7 @@ func TestChildCompletionRetainsUsageAcrossCASConflict(t *testing.T) {
 				_ = activity.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "gpt-test"))
 				// Enqueue synchronously so terminal owns the release edge before
 				// the live worker can acquire the held operation claim.
-				done := completion.enqueue(delegation.Result{State: delegation.StateCompleted, Result: "done"})
+				done := completion.enqueue(taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "done"})
 				release()
 				waitUsageSignal(t, done)
 				awaitChildUsagePersistence(t, activity)
@@ -250,7 +247,7 @@ func TestChildUsageDiscardJoinsUninstalledWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := newChildTaskActivity(r.tasks, t.Context(), task.sessionRef, task.ref.TaskID, task.activityID, task.turnSeq, output.Nop(), false, true)
+	activity := newChildTaskActivity(r.tasks, t.Context(), task.sessionRef, task.ref.TaskID, task.activityID, task.turnSeq, taskapi.NopOutputObserver(), false, true)
 	_ = activity.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "gpt-test"))
 	activity.discard()
 	awaitChildUsagePersistence(t, activity)
@@ -269,10 +266,10 @@ func TestChildUsageWaitsForSpawnInstallation(t *testing.T) {
 			release := make(chan struct{})
 			var releaseOnce sync.Once
 			base := &recordingSubagentRunner{
-				spawnResult:    delegation.Result{State: delegation.StateRunning, Running: true},
+				spawnResult:    taskapi.DelegationResult{State: taskapi.StateRunning, Running: true},
 				publishOnSpawn: true, spawnStreamEvent: childUsageOutput(200000, 42000, "gpt-test").Event,
 			}
-			runner := &usageSpawnTestRunner{Runner: base, entered: make(chan struct{}), release: release, fail: fail}
+			runner := &usageSpawnTestRunner{SubagentRunner: base, entered: make(chan struct{}), release: release, fail: fail}
 			r, active := newSubagentTaskTestRuntime(t, runner)
 			result := make(chan error, 1)
 			finished := make(chan struct{})
@@ -328,14 +325,14 @@ func TestChildUsageWaitsForSpawnInstallation(t *testing.T) {
 }
 
 type usageSpawnTestRunner struct {
-	subagent.Runner
+	taskapi.SubagentRunner
 	entered chan struct{}
 	release <-chan struct{}
 	fail    bool
 }
 
-func (r *usageSpawnTestRunner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	anchor, result, err := r.Runner.Spawn(ctx, spawn, req)
+func (r *usageSpawnTestRunner) Spawn(ctx context.Context, spawn taskapi.SpawnContext, req taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
+	anchor, result, err := r.SubagentRunner.Spawn(ctx, spawn, req)
 	close(r.entered)
 	select {
 	case <-r.release:
@@ -380,7 +377,7 @@ func newUsageTestActivity(t *testing.T, initial bool) (*Runtime, *subagentTask, 
 	var activity *childTaskActivity
 	var completion subagentCompletionSink
 	if initial {
-		runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateRunning, Running: true}}
+		runner := &recordingSubagentRunner{spawnResult: taskapi.DelegationResult{State: taskapi.StateRunning, Running: true}}
 		var active session.Session
 		r, active = newSubagentTaskTestRuntime(t, runner)
 		snapshot, err := r.tasks.StartSubagent(t.Context(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
@@ -403,7 +400,7 @@ func newUsageTestActivity(t *testing.T, initial bool) (*Runtime, *subagentTask, 
 		}
 		activity = observer.(*childTaskActivity)
 		completion = sink.(subagentCompletionSink)
-		_ = observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true})
+		_ = observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "running", Running: true})
 		awaitChildUsagePersistence(t, activity)
 	}
 	t.Cleanup(func() {

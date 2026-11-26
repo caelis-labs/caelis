@@ -9,16 +9,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func TestRunnerActionSummaryKeepsFinalizingIntentAcrossSparseToolUpdate(t *testing.T) {
 	t.Parallel()
 
-	anchor := delegation.Anchor{TaskID: "task-summary", SessionID: "child-1", Agent: "self", AgentID: "self-1"}
+	anchor := task.Anchor{TaskID: "task-summary", SessionID: "child-1", Agent: "self", AgentID: "self-1"}
 	run := &childRun{
-		anchor: anchor, taskID: anchor.TaskID, state: delegation.StateRunning,
+		anchor: anchor, taskID: anchor.TaskID, state: task.StateRunning,
 		running: true, done: make(chan struct{}),
 	}
 	runner := &Runner{clock: time.Now, runs: map[string]*childRun{anchor.TaskID: run}}
@@ -96,9 +96,9 @@ func TestSubagentActionSummaryAssistantKeepsRecentToolContext(t *testing.T) {
 func TestRunnerActionSummaryConcurrentUpdateAndWait(t *testing.T) {
 	t.Parallel()
 
-	anchor := delegation.Anchor{TaskID: "task-summary-race", SessionID: "child-1", Agent: "self", AgentID: "self-1"}
+	anchor := task.Anchor{TaskID: "task-summary-race", SessionID: "child-1", Agent: "self", AgentID: "self-1"}
 	run := &childRun{
-		anchor: anchor, taskID: anchor.TaskID, state: delegation.StateRunning,
+		anchor: anchor, taskID: anchor.TaskID, state: task.StateRunning,
 		running: true, done: make(chan struct{}),
 	}
 	runner := &Runner{clock: time.Now, runs: map[string]*childRun{anchor.TaskID: run}}
@@ -115,7 +115,7 @@ func TestRunnerActionSummaryConcurrentUpdateAndWait(t *testing.T) {
 
 	const iterations = 100
 	start := make(chan struct{})
-	invalid := make(chan delegation.Result, iterations)
+	invalid := make(chan task.DelegationResult, iterations)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -131,7 +131,7 @@ func TestRunnerActionSummaryConcurrentUpdateAndWait(t *testing.T) {
 		<-start
 		for range iterations {
 			got, err := runner.Wait(context.Background(), anchor, 0)
-			if err != nil || got.State != delegation.StateRunning || !got.Running || !utf8.ValidString(got.OutputPreview) {
+			if err != nil || got.State != task.StateRunning || !got.Running || !utf8.ValidString(got.OutputPreview) {
 				invalid <- got
 			}
 		}
@@ -153,7 +153,7 @@ func TestRunnerCompletedResultKeepsActionSummary(t *testing.T) {
 	t.Parallel()
 
 	run := &childRun{
-		taskID: "task-completed-summary", state: delegation.StateRunning,
+		taskID: "task-completed-summary", state: task.StateRunning,
 		running: true, done: make(chan struct{}),
 	}
 	runner := &Runner{clock: time.Now}
@@ -169,7 +169,7 @@ func TestRunnerCompletedResultKeepsActionSummary(t *testing.T) {
 	runner.finishDrive(context.Background(), run, "end_turn", nil)
 
 	got := runner.waitRun(context.Background(), run, 0)
-	if got.State != delegation.StateCompleted || got.Running || got.OutputPreview != "Run focused tests" {
+	if got.State != task.StateCompleted || got.Running || got.OutputPreview != "Run focused tests" {
 		t.Fatalf("completed result = %#v, want terminal action summary", got)
 	}
 }
@@ -245,9 +245,9 @@ func TestSubagentActionSummaryIncludesCanonicalToolOutput(t *testing.T) {
 func TestRunnerActionSummaryUsesCanonicalToolContentNotRawOutput(t *testing.T) {
 	t.Parallel()
 
-	anchor := delegation.Anchor{TaskID: "task-tool-output", SessionID: "child-1", Agent: "self", AgentID: "self-1"}
+	anchor := task.Anchor{TaskID: "task-tool-output", SessionID: "child-1", Agent: "self", AgentID: "self-1"}
 	run := &childRun{
-		anchor: anchor, taskID: anchor.TaskID, state: delegation.StateRunning,
+		anchor: anchor, taskID: anchor.TaskID, state: task.StateRunning,
 		running: true, done: make(chan struct{}),
 	}
 	runner := &Runner{clock: time.Now, runs: map[string]*childRun{anchor.TaskID: run}}
@@ -294,7 +294,7 @@ func TestRunnerTerminalDiagnosticOverridesActionSummary(t *testing.T) {
 	t.Parallel()
 
 	run := &childRun{
-		taskID: "task-terminal-summary", state: delegation.StateRunning,
+		taskID: "task-terminal-summary", state: task.StateRunning,
 		running: true, done: make(chan struct{}),
 	}
 	runner := &Runner{clock: time.Now}
@@ -302,7 +302,7 @@ func TestRunnerTerminalDiagnosticOverridesActionSummary(t *testing.T) {
 	runner.finishDrive(context.Background(), run, "", errors.New("provider secret detail"))
 
 	got := runner.waitRun(context.Background(), run, 0)
-	if got.State != delegation.StateFailed || got.OutputPreview != "participant prompt failed" || got.Error != "participant prompt failed" {
+	if got.State != task.StateFailed || got.OutputPreview != "participant prompt failed" || got.Error != "participant prompt failed" {
 		t.Fatalf("terminal result = %#v, want stable failure diagnostic", got)
 	}
 

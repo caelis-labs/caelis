@@ -12,9 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
@@ -26,7 +23,7 @@ type spoolReplayFixture struct {
 func (*spoolReplayFixture) LoadSession(context.Context, session.LoadSessionRequest) (session.LoadedSession, error) {
 	return session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}}, nil
 }
-func (f *spoolReplayFixture) LoadHistory(ctx context.Context, req subagent.HistoryRequest) (session.LoadedSession, error) {
+func (f *spoolReplayFixture) LoadHistory(ctx context.Context, req task.HistoryRequest) (session.LoadedSession, error) {
 	f.loads.Add(1)
 	if f.err != nil {
 		return session.LoadedSession{}, f.err
@@ -41,7 +38,7 @@ func (f *spoolReplayFixture) LoadHistory(ctx context.Context, req subagent.Histo
 		message := model.NewTextMessage(model.RoleAssistant, event.Text)
 		event.Message = &message
 	}
-	observer, ok := req.Reconnect.Spawn.Output.(output.HistoryObserver)
+	observer, ok := req.Reconnect.Spawn.Output.(task.HistoryObserver)
 	if !ok {
 		return session.LoadedSession{}, errors.New("missing replay observer")
 	}
@@ -55,7 +52,7 @@ func restoredTaskFixture() *task.Entry {
 	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
 	entry.Metadata["child_activity_id"] = "a"
 	entry.Metadata["session_id"] = "child"
-	entry.Spec = map[string]any{"target": delegation.Target{Selector: "helper", Placement: placement.Placement{Kind: placement.KindAgent, Agent: "helper"}}}
+	entry.Spec = map[string]any{"target": task.Target{Selector: "helper", Placement: placement.Placement{Kind: placement.KindAgent, Agent: "helper"}}}
 	return entry
 }
 
@@ -116,8 +113,8 @@ func TestChildReplayAndLiveShareOneSpoolAcrossIdleAndReopen(t *testing.T) {
 	}
 	// The durable directory can still say completed. Actual producer output must
 	// arrive without waiting for its next Task commit or for a Closed frame.
-	second := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", ActivityID: "b", Kind: output.TaskKindSubagent})
-	if err := second.ObserveTaskOutput(ctx, output.Event{Running: true, State: "running", Text: "live before completion"}); err != nil {
+	second := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", ActivityID: "b", Kind: task.KindSubagent})
+	if err := second.ObserveTaskOutput(ctx, task.OutputEvent{Running: true, State: "running", Text: "live before completion"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, sub := range subscriptions {
@@ -204,10 +201,10 @@ func TestReplayPublicationIsAtomicAndDoesNotBlockLiveProducer(t *testing.T) {
 	blocked := blockingReplayStore{Store: base, entered: make(chan struct{}), release: make(chan struct{})}
 	recorder := NewRecorder(blocked, nil)
 	t.Cleanup(func() { _ = recorder.Close(context.Background()) })
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindSubagent})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", Kind: task.KindSubagent})
 	logical := streamspool.LogicalKey{Namespace: streamspool.NamespaceTask, Digest: streamspool.DigestStrings("session-1", "task-1")}
 	old, _, _ := base.Resolve(ctx, logical)
-	if err := observer.(output.HistoryObserver).ReplaceTaskHistory(ctx, []*session.Event{{Type: session.EventTypeAssistant, Text: "old complete history"}}); err != nil {
+	if err := observer.(task.HistoryObserver).ReplaceTaskHistory(ctx, []*session.Event{{Type: session.EventTypeAssistant, Text: "old complete history"}}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -225,7 +222,7 @@ func TestReplayPublicationIsAtomicAndDoesNotBlockLiveProducer(t *testing.T) {
 	produced := make(chan error, 1)
 	go func() {
 		for range 100 {
-			if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "live", Running: true}); err != nil {
+			if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "live", Running: true}); err != nil {
 				produced <- err
 				return
 			}
@@ -271,8 +268,8 @@ func TestFailedChildCacheRebuildsFromProviderOnNewSubscription(t *testing.T) {
 	entry, spool := restoredTaskFixture(), newTaskStreamTestSpool(t)
 	recorder, history := NewRecorder(spool, nil), &spoolReplayFixture{}
 	defer recorder.Close(context.Background())
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true}).(*boundRecorder)
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "incomplete"}); err != nil {
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", Kind: task.KindSubagent, StartsAtTaskOrigin: true}).(*boundRecorder)
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "incomplete"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := recorder.Flush(ctx, task.Ref{SessionID: "session-1", TaskID: "task-1"}); err != nil {
@@ -297,7 +294,7 @@ func TestFailedChildCacheRebuildsFromProviderOnNewSubscription(t *testing.T) {
 	if len(result.Deliveries) != 1 || result.Deliveries[0].Kind != DeliveryAppendPage || len(result.Deliveries[0].Records) != 4 || history.loads.Load() != 1 {
 		t.Fatalf("recovery = %#v", result)
 	}
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "stale writer"}); !errors.Is(err, streamspool.ErrLimit) {
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "stale writer"}); !errors.Is(err, streamspool.ErrLimit) {
 		t.Fatalf("old producer redirected into recovered cache: %v", err)
 	}
 }

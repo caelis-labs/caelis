@@ -604,7 +604,7 @@ func (r testContextRouter) ControllerContext(ctx context.Context, req controller
 	return controller.ContextRoute{Context: contextTransfer, FreshContext: freshContext, SyncSeq: checkpoint}, nil
 }
 
-func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (agent.ContextTransfer, error) {
+func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (session.ContextTransfer, error) {
 	transfer, _, err := r.contextTransfer(ctx, req.SessionRef, req.SinceSeq, "")
 	return transfer, err
 }
@@ -614,15 +614,15 @@ func (r testContextRouter) Checkpoint(ctx context.Context, ref session.SessionRe
 	return checkpoint, err
 }
 
-func (r testContextRouter) contextTransfer(ctx context.Context, ref session.SessionRef, sinceSeq uint64, excludeTurnID string) (agent.ContextTransfer, uint64, error) {
+func (r testContextRouter) contextTransfer(ctx context.Context, ref session.SessionRef, sinceSeq uint64, excludeTurnID string) (session.ContextTransfer, uint64, error) {
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: session.NormalizeSessionRef(ref)})
 	if err != nil {
-		return agent.ContextTransfer{}, 0, err
+		return session.ContextTransfer{}, 0, err
 	}
-	var transfer agent.ContextTransfer
+	var transfer session.ContextTransfer
 	var checkpoint uint64
-	byTurnID := map[string]*agent.ContextTurn{}
-	var legacyPending *agent.ContextTurn
+	byTurnID := map[string]*session.ContextTurn{}
+	var legacyPending *session.ContextTurn
 	for i, event := range events {
 		if event == nil || !session.IsCanonicalHistoryEvent(event) {
 			continue
@@ -646,7 +646,7 @@ func (r testContextRouter) contextTransfer(ctx context.Context, ref session.Sess
 				checkpoint = seq
 			}
 			if seq > sinceSeq {
-				transfer = agent.ContextTransfer{Summary: strings.TrimSpace(session.EventText(event))}
+				transfer = session.ContextTransfer{Summary: strings.TrimSpace(session.EventText(event))}
 			}
 		case session.EventTypeUser:
 			turnID := ""
@@ -658,7 +658,7 @@ func (r testContextRouter) contextTransfer(ctx context.Context, ref session.Sess
 				pending = byTurnID[turnID]
 			}
 			if pending == nil {
-				pending = &agent.ContextTurn{}
+				pending = &session.ContextTurn{}
 				if turnID == "" {
 					legacyPending = pending
 				} else {

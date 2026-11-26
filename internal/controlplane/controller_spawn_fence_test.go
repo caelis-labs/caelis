@@ -15,8 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
@@ -87,7 +85,7 @@ func TestControllerSpawnRetainsTurnFenceThroughCleanupAndReceipt(t *testing.T) {
 					_ = run.Handle.Close()
 				}()
 				<-backend.started
-				base := spawn.New([]delegation.Agent{{Name: "helper"}})
+				base := spawn.New([]task.DelegationAgent{{Name: "helper"}})
 				call := tool.Call{ID: "controller-spawn", Name: spawn.ToolName, Input: []byte(`{"agent":"helper","prompt":"work","handle":"worker"}`)}
 				spawnDone := make(chan error, 1)
 				spawnFinished := make(chan struct{})
@@ -184,14 +182,14 @@ func (s *controllerSpawnReceiptStore) AppendEvent(ctx context.Context, req sessi
 }
 
 type spawnDrainChild struct {
-	subagent.Runner
+	task.SubagentRunner
 	started  chan struct{}
 	cleaning chan struct{}
 	release  chan struct{}
 	calls    atomic.Int32
 }
 
-func (r *spawnDrainChild) Spawn(ctx context.Context, _ subagent.SpawnContext, _ delegation.Request) (delegation.Anchor, delegation.Result, error) {
+func (r *spawnDrainChild) Spawn(ctx context.Context, _ task.SpawnContext, _ task.DelegationRequest) (task.Anchor, task.DelegationResult, error) {
 	r.calls.Add(1)
 	close(r.started)
 	<-ctx.Done()
@@ -199,7 +197,7 @@ func (r *spawnDrainChild) Spawn(ctx context.Context, _ subagent.SpawnContext, _ 
 	// ACP initialization failure joins process cleanup independently of caller
 	// cancellation before it can prove that no child started.
 	<-r.release
-	return delegation.Anchor{}, delegation.Result{}, subagent.MarkSpawnNotStarted(ctx.Err())
+	return task.Anchor{}, task.DelegationResult{}, task.MarkSpawnNotStarted(ctx.Err())
 }
 
 type spawnDrainController struct {

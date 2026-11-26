@@ -15,7 +15,6 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -97,7 +96,7 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	})
 	noticeIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		notice, ok := session.NoticeOf(event)
-		return ok && notice.Kind == session.EventNoticeKindCompact && notice.Text == display.CompactNoticeLabel
+		return ok && notice.Kind == session.EventNoticeKindCompact && notice.Text == compactNoticeLabel
 	})
 	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
 		t.Fatalf("runner event order = %#v, want compact activity before compact notice", runEvents)
@@ -2127,7 +2126,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compactNoticeLabel {
 			sawCompactNotice = true
 		}
 	}
@@ -2257,7 +2256,7 @@ func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compactNoticeLabel {
 			sawCompactNotice = true
 		}
 	}
@@ -2379,7 +2378,7 @@ func TestRuntimeDoesNotCompactProductionSizedInlineImagesBelowProviderWatermark(
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compactNoticeLabel {
 			sawCompactNotice = true
 		}
 		if event != nil && event.Lifecycle != nil &&
@@ -2487,7 +2486,7 @@ func TestRuntimeAutoCompactFailurePublishesLiveNotice(t *testing.T) {
 		return ok &&
 			notice.Level == "warning" &&
 			notice.Kind == session.EventNoticeKindCompactFailed &&
-			strings.Contains(notice.Text, display.CompactFailureNoticeLabel) &&
+			strings.Contains(notice.Text, compactFailureNoticeLabel) &&
 			strings.Contains(notice.Text, "streaming is required")
 	})
 	if activityIndex < 0 || noticeIndex < 0 || activityIndex > noticeIndex {
@@ -2586,7 +2585,7 @@ func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
-		if notice, ok := session.NoticeOf(event); ok && notice.Text == display.CompactNoticeLabel {
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compactNoticeLabel {
 			sawCompactNotice = true
 		}
 	}

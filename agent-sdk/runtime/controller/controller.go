@@ -78,22 +78,22 @@ type DetachRequest struct {
 
 // HandoffRequest activates one ACP controller for a session.
 type HandoffRequest struct {
-	SessionRef     session.SessionRef    `json:"session_ref,omitempty"`
-	Session        session.Session       `json:"session,omitempty"`
-	Agent          string                `json:"agent,omitempty"`
-	Placement      placement.Placement   `json:"placement,omitzero"`
-	Source         string                `json:"source,omitempty"`
-	Context        agent.ContextTransfer `json:"context,omitempty"`
-	FreshContext   agent.ContextTransfer `json:"fresh_context,omitempty"`
-	ContextSyncSeq uint64                `json:"context_sync_seq,omitempty"`
+	SessionRef     session.SessionRef      `json:"session_ref,omitempty"`
+	Session        session.Session         `json:"session,omitempty"`
+	Agent          string                  `json:"agent,omitempty"`
+	Placement      placement.Placement     `json:"placement,omitzero"`
+	Source         string                  `json:"source,omitempty"`
+	Context        session.ContextTransfer `json:"context,omitempty"`
+	FreshContext   session.ContextTransfer `json:"fresh_context,omitempty"`
+	ContextSyncSeq uint64                  `json:"context_sync_seq,omitempty"`
 }
 
 // ContextRoute is one Control-selected context synchronization payload for an
 // endpoint turn or activation.
 type ContextRoute struct {
-	Context      agent.ContextTransfer `json:"context,omitempty"`
-	FreshContext agent.ContextTransfer `json:"fresh_context,omitempty"`
-	SyncSeq      uint64                `json:"sync_seq,omitempty"`
+	Context      session.ContextTransfer `json:"context,omitempty"`
+	FreshContext session.ContextTransfer `json:"fresh_context,omitempty"`
+	SyncSeq      uint64                  `json:"sync_seq,omitempty"`
 }
 
 // ControllerContextRequest asks Control to select the canonical context that
@@ -116,7 +116,7 @@ type ParticipantContextRequest struct {
 // to the host Control layer; Runtime only consumes their neutral routes.
 type ContextRouter interface {
 	ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
-	ParticipantContext(context.Context, ParticipantContextRequest) (agent.ContextTransfer, error)
+	ParticipantContext(context.Context, ParticipantContextRequest) (session.ContextTransfer, error)
 	Checkpoint(context.Context, session.SessionRef, string) (uint64, error)
 }
 
@@ -140,8 +140,8 @@ type TurnRequest struct {
 	Session           session.Session           `json:"session,omitempty"`
 	TurnID            string                    `json:"turn_id,omitempty"`
 	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
-	Context           agent.ContextTransfer     `json:"context,omitempty"`
-	FreshContext      agent.ContextTransfer     `json:"fresh_context,omitempty"`
+	Context           session.ContextTransfer   `json:"context,omitempty"`
+	FreshContext      session.ContextTransfer   `json:"fresh_context,omitempty"`
 	ContextSyncSeq    uint64                    `json:"context_sync_seq,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester         `json:"-"`
@@ -162,7 +162,7 @@ type ParticipantPromptRequest struct {
 	ParticipantID     string                    `json:"participant_id,omitempty"`
 	Input             string                    `json:"input,omitempty"`
 	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
-	Context           agent.ContextTransfer     `json:"context,omitempty"`
+	Context           session.ContextTransfer   `json:"context,omitempty"`
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester         `json:"-"`
 	Observer          agent.SourceEventObserver `json:"-"`
@@ -269,8 +269,8 @@ func NormalizeHandoffRequest(in HandoffRequest) HandoffRequest {
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Placement = placement.Normalize(in.Placement)
 	out.Source = strings.TrimSpace(in.Source)
-	out.Context = agent.CloneContextTransfer(in.Context)
-	out.FreshContext = agent.CloneContextTransfer(in.FreshContext)
+	out.Context = session.CloneContextTransfer(in.Context)
+	out.FreshContext = session.CloneContextTransfer(in.FreshContext)
 	return out
 }
 
@@ -282,8 +282,8 @@ func NormalizeTurnRequest(in TurnRequest) TurnRequest {
 	if len(in.ContentParts) > 0 {
 		out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
 	}
-	out.Context = agent.CloneContextTransfer(in.Context)
-	out.FreshContext = agent.CloneContextTransfer(in.FreshContext)
+	out.Context = session.CloneContextTransfer(in.Context)
+	out.FreshContext = session.CloneContextTransfer(in.FreshContext)
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out
 }
@@ -296,7 +296,7 @@ func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantP
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
 	out.Input = strings.TrimSpace(in.Input)
 	out.ContentParts = append([]model.ContentPart(nil), in.ContentParts...)
-	out.Context = agent.CloneContextTransfer(in.Context)
+	out.Context = session.CloneContextTransfer(in.Context)
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out
 }

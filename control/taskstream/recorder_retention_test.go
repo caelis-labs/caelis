@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	spoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 )
@@ -99,16 +98,16 @@ func TestRecorderCompactionPreservesActivityAndAcceptsOversizedOutput(t *testing
 	defer r.Close(context.Background())
 	for n := range 4 {
 		id := fmt.Sprint(n)
-		o := r.BindTaskOutput(t.Context(), output.Binding{SessionID: "session-1", TaskID: "task-1", Kind: output.TaskKindSubagent, ActivityID: id, StartsAtTaskOrigin: n == 0})
+		o := r.BindTaskOutput(t.Context(), task.OutputBinding{SessionID: "session-1", TaskID: "task-1", Kind: task.KindSubagent, ActivityID: id, StartsAtTaskOrigin: n == 0})
 		message := model.NewTextMessage(model.RoleAssistant, "answer-"+id)
-		if err := o.ObserveTaskOutput(t.Context(), output.Event{Event: &session.Event{Type: session.EventTypeAssistant, Message: &message}}); err != nil {
+		if err := o.ObserveTaskOutput(t.Context(), task.OutputEvent{Event: &session.Event{Type: session.EventTypeAssistant, Message: &message}}); err != nil {
 			t.Fatal(err)
 		}
 		if n == 3 {
-			if err := o.ObserveTaskOutput(t.Context(), output.Event{Event: &session.Event{Meta: map[string]any{"huge": strings.Repeat("x", 3<<20)}}}); err != nil {
+			if err := o.ObserveTaskOutput(t.Context(), task.OutputEvent{Event: &session.Event{Meta: map[string]any{"huge": strings.Repeat("x", 3<<20)}}}); err != nil {
 				t.Fatal(err)
 			}
-			if err := o.ObserveTaskOutput(t.Context(), output.Event{State: "completed", Closed: true}); err != nil {
+			if err := o.ObserveTaskOutput(t.Context(), task.OutputEvent{State: "completed", Closed: true}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -150,11 +149,11 @@ func TestChildSubscriptionReplacesExpiredCursorWithRetainedWindow(t *testing.T) 
 	r := NewRecorder(spool, nil)
 	defer r.Close(context.Background())
 	entry := restoredTaskFixture()
-	o := r.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	o := r.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	appendText := func(text string) {
 		t.Helper()
 		msg := model.NewTextMessage(model.RoleAssistant, text)
-		if err := o.ObserveTaskOutput(ctx, output.Event{Event: &session.Event{Type: session.EventTypeAssistant, Scope: &session.EventScope{TurnID: "long"}, Message: &msg}}); err != nil {
+		if err := o.ObserveTaskOutput(ctx, task.OutputEvent{Event: &session.Event{Type: session.EventTypeAssistant, Scope: &session.EventScope{TurnID: "long"}, Message: &msg}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := r.Flush(ctx, task.Ref{SessionID: "session-1", TaskID: "task-1"}); err != nil {

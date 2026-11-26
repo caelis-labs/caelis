@@ -10,7 +10,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 )
 
 // ModelContext injects Runtime-authored context at the next safe model boundary
@@ -23,7 +22,7 @@ func NewEvent(kind agent.SubmissionKind, input agent.AgentCommunicationInput, me
 	if strings.TrimSpace(input.Input) == "" && len(input.ContentParts) == 0 {
 		return nil, nil
 	}
-	message, text, meta := userdisplay.Resolve(input.Input, input.DisplayInput, input.ContentParts, metadata)
+	message, text, meta := session.ResolveUserDisplay(input.Input, input.DisplayInput, input.ContentParts, metadata)
 	event := &session.Event{
 		Visibility: session.VisibilityCanonical, Actor: session.CloneActorRef(input.Source),
 		Message: &message, Text: text, Meta: meta,

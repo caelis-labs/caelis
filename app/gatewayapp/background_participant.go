@@ -10,8 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -19,7 +18,7 @@ import (
 // service must first return any retained receipt, including a legacy unknown;
 // new validation cannot reclassify or replay that original operation.
 func validateBackgroundParticipantLabel(label string) error {
-	if _, err := agenthandle.CanonicalRequested(label); err != nil {
+	if _, err := task.CanonicalRequestedHandle(label); err != nil {
 		return errorcode.Wrap(errorcode.InvalidArgument, "background participant label must be a Task handle", err)
 	}
 	return nil
@@ -30,7 +29,7 @@ func (s *runtimeComposition) startBackgroundParticipant(ctx context.Context, act
 	snapshot, err := s.engine.StartSubagentWithOptions(ctx, active.SessionRef, req.Handle, req.Input, req.Source, runtime.StartSubagentOptions{
 		SpawnID: req.OperationID, Handle: req.Label, ContentParts: req.ContentParts,
 		ReturnOnStart: true,
-		Target:        delegation.Target{Selector: req.Handle, Placement: target},
+		Target:        task.Target{Selector: req.Handle, Placement: target},
 	})
 	if err != nil {
 		return sessionCommandResult(active), classifyControlBackendError(err)

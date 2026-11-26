@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 func TestSpawnedChildRejectsV2BeforeSessionEffect(t *testing.T) {
@@ -31,10 +30,10 @@ func TestSpawnedChildRejectsV2BeforeSessionEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	anchor, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+	anchor, _, err := runner.Spawn(ctx, task.SpawnContext{
 		TaskID: "task-incompatible", ActivityID: "activity-incompatible", CWD: t.TempDir(),
 		Output: &recordingStreams{},
-	}, delegation.Request{Agent: "helper", Prompt: "must not execute"})
+	}, task.DelegationRequest{Agent: "helper", Prompt: "must not execute"})
 	if err == nil || !strings.Contains(err.Error(), "requires stable v1") || anchor.SessionID != "" {
 		t.Fatalf("spawn incompatible peer = %#v, %v", anchor, err)
 	}

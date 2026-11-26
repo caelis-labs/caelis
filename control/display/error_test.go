@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/display"
 )
 
 func TestUserVisibleErrorSummarizesCommittedPersistenceFailure(t *testing.T) {

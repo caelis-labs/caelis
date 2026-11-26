@@ -817,8 +817,7 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 }
 
 func isProductionTestSupportPackage(rel string) bool {
-	return strings.HasPrefix(rel, "agent-sdk/session/sessiontest/") ||
-		strings.HasPrefix(rel, "internal/evalharness/") ||
+	return strings.HasPrefix(rel, "internal/evalharness/") ||
 		strings.HasPrefix(rel, "internal/testenv/")
 }
 
@@ -882,7 +881,7 @@ func deletedSDKImplPaths() []deletedSDKImplPath {
 	paths = append(paths,
 		deletedSDKImplPath{prefix: "impl/policy", sdk: "agent-sdk/policy"},
 		deletedSDKImplPath{prefix: "impl/session", sdk: "agent-sdk/session"},
-		deletedSDKImplPath{prefix: "impl/stream", sdk: "agent-sdk/task/output"},
+		deletedSDKImplPath{prefix: "impl/stream", sdk: "agent-sdk/task"},
 		deletedSDKImplPath{prefix: "impl/sandbox", sdk: "agent-sdk/sandbox"},
 		deletedSDKImplPath{prefix: "impl/tool", sdk: "agent-sdk/tool"},
 	)
@@ -1223,19 +1222,19 @@ func sdkOwnedPortsImportMessage(target string) string {
 		sdk   string
 	}{
 		{"ports/tool/commanddiag", "agent-sdk/tool/commanddiag"},
-		{"ports/subagent/agenthandle", "agent-sdk/task/agenthandle"},
-		{"ports/displaypolicy", "agent-sdk/display"},
-		{"ports/userdisplay", "agent-sdk/session/userdisplay"},
+		{"ports/subagent/agenthandle", "agent-sdk/task"},
+		{"ports/displaypolicy", "control/display"},
+		{"ports/userdisplay", "agent-sdk/session"},
 		{"ports/assembly", "internal/controlassembly"},
 		{"ports/controller", "agent-sdk/runtime/controller"},
-		{"ports/delegation", "agent-sdk/task/delegation"},
-		{"ports/subagent", "agent-sdk/task/subagent"},
+		{"ports/delegation", "agent-sdk/task"},
+		{"ports/subagent", "agent-sdk/task"},
 		{"ports/compact", "agent-sdk/runtime/compact"},
 		{"ports/approval", "agent-sdk/approval"},
 		{"ports/sandbox", "agent-sdk/sandbox"},
 		{"ports/session", "agent-sdk/session"},
 		{"ports/policy", "agent-sdk/policy"},
-		{"ports/stream", "agent-sdk/task/output"},
+		{"ports/stream", "agent-sdk/task"},
 		{"ports/agent", "agent-sdk"},
 		{"ports/model", "agent-sdk/model"},
 		{"ports/tool", "agent-sdk/tool"},

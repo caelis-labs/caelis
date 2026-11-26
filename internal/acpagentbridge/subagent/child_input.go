@@ -12,10 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -29,7 +26,7 @@ import (
 func (r *Runner) BindChildEndpoint(
 	ctx context.Context,
 	target agent.ChildEndpointRef,
-	spawn tasksubagent.SpawnContext,
+	spawn task.SpawnContext,
 ) error {
 	if r == nil {
 		return errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
@@ -57,12 +54,12 @@ func (r *Runner) BindChildEndpoint(
 		done := make(chan struct{})
 		close(done)
 		run := &childRun{
-			anchor: delegation.Anchor{
+			anchor: task.Anchor{
 				TaskID: target.EndpointKey, SessionID: target.SessionID, AgentID: target.ParticipantID,
 			},
 			agentName: firstNonEmpty(target.Placement.Agent, target.Placement.Model),
 			spawn:     spawn, taskID: target.EndpointKey, output: spawn.Output, completion: spawn.Completion,
-			state: delegation.StateInterrupted, updatedAt: r.clock(), done: done,
+			state: task.StateInterrupted, updatedAt: r.clock(), done: done,
 		}
 		slot = newChildSlot(target, run)
 		r.slots[key] = slot
@@ -208,8 +205,8 @@ func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessag
 	return acputil.BuildPromptParts("", parts)
 }
 
-func (r *Runner) acceptedChildInputOutputs(slot *childSlot, run *childRun, req agent.ChildInputRequest, activityID string) []*output.Event {
-	var events []*output.Event
+func (r *Runner) acceptedChildInputOutputs(slot *childSlot, run *childRun, req agent.ChildInputRequest, activityID string) []*task.OutputEvent {
+	var events []*task.OutputEvent
 	for _, message := range childInputMessages(req) {
 		if event := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{UserInput: req.UserInput, Source: message.Source, Input: message.Input, DisplayInput: message.DisplayInput, ContentParts: message.ContentParts}, activityID, message.MessageID); event != nil {
 			events = append(events, event)
@@ -227,11 +224,11 @@ func (r *Runner) acceptedChildInputOutput(
 	req agent.ChildInputRequest,
 	activityID string,
 	messageID string,
-) *output.Event {
+) *task.OutputEvent {
 	if r == nil || slot == nil || run == nil {
 		return nil
 	}
-	_, displayText, _ := userdisplay.Resolve(req.Input, req.DisplayInput, req.ContentParts, nil)
+	_, displayText, _ := session.ResolveUserDisplay(req.Input, req.DisplayInput, req.ContentParts, nil)
 	displayText = strings.TrimSpace(displayText)
 	if displayText == "" {
 		var imageMarkers []string
@@ -275,7 +272,7 @@ func (r *Runner) acceptedChildInputOutput(
 	if event != nil {
 		event.ID = projectionID
 	}
-	frame := &output.Event{
+	frame := &task.OutputEvent{
 		State:      string(run.state),
 		Running:    run.running,
 		Event:      event,
@@ -406,7 +403,7 @@ func (r *Runner) callChildSteering(ctx context.Context, run *childRun, prompt []
 }
 
 type childIdleCheckpoint struct {
-	state             delegation.State
+	state             task.State
 	outputPreview     string
 	failureDetail     string
 	result            string
@@ -567,7 +564,7 @@ func (r *Runner) submitIdleChildInput(
 	run.mu.RLock()
 	state := run.state
 	run.mu.RUnlock()
-	if state == delegation.StateUnknownOutcome {
+	if state == task.StateUnknownOutcome {
 		slot.opMu.Unlock()
 		err := errorcode.New(errorcode.UnknownOutcome, "Target Agent execution outcome is unresolved; another prompt cannot be submitted")
 		r.logChildError(ctx, run, "follow_up_rejected", err)
@@ -585,7 +582,7 @@ func (r *Runner) submitIdleChildInput(
 			return agent.ChildInputResult{}, childInputProvenFailure("close expired collaboration connection", err)
 		}
 	}
-	if state != delegation.StateCompleted || !run.client.CollaborationReady() {
+	if state != task.StateCompleted || !run.client.CollaborationReady() {
 		recovery := childInputReconnectRequest(run, req.Target)
 		var err error
 		run, err = r.reconnectChildEndpointLocked(ctx, run.anchor, recovery, slot)
@@ -631,7 +628,7 @@ func (r *Runner) submitIdleChildInput(
 	}
 	run.mu.Lock()
 	runCheckpoint := checkpointIdleRun(run)
-	run.state = delegation.StateRunning
+	run.state = task.StateRunning
 	run.running = true
 	run.outputPreview = ""
 	run.actionSummary.reset()
@@ -682,8 +679,8 @@ func (r *Runner) submitIdleChildInput(
 		_ = acpClient.Close(context.Background())
 	})
 	if dispatchErr == nil {
-		started := &output.Event{State: string(delegation.StateRunning), Running: true, OccurredAt: r.clock()}
-		for _, event := range append([]*output.Event{started}, acceptedInput...) {
+		started := &task.OutputEvent{State: string(task.StateRunning), Running: true, OccurredAt: r.clock()}
+		for _, event := range append([]*task.OutputEvent{started}, acceptedInput...) {
 			slot.publishRunOutputLocked(run, *event)
 		}
 	}
@@ -722,7 +719,7 @@ func (r *Runner) submitIdleChildInput(
 	return agent.ChildInputResult{StartedActivity: true}, nil
 }
 
-func childInputReconnectRequest(run *childRun, target agent.ChildEndpointRef) *tasksubagent.ReconnectRequest {
+func childInputReconnectRequest(run *childRun, target agent.ChildEndpointRef) *task.ReconnectRequest {
 	if run == nil {
 		return nil
 	}
@@ -730,9 +727,9 @@ func childInputReconnectRequest(run *childRun, target agent.ChildEndpointRef) *t
 	spawn := run.spawn
 	selector := strings.TrimSpace(run.agentName)
 	run.mu.RUnlock()
-	return &tasksubagent.ReconnectRequest{
+	return &task.ReconnectRequest{
 		Spawn:  spawn,
-		Target: delegation.Target{Selector: selector, Placement: target.Placement},
+		Target: task.Target{Selector: selector, Placement: target.Placement},
 	}
 }
 

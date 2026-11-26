@@ -21,8 +21,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	memory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 type sagaTaskStore struct {
@@ -158,24 +156,24 @@ type sagaRunner struct {
 
 type placementSagaRunner struct{ sagaRunner }
 
-func (r *placementSagaRunner) SpawnTarget(_ context.Context, spawn subagent.SpawnContext, req delegation.TargetRequest) (delegation.Anchor, delegation.Result, error) {
+func (r *placementSagaRunner) SpawnTarget(_ context.Context, spawn taskapi.SpawnContext, req taskapi.TargetRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
 	r.spawnCalls++
 	// The runner may report its concrete backend Agent identity. Runtime must
 	// not compare it with the public Target.Selector ("orbit" in the test).
-	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: "backend-agent", AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
+	return taskapi.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: "backend-agent", AgentID: "child-agent-saga"}, taskapi.DelegationResult{TaskID: spawn.TaskID, State: taskapi.StateCompleted, Result: "saga result"}, nil
 }
 
-func (r *sagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+func (r *sagaRunner) Spawn(_ context.Context, spawn taskapi.SpawnContext, req taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
 	r.spawnCalls++
 	if r.spawnErr != nil {
-		return delegation.Anchor{}, delegation.Result{}, r.spawnErr
+		return taskapi.Anchor{}, taskapi.DelegationResult{}, r.spawnErr
 	}
-	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Agent, AgentID: "child-agent-saga"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "saga result"}, nil
+	return taskapi.Anchor{TaskID: spawn.TaskID, SessionID: "child-saga", Agent: req.Agent, AgentID: "child-agent-saga"}, taskapi.DelegationResult{TaskID: spawn.TaskID, State: taskapi.StateCompleted, Result: "saga result"}, nil
 }
-func (*sagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{}, nil
+func (*sagaRunner) Wait(context.Context, taskapi.Anchor, int) (taskapi.DelegationResult, error) {
+	return taskapi.DelegationResult{}, nil
 }
-func (r *sagaRunner) Cancel(context.Context, delegation.Anchor) error {
+func (r *sagaRunner) Cancel(context.Context, taskapi.Anchor) error {
 	r.cancelCalls++
 	return r.cancelErr
 }
@@ -212,26 +210,26 @@ type blockingRevisionConflictSessionService struct {
 }
 
 type completionPublishingSagaRunner struct {
-	spawnContext subagent.SpawnContext
+	spawnContext taskapi.SpawnContext
 	cancelCalls  atomic.Int64
 }
 
 func (r *completionPublishingSagaRunner) Spawn(
 	_ context.Context,
-	spawn subagent.SpawnContext,
-	req delegation.Request,
-) (delegation.Anchor, delegation.Result, error) {
+	spawn taskapi.SpawnContext,
+	req taskapi.DelegationRequest,
+) (taskapi.Anchor, taskapi.DelegationResult, error) {
 	r.spawnContext = spawn
-	return delegation.Anchor{
+	return taskapi.Anchor{
 		TaskID: spawn.TaskID, SessionID: "child-persistent-conflict", Agent: req.Agent, AgentID: spawn.TaskID,
-	}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateRunning, Running: true}, nil
+	}, taskapi.DelegationResult{TaskID: spawn.TaskID, State: taskapi.StateRunning, Running: true}, nil
 }
 
-func (*completionPublishingSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{}, nil
+func (*completionPublishingSagaRunner) Wait(context.Context, taskapi.Anchor, int) (taskapi.DelegationResult, error) {
+	return taskapi.DelegationResult{}, nil
 }
 
-func (r *completionPublishingSagaRunner) Cancel(context.Context, delegation.Anchor) error {
+func (r *completionPublishingSagaRunner) Cancel(context.Context, taskapi.Anchor) error {
 	r.cancelCalls.Add(1)
 	return nil
 }
@@ -346,7 +344,7 @@ func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: taskapi.DelegationResult{State: taskapi.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
@@ -358,9 +356,9 @@ func TestSubagentProducerCompletionAcknowledgesDurableCommit(t *testing.T) {
 
 	published := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
 			TaskID: started.Ref.TaskID,
-			State:  delegation.StateCompleted,
+			State:  taskapi.StateCompleted,
 			Result: "done",
 		})
 		close(published)
@@ -393,7 +391,7 @@ func TestSubagentProducerCompletionRetriesWithoutTaskObservation(t *testing.T) {
 	t.Parallel()
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: taskapi.DelegationResult{State: taskapi.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
@@ -408,9 +406,9 @@ func TestSubagentProducerCompletionRetriesWithoutTaskObservation(t *testing.T) {
 
 	published := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
 			TaskID: started.Ref.TaskID,
-			State:  delegation.StateCompleted,
+			State:  taskapi.StateCompleted,
 			Result: "done after retry",
 		})
 		close(published)
@@ -430,7 +428,7 @@ func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
 	t.Parallel()
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: taskapi.DelegationResult{State: taskapi.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, nil, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
@@ -452,9 +450,9 @@ func TestSubagentProducerCompletionRefreshesAfterCASConflict(t *testing.T) {
 
 	published := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
 			TaskID: started.Ref.TaskID,
-			State:  delegation.StateCompleted,
+			State:  taskapi.StateCompleted,
 			Result: "done after CAS refresh",
 		})
 		close(published)
@@ -476,7 +474,7 @@ func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *tes
 	sessions := &sagaSessionService{ManagedService: baseSessions, failCanonicalAt: 2}
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: taskapi.DelegationResult{State: taskapi.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
@@ -488,9 +486,9 @@ func TestSubagentProducerCompletionRetriesSideFinalWithoutTaskObservation(t *tes
 
 	published := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
 			TaskID: started.Ref.TaskID,
-			State:  delegation.StateCompleted,
+			State:  taskapi.StateCompleted,
 			Result: "side final after retry",
 		})
 		close(published)
@@ -523,7 +521,7 @@ func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) 
 	sessions.fail.Store(true)
 	store := newSagaTaskStore()
 	runner := &recordingSubagentRunner{
-		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		spawnResult: taskapi.DelegationResult{State: taskapi.StateRunning, Running: true},
 	}
 	runtime, active := newSubagentCompletionSagaRuntime(t, store, sessions, runner)
 	parentRun := newRunner(t.Context(), "parent-run", func() {}, nil)
@@ -547,8 +545,8 @@ func TestSubagentProducerCompletionDoesNotWaitForCompletionNotice(t *testing.T) 
 
 	published := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
-			TaskID: started.Ref.TaskID, State: delegation.StateCompleted, Result: "done without notice",
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
+			TaskID: started.Ref.TaskID, State: taskapi.StateCompleted, Result: "done without notice",
 		})
 		close(published)
 	}()
@@ -673,8 +671,8 @@ func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *
 
 	published := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
-			TaskID: taskID, State: delegation.StateCompleted, Result: "completed during failed attachment",
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
+			TaskID: taskID, State: taskapi.StateCompleted, Result: "completed during failed attachment",
 		})
 		close(published)
 	}()
@@ -719,8 +717,8 @@ func TestSubagentSpawnCompensatesAfterPersistentParticipantRevisionConflicts(t *
 
 	latePublished := make(chan struct{})
 	go func() {
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{
-			TaskID: taskID, State: delegation.StateCompleted, Result: "late completion after compensation",
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{
+			TaskID: taskID, State: taskapi.StateCompleted, Result: "late completion after compensation",
 		})
 		close(latePublished)
 	}()
@@ -735,7 +733,7 @@ func newSubagentCompletionSagaRuntime(
 	t *testing.T,
 	store taskapi.Store,
 	sessions session.ManagedService,
-	runner subagent.Runner,
+	runner taskapi.SubagentRunner,
 ) (*Runtime, session.Session) {
 	t.Helper()
 	if sessions == nil {
@@ -1245,7 +1243,7 @@ func TestSubagentSpawnReleasesHandleWhenRunnerProvesNoChildWasCreated(t *testing
 		t.Fatal(err)
 	}
 	store := newFileTaskStoreForTest(t)
-	runner := &sagaRunner{spawnErr: subagent.MarkSpawnNotStarted(errors.New("runner setup failed"))}
+	runner := &sagaRunner{spawnErr: taskapi.MarkSpawnNotStarted(errors.New("runner setup failed"))}
 	producerLifecycle := &recordingProducerLifecycle{}
 	runtime, err := New(testConfigWithACPForwarder(Config{
 		Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store, TaskOutput: producerLifecycle,
@@ -1363,7 +1361,7 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 		change func(*taskapi.SubagentStartRequest)
 	}{
 		{name: "context", change: func(req *taskapi.SubagentStartRequest) {
-			req.Context = agent.ContextTransfer{Summary: "different context"}
+			req.Context = session.ContextTransfer{Summary: "different context"}
 		}},
 		{name: "mode", change: func(req *taskapi.SubagentStartRequest) { req.Mode = "different-mode" }},
 		{name: "approval mode", change: func(req *taskapi.SubagentStartRequest) { req.ApprovalMode = "different-approval" }},
@@ -1386,7 +1384,7 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 				t.Fatal(err)
 			}
 			req := taskapi.SubagentStartRequest{
-				SpawnID: "semantic-request", Agent: "helper", Prompt: "review", Context: agent.ContextTransfer{Summary: "context"},
+				SpawnID: "semantic-request", Agent: "helper", Prompt: "review", Context: session.ContextTransfer{Summary: "context"},
 				Mode: "allow", ApprovalMode: "ask", ParentCall: "call-1", Role: session.ParticipantRoleSidecar,
 			}
 			if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err != nil {
@@ -1445,13 +1443,13 @@ type invalidAnchorSagaRunner struct {
 	cancelCalls int
 }
 
-func (*invalidAnchorSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-invalid", Agent: req.Agent}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted}, nil
+func (*invalidAnchorSagaRunner) Spawn(_ context.Context, spawn taskapi.SpawnContext, req taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
+	return taskapi.Anchor{TaskID: spawn.TaskID, SessionID: "child-invalid", Agent: req.Agent}, taskapi.DelegationResult{TaskID: spawn.TaskID, State: taskapi.StateCompleted}, nil
 }
-func (*invalidAnchorSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{}, nil
+func (*invalidAnchorSagaRunner) Wait(context.Context, taskapi.Anchor, int) (taskapi.DelegationResult, error) {
+	return taskapi.DelegationResult{}, nil
 }
-func (r *invalidAnchorSagaRunner) Cancel(context.Context, delegation.Anchor) error {
+func (r *invalidAnchorSagaRunner) Cancel(context.Context, taskapi.Anchor) error {
 	r.cancelCalls++
 	return nil
 }
@@ -1578,7 +1576,7 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	durableTarget := delegation.Target{
+	durableTarget := taskapi.Target{
 		Selector: "orbit",
 		Placement: mustSealPlacement(t, placement.Placement{
 			Kind: placement.KindModel, Model: "provider/model", ReasoningEffort: "high",
@@ -1654,15 +1652,15 @@ func (s *upsertOnlySagaStore) GetSessionTaskByHandle(ctx context.Context, ref se
 
 type countingSagaRunner struct{ spawnCalls atomic.Int32 }
 
-func (r *countingSagaRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
+func (r *countingSagaRunner) Spawn(_ context.Context, spawn taskapi.SpawnContext, req taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
 	r.spawnCalls.Add(1)
 	time.Sleep(10 * time.Millisecond)
-	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-concurrent", Agent: req.Agent, AgentID: "child-agent-concurrent"}, delegation.Result{TaskID: spawn.TaskID, State: delegation.StateCompleted, Result: "done"}, nil
+	return taskapi.Anchor{TaskID: spawn.TaskID, SessionID: "child-concurrent", Agent: req.Agent, AgentID: "child-agent-concurrent"}, taskapi.DelegationResult{TaskID: spawn.TaskID, State: taskapi.StateCompleted, Result: "done"}, nil
 }
-func (*countingSagaRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{}, nil
+func (*countingSagaRunner) Wait(context.Context, taskapi.Anchor, int) (taskapi.DelegationResult, error) {
+	return taskapi.DelegationResult{}, nil
 }
-func (*countingSagaRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+func (*countingSagaRunner) Cancel(context.Context, taskapi.Anchor) error { return nil }
 
 func assertSubagentSagaModelRoundTrip(t *testing.T, sessions session.Service, ref session.SessionRef) {
 	t.Helper()

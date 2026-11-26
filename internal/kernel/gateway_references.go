@@ -7,7 +7,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 )
 
 type SubmissionReferenceProjectionRequest struct {
@@ -147,7 +146,7 @@ func (g *Gateway) prepareUserInput(
 	meta map[string]any,
 ) (string, string, []model.ContentPart, map[string]any, error) {
 	rawInput := strings.TrimSpace(input)
-	displayInput = userdisplay.ResolveDisplayInput(displayInput, meta)
+	displayInput = session.ResolveDisplayInput(displayInput, meta)
 	modelInput := rawInput
 	preparedParts := append([]model.ContentPart(nil), parts...)
 	if g != nil && g.submissionReferences != nil && rawInput != "" {
@@ -174,7 +173,7 @@ func (g *Gateway) prepareUserInput(
 }
 
 func canonicalDisplayInput(input string, displayInput string, parts []model.ContentPart, meta map[string]any) (string, map[string]any) {
-	message, displayText, outMeta := userdisplay.Resolve(input, displayInput, parts, meta)
+	message, displayText, outMeta := session.ResolveUserDisplay(input, displayInput, parts, meta)
 	if strings.TrimSpace(displayText) == "" || strings.TrimSpace(displayText) == strings.TrimSpace(message.TextContent()) {
 		displayText = ""
 	}

@@ -7,7 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"strings"
@@ -181,7 +180,7 @@ func TestRuntimeSendMessageDoesNotTreatLocalAsParentTarget(t *testing.T) {
 
 func newLocalControllerChildActivityTask(t *testing.T) (*Runtime, *subagentTask, *runtimeChildInputRunner) {
 	t.Helper()
-	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
+	runner := &runtimeChildInputRunner{spawnResult: taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "first done"}}
 	r, active := newSubagentTaskTestRuntime(t, runner)
 	_, err := r.sessions.BindController(t.Context(), session.BindControllerRequest{
 		SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeLifecycle),
@@ -208,7 +207,7 @@ func TestChildInputRejectsPersistedUnresolvedExecution(t *testing.T) {
 	t.Parallel()
 	r, task, runner := newLocalControllerChildActivityTask(t)
 	task.mu.Lock()
-	task.applyResult(delegation.Result{State: delegation.StateUnknownOutcome, Error: "prompt observation lost"})
+	task.applyResult(taskapi.DelegationResult{State: taskapi.StateUnknownOutcome, Error: "prompt observation lost"})
 	entry := task.entrySnapshot(r.now())
 	task.mu.Unlock()
 	if err := r.tasks.persistTaskEntryWithConflictInvalidation(t.Context(), entry, false); err != nil {

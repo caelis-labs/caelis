@@ -11,8 +11,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	spoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 	"github.com/caelis-labs/caelis/control/taskstream"
@@ -36,9 +34,9 @@ func (childReplayAccess) LoadSession(_ context.Context, req session.LoadSessionR
 	return session.LoadedSession{Session: session.Session{SessionRef: req.SessionRef, CWD: os.TempDir()}}, nil
 }
 
-type childReplayCompletion chan delegation.Result
+type childReplayCompletion chan task.DelegationResult
 
-func (c childReplayCompletion) PublishSubagentCompletion(result delegation.Result) { c <- result }
+func (c childReplayCompletion) PublishSubagentCompletion(result task.DelegationResult) { c <- result }
 
 func TestRestoredChildFollowsRealACPConnectionThroughOneSpool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
@@ -54,7 +52,7 @@ func TestRestoredChildFollowsRealACPConnectionThroughOneSpool(t *testing.T) {
 	recorder := taskstream.NewRecorder(spool, nil)
 	defer recorder.Close(context.Background())
 	entry := &task.Entry{TaskID: "task-replay", Handle: "helper", Session: session.SessionRef{SessionID: "parent"}, Kind: task.KindSubagent, State: task.StateCompleted,
-		Spec:     map[string]any{"target": delegation.AgentTarget("helper"), "agent_id": "child-agent"},
+		Spec:     map[string]any{"target": task.AgentTarget("helper"), "agent_id": "child-agent"},
 		Metadata: map[string]any{"session_id": "child-input-session", "child_activity_id": "old", "parent_call": "spawn"}}
 	service, err := taskstream.New(taskstream.Config{Tasks: childReplayStore{entry: entry}, Spool: spool, Recorder: recorder, Sessions: childReplayAccess{}, SubagentHistory: runner, Authorizer: childReplayAccess{}, Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
@@ -94,7 +92,7 @@ func TestRestoredChildFollowsRealACPConnectionThroughOneSpool(t *testing.T) {
 	if strings.Join(history, "|") != "original prompt|original reasoning|original answer" {
 		t.Fatalf("history: %q", history)
 	}
-	anchor := delegation.Anchor{TaskID: entry.TaskID, SessionID: "child-input-session", AgentID: "child-agent"}
+	anchor := task.Anchor{TaskID: entry.TaskID, SessionID: "child-input-session", AgentID: "child-agent"}
 	run, err := runner.lookup(anchor)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +100,7 @@ func TestRestoredChildFollowsRealACPConnectionThroughOneSpool(t *testing.T) {
 	originalClient := run.client
 	completed := make(childReplayCompletion, 1)
 	input, err := runner.SubmitChildInput(ctx, agent.ChildInputRequest{Target: run.slot.target, UserInput: true, Source: session.ActorRef{Kind: session.ActorKindUser, ID: "user"}, Input: "continue", ActivityID: "next",
-		Output: recorder.BindTaskOutput(ctx, output.Binding{SessionID: "parent", TaskID: entry.TaskID, ActivityID: "next", Kind: output.TaskKindSubagent}), Completion: completed})
+		Output: recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "parent", TaskID: entry.TaskID, ActivityID: "next", Kind: task.KindSubagent}), Completion: completed})
 	if err != nil || !input.StartedActivity {
 		t.Fatalf("input: %#v %v", input, err)
 	}

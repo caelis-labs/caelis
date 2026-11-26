@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	spoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 )
@@ -25,11 +24,11 @@ func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T
 
 	// Each completed command must free the sole registration for its successor.
 	for index := range 3 {
-		observer := recorder.BindTaskOutput(t.Context(), output.Binding{
+		observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
 			SessionID: "session-1", TaskID: fmt.Sprintf("task-%d", index),
-			Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
+			Kind: taskapi.KindCommand, StartsAtTaskOrigin: true,
 		})
-		if err := observer.ObserveTaskOutput(t.Context(), output.Event{
+		if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{
 			OccurredAt: time.Now(), State: "completed", Closed: true,
 		}); err != nil {
 			t.Fatal(err)
@@ -63,10 +62,10 @@ func TestRecorderReleasesTerminalPartitionsAndCanRebindAfterRemoval(t *testing.T
 	if err := store.Remove(context.Background(), key); err != nil {
 		t.Fatal(err)
 	}
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "task-0", Kind: output.TaskKindCommand, StartsAtTaskOrigin: false,
+	observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
+		SessionID: "session-1", TaskID: "task-0", Kind: taskapi.KindCommand, StartsAtTaskOrigin: false,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "completed", Closed: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{State: "completed", Closed: true}); err != nil {
 		t.Fatalf("rebound terminal ObserveTaskOutput() error = %v", err)
 	}
 	if _, _, err := store.Resolve(t.Context(), logical); err != nil {
@@ -83,10 +82,10 @@ func TestRecorderRetainsKnownGapUntilTaskRelease(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	recorder := NewRecorder(store, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "task-failed", Kind: output.TaskKindCommand, StartsAtTaskOrigin: true,
+	observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
+		SessionID: "session-1", TaskID: "task-failed", Kind: taskapi.KindCommand, StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "too large"}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "too large"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := recorder.Flush(t.Context(), taskapi.Ref{SessionID: "session-1", TaskID: "task-failed"}); err == nil {
@@ -114,11 +113,11 @@ func TestRecorderTaskReleaseBoundsRegistrationsByConcurrencyNotLifetime(t *testi
 	// Each release context must independently exceed the registration limit.
 	for index := range 2 * (registrations + 1) {
 		taskID := fmt.Sprintf("subagent-%d", index)
-		observer := recorder.BindTaskOutput(t.Context(), output.Binding{
+		observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
 			SessionID: "session-1", TaskID: taskID, ActivityID: "activity-1",
-			Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+			Kind: taskapi.KindSubagent, StartsAtTaskOrigin: true,
 		})
-		if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "final", State: "completed", Closed: true}); err != nil {
+		if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "final", State: "completed", Closed: true}); err != nil {
 			t.Fatal(err)
 		}
 		logical := streamspool.LogicalKey{
@@ -156,20 +155,20 @@ func TestRecorderSessionReleaseClosesEveryOwnedTaskPartition(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	recorder := NewRecorder(store, nil)
 	for _, taskID := range []string{"task-1", "task-2"} {
-		observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-			SessionID: "session-1", TaskID: taskID, Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+		observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
+			SessionID: "session-1", TaskID: taskID, Kind: taskapi.KindSubagent, StartsAtTaskOrigin: true,
 		})
-		if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: taskID, Running: true}); err != nil {
+		if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: taskID, Running: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := recorder.ReleaseSession(t.Context(), session.SessionRef{SessionID: "session-1"}); err != nil {
 		t.Fatal(err)
 	}
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-2", TaskID: "next", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+	observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
+		SessionID: "session-2", TaskID: "next", Kind: taskapi.KindSubagent, StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "next", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "next", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	logical := streamspool.LogicalKey{
@@ -190,25 +189,25 @@ func TestRecorderProducerCloseReleasesSubagentPartition(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	recorder := NewRecorder(store, nil)
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "subagent-1", Kind: output.TaskKindSubagent,
+	observer := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
+		SessionID: "session-1", TaskID: "subagent-1", Kind: taskapi.KindSubagent,
 		StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "partial", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "partial", Running: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.ObserveTaskOutput(t.Context(), output.Event{ProducerClosed: true}); err != nil {
+	if err := observer.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{ProducerClosed: true}); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := recorder.Flush(t.Context(), taskapi.Ref{SessionID: "session-1", TaskID: "subagent-1"}); err != nil {
 		t.Fatal(err)
 	}
-	next := recorder.BindTaskOutput(t.Context(), output.Binding{
-		SessionID: "session-1", TaskID: "subagent-2", Kind: output.TaskKindSubagent,
+	next := recorder.BindTaskOutput(t.Context(), taskapi.OutputBinding{
+		SessionID: "session-1", TaskID: "subagent-2", Kind: taskapi.KindSubagent,
 		StartsAtTaskOrigin: true,
 	})
-	if err := next.ObserveTaskOutput(t.Context(), output.Event{Text: "next", Running: true}); err != nil {
+	if err := next.ObserveTaskOutput(t.Context(), taskapi.OutputEvent{Text: "next", Running: true}); err != nil {
 		t.Fatalf("released producer kept the registration slot: %v", err)
 	}
 }

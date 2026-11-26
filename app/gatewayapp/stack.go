@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	hostacpendpoint "github.com/caelis-labs/caelis/app/gatewayapp/internal/acpendpoint"
 	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
@@ -197,7 +197,7 @@ func (s *runtimeComposition) KernelControlPlaneState() KernelControlPlaneReader 
 }
 
 // KernelTerminals returns command control for the currently bound gateway.
-func (s *runtimeComposition) KernelTerminals() terminal.Controller {
+func (s *runtimeComposition) KernelTerminals() task.TerminalController {
 	if gw := s.currentGateway(); gw != nil {
 		return gw.Terminals()
 	}
@@ -266,7 +266,7 @@ func (s *Stack) TaskStreams() acptaskstream.Service {
 // ControlTerminalStreams returns the Session-routed Runtime terminal stream
 // used by AppServer terminal services. Presentation surfaces must consume the
 // typed TerminalClient instead of this Runtime-facing controller.
-func (s *Stack) ControlTerminalStreams() terminal.Controller {
+func (s *Stack) ControlTerminalStreams() task.TerminalController {
 	if s == nil {
 		return nil
 	}

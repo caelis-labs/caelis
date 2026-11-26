@@ -10,8 +10,7 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
 )
@@ -26,16 +25,16 @@ func TestSpawnedChildRetainsNegotiatedSteeringCapability(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			runner := steeringChildTestRunner(t, fmt.Sprintf(`{"supported":%v}`, supported), "")
-			completion := make(chan delegation.Result, 1)
-			anchor, spawnResult, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+			completion := make(chan task.DelegationResult, 1)
+			anchor, spawnResult, err := runner.Spawn(ctx, task.SpawnContext{
 				ActivityID: "activity-new-" + fmt.Sprint(supported),
 				TaskID:     "task-new-" + fmt.Sprint(supported),
 				CWD:        t.TempDir(),
 				Output:     &recordingStreams{},
-				Completion: completionSinkFunc(func(result delegation.Result) {
+				Completion: completionSinkFunc(func(result task.DelegationResult) {
 					completion <- result
 				}),
-			}, delegation.Request{Agent: "helper", Prompt: "review"})
+			}, task.DelegationRequest{Agent: "helper", Prompt: "review"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,13 +70,13 @@ func TestSpawnRejectsMalformedSteeringBeforeSessionOrRegistration(t *testing.T) 
 	defer cancel()
 	marker := filepath.Join(t.TempDir(), "session-called")
 	runner := steeringChildTestRunner(t, `{"supported":null}`, marker)
-	_, _, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+	_, _, err := runner.Spawn(ctx, task.SpawnContext{
 		TaskID: "task-malformed", CWD: t.TempDir(),
-	}, delegation.Request{Agent: "helper", Prompt: "review"})
+	}, task.DelegationRequest{Agent: "helper", Prompt: "review"})
 	if err == nil {
 		t.Fatal("Spawn() error = nil, want malformed steering capability")
 	}
-	if !tasksubagent.SpawnProvenNotStarted(err) {
+	if !task.SpawnProvenNotStarted(err) {
 		t.Fatalf("Spawn() error = %v, want positive no-child proof before session/new", err)
 	}
 	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
@@ -119,8 +118,8 @@ type SubagentStartRequest struct {
 	// Handle is an optional Session-unique public identity. Empty lets Runtime
 	// assign one. A supplied value is canonicalized and must not collide with
 	// another Task in the same Session.
-	Handle  string                `json:"handle,omitempty"`
-	Context agent.ContextTransfer `json:"context,omitempty"`
+	Handle  string                  `json:"handle,omitempty"`
+	Context session.ContextTransfer `json:"context,omitempty"`
 	// IncludeContext is the model-facing request bit. Durable spawn identity
 	// binds this flag, not the resolved ContextTransfer contents.
 	IncludeContext bool `json:"include_context,omitempty"`
@@ -143,10 +142,10 @@ type ControlRequest struct {
 	Input  string        `json:"input,omitempty"`
 	// AppendNewline defaults to true when nil so existing line-oriented Task
 	// writes retain their behavior. False sends Input exactly as supplied.
-	AppendNewline *bool                 `json:"append_newline,omitempty"`
-	Principal     session.ActorKind     `json:"principal,omitempty"`
-	Source        string                `json:"source,omitempty"`
-	Context       agent.ContextTransfer `json:"context,omitempty"`
+	AppendNewline *bool                   `json:"append_newline,omitempty"`
+	Principal     session.ActorKind       `json:"principal,omitempty"`
+	Source        string                  `json:"source,omitempty"`
+	Context       session.ContextTransfer `json:"context,omitempty"`
 }
 
 // Entry is one durable task persistence record.

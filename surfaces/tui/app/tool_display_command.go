@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/control/display"
 )
 
 func commandDisplayArguments(name string, kind string, raw map[string]any) (string, string, bool) {

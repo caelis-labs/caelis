@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	spoolfile "github.com/caelis-labs/caelis/control/streamspool/file"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -34,8 +33,8 @@ func TestCompactedSpoolReplacementProjectsEveryActivityFinal(t *testing.T) {
 			}
 			for n := range 3 {
 				id := fmt.Sprint(n)
-				observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "parent", TaskID: "child", Kind: output.TaskKindSubagent, ActivityID: id, TerminalID: "stable-child", StartsAtTaskOrigin: n == 0})
-				frame := output.Event{Event: &session.Event{Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
+				observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "parent", TaskID: "child", Kind: task.KindSubagent, ActivityID: id, TerminalID: "stable-child", StartsAtTaskOrigin: n == 0})
+				frame := task.OutputEvent{Event: &session.Event{Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
 					Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent("answer-" + id)}}}}
 				if combined {
 					frame.State, frame.Closed = "completed", true
@@ -44,7 +43,7 @@ func TestCompactedSpoolReplacementProjectsEveryActivityFinal(t *testing.T) {
 					t.Fatal(err)
 				}
 				if !combined {
-					if err := observer.ObserveTaskOutput(ctx, output.Event{State: "completed", Closed: true}); err != nil {
+					if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{State: "completed", Closed: true}); err != nil {
 						t.Fatal(err)
 					}
 				}

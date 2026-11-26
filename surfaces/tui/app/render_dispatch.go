@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/display"
 )
 
 type renderEventLane string

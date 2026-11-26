@@ -1,4 +1,4 @@
-package delegation
+package task
 
 import (
 	"fmt"
@@ -8,9 +8,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 )
 
-// Agent is the LLM-visible descriptor of one spawnable ACP agent.
+// DelegationAgent is the LLM-visible descriptor of one spawnable ACP agent.
 // Name is the unique identifier used by SPAWN. Description is optional.
-type Agent struct {
+type DelegationAgent struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 }
@@ -21,19 +21,6 @@ type Target struct {
 	Selector  string              `json:"selector,omitempty"`
 	Placement placement.Placement `json:"placement,omitempty"`
 }
-
-// State identifies one delegated child lifecycle state.
-type State string
-
-const (
-	StateRunning         State = "running"
-	StateCompleted       State = "completed"
-	StateFailed          State = "failed"
-	StateCancelled       State = "cancelled"
-	StateInterrupted     State = "interrupted"
-	StateUnknownOutcome  State = "unknown_outcome"
-	StateWaitingApproval State = "waiting_approval"
-)
 
 // Anchor identifies one delegated child instance for system/runtime use.
 // It is not intended to be exposed to the LLM-facing tool result surface.
@@ -48,16 +35,16 @@ type Anchor struct {
 	AgentID string `json:"agent_id,omitempty"`
 }
 
-// Request describes one delegated child prompt. System-controlled execution
-// details such as workspace, timeout, model, and prompt scaffolding are
-// deliberately excluded from the LLM-visible SPAWN surface.
-type Request struct {
+// DelegationRequest describes one delegated child prompt. System-controlled
+// execution details such as workspace, timeout, model, and prompt scaffolding
+// are deliberately excluded from the LLM-visible SPAWN surface.
+type DelegationRequest struct {
 	Agent  string `json:"agent,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
 }
 
 // TargetRequest carries a typed durable execution placement to runners that
-// implement the optional subagent.PlacementRunner extension.
+// implement the optional PlacementRunner extension.
 type TargetRequest struct {
 	Target Target `json:"target,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
@@ -68,12 +55,12 @@ type TargetRequest struct {
 // Spawn/Message returns and after releasing their own locks. Publish does not
 // return until Runtime has durably converged the terminal result.
 type CompletionSink interface {
-	PublishSubagentCompletion(Result)
+	PublishSubagentCompletion(DelegationResult)
 }
 
-// Result captures one collaborating Agent summary visible to Runtime and the
-// calling Agent. The collaborator transcript remains in its own Session.
-type Result struct {
+// DelegationResult captures one collaborating Agent summary visible to Runtime
+// and the calling Agent. The collaborator transcript remains in its own Session.
+type DelegationResult struct {
 	TaskID  string `json:"task_id,omitempty"`
 	State   State  `json:"state,omitempty"`
 	Running bool   `json:"running,omitempty"`
@@ -90,13 +77,15 @@ type Result struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
-func NormalizeAgent(in Agent) Agent {
-	return Agent{
+// NormalizeDelegationAgent returns a normalized descriptor copy.
+func NormalizeDelegationAgent(in DelegationAgent) DelegationAgent {
+	return DelegationAgent{
 		Name:        strings.TrimSpace(in.Name),
 		Description: strings.TrimSpace(in.Description),
 	}
 }
 
+// CloneAnchor returns a normalized copy of an instance anchor.
 func CloneAnchor(in Anchor) Anchor {
 	return Anchor{
 		TaskID:    strings.TrimSpace(in.TaskID),
@@ -106,7 +95,8 @@ func CloneAnchor(in Anchor) Anchor {
 	}
 }
 
-func CloneRequest(in Request) Request {
+// CloneDelegationRequest returns a trimmed copy of a spawn prompt request.
+func CloneDelegationRequest(in DelegationRequest) DelegationRequest {
 	out := in
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Prompt = strings.TrimSpace(in.Prompt)
@@ -129,15 +119,17 @@ func AgentTarget(name string) Target {
 func ValidateTarget(raw Target) error {
 	target := NormalizeTarget(raw)
 	if target.Selector == "" {
-		return fmt.Errorf("agent-sdk/task/delegation: target selector is required")
+		return fmt.Errorf("agent-sdk/task: target selector is required")
 	}
 	if err := placement.Validate(target.Placement); err != nil {
-		return fmt.Errorf("agent-sdk/task/delegation: %w", err)
+		return fmt.Errorf("agent-sdk/task: %w", err)
 	}
 	return nil
 }
 
-func CloneResult(in Result) Result {
+// CloneDelegationResult returns a trimmed copy with error scrubbed unless
+// terminal failure.
+func CloneDelegationResult(in DelegationResult) DelegationResult {
 	out := in
 	out.State = State(strings.TrimSpace(string(in.State)))
 	out.TaskID = strings.TrimSpace(in.TaskID)

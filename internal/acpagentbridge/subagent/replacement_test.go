@@ -10,7 +10,7 @@ import (
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpdraft"
 	"github.com/caelis-labs/caelis/internal/acptest/draftpeer"
@@ -30,7 +30,7 @@ func TestChildReplacementClearAndReloadIdentity(t *testing.T) {
 	if run.finalAssistant.FinalText() != "current" {
 		t.Fatalf("child final = %q", run.finalAssistant.FinalText())
 	}
-	c := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{SessionID: "child", TaskID: "task"}, "helper")
+	c := newHistoryCollector(&Runner{clock: time.Now}, taskapi.Anchor{SessionID: "child", TaskID: "task"}, "helper")
 	c.openProjection()
 	defer c.closeProjection()
 	observe := func(kind, id, text string, replace bool) {
@@ -141,7 +141,7 @@ func TestDraftChildPreviousActivityRevisionKeepsCurrentResult(t *testing.T) {
 			runner := replacementDraftRunner(t, peer)
 			events := make(chan childInputTestEvent, 64)
 			spawn := childInputSpawnContext(t, "original-task", events)
-			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "first input"})
+			anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "first input"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -204,7 +204,7 @@ func TestDraftChildPreviousActivityRevisionKeepsCurrentResult(t *testing.T) {
 			if test.after {
 				wantRevisions++
 			}
-			if second.Result == nil || second.Result.State != delegation.StateCompleted || second.Result.TaskID != anchor.TaskID || second.Result.Result != want || observedRevisions != wantRevisions {
+			if second.Result == nil || second.Result.State != taskapi.StateCompleted || second.Result.TaskID != anchor.TaskID || second.Result.Result != want || observedRevisions != wantRevisions {
 				t.Fatalf("old message revision replaced current Activity or vanished: result=%+v revisions=%d", second.Result, observedRevisions)
 			}
 		})
@@ -233,7 +233,7 @@ func TestDraftChildNewSessionCanReuseMessageIdentity(t *testing.T) {
 		runner := replacementDraftRunner(t, peer)
 		events := make(chan childInputTestEvent, 64)
 		spawn := childInputSpawnContext(t, "task-"+remote, events)
-		anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "input"})
+		anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "input"})
 		if err != nil {
 			cancel()
 			t.Fatal(err)
@@ -290,7 +290,7 @@ func TestDraftChildPreviousThoughtRevisionKeepsCurrentResult(t *testing.T) {
 	runner := replacementDraftRunner(t, peer)
 	events := make(chan childInputTestEvent, 64)
 	spawn := childInputSpawnContext(t, "thought-task", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "first input"})
+	anchor, _, err := runner.Spawn(ctx, spawn, taskapi.DelegationRequest{Agent: "helper", Prompt: "first input"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,8 +389,8 @@ func TestChildTrustedCommunicationReplacementKeepsDisplayBody(t *testing.T) {
 	source := session.ActorRef{Kind: session.ActorKindParticipant, ID: "reviewer", Role: "delegated", Name: "reviewer"}
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor: delegation.Anchor{TaskID: "task", SessionID: "child", AgentID: "child-agent"},
-		taskID: "task", state: delegation.StateRunning, running: true, output: sink, inputActor: source,
+		anchor: taskapi.Anchor{TaskID: "task", SessionID: "child", AgentID: "child-agent"},
+		taskID: "task", state: taskapi.StateRunning, running: true, output: sink, inputActor: source,
 	}
 	runner := &Runner{clock: time.Now}
 	for _, body := range []string{" revised body ", ""} {

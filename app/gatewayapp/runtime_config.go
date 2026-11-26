@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/experimental"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -38,7 +38,7 @@ type stackRuntimeConfig struct {
 	EstimatedPromptPrefixTokens int
 }
 
-func (s *runtimeComposition) delegationAgentsForSpawn() []delegation.Agent {
+func (s *runtimeComposition) delegationAgentsForSpawn() []task.DelegationAgent {
 	if s == nil {
 		return delegationAgentsForBindings(agentbinding.Configuration{}, true)
 	}

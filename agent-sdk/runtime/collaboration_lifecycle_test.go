@@ -9,8 +9,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 type collaborationLifecycleRunner struct {
@@ -29,10 +27,10 @@ func (r *collaborationLifecycleRunner) SubmitChildInput(ctx context.Context, req
 	}
 	return result, err
 }
-func (r *collaborationLifecycleRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+func (r *collaborationLifecycleRunner) Wait(context.Context, task.Anchor, int) (task.DelegationResult, error) {
 	close(r.waitEntered)
 	<-r.waitRelease
-	return delegation.Result{State: delegation.StateRunning, Running: true}, nil
+	return task.DelegationResult{State: task.StateRunning, Running: true}, nil
 }
 func TestSubagentWaitObservesFollowupAfterReadingFirstResult(t *testing.T) {
 	t.Parallel()
@@ -48,7 +46,7 @@ func TestSubagentWaitObservesFollowupAfterReadingFirstResult(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := base.request.Output.ObserveTaskOutput(t.Context(), output.Event{Text: "working", Running: true}); err != nil {
+		if err := base.request.Output.ObserveTaskOutput(t.Context(), task.OutputEvent{Text: "working", Running: true}); err != nil {
 			t.Fatal(err)
 		}
 		done := make(chan error, 1)

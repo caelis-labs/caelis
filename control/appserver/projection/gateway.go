@@ -4,12 +4,12 @@ import (
 	"strings"
 
 	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
+	"github.com/caelis-labs/caelis/control/display"
 )
 
 // ProjectSessionEventEnvelope projects one canonical session event into

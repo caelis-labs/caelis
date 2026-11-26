@@ -14,59 +14,57 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 type sessionCancelRunner struct {
 	mu               sync.Mutex
-	spawnState       delegation.State
-	spawnContext     subagent.SpawnContext
+	spawnState       taskapi.State
+	spawnContext     taskapi.SpawnContext
 	producerContext  context.Context
 	entered          chan struct{}
 	release          chan struct{}
 	cancelCalls      int
 	completeOnCancel bool
-	waitState        delegation.State
+	waitState        taskapi.State
 }
 
-func (r *sessionCancelRunner) Spawn(ctx context.Context, spawn subagent.SpawnContext, _ delegation.Request) (delegation.Anchor, delegation.Result, error) {
+func (r *sessionCancelRunner) Spawn(ctx context.Context, spawn taskapi.SpawnContext, _ taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
 	r.mu.Lock()
 	r.spawnContext, r.producerContext = spawn, ctx
 	state := r.spawnState
 	if state == "" {
-		state = delegation.StateRunning
+		state = taskapi.StateRunning
 	}
 	r.mu.Unlock()
 	if r.entered != nil {
 		close(r.entered)
 		<-r.release // Exercise a producer that returns its identity after cancellation.
 	}
-	return delegation.Anchor{TaskID: spawn.TaskID, SessionID: "child-" + spawn.TaskID, AgentID: "agent-" + spawn.TaskID}, delegation.Result{TaskID: spawn.TaskID, State: state, Running: state == delegation.StateRunning, Result: "retained child result"}, nil
+	return taskapi.Anchor{TaskID: spawn.TaskID, SessionID: "child-" + spawn.TaskID, AgentID: "agent-" + spawn.TaskID}, taskapi.DelegationResult{TaskID: spawn.TaskID, State: state, Running: state == taskapi.StateRunning, Result: "retained child result"}, nil
 }
 
-func (r *sessionCancelRunner) Cancel(_ context.Context, _ delegation.Anchor) error {
+func (r *sessionCancelRunner) Cancel(_ context.Context, _ taskapi.Anchor) error {
 	r.mu.Lock()
 	r.cancelCalls++
 	completion, complete := r.spawnContext.Completion, r.completeOnCancel
 	r.mu.Unlock()
 	if complete {
-		completion.PublishSubagentCompletion(delegation.Result{State: delegation.StateCancelled})
+		completion.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCancelled})
 	}
 	return nil
 }
 
-func (r *sessionCancelRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
+func (r *sessionCancelRunner) Wait(context.Context, taskapi.Anchor, int) (taskapi.DelegationResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state := r.waitState
 	if state == "" {
-		state = delegation.StateRunning
+		state = taskapi.StateRunning
 	}
-	return delegation.Result{State: state, Running: state == delegation.StateRunning}, nil
+	return taskapi.DelegationResult{State: state, Running: state == taskapi.StateRunning}, nil
 }
 
-func startSessionCancelChild(t *testing.T, r *Runtime, active session.Session, runner subagent.Runner, spawnID string) taskapi.Snapshot {
+func startSessionCancelChild(t *testing.T, r *Runtime, active session.Session, runner taskapi.SubagentRunner, spawnID string) taskapi.Snapshot {
 	t.Helper()
 	active, err := r.ensureSessionController(t.Context(), active, session.RuntimeMutationGuard(t.Context()))
 	if err != nil {
@@ -111,7 +109,7 @@ func TestCancelSessionSubagentsRetainsProducerUntilTerminal(t *testing.T) {
 					if _, err := r.CancelSessionSubagents(t.Context(), active.SessionRef); err != nil {
 						t.Fatal(err)
 					}
-					runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{State: delegation.StateCancelled})
+					runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCancelled})
 				}
 				synctest.Wait()
 				if runner.cancelCalls != 1 {
@@ -133,7 +131,7 @@ func TestCancelSessionSubagentsRevokesParentInputAdmissions(t *testing.T) {
 	for _, batch := range []bool{false, true} {
 		t.Run(map[bool]string{false: "single", true: "batch"}[batch], func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				runner := &sessionCancelRunner{spawnState: delegation.StateCompleted}
+				runner := &sessionCancelRunner{spawnState: taskapi.StateCompleted}
 				r, active := newSubagentTaskTestRuntime(t, runner)
 				started := startSessionCancelChild(t, r, active, runner, "source")
 				current, err := r.sessions.Session(t.Context(), active.SessionRef)
@@ -227,7 +225,7 @@ func TestCancelSessionSubagentsJoinsSpawnAndReturnsLateIdentity(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancelled spawn retry = %v", err)
 		}
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{State: delegation.StateCancelled})
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCancelled})
 	})
 }
 
@@ -304,7 +302,7 @@ func TestCancelSessionSubagentsFileHistoryAndModelContextRoundTrip(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &sessionCancelRunner{spawnState: delegation.StateCompleted}
+	runner := &sessionCancelRunner{spawnState: taskapi.StateCompleted}
 	r, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, TaskStore: sessionfile.NewTaskStore(sessions), AgentFactory: chat.Factory{}, Subagents: runner}))
 	if err != nil {
 		t.Fatal(err)
@@ -385,7 +383,7 @@ func TestCancelSessionSubagentsJoinsDurableSpawnBeforeProducerInstallation(t *te
 		if runner.cancelCalls != 1 {
 			t.Fatalf("real producer Cancel calls = %d", runner.cancelCalls)
 		}
-		runner.spawnContext.Completion.PublishSubagentCompletion(delegation.Result{State: delegation.StateCancelled})
+		runner.spawnContext.Completion.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCancelled})
 	})
 }
 
@@ -407,7 +405,7 @@ func (r *sessionCancelInputRunner) SubmitChildInput(ctx context.Context, req age
 func TestCancelSessionSubagentsJoinsDispatchedFollowupBeforeReceipt(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		runner := &sessionCancelInputRunner{sessionCancelRunner: &sessionCancelRunner{spawnState: delegation.StateCompleted}, inputEntered: make(chan struct{}), inputRelease: make(chan struct{})}
+		runner := &sessionCancelInputRunner{sessionCancelRunner: &sessionCancelRunner{spawnState: taskapi.StateCompleted}, inputEntered: make(chan struct{}), inputRelease: make(chan struct{})}
 		r, active := newSubagentTaskTestRuntime(t, runner)
 		started := startSessionCancelChild(t, r, active, runner, "followup")
 		current, err := r.sessions.Session(t.Context(), active.SessionRef)
@@ -439,14 +437,14 @@ func TestCancelSessionSubagentsJoinsDispatchedFollowupBeforeReceipt(t *testing.T
 		if err != nil || runner.cancelCalls != 1 || generation != 2 || !entry.Running {
 			t.Fatalf("admitted next generation escaped cancellation: %#v, %v, effects %d", entry, err, runner.cancelCalls)
 		}
-		runner.inputRequest.Completion.PublishSubagentCompletion(delegation.Result{State: delegation.StateCancelled})
+		runner.inputRequest.Completion.PublishSubagentCompletion(taskapi.DelegationResult{State: taskapi.StateCancelled})
 	})
 }
 
 func TestCancelSessionSubagentsPreservesUnknownInputOutcome(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		runner := &sessionCancelRunner{spawnState: delegation.StateCompleted}
+		runner := &sessionCancelRunner{spawnState: taskapi.StateCompleted}
 		r, active := newSubagentTaskTestRuntime(t, runner)
 		startSessionCancelChild(t, r, active, runner, "source")
 		current, err := r.sessions.Session(t.Context(), active.SessionRef)

@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func (t *commandTask) appendSandboxOutput(chunk sandbox.OutputChunk) {
@@ -152,7 +151,7 @@ func (t *commandTask) appendOutputLocked(text string) {
 	}
 	t.output = string(raw)
 	if t.outputObserver != nil {
-		_ = t.outputObserver.ObserveTaskOutput(context.Background(), output.Event{
+		_ = t.outputObserver.ObserveTaskOutput(context.Background(), taskapi.OutputEvent{
 			OccurredAt: time.Now(), Text: text, Running: t.running,
 		})
 	}
@@ -164,7 +163,7 @@ func (t *commandTask) emitOutputTerminalLocked(state taskapi.State, status sandb
 		return
 	}
 	t.outputTerminal = true
-	event := output.Event{OccurredAt: status.UpdatedAt, State: string(state), Closed: true}
+	event := taskapi.OutputEvent{OccurredAt: status.UpdatedAt, State: string(state), Closed: true}
 	if event.OccurredAt.IsZero() {
 		event.OccurredAt = time.Now()
 	}

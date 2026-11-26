@@ -7,14 +7,14 @@ import (
 	"strings"
 
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
-	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSelf bool) []sdkdelegation.Agent {
+func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSelf bool) []task.DelegationAgent {
 	catalog := agentbinding.CatalogFor(bindings)
 	visible := map[agentbinding.Handle]struct{}{}
 	if includeSelf {
@@ -25,13 +25,13 @@ func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSel
 			visible[binding.Handle] = struct{}{}
 		}
 	}
-	out := make([]sdkdelegation.Agent, 0, len(visible))
+	out := make([]task.DelegationAgent, 0, len(visible))
 	for _, definition := range catalog.DelegationDefinitions() {
 		handle := definition.Handle
 		if _, ok := visible[handle]; !ok {
 			continue
 		}
-		out = append(out, sdkdelegation.Agent{
+		out = append(out, task.DelegationAgent{
 			Name:        string(handle),
 			Description: definition.Description,
 		})
@@ -39,12 +39,12 @@ func delegationAgentsForBindings(bindings agentbinding.Configuration, includeSel
 	return out
 }
 
-func (s *runtimeComposition) delegationSpawnTargets(session controlplacement.SessionContext) (map[string]sdkdelegation.Target, error) {
+func (s *runtimeComposition) delegationSpawnTargets(session controlplacement.SessionContext) (map[string]task.Target, error) {
 	_, targets, err := s.delegationSpawnConfiguration(session)
 	return targets, err
 }
 
-func (s *runtimeComposition) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]sdkdelegation.Agent, map[string]sdkdelegation.Target, error) {
+func (s *runtimeComposition) delegationSpawnConfiguration(session controlplacement.SessionContext) ([]task.DelegationAgent, map[string]task.Target, error) {
 	if s == nil || s.authorities.store == nil {
 		return nil, nil, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
@@ -54,7 +54,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 	}
 	hasSessionSelection := strings.TrimSpace(session.ProfileID) != "" || strings.TrimSpace(session.Effort) != ""
 	agents := delegationAgentsForBindings(snapshot.placement.Bindings, hasSessionSelection)
-	targets := make(map[string]sdkdelegation.Target, len(agents))
+	targets := make(map[string]task.Target, len(agents))
 
 	if hasSessionSelection {
 		selfSnapshot, err := s.selfPlacementSnapshot(snapshot, session.ProfileID)
@@ -69,7 +69,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 		if err != nil {
 			return nil, nil, err
 		}
-		targets[string(agentbinding.HandleSelf)] = sdkdelegation.Target{Selector: string(agentbinding.HandleSelf), Placement: self}
+		targets[string(agentbinding.HandleSelf)] = task.Target{Selector: string(agentbinding.HandleSelf), Placement: self}
 	}
 
 	for _, definition := range agentbinding.CatalogFor(snapshot.placement.Bindings).DelegationDefinitions() {
@@ -87,16 +87,16 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 		if err != nil {
 			return nil, nil, err
 		}
-		targets[string(handle)] = sdkdelegation.Target{Selector: string(handle), Placement: placement}
+		targets[string(handle)] = task.Target{Selector: string(handle), Placement: placement}
 	}
 	return agents, targets, nil
 }
 
-func (s *runtimeComposition) resolveDelegationPlacement(ctx context.Context, req sdkdelegation.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+func (s *runtimeComposition) resolveDelegationPlacement(ctx context.Context, req task.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
 	if s == nil || s.authorities.store == nil || s.lookup == nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
-	target := sdkdelegation.NormalizeTarget(req.Target)
+	target := task.NormalizeTarget(req.Target)
 	if target.Selector == "" {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: delegation selector is required")
 	}

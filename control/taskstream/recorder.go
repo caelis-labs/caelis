@@ -12,7 +12,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
@@ -28,9 +27,9 @@ const (
 )
 
 type recordedTaskOutput struct {
-	TerminalID string       `json:"terminal_id,omitempty"`
-	ActivityID string       `json:"activity_id,omitempty"`
-	Event      output.Event `json:"event"`
+	TerminalID string              `json:"terminal_id,omitempty"`
+	ActivityID string              `json:"activity_id,omitempty"`
+	Event      taskapi.OutputEvent `json:"event"`
 }
 
 // Recorder binds trusted Task identity to raw SDK output and appends it to the
@@ -75,7 +74,7 @@ type outputWrite struct {
 type boundRecorder struct {
 	recorder          *Recorder
 	partition         *recordingPartition
-	binding           output.Binding
+	binding           taskapi.OutputBinding
 	partitionTerminal bool
 }
 
@@ -87,13 +86,13 @@ func NewRecorder(store streamspool.Store, diagnostics *slog.Logger) *Recorder {
 
 // BindTaskOutput installs or reuses the single writer for a stable Task. A
 // later child activity shares the partition and receives only a new binding.
-func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) output.Observer {
+func (r *Recorder) BindTaskOutput(ctx context.Context, binding taskapi.OutputBinding) taskapi.OutputObserver {
 	binding.SessionID = strings.TrimSpace(binding.SessionID)
 	binding.TaskID = strings.TrimSpace(binding.TaskID)
 	binding.TerminalID = strings.TrimSpace(binding.TerminalID)
 	binding.ActivityID = strings.TrimSpace(binding.ActivityID)
 	if r == nil || r.store == nil || binding.SessionID == "" || binding.TaskID == "" {
-		return output.Nop()
+		return taskapi.NopOutputObserver()
 	}
 	logical := streamspool.LogicalKey{
 		Namespace: streamspool.NamespaceTask,
@@ -104,7 +103,7 @@ func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) o
 	unpublished := false
 	if r.closed {
 		r.mu.Unlock()
-		return output.Nop()
+		return taskapi.NopOutputObserver()
 	}
 	if partition != nil {
 		partition.mu.Lock()
@@ -123,7 +122,7 @@ func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) o
 	}
 	if partition == nil {
 		writer, err := r.store.Register(ctx, logical, streamspool.WriterOptions{OriginComplete: binding.StartsAtTaskOrigin, Unpublished: unpublished})
-		if errors.Is(err, streamspool.ErrInUse) && binding.Kind == output.TaskKindSubagent {
+		if errors.Is(err, streamspool.ErrInUse) && binding.Kind == taskapi.KindSubagent {
 			// A retired connection can leave a sealed incarnation behind. Its
 			// replacement stays private until session/load supplies the origin.
 			unpublished = true
@@ -132,22 +131,22 @@ func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) o
 		if err != nil {
 			r.mu.Unlock()
 			r.logFailure("register", binding, err)
-			return output.Nop()
+			return taskapi.NopOutputObserver()
 		}
-		partition = &recordingPartition{writer: writer, unpublished: unpublished, subagent: binding.Kind == output.TaskKindSubagent, sessionID: binding.SessionID, taskID: binding.TaskID, wake: make(chan struct{}, 1), done: make(chan struct{})}
+		partition = &recordingPartition{writer: writer, unpublished: unpublished, subagent: binding.Kind == taskapi.KindSubagent, sessionID: binding.SessionID, taskID: binding.TaskID, wake: make(chan struct{}, 1), done: make(chan struct{})}
 		r.writers[logical] = partition
 		go r.writeLoop(logical, partition)
 	}
 	r.mu.Unlock()
 	return &boundRecorder{
 		recorder: r, partition: partition, binding: binding,
-		partitionTerminal: binding.Kind == output.TaskKindCommand || binding.Kind == output.TaskKindCodeMode,
+		partitionTerminal: binding.Kind == taskapi.KindCommand || binding.Kind == taskapi.KindCodeMode,
 	}
 }
 
 // ObserveTaskOutput copies and admits an event into bounded memory. Consumer
 // speed, file writes and fsync are never on this callback's lock path.
-func (o *boundRecorder) ObserveTaskOutput(ctx context.Context, event output.Event) error {
+func (o *boundRecorder) ObserveTaskOutput(ctx context.Context, event taskapi.OutputEvent) error {
 	if o == nil || o.partition == nil {
 		return nil
 	}
@@ -414,7 +413,7 @@ func (r *Recorder) forgetPartition(logical streamspool.LogicalKey, partition *re
 	r.mu.Unlock()
 }
 
-func cloneOutputEvent(in output.Event) output.Event {
+func cloneOutputEvent(in taskapi.OutputEvent) taskapi.OutputEvent {
 	out := in
 	if in.ExitCode != nil {
 		code := *in.ExitCode
@@ -424,12 +423,12 @@ func cloneOutputEvent(in output.Event) output.Event {
 	return out
 }
 
-func (r *Recorder) logFailure(operation string, binding output.Binding, err error) {
+func (r *Recorder) logFailure(operation string, binding taskapi.OutputBinding, err error) {
 	if r == nil || r.diagnostics == nil || err == nil {
 		return
 	}
 	r.diagnostics.Warn("Control Task output trace unavailable", "operation", operation, "error", err)
 }
 
-var _ output.Binder = (*Recorder)(nil)
-var _ output.Observer = (*boundRecorder)(nil)
+var _ taskapi.OutputBinder = (*Recorder)(nil)
+var _ taskapi.OutputObserver = (*boundRecorder)(nil)

@@ -117,7 +117,7 @@ func TestBatchAdmissionRejectsSingularOnlyRunnerWithoutDispatch(t *testing.T) {
 	t.Parallel()
 	r, child, base := newLocalControllerChildActivityTask(t)
 	child.runner = struct {
-		agent.SubagentRunner
+		taskapi.SubagentRunner
 		agent.ChildInputRunner
 	}{base, base}
 	err := r.SubmitAgentInputBatch(t.Context(), child.sessionRef, child.handle, []agent.AgentInputBatchEntry{{Message: agent.AgentCommunicationInput{Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "keep full batch"}}}, nil)

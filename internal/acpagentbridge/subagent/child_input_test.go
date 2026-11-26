@@ -19,9 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
@@ -30,8 +28,8 @@ import (
 type childInputTestEvent struct {
 	ActivityID string
 	Cursor     uint64
-	Frame      *output.Event
-	Result     *delegation.Result
+	Frame      *task.OutputEvent
+	Result     *task.DelegationResult
 }
 
 type childInputTestSink struct {
@@ -40,7 +38,7 @@ type childInputTestSink struct {
 	cursor     atomic.Uint64
 }
 
-func (s *childInputTestSink) ObserveTaskOutput(_ context.Context, event output.Event) error {
+func (s *childInputTestSink) ObserveTaskOutput(_ context.Context, event task.OutputEvent) error {
 	if s == nil || s.events == nil || (event.Closed && event.Event == nil && event.Text == "") {
 		return nil
 	}
@@ -48,7 +46,7 @@ func (s *childInputTestSink) ObserveTaskOutput(_ context.Context, event output.E
 	if canonical == nil && event.Text != "" {
 		canonical = &session.Event{Text: event.Text}
 	}
-	frame := &output.Event{
+	frame := &task.OutputEvent{
 		Text: event.Text, State: event.State, Running: event.Running, Closed: event.Closed,
 		ExitCode: event.ExitCode, Event: canonical, OccurredAt: event.OccurredAt,
 	}
@@ -56,11 +54,11 @@ func (s *childInputTestSink) ObserveTaskOutput(_ context.Context, event output.E
 	return nil
 }
 
-func (s *childInputTestSink) PublishSubagentCompletion(result delegation.Result) {
+func (s *childInputTestSink) PublishSubagentCompletion(result task.DelegationResult) {
 	if s == nil || s.events == nil {
 		return
 	}
-	cloned := delegation.CloneResult(result)
+	cloned := task.CloneDelegationResult(result)
 	s.events <- childInputTestEvent{ActivityID: s.activityID, Cursor: s.cursor.Add(1), Result: &cloned}
 }
 
@@ -75,7 +73,7 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 	runner := newChildInputTestRunner(t, "active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 8)
 	spawn := childInputSpawnContext(t, "task-active-input", events)
-	anchor, initial, err := runner.Spawn(ctx, spawn, delegation.Request{
+	anchor, initial, err := runner.Spawn(ctx, spawn, task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil || !initial.Running {
@@ -135,7 +133,7 @@ func TestActiveChildInputPreservesStandardACPImageContent(t *testing.T) {
 	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
 	runner := newChildInputTestRunner(t, "image", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 8)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-image-input", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-image-input", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -221,7 +219,7 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 			runner := newChildInputTestRunner(t, "failed-echo", map[string]string{key: release}, controlagents.Authentication{})
 			events := make(chan childInputTestEvent, 8)
 			spawn := childInputSpawnContext(t, "task-rejected-input", events)
-			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
+			anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{
 				Agent: "helper", Prompt: "initial",
 			})
 			if err != nil {
@@ -264,7 +262,7 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 					t.Fatal(ctx.Err())
 				}
 			}
-			if frame.Frame == nil || frame.Frame.Event.Text != "not injected output" || terminal.Cursor <= frame.Cursor || terminal.Result.State != delegation.StateCompleted {
+			if frame.Frame == nil || frame.Frame.Event.Text != "not injected output" || terminal.Cursor <= frame.Cursor || terminal.Result.State != task.StateCompleted {
 				t.Fatalf("released rejection events = frame %#v terminal %#v", frame, terminal)
 			}
 			if communicationCount != 0 {
@@ -285,7 +283,7 @@ func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
 	runner := newChildInputTestRunner(t, "prompt-required", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 24)
 	spawn := childInputSpawnContext(t, "task-finishing-input", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +334,7 @@ func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
 	runner := childInputTestRunner(t, "idle")
 	events := make(chan childInputTestEvent, 12)
 	spawn := childInputSpawnContext(t, "task-idle-input", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +360,7 @@ func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
 	if outputFrame.Event == nil || outputFrame.Event.Text != "prompt output 2" {
 		t.Fatalf("idle prompt output = %#v", outputFrame)
 	}
-	if terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result.State != task.StateCompleted {
 		t.Fatalf("idle prompt terminal = %#v", terminal.Result)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
@@ -395,7 +393,7 @@ func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
 			runner := newChildInputTestRunner(t, test.mode, env, controlagents.Authentication{})
 			events := make(chan childInputTestEvent, 12)
 			spawn := childInputSpawnContext(t, "task-echo-"+test.name, events)
-			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
+			anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{
 				Agent: "helper", Prompt: "initial",
 			})
 			if err != nil {
@@ -451,7 +449,7 @@ func TestIdleChildInputCancellationBeforeWriteRestoresCompleteRunState(t *testin
 	defer cancel()
 	runner := childInputTestRunner(t, "idle")
 	events := make(chan childInputTestEvent, 8)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-idle-rollback", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-idle-rollback", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -523,7 +521,7 @@ func TestPromptAuthenticationRetryKeepsChildInputAdmissionFence(t *testing.T) {
 			steeringMarker := stateDir + "/steering"
 			runner := childInputAuthTestRunner(t, mode, authReady, authRelease, steeringMarker)
 			events := make(chan childInputTestEvent, 16)
-			anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-"+mode, events), delegation.Request{
+			anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-"+mode, events), task.DelegationRequest{
 				Agent: "helper", Prompt: "initial",
 			})
 			if err != nil {
@@ -627,7 +625,7 @@ func TestGenericReconnectDoesNotRequirePrivateMessageCapability(t *testing.T) {
 	defer cancel()
 	runner := childInputTestRunner(t, "idle")
 	events := make(chan childInputTestEvent, 12)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-reconnect-input", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-reconnect-input", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -640,7 +638,7 @@ func TestGenericReconnectDoesNotRequirePrivateMessageCapability(t *testing.T) {
 	}
 	_ = run.client.Close(ctx)
 	run.mu.Lock()
-	run.state = delegation.StateFailed
+	run.state = task.StateFailed
 	run.running = false
 	run.mu.Unlock()
 	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
@@ -652,7 +650,7 @@ func TestGenericReconnectDoesNotRequirePrivateMessageCapability(t *testing.T) {
 		t.Fatalf("SubmitChildInput() after reconnect = (%#v, %v)", result, err)
 	}
 	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("reconnected terminal = %#v", terminal)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
@@ -667,7 +665,7 @@ func TestResumeSetupUsesNewChildOutputBinding(t *testing.T) {
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 16)
 	spawn := childInputSpawnContext(t, "task-resume-binding", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +676,7 @@ func TestResumeSetupUsesNewChildOutputBinding(t *testing.T) {
 	}
 	_ = run.client.Close(ctx)
 	run.mu.Lock()
-	run.state, run.running = delegation.StateFailed, false
+	run.state, run.running = task.StateFailed, false
 	run.mu.Unlock()
 	sink := &childInputTestSink{activityID: "resumed-activity", events: events}
 	spawn.ActivityID, spawn.Output, spawn.Completion = sink.activityID, sink, sink
@@ -705,7 +703,7 @@ func TestActiveChildInputKeepsProducerBindingBeforeRuntimeObservation(t *testing
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 16)
 	spawn := childInputSpawnContext(t, "task-active-binding", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -748,7 +746,7 @@ func TestRehydratedEndpointResumesWithoutProcessLocalRun(t *testing.T) {
 	firstRunner := childInputTestRunner(t, "idle")
 	events := make(chan childInputTestEvent, 12)
 	spawn := childInputSpawnContext(t, "task-rehydrated-input", events)
-	anchor, _, err := firstRunner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	anchor, _, err := firstRunner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,7 +771,7 @@ func TestRehydratedEndpointResumesWithoutProcessLocalRun(t *testing.T) {
 		t.Fatalf("rehydrated SubmitChildInput() = (%#v, %v)", result, err)
 	}
 	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("rehydrated terminal = %#v", terminal)
 	}
 	if err := rehydrated.Quiesce(ctx); err != nil {
@@ -789,7 +787,7 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
 	runner := newChildInputTestRunner(t, "second-active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 12)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-prompt-then-steer", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-prompt-then-steer", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -815,7 +813,7 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 				t.Fatalf("pre-output event = %#v, want new activity frame", event)
 			}
 			if i == 0 {
-				if !isProducerRunningEvidence(*event.Frame) || event.Frame.State != string(delegation.StateRunning) || event.Frame.OccurredAt.IsZero() {
+				if !isProducerRunningEvidence(*event.Frame) || event.Frame.State != string(task.StateRunning) || event.Frame.OccurredAt.IsZero() {
 					t.Fatalf("first pre-output frame = %#v, want explicit running state", event.Frame)
 				}
 			} else if communication := session.ProtocolAgentCommunicationOf(event.Frame.Event); communication == nil || communication.Text != "prompt two" {
@@ -849,7 +847,7 @@ func TestUnknownSteeringOutcomePreservesOriginalActivity(t *testing.T) {
 	runner := childInputTestRunner(t, "unknown")
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 12)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-unknown-steering", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-unknown-steering", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -866,7 +864,7 @@ func TestUnknownSteeringOutcomePreservesOriginalActivity(t *testing.T) {
 		t.Fatalf("SubmitChildInput() error = %v, want unknown outcome", err)
 	}
 	terminal := waitChildActivityTerminal(t, ctx, events)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("unknown terminal = %#v", terminal)
 	}
 	if terminal.Result.Result != "ambiguous output" {
@@ -882,7 +880,7 @@ func TestMalformedSteeringResultDoesNotSettleOriginalActivity(t *testing.T) {
 	runner := childInputTestRunner(t, "malformed-steering")
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 12)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-malformed-steering", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-malformed-steering", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -901,7 +899,7 @@ func TestMalformedSteeringResultDoesNotSettleOriginalActivity(t *testing.T) {
 		t.Fatalf("SubmitChildInput() error = %v, want unknown outcome", err)
 	}
 	terminal := waitChildActivityTerminal(t, ctx, events)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("malformed steering terminal = %#v", terminal)
 	}
 	if terminal.Result.Result != "malformed steering output" {
@@ -917,7 +915,7 @@ func TestMalformedIdlePromptResultFinishesUnknownAndIsolatesTransport(t *testing
 	runner := childInputTestRunner(t, "malformed-idle")
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 12)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-malformed-idle", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-malformed-idle", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -937,23 +935,23 @@ func TestMalformedIdlePromptResultFinishesUnknownAndIsolatesTransport(t *testing
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want started activity", started, err)
 	}
 	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome {
+	if terminal.Result == nil || terminal.Result.State != task.StateUnknownOutcome {
 		t.Fatalf("malformed prompt terminal = %#v, want unknown", terminal)
 	}
 	run.mu.RLock()
 	state := run.state
 	remote := run.client
 	run.mu.RUnlock()
-	if state != delegation.StateUnknownOutcome || remote == nil {
+	if state != task.StateUnknownOutcome || remote == nil {
 		t.Fatalf("malformed prompt run state=%q client=%v", state, remote != nil)
 	}
 }
 
-func childInputSpawnContext(t *testing.T, taskID string, events chan<- childInputTestEvent) tasksubagent.SpawnContext {
+func childInputSpawnContext(t *testing.T, taskID string, events chan<- childInputTestEvent) task.SpawnContext {
 	t.Helper()
 	activityID := fmt.Sprintf("spawn-activity-%d", childInputTestActivity.Add(1))
 	sink := &childInputTestSink{activityID: activityID, events: events}
-	return tasksubagent.SpawnContext{
+	return task.SpawnContext{
 		SessionRef: session.SessionRef{SessionID: "parent-session"},
 		TaskID:     taskID, CWD: t.TempDir(), Role: session.ParticipantRoleDelegated,
 		ActivityID: activityID, Output: sink, Completion: sink,
@@ -1100,11 +1098,11 @@ func waitChildActivityTerminalFor(t *testing.T, ctx context.Context, events <-ch
 	}
 }
 
-func isProducerRunningEvidence(frame output.Event) bool {
+func isProducerRunningEvidence(frame task.OutputEvent) bool {
 	return frame.Running && !frame.Closed && frame.Event == nil && strings.TrimSpace(frame.Text) == ""
 }
 
-func requireIdlePromptRunningThenAccepted(t *testing.T, frames []output.Event) (output.Event, output.Event) {
+func requireIdlePromptRunningThenAccepted(t *testing.T, frames []task.OutputEvent) (task.OutputEvent, task.OutputEvent) {
 	t.Helper()
 	if len(frames) != 3 {
 		t.Fatalf("idle prompt frames = %#v, want one running, input, and output frame", frames)
@@ -1144,9 +1142,9 @@ func waitChildActivityFramesUntilTerminalFor(
 	ctx context.Context,
 	events <-chan childInputTestEvent,
 	activityID string,
-) ([]output.Event, childInputTestEvent) {
+) ([]task.OutputEvent, childInputTestEvent) {
 	t.Helper()
-	var frames []output.Event
+	var frames []task.OutputEvent
 	for {
 		select {
 		case event := <-events:
@@ -1482,7 +1480,7 @@ func appendChildInputTestFile(path string, text string) error {
 
 func (s *childInputTestSink) ReplaceTaskHistory(ctx context.Context, events []*session.Event) error {
 	for _, event := range events {
-		if err := s.ObserveTaskOutput(ctx, output.Event{Event: event}); err != nil {
+		if err := s.ObserveTaskOutput(ctx, task.OutputEvent{Event: event}); err != nil {
 			return err
 		}
 	}

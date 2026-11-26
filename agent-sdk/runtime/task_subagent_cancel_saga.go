@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
 // subagentCancelPhase records the one-way boundary around the remote Cancel
@@ -42,7 +41,7 @@ func (tm *taskRuntime) advanceSubagentCancel(
 	if task == nil || task.runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent cancellation cannot be reconciled without a runner")
 	}
-	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), yieldMS)
+	result, err := task.runner.Wait(ctx, taskapi.CloneAnchor(task.anchor), yieldMS)
 	if err != nil {
 		if phase == subagentCancelPhaseClaimed {
 			_, persistErr := tm.persistSubagentCancelPhase(context.WithoutCancel(ctx), task, cancelTurnSeq, subagentCancelPhaseUnknown,
@@ -83,17 +82,17 @@ func (tm *taskRuntime) advanceSubagentCancel(
 	return snapshot, nil
 }
 
-func subagentCancelResultPending(result delegation.Result) bool {
-	return result.Running || result.State == delegation.StateRunning || result.State == delegation.StateWaitingApproval
+func subagentCancelResultPending(result taskapi.DelegationResult) bool {
+	return result.Running || result.State == taskapi.StateRunning || result.State == taskapi.StateWaitingApproval
 }
 
-func subagentCancelResultTerminal(result delegation.Result) bool {
+func subagentCancelResultTerminal(result taskapi.DelegationResult) bool {
 	switch result.State {
-	case delegation.StateCompleted,
-		delegation.StateFailed,
-		delegation.StateCancelled,
-		delegation.StateInterrupted,
-		delegation.StateUnknownOutcome:
+	case taskapi.StateCompleted,
+		taskapi.StateFailed,
+		taskapi.StateCancelled,
+		taskapi.StateInterrupted,
+		taskapi.StateUnknownOutcome:
 		return true
 	default:
 		return false
@@ -106,7 +105,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	cancelTurnSeq int64,
 	phase subagentCancelPhase,
 	reason string,
-	result *delegation.Result,
+	result *taskapi.DelegationResult,
 	terminal bool,
 ) (bool, error) {
 	if task == nil {

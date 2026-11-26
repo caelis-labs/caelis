@@ -1,9 +1,10 @@
-package delegation
+package task
 
 import "testing"
 
-func TestCloneRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
-	req := CloneRequest(Request{
+func TestCloneDelegationRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
+	t.Parallel()
+	req := CloneDelegationRequest(DelegationRequest{
 		Agent:  "  codex  ",
 		Prompt: "  inspect repo  ",
 	})
@@ -13,7 +14,7 @@ func TestCloneRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
 	if got := req.Prompt; got != "inspect repo" {
 		t.Fatalf("req.Prompt = %q, want %q", got, "inspect repo")
 	}
-	result := CloneResult(Result{
+	result := CloneDelegationResult(DelegationResult{
 		TaskID:        "  task-1  ",
 		State:         StateRunning,
 		Running:       true,
@@ -30,7 +31,7 @@ func TestCloneRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
 	if result.Error != "" {
 		t.Fatalf("running result.Error = %q, want empty", result.Error)
 	}
-	completed := CloneResult(Result{
+	completed := CloneDelegationResult(DelegationResult{
 		TaskID: " task-2 ",
 		State:  StateCompleted,
 		Error:  " stale failure ",
@@ -42,7 +43,7 @@ func TestCloneRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
 	if completed.Error != "" {
 		t.Fatalf("completed.Error = %q, want empty", completed.Error)
 	}
-	failed := CloneResult(Result{
+	failed := CloneDelegationResult(DelegationResult{
 		TaskID: " task-3 ",
 		State:  StateFailed,
 		Error:  "  child prompt failed  ",
@@ -53,6 +54,7 @@ func TestCloneRequestAndResultPreserveMinimalLLMSurface(t *testing.T) {
 }
 
 func TestCloneAnchorKeepsSystemIdentitySeparate(t *testing.T) {
+	t.Parallel()
 	anchor := CloneAnchor(Anchor{
 		TaskID:    "  task-1  ",
 		SessionID: "  child-1  ",

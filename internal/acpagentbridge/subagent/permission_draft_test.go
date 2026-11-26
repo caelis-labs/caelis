@@ -9,8 +9,7 @@ import (
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 func TestDraftChildNativeToolDisplayDoesNotTrustExternalMetadata(t *testing.T) {
@@ -45,7 +44,7 @@ func TestDraftChildNativeToolDisplayDoesNotTrustExternalMetadata(t *testing.T) {
 				req.Subject = nil
 			}
 			calls := 0
-			spawn := tasksubagent.SpawnContext{SessionRef: session.SessionRef{SessionID: "parent"}, TaskID: "original-task", ParentCallID: "original-spawn", ApprovalRequester: subagentApprovalRequesterFunc(func(_ context.Context, request tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+			spawn := taskapi.SpawnContext{SessionRef: session.SessionRef{SessionID: "parent"}, TaskID: "original-task", ParentCallID: "original-spawn", ApprovalRequester: subagentApprovalRequesterFunc(func(_ context.Context, request approval.SubagentRequest) (approval.Response, error) {
 				calls++
 				if request.Origin.SessionID != "child" || request.Origin.ParentSessionID != "parent" || request.Origin.TaskID != "original-task" || request.Origin.ParentCallID != "original-spawn" || request.Approval == nil {
 					t.Fatal("native forwarding changed its bound identity")
@@ -69,7 +68,7 @@ func TestDraftChildNativeToolDisplayDoesNotTrustExternalMetadata(t *testing.T) {
 				}
 				return approval.Response{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
 			})}
-			run := &childRun{anchor: delegation.Anchor{SessionID: "child"}}
+			run := &childRun{anchor: taskapi.Anchor{SessionID: "child"}}
 			response, err := (&Runner{}).boundDraftPermissionHandler(run, spawn, AgentConfig{Name: "native-child", BuiltinRuntime: tc.builtin}, "native-child")(t.Context(), req)
 			if err != nil || calls != 1 || response.Outcome.Selected == nil || response.Outcome.Selected.OptionId != "allow_session" {
 				t.Fatalf("original native option did not return: %+v %v calls=%d", response, err, calls)
@@ -87,8 +86,8 @@ func TestDraftChildPermissionIndependentContextAndObservationBoundary(t *testing
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			var observed tasksubagent.ApprovalRequest
-			spawn := tasksubagent.SpawnContext{SessionRef: session.SessionRef{SessionID: "parent"}, TaskID: "task", ParentCallID: "spawn", ApprovalRequester: subagentApprovalRequesterFunc(func(_ context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+			var observed approval.SubagentRequest
+			spawn := taskapi.SpawnContext{SessionRef: session.SessionRef{SessionID: "parent"}, TaskID: "task", ParentCallID: "spawn", ApprovalRequester: subagentApprovalRequesterFunc(func(_ context.Context, req approval.SubagentRequest) (approval.Response, error) {
 				calls++
 				observed = req
 				return approval.Response{Outcome: "selected", OptionID: "native-allow", Approved: true}, nil
@@ -97,7 +96,7 @@ func TestDraftChildPermissionIndependentContextAndObservationBoundary(t *testing
 			if tc.legacy {
 				runner.permissionBridge = &recordingPermissionBridge{}
 			}
-			run := &childRun{anchor: delegation.Anchor{SessionID: tc.bound}, observationOnly: tc.observation}
+			run := &childRun{anchor: taskapi.Anchor{SessionID: tc.bound}, observationOnly: tc.observation}
 			req := v2.RequestPermissionRequest{SessionId: v2.SessionId(tc.requested), Title: "Independent command", Options: []v2.PermissionOption{{OptionId: "native-allow", Name: "Allow", Kind: "allow_once"}}, Subject: &v2.RequestPermissionSubject{Command: &v2.RequestPermissionSubjectCommand{Type: "command", Command: "git fetch", Cwd: "/workspace"}}}
 			response, err := runner.boundDraftPermissionHandler(run, spawn, AgentConfig{Name: "helper"}, "helper")(t.Context(), req)
 			if tc.bound == "" || tc.bound != tc.requested {

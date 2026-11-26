@@ -84,8 +84,8 @@ func replacementRemoteBinding(durable session.ControllerBinding) session.Control
 	return live
 }
 
-func fullDialogueContext() agent.ContextTransfer {
-	return agent.ContextTransfer{Turns: []agent.ContextTurn{{
+func fullDialogueContext() session.ContextTransfer {
+	return session.ContextTransfer{Turns: []session.ContextTurn{{
 		UserMessages:     []string{"previous request"},
 		AssistantSummary: "previous answer",
 	}}}
@@ -149,7 +149,7 @@ func TestRuntimeCommitBindingPublishesReplacementRemoteBeforePrompt(t *testing.T
 		t.Fatalf("committed controller = %#v, want live replacement %#v", got, live)
 	}
 	turnReq := <-turnRequests
-	if !agent.ContextTransferEmpty(turnReq.Context) {
+	if !session.ContextTransferEmpty(turnReq.Context) {
 		t.Fatalf("admitted Context = %#v, want no already-delivered dialogue at durable checkpoint %d", turnReq.Context, bindingCommitDurableSeq)
 	}
 	if want := fullDialogueContext(); !reflect.DeepEqual(turnReq.FreshContext, want) {

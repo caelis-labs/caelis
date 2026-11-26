@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/plugin"
+	"github.com/caelis-labs/caelis/platform/atomicfile"
 )
 
 // ErrConfigurationRevisionConflict identifies a compare-and-save request that

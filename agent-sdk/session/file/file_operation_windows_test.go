@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"golang.org/x/sys/windows"
@@ -137,7 +136,11 @@ func TestWindowsAccessDeniedRetryRequiresAccessibleFiles(t *testing.T) {
 	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || attempts != 1 {
 		t.Fatalf("ineligible access-denied retry = attempts %d, error %v; want one immediate failure", attempts, err)
 	}
-	if got := display.UserVisibleError(err); got != "Caelis could not update local session storage." || strings.Contains(got, dir) {
+	var displayErr interface{ DisplayMessage() string }
+	if !errors.As(err, &displayErr) {
+		t.Fatalf("expected error to implement DisplayMessage(), got %T (%v)", err, err)
+	}
+	if got := strings.TrimSpace(displayErr.DisplayMessage()); got != "Caelis could not update local session storage." || strings.Contains(got, dir) {
 		t.Fatalf("user-visible file error = %q, want path-free summary", got)
 	}
 }

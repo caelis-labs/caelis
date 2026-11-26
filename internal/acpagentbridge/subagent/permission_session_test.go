@@ -10,8 +10,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -35,8 +34,8 @@ func TestBoundChildPermissionHandlerFailClosedBeforeBridge(t *testing.T) {
 
 			bridge := &recordingPermissionBridge{}
 			runner := &Runner{permissionBridge: bridge}
-			run := &childRun{anchor: delegation.Anchor{SessionID: test.boundID}}
-			handler := boundChildPermissionHandler(run, runner.permissionCallback(tasksubagent.SpawnContext{
+			run := &childRun{anchor: task.Anchor{SessionID: test.boundID}}
+			handler := boundChildPermissionHandler(run, runner.permissionCallback(task.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "root-session"},
 				TaskID:     "task-1",
 			}, AgentConfig{Name: "helper"}, "helper-1"))
@@ -73,7 +72,7 @@ func TestReconnectPermissionEntryUsesBoundChildSession(t *testing.T) {
 	runner := childInputTestRunner(t, "permission-resume")
 	runner.permissionBridge = bridge
 	events := make(chan childInputTestEvent, 12)
-	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-permission-resume", events), delegation.Request{
+	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-permission-resume", events), task.DelegationRequest{
 		Agent: "helper", Prompt: "initial",
 	})
 	if err != nil {
@@ -89,7 +88,7 @@ func TestReconnectPermissionEntryUsesBoundChildSession(t *testing.T) {
 	}
 	_ = run.client.Close(ctx)
 	run.mu.Lock()
-	run.state = delegation.StateFailed
+	run.state = task.StateFailed
 	run.running = false
 	run.mu.Unlock()
 	result, expectedActivityID, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
@@ -101,7 +100,7 @@ func TestReconnectPermissionEntryUsesBoundChildSession(t *testing.T) {
 		t.Fatalf("SubmitChildInput() after reconnect = (%#v, %v)", result, err)
 	}
 	terminal := waitChildActivityTerminalFor(t, ctx, events, expectedActivityID)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
+	if terminal.Result == nil || terminal.Result.State != task.StateCompleted {
 		t.Fatalf("reconnected terminal = %#v", terminal)
 	}
 	if bridge.calls.Load() != 1 {

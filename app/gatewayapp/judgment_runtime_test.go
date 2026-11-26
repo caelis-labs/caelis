@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelconfig/typesafe"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/internal/kernel"

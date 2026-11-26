@@ -9,7 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 // runtimeFacade is the shared decorator shell for Control-owned Runtime
@@ -46,8 +46,8 @@ func (f *runtimeFacade) RunState(ctx context.Context, ref session.SessionRef) (a
 	return f.inner.RunState(ctx, ref)
 }
 
-func (f *runtimeFacade) Terminals() terminal.Controller {
-	provider, _ := f.inner.(terminal.Provider)
+func (f *runtimeFacade) Terminals() task.TerminalController {
+	provider, _ := f.inner.(task.TerminalProvider)
 	if provider == nil {
 		return nil
 	}

@@ -5,9 +5,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+)
+
+const (
+	compactNoticeLabel        = "Context compacted"
+	compactFailureNoticeLabel = "Context Compact failed"
 )
 
 func buildCompactEvent(activeSession session.Session, compactText string, data session.CheckpointData) *session.Event {
@@ -65,7 +69,7 @@ func (r *Runtime) publishCompactNotice(sink *runner, checkpoint *session.Event) 
 		Actor:     session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Scope:     checkpoint.Scope,
 	}
-	session.MarkNotice(event, "notice", display.CompactNoticeLabel)
+	session.MarkNotice(event, "notice", compactNoticeLabel)
 	event.Notice.Kind = session.EventNoticeKindCompact
 	sink.publishEvent(event)
 }
@@ -88,9 +92,9 @@ func buildCompactFailureNoticeEvent(activeSession session.Session, turnID string
 func compactFailureNoticeText(cause error) string {
 	text := strings.TrimSpace(compactionFailureCauseText(cause))
 	if text == "" {
-		return display.CompactFailureNoticeLabel
+		return compactFailureNoticeLabel
 	}
-	return display.CompactFailureNoticeLabel + ": " + truncateCompactFailureNotice(text)
+	return compactFailureNoticeLabel + ": " + truncateCompactFailureNotice(text)
 }
 
 func compactionFailureCauseText(cause error) string {

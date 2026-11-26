@@ -1,6 +1,4 @@
-// Package sessiontest provides reusable conformance tests for third-party
-// session service implementations.
-package sessiontest
+package session_test
 
 import (
 	"bytes"
@@ -8,45 +6,152 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
-// ParticipantStore is the participant persistence surface exercised by
-// ParticipantLifecycleConformance.
-type ParticipantStore interface {
+func TestReferenceParticipantStoresConform(t *testing.T) {
+	t.Run("memory", func(t *testing.T) {
+		t.Parallel()
+
+		participantLifecycleConformance(t, func(*testing.T) conformanceParticipantStore {
+			return &committedFaultParticipantStore{participantBackend: sessionmemory.NewStore(sessionmemory.Config{})}
+		})
+	})
+	t.Run("file", func(t *testing.T) {
+		t.Parallel()
+
+		participantLifecycleConformance(t, func(t *testing.T) conformanceParticipantStore {
+			return &committedFaultParticipantStore{participantBackend: sdkctx.UseLogicalFileStore(t, sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))}
+		})
+	})
+}
+
+func TestParticipantEventMatchesRejectsUnrelatedAssistantEvent(t *testing.T) {
+	t.Parallel()
+	binding := session.ParticipantBinding{
+		ID: "participant-a", Kind: session.ParticipantKindSubagent,
+		Role: session.ParticipantRoleSidecar, DelegationID: "delegation-a",
+	}
+	requested := participantEvent("attach-a", binding, "attached")
+	actual := &session.Event{
+		ID: "event-a", IdempotencyKey: requested.IdempotencyKey,
+		SessionID: "session-a", Seq: 1, Schema: session.EventSchemaVersion,
+		Type: session.EventTypeAssistant, Visibility: requested.Visibility, Time: time.Now(),
+	}
+	if participantEventMatches(session.SessionRef{SessionID: "session-a"}, requested, actual) {
+		t.Fatal("unrelated assistant event passed participant lifecycle validation")
+	}
+}
+
+func TestParticipantJSONEqualRejectsCorruptedReturnedSessionTitle(t *testing.T) {
+	t.Parallel()
+	durable := session.Session{SessionRef: session.SessionRef{SessionID: "session-a"}, Revision: 2, Title: "durable title"}
+	returned := session.CloneSession(durable)
+	returned.Title = "corrupted title"
+	if participantJSONEqual(returned, durable) {
+		t.Fatal("corrupted returned Session.Title passed whole-object validation")
+	}
+}
+
+type participantBackend interface {
+	session.ManagedService
+	session.ParticipantLifecycleService
+}
+
+type participantMutation string
+
+const (
+	participantPlainPut        participantMutation = "plain_put"
+	participantPlainRemove     participantMutation = "plain_remove"
+	participantLifecyclePut    participantMutation = "lifecycle_put"
+	participantLifecycleRemove participantMutation = "lifecycle_remove"
+)
+
+type conformanceParticipantStore interface {
 	session.ManagedService
 	session.ParticipantLifecycleService
 	session.SessionFenceService
-	ParticipantCommittedFailureInjector
+	ArmParticipantCommittedFailure(participantMutation)
 }
 
-// ParticipantMutation identifies one participant operation for committed
-// reporting fault injection in conformance tests.
-type ParticipantMutation string
-
-const (
-	ParticipantPlainPut        ParticipantMutation = "plain_put"
-	ParticipantPlainRemove     ParticipantMutation = "plain_remove"
-	ParticipantLifecyclePut    ParticipantMutation = "lifecycle_put"
-	ParticipantLifecycleRemove ParticipantMutation = "lifecycle_remove"
-)
-
-// ParticipantCommittedFailureInjector lets a third-party test adapter arm a
-// post-commit reporting failure for the next named participant mutation.
-type ParticipantCommittedFailureInjector interface {
-	ArmParticipantCommittedFailure(ParticipantMutation)
+type committedFaultParticipantStore struct {
+	participantBackend
+	mu    sync.Mutex
+	armed participantMutation
 }
 
-// ParticipantLifecycleConformance verifies the normative revision,
-// delegation, and atomic lifecycle-event behavior of one participant store.
-// Third-party stores should call this helper from their own test suite.
-func ParticipantLifecycleConformance(t *testing.T, factory func(*testing.T) ParticipantStore) {
+func (s *committedFaultParticipantStore) ArmParticipantCommittedFailure(mutation participantMutation) {
+	s.mu.Lock()
+	s.armed = mutation
+	s.mu.Unlock()
+}
+
+func (s *committedFaultParticipantStore) consume(mutation participantMutation) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.armed != mutation {
+		return false
+	}
+	s.armed = ""
+	return true
+}
+
+func (s *committedFaultParticipantStore) PutParticipant(ctx context.Context, req session.PutParticipantRequest) (session.Session, error) {
+	updated, err := s.participantBackend.PutParticipant(ctx, req)
+	if err == nil && s.consume(participantPlainPut) {
+		err = &session.CommittedError{Err: errors.New("forced post-commit report failure")}
+	}
+	return updated, err
+}
+
+func (s *committedFaultParticipantStore) RemoveParticipant(ctx context.Context, req session.RemoveParticipantRequest) (session.Session, error) {
+	updated, err := s.participantBackend.RemoveParticipant(ctx, req)
+	if err == nil && s.consume(participantPlainRemove) {
+		err = &session.CommittedError{Err: errors.New("forced post-commit report failure")}
+	}
+	return updated, err
+}
+
+func (s *committedFaultParticipantStore) PutParticipantWithEvent(ctx context.Context, req session.PutParticipantWithEventRequest) (session.Session, *session.Event, error) {
+	updated, event, err := s.participantBackend.PutParticipantWithEvent(ctx, req)
+	if err == nil && s.consume(participantLifecyclePut) {
+		err = &session.CommittedError{Err: errors.New("forced post-commit report failure")}
+	}
+	return updated, event, err
+}
+
+func (s *committedFaultParticipantStore) RemoveParticipantWithEvent(ctx context.Context, req session.RemoveParticipantWithEventRequest) (session.Session, *session.Event, error) {
+	updated, event, err := s.participantBackend.RemoveParticipantWithEvent(ctx, req)
+	if err == nil && s.consume(participantLifecycleRemove) {
+		err = &session.CommittedError{Err: errors.New("forced post-commit report failure")}
+	}
+	return updated, event, err
+}
+
+func (s *committedFaultParticipantStore) AcquireSessionFence(ctx context.Context, req session.AcquireSessionFenceRequest) (session.SessionFence, error) {
+	return s.participantBackend.(session.SessionFenceService).AcquireSessionFence(ctx, req)
+}
+
+func (s *committedFaultParticipantStore) SessionFence(ctx context.Context, ref session.SessionRef) (session.SessionFence, error) {
+	return s.participantBackend.(session.SessionFenceReader).SessionFence(ctx, ref)
+}
+
+func (s *committedFaultParticipantStore) ReleaseSessionFence(ctx context.Context, req session.ReleaseSessionFenceRequest) error {
+	return s.participantBackend.(session.SessionFenceService).ReleaseSessionFence(ctx, req)
+}
+
+func participantLifecycleConformance(t *testing.T, factory func(*testing.T) conformanceParticipantStore) {
 	t.Helper()
 	for _, test := range []struct {
 		name string
-		run  func(*testing.T, ParticipantStore, session.Session, session.ParticipantBinding)
+		run  func(*testing.T, conformanceParticipantStore, session.Session, session.ParticipantBinding)
 	}{
 		{name: "plain delegation and revision CAS", run: checkPlainParticipantCAS},
 		{name: "lifecycle conflict is atomic", run: checkLifecycleParticipantCAS},
@@ -61,7 +166,7 @@ func ParticipantLifecycleConformance(t *testing.T, factory func(*testing.T) Part
 	}
 }
 
-func seedParticipant(t *testing.T, store ParticipantStore, user string) (session.Session, session.ParticipantBinding) {
+func seedParticipant(t *testing.T, store conformanceParticipantStore, user string) (session.Session, session.ParticipantBinding) {
 	t.Helper()
 	ctx := context.Background()
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "sessiontest", UserID: user})
@@ -87,7 +192,7 @@ func seedParticipant(t *testing.T, store ParticipantStore, user string) (session
 	return active, binding
 }
 
-func checkPlainParticipantCAS(t *testing.T, store ParticipantStore, active session.Session, binding session.ParticipantBinding) {
+func checkPlainParticipantCAS(t *testing.T, store conformanceParticipantStore, active session.Session, binding session.ParticipantBinding) {
 	t.Helper()
 	ctx := context.Background()
 	colliding := binding
@@ -131,7 +236,7 @@ func checkPlainParticipantCAS(t *testing.T, store ParticipantStore, active sessi
 	assertParticipantSessionTransition(t, store, updated, removed, binding, "detached", nil)
 }
 
-func checkLifecycleParticipantCAS(t *testing.T, store ParticipantStore, active session.Session, binding session.ParticipantBinding) {
+func checkLifecycleParticipantCAS(t *testing.T, store conformanceParticipantStore, active session.Session, binding session.ParticipantBinding) {
 	t.Helper()
 	ctx := context.Background()
 	beforeEvents, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
@@ -180,7 +285,7 @@ func checkLifecycleParticipantCAS(t *testing.T, store ParticipantStore, active s
 	assertParticipantEvent(t, store, active.SessionRef, requestedEvent, removedEvent)
 }
 
-func checkParticipantMutationGuard(t *testing.T, store ParticipantStore, active session.Session, binding session.ParticipantBinding) {
+func checkParticipantMutationGuard(t *testing.T, store conformanceParticipantStore, active session.Session, binding session.ParticipantBinding) {
 	t.Helper()
 	ctx := context.Background()
 	fence, err := store.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "owner-a"})
@@ -228,7 +333,7 @@ func checkParticipantMutationGuard(t *testing.T, store ParticipantStore, active 
 
 func checkParticipantMutationGuardShape(
 	t *testing.T,
-	store ParticipantStore,
+	store conformanceParticipantStore,
 	baseline session.Session,
 	baselineEvents []*session.Event,
 	binding session.ParticipantBinding,
@@ -267,7 +372,7 @@ func checkParticipantMutationGuardShape(
 
 func assertParticipantMutationGuardRejected(
 	t *testing.T,
-	store ParticipantStore,
+	store conformanceParticipantStore,
 	baseline session.Session,
 	baselineEvents []*session.Event,
 	operation string,
@@ -294,12 +399,12 @@ func assertParticipantMutationGuardRejected(
 	}
 }
 
-func checkParticipantCommittedResults(t *testing.T, store ParticipantStore, active session.Session, binding session.ParticipantBinding) {
+func checkParticipantCommittedResults(t *testing.T, store conformanceParticipantStore, active session.Session, binding session.ParticipantBinding) {
 	t.Helper()
 	ctx := context.Background()
 	updatedBinding := binding
 	updatedBinding.Label = "committed"
-	store.ArmParticipantCommittedFailure(ParticipantPlainPut)
+	store.ArmParticipantCommittedFailure(participantPlainPut)
 	updated, err := store.PutParticipant(ctx, session.PutParticipantRequest{
 		SessionRef: active.SessionRef, ExpectedRevision: &active.Revision,
 		ExpectedDelegationID: stringPointer(binding.DelegationID), Binding: updatedBinding,
@@ -310,7 +415,7 @@ func checkParticipantCommittedResults(t *testing.T, store ParticipantStore, acti
 	}
 	assertParticipantSessionTransition(t, store, active, updated, updatedBinding, "attached", nil)
 
-	store.ArmParticipantCommittedFailure(ParticipantPlainRemove)
+	store.ArmParticipantCommittedFailure(participantPlainRemove)
 	removed, err := store.RemoveParticipant(ctx, session.RemoveParticipantRequest{
 		SessionRef: updated.SessionRef, ExpectedRevision: &updated.Revision,
 		ParticipantID: binding.ID, ExpectedDelegationID: stringPointer(binding.DelegationID),
@@ -321,7 +426,7 @@ func checkParticipantCommittedResults(t *testing.T, store ParticipantStore, acti
 	}
 	assertParticipantSessionTransition(t, store, updated, removed, binding, "detached", nil)
 
-	store.ArmParticipantCommittedFailure(ParticipantLifecyclePut)
+	store.ArmParticipantCommittedFailure(participantLifecyclePut)
 	putRequestedEvent := participantEvent("committed-attach", binding, "attached")
 	restored, putEvent, err := store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
 		SessionRef: removed.SessionRef, ExpectedRevision: &removed.Revision,
@@ -335,7 +440,7 @@ func checkParticipantCommittedResults(t *testing.T, store ParticipantStore, acti
 	assertParticipantSessionTransition(t, store, removed, restored, binding, "attached", putEvent)
 	assertParticipantEvent(t, store, restored.SessionRef, putRequestedEvent, putEvent)
 
-	store.ArmParticipantCommittedFailure(ParticipantLifecycleRemove)
+	store.ArmParticipantCommittedFailure(participantLifecycleRemove)
 	removeRequestedEvent := participantEvent("committed-detach", binding, "detached")
 	final, removeEvent, err := store.RemoveParticipantWithEvent(ctx, session.RemoveParticipantWithEventRequest{
 		SessionRef: restored.SessionRef, ExpectedRevision: &restored.Revision,
@@ -352,7 +457,7 @@ func checkParticipantCommittedResults(t *testing.T, store ParticipantStore, acti
 
 func assertParticipantSessionTransition(
 	t *testing.T,
-	store ParticipantStore,
+	store conformanceParticipantStore,
 	before session.Session,
 	actual session.Session,
 	binding session.ParticipantBinding,
@@ -386,7 +491,7 @@ func assertParticipantSessionTransition(
 	}
 }
 
-func assertParticipantEvent(t *testing.T, store ParticipantStore, ref session.SessionRef, requested, actual *session.Event) {
+func assertParticipantEvent(t *testing.T, store conformanceParticipantStore, ref session.SessionRef, requested, actual *session.Event) {
 	t.Helper()
 	if !participantEventMatches(ref, requested, actual) {
 		t.Fatalf("participant lifecycle event is not the exact normalized request: requested=%#v actual=%#v", requested, actual)

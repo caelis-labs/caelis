@@ -3,8 +3,8 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/display"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )

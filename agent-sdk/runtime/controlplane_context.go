@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -32,8 +31,8 @@ func (r *Runtime) buildControllerTurnContext(
 		return controller.ContextRoute{}, err
 	}
 	return controller.ContextRoute{
-		Context:      agent.CloneContextTransfer(route.Context),
-		FreshContext: agent.CloneContextTransfer(route.FreshContext),
+		Context:      session.CloneContextTransfer(route.Context),
+		FreshContext: session.CloneContextTransfer(route.FreshContext),
 		SyncSeq:      route.SyncSeq,
 	}, nil
 }
@@ -42,18 +41,18 @@ func (r *Runtime) buildParticipantPromptContext(
 	ctx context.Context,
 	ref session.SessionRef,
 	sinceSeq uint64,
-) (agent.ContextTransfer, error) {
+) (session.ContextTransfer, error) {
 	if r == nil || r.controllerContextRouter == nil {
-		return agent.ContextTransfer{}, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
+		return session.ContextTransfer{}, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
 	transfer, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
 		SinceSeq:   sinceSeq,
 	})
 	if err != nil {
-		return agent.ContextTransfer{}, err
+		return session.ContextTransfer{}, err
 	}
-	return agent.CloneContextTransfer(transfer), nil
+	return session.CloneContextTransfer(transfer), nil
 }
 
 func (r *Runtime) updateControllerContextCheckpoint(ctx context.Context, ref session.SessionRef) error {

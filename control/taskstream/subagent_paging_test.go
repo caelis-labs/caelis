@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func TestChildExactOriginPagesLongHistoryAndFollowsOutput(t *testing.T) {
@@ -18,10 +17,10 @@ func TestChildExactOriginPagesLongHistoryAndFollowsOutput(t *testing.T) {
 	entry, spool := restoredTaskFixture(), newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	t.Cleanup(func() { _ = recorder.Close(context.Background()) })
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	const count = maxReplacementRecords + 1
 	for i := range count {
-		if err := observer.ObserveTaskOutput(ctx, output.Event{Text: fmt.Sprint(i), Closed: i == 12}); err != nil {
+		if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: fmt.Sprint(i), Closed: i == 12}); err != nil {
 			t.Fatal(err)
 		}
 		if i%maxDeliveryRecords == 0 {
@@ -77,7 +76,7 @@ func TestChildExactOriginPagesLongHistoryAndFollowsOutput(t *testing.T) {
 			}
 			continue
 		}
-		if err := observer.ObserveTaskOutput(ctx, output.Event{Text: fmt.Sprint(count), Running: true}); err != nil {
+		if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: fmt.Sprint(count), Running: true}); err != nil {
 			t.Fatal(err)
 		}
 		checkPage(nextTaskDelivery(t, ctx, result.Subscription), &seen)
@@ -86,7 +85,7 @@ func TestChildExactOriginPagesLongHistoryAndFollowsOutput(t *testing.T) {
 		}
 		// A recorder replacement still replaces the already visible prefix.
 		message := model.NewTextMessage(model.RoleAssistant, "authoritative replay")
-		if err := observer.(output.HistoryObserver).ReplaceTaskHistory(ctx, []*session.Event{{Type: session.EventTypeAssistant, Text: "authoritative replay", Message: &message}}); err != nil {
+		if err := observer.(task.HistoryObserver).ReplaceTaskHistory(ctx, []*session.Event{{Type: session.EventTypeAssistant, Text: "authoritative replay", Message: &message}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := recorder.Flush(ctx, task.Ref{SessionID: "session-1", TaskID: "task-1"}); err != nil {
@@ -110,10 +109,10 @@ func TestChildSnapshotPagesPastLegacyLimitAndJoinsLiveAtCapturedBoundary(t *test
 	entry, spool := restoredTaskFixture(), newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	t.Cleanup(func() { _ = recorder.Close(context.Background()) })
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	const count = maxReplacementRecords + 1
 	for i := range count {
-		if err := observer.ObserveTaskOutput(ctx, output.Event{Text: fmt.Sprint(i)}); err != nil {
+		if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: fmt.Sprint(i)}); err != nil {
 			t.Fatal(err)
 		}
 		if i%maxDeliveryRecords == 0 {
@@ -134,7 +133,7 @@ func TestChildSnapshotPagesPastLegacyLimitAndJoinsLiveAtCapturedBoundary(t *test
 	}
 	// Publication happens after the reader's captured boundary but before its
 	// first history page is consumed. It must appear exactly once after commit.
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "live tail", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "live tail", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := recorder.Flush(ctx, task.Ref{SessionID: "session-1", TaskID: "task-1"}); err != nil {
@@ -175,10 +174,10 @@ func TestChildHistoryWindowsKeepLiveCursorIndependent(t *testing.T) {
 	entry, spool := restoredTaskFixture(), newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	t.Cleanup(func() { _ = recorder.Close(context.Background()) })
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "session-1", TaskID: "task-1", ActivityID: "a", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	for n := range 40 {
 		message := model.NewTextMessage(model.RoleAssistant, fmt.Sprint(n))
-		err := observer.ObserveTaskOutput(ctx, output.Event{Event: &session.Event{Type: session.EventTypeAssistant, Scope: &session.EventScope{TurnID: fmt.Sprint(n)}, Message: &message}})
+		err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Event: &session.Event{Type: session.EventTypeAssistant, Scope: &session.EventScope{TurnID: fmt.Sprint(n)}, Message: &message}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +203,7 @@ func TestChildHistoryWindowsKeepLiveCursorIndependent(t *testing.T) {
 	if count != 16 || before == "" || cursor == "" {
 		t.Fatalf("initial count %d", count)
 	}
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "live", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "live", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	for before != "" {

@@ -10,11 +10,10 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -26,7 +25,7 @@ type detachedChildContextMarker struct{}
 func TestSubagentSessionMetaMarksParentAndTask(t *testing.T) {
 	t.Parallel()
 
-	meta := subagentSessionMeta(tasksubagent.SpawnContext{
+	meta := subagentSessionMeta(taskapi.SpawnContext{
 		SessionRef: session.SessionRef{SessionID: "parent-session"},
 		TaskID:     "task-1",
 	})
@@ -52,7 +51,7 @@ func TestChildACPUpdatePreservesUIOnlyRuntimeToolIdentity(t *testing.T) {
 		},
 	}
 	run := &childRun{
-		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-session", AgentID: "child-1"},
+		anchor: taskapi.Anchor{TaskID: "task-1", SessionID: "child-session", AgentID: "child-1"},
 		taskID: "task-1", agentName: "external",
 	}
 	event := run.acpUpdateEvent(envelope, time.Unix(1, 0))
@@ -73,9 +72,9 @@ func TestRunnerQuiesceWaitsForCompletionPublication(t *testing.T) {
 	completionStarted := make(chan struct{})
 	releaseCompletion := make(chan struct{})
 	run := &childRun{
-		anchor: delegation.Anchor{TaskID: "task-quiesce", SessionID: "child-quiesce", Agent: "helper"},
-		taskID: "task-quiesce", state: delegation.StateRunning, running: true,
-		done: make(chan struct{}), completion: completionSinkFunc(func(delegation.Result) {
+		anchor: taskapi.Anchor{TaskID: "task-quiesce", SessionID: "child-quiesce", Agent: "helper"},
+		taskID: "task-quiesce", state: taskapi.StateRunning, running: true,
+		done: make(chan struct{}), completion: completionSinkFunc(func(taskapi.DelegationResult) {
 			close(completionStarted)
 			<-releaseCompletion
 		}),
@@ -108,11 +107,11 @@ func TestRunnerQuiesceSignalsEveryChildBeforeWaiting(t *testing.T) {
 	firstCancelled := make(chan struct{})
 	secondCancelled := make(chan struct{})
 	first := &childRun{
-		anchor: delegation.Anchor{TaskID: "task-first"}, taskID: "task-first",
+		anchor: taskapi.Anchor{TaskID: "task-first"}, taskID: "task-first",
 		running: true, done: make(chan struct{}), cancel: func() { close(firstCancelled) },
 	}
 	second := &childRun{
-		anchor: delegation.Anchor{TaskID: "task-second"}, taskID: "task-second",
+		anchor: taskapi.Anchor{TaskID: "task-second"}, taskID: "task-second",
 		running: true, done: make(chan struct{}), cancel: func() { close(secondCancelled) },
 	}
 	runner := &Runner{clock: time.Now, runs: map[string]*childRun{
@@ -142,7 +141,7 @@ func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
 	called := 0
 	runner, err := NewRunner(RunnerConfig{
 		Registry: registry,
-		PlacementResolver: func(_ context.Context, _ tasksubagent.SpawnContext, req delegation.TargetRequest) (AgentConfig, error) {
+		PlacementResolver: func(_ context.Context, _ taskapi.SpawnContext, req taskapi.TargetRequest) (AgentConfig, error) {
 			called++
 			if req.Target.Selector != "orbit" || req.Target.Placement.Model != "provider/model" {
 				t.Fatalf("placement request = %#v", req.Target)
@@ -153,7 +152,7 @@ func TestRunnerResolvesTypedPlacementWithoutRegistryIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := runner.resolveSpawnConfig(context.Background(), tasksubagent.SpawnContext{}, delegation.TargetRequest{Target: delegation.Target{
+	got, err := runner.resolveSpawnConfig(context.Background(), taskapi.SpawnContext{}, taskapi.TargetRequest{Target: taskapi.Target{
 		Selector: "orbit",
 		Placement: placement.Placement{
 			Kind: placement.KindModel, Model: "provider/model", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
@@ -174,14 +173,14 @@ func TestRunnerResolvesConfiguredPlacementToHostedAdapter(t *testing.T) {
 	}
 	runner, err := NewRunner(RunnerConfig{
 		Registry: registry,
-		PlacementResolver: func(_ context.Context, _ tasksubagent.SpawnContext, _ delegation.TargetRequest) (AgentConfig, error) {
+		PlacementResolver: func(_ context.Context, _ taskapi.SpawnContext, _ taskapi.TargetRequest) (AgentConfig, error) {
 			return AgentConfig{Name: "codex", HostedAdapterID: "codex"}, nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := runner.resolveSpawnConfig(context.Background(), tasksubagent.SpawnContext{}, delegation.TargetRequest{Target: delegation.Target{
+	got, err := runner.resolveSpawnConfig(context.Background(), taskapi.SpawnContext{}, taskapi.TargetRequest{Target: taskapi.Target{
 		Selector: "codex-demo",
 		Placement: placement.Placement{
 			Kind: placement.KindAgent, Agent: "codex", ConfigFingerprint: "config-v1", Fingerprint: "placement-v1",
@@ -220,7 +219,7 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor: delegation.Anchor{
+		anchor: taskapi.Anchor{
 			TaskID:    "task-1",
 			SessionID: "child-1",
 			Agent:     "self",
@@ -228,7 +227,7 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 		},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -277,12 +276,12 @@ func TestRunnerHandleUpdatePublishesACPUsageGauge(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:     delegation.Anchor{TaskID: "task-1", SessionID: "child-1", AgentID: "codex-1"},
+		anchor:     taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", AgentID: "codex-1"},
 		taskID:     "task-1",
 		agentName:  "codex",
 		invocation: session.EventInvocation{Provider: "codex", Model: "gpt-test"},
 		output:     sink,
-		state:      delegation.StateRunning,
+		state:      taskapi.StateRunning,
 		running:    true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -323,7 +322,7 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 		Options: []acpsdk.PermissionOption{{OptionId: "allow-once", Name: "Allow once", Kind: acpsdk.PermissionOptionKindAllowOnce}},
 	}
 
-	got, err := translateApprovalRequest(tasksubagent.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
+	got, err := translateApprovalRequest(taskapi.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +337,7 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	}
 	for _, name := range []*string{nil, new(""), new(" write_file ")} {
 		req.ToolCall.Name = name
-		got, err := translateApprovalRequest(tasksubagent.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
+		got, err := translateApprovalRequest(taskapi.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,12 +356,12 @@ func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t
 
 	sink := &recordingStreams{}
 	runner := &Runner{}
-	var captured tasksubagent.ApprovalRequest
-	requester := subagentApprovalRequesterFunc(func(ctx context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+	var captured approval.SubagentRequest
+	requester := subagentApprovalRequesterFunc(func(ctx context.Context, req approval.SubagentRequest) (approval.Response, error) {
 		captured = req
-		return tasksubagent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+		return approval.Response{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
-	handler := runner.permissionCallback(tasksubagent.SpawnContext{
+	handler := runner.permissionCallback(taskapi.SpawnContext{
 		SessionRef:        session.SessionRef{SessionID: "root-session"},
 		TaskID:            "task-1",
 		ParentCallID:      "spawn-call-1",
@@ -414,9 +413,9 @@ func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	defer remote.Close(context.Background())
 	localCancelled := false
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-cancel", SessionID: "child-cancel", Agent: "helper", AgentID: "helper-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-cancel", SessionID: "child-cancel", Agent: "helper", AgentID: "helper-1"},
 		client:  remote,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 		cancel:  func() { localCancelled = true },
 	}
@@ -432,7 +431,7 @@ func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	run.mu.RLock()
 	state := run.state
 	run.mu.RUnlock()
-	if state == delegation.StateCancelled {
+	if state == taskapi.StateCancelled {
 		t.Fatalf("child state = %q, must not claim cancellation after remote failure", state)
 	}
 }
@@ -442,13 +441,13 @@ func TestRunnerCancelNaturalTerminalIsEndpointNoop(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		state      delegation.State
+		state      taskapi.State
 		finishing  bool
 		result     string
 		diagnostic string
 	}{
-		{name: "completed", state: delegation.StateCompleted, result: "natural final"},
-		{name: "failed finishing", state: delegation.StateFailed, finishing: true, diagnostic: "natural failure"},
+		{name: "completed", state: taskapi.StateCompleted, result: "natural final"},
+		{name: "failed finishing", state: taskapi.StateFailed, finishing: true, diagnostic: "natural failure"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -465,7 +464,7 @@ func TestRunnerCancelNaturalTerminalIsEndpointNoop(t *testing.T) {
 			defer remote.Close(context.Background())
 			localCancelled := false
 			run := &childRun{
-				anchor: delegation.Anchor{
+				anchor: taskapi.Anchor{
 					TaskID: "task-natural-" + test.name, SessionID: "child-natural", AgentID: "helper-1",
 				},
 				taskID: "task-natural-" + test.name, client: remote,
@@ -496,17 +495,17 @@ func TestRunnerCancelNaturalTerminalIsEndpointNoop(t *testing.T) {
 func TestOnlyResolvedDelegationStatesRemainEligibleForAnotherTurn(t *testing.T) {
 	t.Parallel()
 
-	for _, state := range []delegation.State{
-		delegation.StateCompleted,
-		delegation.StateFailed,
-		delegation.StateCancelled,
-		delegation.StateInterrupted,
+	for _, state := range []taskapi.State{
+		taskapi.StateCompleted,
+		taskapi.StateFailed,
+		taskapi.StateCancelled,
+		taskapi.StateInterrupted,
 	} {
 		if !delegationStateCanStartTurn(state) {
 			t.Fatalf("delegationStateCanStartTurn(%q) = false, want idle child to remain resumable", state)
 		}
 	}
-	for _, state := range []delegation.State{delegation.StateRunning, delegation.StateWaitingApproval, delegation.StateUnknownOutcome, ""} {
+	for _, state := range []taskapi.State{taskapi.StateRunning, taskapi.StateWaitingApproval, taskapi.StateUnknownOutcome, ""} {
 		if delegationStateCanStartTurn(state) {
 			t.Fatalf("delegationStateCanStartTurn(%q) = true, want active/incomplete Turn rejected", state)
 		}
@@ -518,10 +517,10 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -605,10 +604,10 @@ func TestRunnerRestoresGrokExecutePresentationForSpawnStream(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "grok", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "grok", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -645,10 +644,10 @@ func TestRunnerDoesNotInventBuiltinIdentityForGenericFetch(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -693,10 +692,10 @@ func TestRunnerPreservesChildTerminalContentWithoutParentTraceText(t *testing.T)
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -734,10 +733,10 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -787,10 +786,10 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -838,8 +837,8 @@ func TestRunnerHandleUpdateKeepsTrustedAgentCommunicationSource(t *testing.T) {
 	}
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
-		taskID: "task-1", output: sink, state: delegation.StateRunning, running: true,
+		anchor: taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		taskID: "task-1", output: sink, state: taskapi.StateRunning, running: true,
 		inputActor: source,
 	}
 	runner := &Runner{clock: time.Now}
@@ -864,10 +863,10 @@ func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -911,10 +910,10 @@ func TestRunnerHandleUpdateSeparatesAgentMessageIDs(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -944,10 +943,10 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -994,10 +993,10 @@ func TestRunnerPublishesSemanticFramesWithoutFormattedTrace(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -1051,9 +1050,9 @@ func TestRunnerResultDoesNotUseToolPreviewAsFinalAnswer(t *testing.T) {
 	t.Parallel()
 
 	run := &childRun{
-		anchor:        delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		anchor:        taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
 		taskID:        "task-1",
-		state:         delegation.StateCompleted,
+		state:         taskapi.StateCompleted,
 		outputPreview: "Read hello_spawn.txt completed",
 		running:       false,
 		updatedAt:     time.Now(),
@@ -1123,10 +1122,10 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -1151,10 +1150,10 @@ func TestRunnerHandleUpdatePreservesWhitespaceThoughtChunk(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -1181,10 +1180,10 @@ func TestRunnerHandleUpdateDoesNotHoldRunLockWhilePublishing(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -1225,8 +1224,8 @@ func TestChildRunKeyIsolatesSharedRemoteSessionIDs(t *testing.T) {
 	t.Parallel()
 
 	runner := &Runner{clock: time.Now, runs: map[string]*childRun{}}
-	a := &childRun{anchor: delegation.Anchor{TaskID: "task-a", SessionID: "session-1", Agent: "helper", AgentID: "task-a"}}
-	b := &childRun{anchor: delegation.Anchor{TaskID: "task-b", SessionID: "session-1", Agent: "helper", AgentID: "task-b"}}
+	a := &childRun{anchor: taskapi.Anchor{TaskID: "task-a", SessionID: "session-1", Agent: "helper", AgentID: "task-a"}}
+	b := &childRun{anchor: taskapi.Anchor{TaskID: "task-b", SessionID: "session-1", Agent: "helper", AgentID: "task-b"}}
 	keyA, err := childRunKey(a.anchor)
 	if err != nil {
 		t.Fatal(err)
@@ -1249,7 +1248,7 @@ func TestChildRunKeyIsolatesSharedRemoteSessionIDs(t *testing.T) {
 	if err != nil || gotB != b {
 		t.Fatalf("lookup(B) = %#v, %v", gotB, err)
 	}
-	if _, err := runner.lookup(delegation.Anchor{TaskID: "task-a", SessionID: "session-other"}); err == nil {
+	if _, err := runner.lookup(taskapi.Anchor{TaskID: "task-a", SessionID: "session-other"}); err == nil {
 		t.Fatal("lookup with mismatched session_id succeeded, want isolation error")
 	}
 }
@@ -1273,10 +1272,10 @@ func TestRunnerHandleUpdateAcceptsStringContentChunks(t *testing.T) {
 
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "copilot-1"},
+		anchor:  taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "copilot-1"},
 		taskID:  "task-1",
 		output:  sink,
-		state:   delegation.StateRunning,
+		state:   taskapi.StateRunning,
 		running: true,
 	}
 	runner := &Runner{clock: time.Now}
@@ -1336,7 +1335,7 @@ func stringPtr(value string) *string {
 }
 
 type recordingStreams struct {
-	frames []output.Event
+	frames []taskapi.OutputEvent
 }
 
 func handleTestUpdate(runner *Runner, run *childRun, env client.UpdateEnvelope) {
@@ -1347,14 +1346,14 @@ func handleTestUpdate(runner *Runner, run *childRun, env client.UpdateEnvelope) 
 	runner.handleUpdate(run, env)
 }
 
-type subagentApprovalRequesterFunc func(context.Context, tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error)
+type subagentApprovalRequesterFunc func(context.Context, approval.SubagentRequest) (approval.Response, error)
 
-func (f subagentApprovalRequesterFunc) RequestSubagentApproval(ctx context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+func (f subagentApprovalRequesterFunc) RequestSubagentApproval(ctx context.Context, req approval.SubagentRequest) (approval.Response, error) {
 	return f(ctx, req)
 }
 
-func (s *recordingStreams) ObserveTaskOutput(_ context.Context, event output.Event) error {
-	s.frames = append(s.frames, output.Event{
+func (s *recordingStreams) ObserveTaskOutput(_ context.Context, event taskapi.OutputEvent) error {
+	s.frames = append(s.frames, taskapi.OutputEvent{
 		Text: event.Text, State: event.State, Running: event.Running, Closed: event.Closed,
 		ExitCode: event.ExitCode, Event: session.CloneEvent(event.Event), OccurredAt: event.OccurredAt,
 	})
@@ -1366,7 +1365,7 @@ type blockingStreams struct {
 	release chan struct{}
 }
 
-func (s *blockingStreams) ObserveTaskOutput(context.Context, output.Event) error {
+func (s *blockingStreams) ObserveTaskOutput(context.Context, taskapi.OutputEvent) error {
 	close(s.entered)
 	<-s.release
 	return nil
@@ -1375,8 +1374,8 @@ func (s *blockingStreams) ObserveTaskOutput(context.Context, output.Event) error
 func TestRunnerNoticeStaysOutOfPublicResultWithoutTruncatingAssistant(t *testing.T) {
 	sink := &recordingStreams{}
 	run := &childRun{
-		anchor: delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "codex-1"},
-		taskID: "task-1", output: sink, state: delegation.StateRunning, running: true,
+		anchor: taskapi.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "codex-1"},
+		taskID: "task-1", output: sink, state: taskapi.StateRunning, running: true,
 	}
 	runner := &Runner{clock: time.Now}
 	handleTestUpdate(runner, run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "answer-1", "First answer"))

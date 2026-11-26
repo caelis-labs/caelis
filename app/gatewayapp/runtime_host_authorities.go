@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -53,7 +52,7 @@ type runtimeHostAuthorities struct {
 	fenceOwnerID            string
 	idleGeneration          chan struct{}
 	taskStore               task.Store
-	taskOutput              output.Binder
+	taskOutput              task.OutputBinder
 	taskOutputLifecycle     taskOutputLifecycle
 	streamSpool             streamspool.Store
 	controlFeeds            appserver.FeedRegistry

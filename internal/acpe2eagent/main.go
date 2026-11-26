@@ -23,7 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -347,9 +347,9 @@ func buildSpec(
 	if err != nil {
 		return agent.AgentSpec{}, err
 	}
-	agents := make([]delegation.Agent, 0, len(assembly.Agents))
+	agents := make([]taskapi.DelegationAgent, 0, len(assembly.Agents))
 	for _, one := range assembly.Agents {
-		agents = append(agents, delegation.Agent{
+		agents = append(agents, taskapi.DelegationAgent{
 			Name:        strings.TrimSpace(one.Name),
 			Description: strings.TrimSpace(one.Description),
 		})

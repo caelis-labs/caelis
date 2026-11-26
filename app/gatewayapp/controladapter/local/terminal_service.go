@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
@@ -15,14 +15,14 @@ import (
 // Task directory, then controls the Session-routed Runtime stream.
 type TerminalService struct {
 	tasks      taskstream.Service
-	terminals  terminal.Controller
+	terminals  taskapi.TerminalController
 	authorizer appserver.Authorizer
 }
 
 // NewTerminalService accepts the canonical Session mutation authorizer. Legacy
 // unscoped embeddings may omit it; scoped terminal mutation fails closed until
 // its binding/grant owner is supplied.
-func NewTerminalService(tasks taskstream.Service, terminals terminal.Controller, authorizers ...appserver.Authorizer) (*TerminalService, error) {
+func NewTerminalService(tasks taskstream.Service, terminals taskapi.TerminalController, authorizers ...appserver.Authorizer) (*TerminalService, error) {
 	if tasks == nil || terminals == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: Task directory and terminal control are required")
 	}
@@ -100,15 +100,15 @@ func (s *TerminalService) authorizeMutation(ctx context.Context, principal appse
 	return nil
 }
 
-func (s *TerminalService) resolve(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (terminal.Ref, error) {
+func (s *TerminalService) resolve(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (taskapi.TerminalRef, error) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	terminalID := strings.TrimSpace(req.TerminalID)
 	if sessionID == "" || terminalID == "" {
-		return terminal.Ref{}, errorcode.New(errorcode.InvalidArgument, "appserver terminal requires Session and terminal IDs")
+		return taskapi.TerminalRef{}, errorcode.New(errorcode.InvalidArgument, "appserver terminal requires Session and terminal IDs")
 	}
 	list, err := s.tasks.List(ctx, taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}, taskstream.ListRequest{SessionID: sessionID})
 	if err != nil {
-		return terminal.Ref{}, err
+		return taskapi.TerminalRef{}, err
 	}
 	for _, task := range list.Tasks {
 		if terminalID != strings.TrimSpace(task.ParentTool.ToolCallID) &&
@@ -120,12 +120,12 @@ func (s *TerminalService) resolve(ctx context.Context, principal appserver.Princ
 		if resolvedTerminalID == "" {
 			resolvedTerminalID = terminalID
 		}
-		return terminal.NormalizeRef(terminal.Ref{SessionID: sessionID, TaskID: task.TaskID, TerminalID: resolvedTerminalID}), nil
+		return taskapi.NormalizeTerminalRef(taskapi.TerminalRef{SessionID: sessionID, TaskID: task.TaskID, TerminalID: resolvedTerminalID}), nil
 	}
-	return terminal.Ref{}, errorcode.New(errorcode.NotFound, "appserver terminal was not found in the Session Task directory")
+	return taskapi.TerminalRef{}, errorcode.New(errorcode.NotFound, "appserver terminal was not found in the Session Task directory")
 }
 
-func terminalSnapshotOutput(snapshot terminal.Snapshot) string {
+func terminalSnapshotOutput(snapshot taskapi.TerminalSnapshot) string {
 	if snapshot.Output != "" {
 		return snapshot.Output
 	}

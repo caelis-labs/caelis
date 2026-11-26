@@ -13,9 +13,7 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
@@ -42,24 +40,24 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 		t.Fatalf("NewRunner() error = %v", err)
 	}
 	streams := &recordingStreams{}
-	completions := make(chan delegation.Result, 1)
-	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+	completions := make(chan taskapi.DelegationResult, 1)
+	_, _, err = runner.Spawn(ctx, taskapi.SpawnContext{
 		ActivityID: "activity-prompt-failure",
 		TaskID:     "task-prompt-failure",
 		CWD:        t.TempDir(),
 		Output:     streams,
-		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
-	}, delegation.Request{Agent: "helper", Prompt: "review"})
+		Completion: completionSinkFunc(func(result taskapi.DelegationResult) { completions <- result }),
+	}, taskapi.DelegationRequest{Agent: "helper", Prompt: "review"})
 	if err != nil {
 		t.Fatalf("Spawn() error = %v", err)
 	}
-	var got delegation.Result
+	var got taskapi.DelegationResult
 	select {
 	case got = <-completions:
 	case <-ctx.Done():
 		t.Fatalf("producer completion was not published: %v", ctx.Err())
 	}
-	if got.State != delegation.StateFailed || got.Running {
+	if got.State != taskapi.StateFailed || got.Running {
 		t.Fatalf("Result = state %q running %v, want terminal failed", got.State, got.Running)
 	}
 	if got.Error != "participant prompt failed" {
@@ -88,7 +86,7 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 	}
 	if len(streams.frames) != 2 || streams.frames[0].Event == nil ||
 		session.ProtocolAgentCommunicationOf(streams.frames[0].Event) == nil || streams.frames[0].Event.Text != "review" ||
-		!streams.frames[1].Closed || streams.frames[1].State != string(delegation.StateFailed) {
+		!streams.frames[1].Closed || streams.frames[1].State != string(taskapi.StateFailed) {
 		t.Fatalf("stream frames = %#v, want submitted input then terminal failed marker", streams.frames)
 	}
 }
@@ -111,12 +109,12 @@ func TestRunnerInitializeFailureReportsStageWithoutChildStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+	_, _, err = runner.Spawn(ctx, taskapi.SpawnContext{
 		ActivityID: "activity-initialize-exit",
 		TaskID:     "task-initialize-exit",
 		CWD:        t.TempDir(),
 		Output:     &recordingStreams{},
-	}, delegation.Request{Agent: "self", Prompt: "review"})
+	}, taskapi.DelegationRequest{Agent: "self", Prompt: "review"})
 	if err == nil || !strings.Contains(err.Error(), `initialize spawned ACP child "self"`) {
 		t.Fatalf("Spawn() error = %v, want explicit child initialize stage", err)
 	}
@@ -161,19 +159,19 @@ func TestRunnerAppliesBuiltInSessionOptionsAfterSessionNewBeforePrompt(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion := make(chan delegation.Result, 1)
-	_, initial, err := runner.Spawn(ctx, tasksubagent.SpawnContext{
+	completion := make(chan taskapi.DelegationResult, 1)
+	_, initial, err := runner.Spawn(ctx, taskapi.SpawnContext{
 		ActivityID: "activity-session-options",
 		SessionRef: session.SessionRef{SessionID: "parent-session-options"},
 		TaskID:     "task-session-options",
 		CWD:        t.TempDir(),
 		Output:     &recordingStreams{},
-		Completion: completionSinkFunc(func(result delegation.Result) { completion <- result }),
-	}, delegation.Request{Agent: "self", Prompt: "review"})
+		Completion: completionSinkFunc(func(result taskapi.DelegationResult) { completion <- result }),
+	}, taskapi.DelegationRequest{Agent: "self", Prompt: "review"})
 	if err != nil {
 		t.Fatalf("Spawn() error = %v", err)
 	}
-	if !initial.Running && initial.State != delegation.StateCompleted {
+	if !initial.Running && initial.State != taskapi.StateCompleted {
 		t.Fatalf("Spawn() initial result = %#v, want running or completed", initial)
 	}
 	if preparedSession != "child-session-options" {
@@ -181,7 +179,7 @@ func TestRunnerAppliesBuiltInSessionOptionsAfterSessionNewBeforePrompt(t *testin
 	}
 	select {
 	case got := <-completion:
-		if got.Running || got.State != delegation.StateCompleted {
+		if got.Running || got.State != taskapi.StateCompleted {
 			t.Fatalf("completion = %#v, want completed after configured prompt", got)
 		}
 	case <-ctx.Done():
@@ -214,24 +212,24 @@ func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
-	completions := make(chan delegation.Result, 1)
-	_, _, err = runner.Spawn(ctx, tasksubagent.SpawnContext{
+	completions := make(chan taskapi.DelegationResult, 1)
+	_, _, err = runner.Spawn(ctx, taskapi.SpawnContext{
 		ActivityID: "activity-prompt-authentication",
 		TaskID:     "task-prompt-authentication",
 		CWD:        t.TempDir(),
 		Output:     &recordingStreams{},
-		Completion: completionSinkFunc(func(result delegation.Result) { completions <- result }),
-	}, delegation.Request{Agent: "protected-helper", Prompt: "review"})
+		Completion: completionSinkFunc(func(result taskapi.DelegationResult) { completions <- result }),
+	}, taskapi.DelegationRequest{Agent: "protected-helper", Prompt: "review"})
 	if err != nil {
 		t.Fatalf("Spawn() error = %v", err)
 	}
-	var got delegation.Result
+	var got taskapi.DelegationResult
 	select {
 	case got = <-completions:
 	case <-ctx.Done():
 		t.Fatalf("producer completion was not published: %v", ctx.Err())
 	}
-	if got.State != delegation.StateCompleted || got.Running {
+	if got.State != taskapi.StateCompleted || got.Running {
 		t.Fatalf("Result = state %q running %v, want completed", got.State, got.Running)
 	}
 	if err := runner.Quiesce(ctx); err != nil {
@@ -261,18 +259,18 @@ func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T)
 			}
 			defer func() { _ = runner.Quiesce(context.Background()) }()
 			sink := &historyStreamTestSink{}
-			loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
+			loaded, err := runner.LoadHistory(ctx, taskapi.HistoryRequest{
 				MetadataOnly: metadataOnly,
-				Anchor:       delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
-				Reconnect: tasksubagent.ReconnectRequest{
-					Spawn: tasksubagent.SpawnContext{
+				Anchor:       taskapi.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+				Reconnect: taskapi.ReconnectRequest{
+					Spawn: taskapi.SpawnContext{
 						SessionRef: session.SessionRef{SessionID: "parent-history"},
 						CWD:        os.TempDir(),
 						TaskID:     "task-history",
 						Handle:     "helper",
 						Output:     sink,
 					},
-					Target: delegation.AgentTarget("helper"),
+					Target: taskapi.AgentTarget("helper"),
 				},
 			})
 			if err != nil {
@@ -331,16 +329,16 @@ func TestRunnerLoadHistoryPassesExactRelationToBuiltInBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runner.Quiesce(context.Background()) }()
-	_, err = runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
-		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
-		Reconnect: tasksubagent.ReconnectRequest{
-			Spawn: tasksubagent.SpawnContext{
+	_, err = runner.LoadHistory(ctx, taskapi.HistoryRequest{
+		Anchor: taskapi.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+		Reconnect: taskapi.ReconnectRequest{
+			Spawn: taskapi.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
 				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "self",
 			},
-			Target: delegation.AgentTarget("self"),
+			Target: taskapi.AgentTarget("self"),
 		},
 	})
 	if err != nil {
@@ -367,16 +365,16 @@ func TestRunnerLoadHistoryReportsUnsupportedCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runner.Quiesce(context.Background()) }()
-	_, err = runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
-		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
-		Reconnect: tasksubagent.ReconnectRequest{
-			Spawn: tasksubagent.SpawnContext{
+	_, err = runner.LoadHistory(ctx, taskapi.HistoryRequest{
+		Anchor: taskapi.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+		Reconnect: taskapi.ReconnectRequest{
+			Spawn: taskapi.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
 				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "helper",
 			},
-			Target: delegation.AgentTarget("helper"),
+			Target: taskapi.AgentTarget("helper"),
 		},
 	})
 	if !errorcode.Is(err, errorcode.Unsupported) {
@@ -403,16 +401,16 @@ func TestRunnerLoadHistoryRejectsUpdatesFromAnotherSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runner.Quiesce(context.Background()) }()
-	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
-		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
-		Reconnect: tasksubagent.ReconnectRequest{
-			Spawn: tasksubagent.SpawnContext{
+	loaded, err := runner.LoadHistory(ctx, taskapi.HistoryRequest{
+		Anchor: taskapi.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+		Reconnect: taskapi.ReconnectRequest{
+			Spawn: taskapi.SpawnContext{
 				SessionRef: session.SessionRef{SessionID: "parent-history"},
 				CWD:        os.TempDir(),
 				TaskID:     "task-history",
 				Handle:     "helper",
 			},
-			Target: delegation.AgentTarget("helper"),
+			Target: taskapi.AgentTarget("helper"),
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), `belongs to Session "other-child"`) {
@@ -648,7 +646,7 @@ func TestRunnerPromptFailureHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-type completionSinkFunc func(delegation.Result)
+type completionSinkFunc func(taskapi.DelegationResult)
 
 func diagnosticRawMeta(raw map[string]json.RawMessage) map[string]any {
 	if len(raw) == 0 {
@@ -664,7 +662,7 @@ func diagnosticRawMeta(raw map[string]json.RawMessage) map[string]any {
 	return result
 }
 
-func (sink completionSinkFunc) PublishSubagentCompletion(result delegation.Result) {
+func (sink completionSinkFunc) PublishSubagentCompletion(result taskapi.DelegationResult) {
 	sink(result)
 }
 
@@ -680,7 +678,9 @@ func TestSubagentPromptFailureDetailIsStable(t *testing.T) {
 // The source is consumed synchronously, matching the observer ownership contract.
 type historyStreamTestSink struct{ events []*session.Event }
 
-func (*historyStreamTestSink) ObserveTaskOutput(context.Context, output.Event) error { return nil }
-func (s *historyStreamTestSink) ReplaceTaskHistoryStream(ctx context.Context, source output.HistorySource) error {
+func (*historyStreamTestSink) ObserveTaskOutput(context.Context, taskapi.OutputEvent) error {
+	return nil
+}
+func (s *historyStreamTestSink) ReplaceTaskHistoryStream(ctx context.Context, source taskapi.HistorySource) error {
 	return source(ctx, func(event *session.Event) error { s.events = append(s.events, session.CloneEvent(event)); return nil })
 }

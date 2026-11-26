@@ -5,6 +5,7 @@ package windows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/capability"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -951,7 +952,29 @@ func validatePreparedReceiptsForEffects(manifest workspaceManifest, desired []re
 }
 
 func (r *runtime) persistHostReceiptLedger(ledger hostReceiptLedger) error {
-	return r.persistHostReceiptLedgerWithReplace(ledger, atomicfile.Replace)
+	return r.persistHostReceiptLedgerWithReplace(ledger, replaceHostReceiptFile)
+}
+
+func replaceHostReceiptFile(source, destination string) error {
+	const retryLimit = 20
+	const retryDelay = 10 * time.Millisecond
+	var err error
+	for attempt := 0; attempt < retryLimit; attempt++ {
+		err = os.Rename(source, destination)
+		if err == nil || !isRetryableWindowsReplaceError(err) {
+			return err
+		}
+		if attempt+1 < retryLimit {
+			time.Sleep(retryDelay)
+		}
+	}
+	return err
+}
+
+func isRetryableWindowsReplaceError(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
+		errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
+		errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
 
 func (r *runtime) persistHostReceiptLedgerWithReplace(ledger hostReceiptLedger, replace func(string, string) error) error {

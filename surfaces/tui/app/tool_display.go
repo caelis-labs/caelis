@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/display"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 

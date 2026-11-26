@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
 func (a *childTaskActivity) markInstalled() {
@@ -153,7 +152,7 @@ func (a *childTaskActivity) writeUsage(ctx context.Context, record *taskapi.Cont
 	return true, nil
 }
 
-func contextUsageRecordFromOutput(event output.Event) *taskapi.ContextUsageRecord {
+func contextUsageRecordFromOutput(event taskapi.OutputEvent) *taskapi.ContextUsageRecord {
 	if event.Event == nil || event.Event.ContextUsage == nil {
 		return nil
 	}

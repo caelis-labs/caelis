@@ -78,7 +78,7 @@ func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	if route.SyncSeq != 3 {
 		t.Fatalf("SyncSeq = %d, want latest shared event sequence 3", route.SyncSeq)
 	}
-	wantContext := agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	wantContext := session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor:     session.ActorRef{Kind: session.ActorKindParticipant, Name: "ella"},
 		UserMessages: []string{"user prompt"}, AssistantSummary: "child answer",
 	}}}
@@ -114,7 +114,7 @@ func TestContextRouterAllowsEmptyCanonicalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParticipantContext(empty history) error = %v", err)
 	}
-	if !agent.ContextTransferEmpty(transfer) {
+	if !session.ContextTransferEmpty(transfer) {
 		t.Fatalf("empty history transfer = %#v, want empty transfer without error", transfer)
 	}
 }
@@ -136,9 +136,9 @@ func TestSharedContextOffsetUsesDurableCompleteTurnsAndOpaqueCompactBoundary(t *
 	first := sharedContextOffsetFromEvents(events, 0, "")
 	want := sharedContextOffset{
 		Checkpoint: 9,
-		Transfer: agent.ContextTransfer{
+		Transfer: session.ContextTransfer{
 			Summary: compactMessage.TextContent(),
-			Turns: []agent.ContextTurn{{
+			Turns: []session.ContextTurn{{
 				Executor:     session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
 				UserMessages: []string{"fresh user"}, AssistantSummary: "fresh assistant",
 			}},
@@ -208,7 +208,7 @@ func TestSharedContextOffsetDefersIncompleteTurnsWithoutLosingTheirUserMessage(t
 		}},
 	}
 	first := sharedContextOffsetFromEvents(events, 0, "")
-	wantFirst := sharedContextOffset{Checkpoint: 4, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	wantFirst := sharedContextOffset{Checkpoint: 4, Transfer: session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor:     session.ActorRef{Kind: session.ActorKindParticipant, Name: "claude(aria)"},
 		UserMessages: []string{"second user"}, AssistantSummary: "second assistant",
 	}}}}
@@ -222,7 +222,7 @@ func TestSharedContextOffsetDefersIncompleteTurnsWithoutLosingTheirUserMessage(t
 		},
 	})
 	second := sharedContextOffsetFromEvents(events, first.Checkpoint, "")
-	wantSecond := sharedContextOffset{Checkpoint: 5, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	wantSecond := sharedContextOffset{Checkpoint: 5, Transfer: session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor:     session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
 		UserMessages: []string{"first user"}, AssistantSummary: "first assistant",
 	}}}}
@@ -248,7 +248,7 @@ func TestSharedContextOffsetPreservesMultipleExchangesWithinOneRuntimeTurn(t *te
 		{Seq: 3, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "follow-up guidance", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
 		{Seq: 4, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "revised answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
 	}
-	want := sharedContextOffset{Checkpoint: 4, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{
+	want := sharedContextOffset{Checkpoint: 4, Transfer: session.ContextTransfer{Turns: []session.ContextTurn{
 		{Executor: executor, UserMessages: []string{"initial request"}, AssistantSummary: "initial answer"},
 		{Executor: executor, UserMessages: []string{"follow-up guidance"}, AssistantSummary: "revised answer"},
 	}}}
@@ -266,7 +266,7 @@ func TestSharedContextOffsetPreservesSteeringBeforeAssistantAnswer(t *testing.T)
 		{Seq: 2, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "steer before answering", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
 		{Seq: 3, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "guided answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
 	}
-	want := sharedContextOffset{Checkpoint: 3, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	want := sharedContextOffset{Checkpoint: 3, Transfer: session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor:         executor,
 		UserMessages:     []string{"initial request", "steer before answering"},
 		AssistantSummary: "guided answer",
@@ -284,7 +284,7 @@ func TestSharedContextOffsetPreservesIDOnlyExecutor(t *testing.T) {
 		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "question", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
 		{Seq: 2, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "answer", Scope: &session.EventScope{TurnID: "turn-1", Executor: executor}},
 	}
-	want := sharedContextOffset{Checkpoint: 2, Transfer: agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	want := sharedContextOffset{Checkpoint: 2, Transfer: session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor: executor, UserMessages: []string{"question"}, AssistantSummary: "answer",
 	}}}}
 	if got := sharedContextOffsetFromEvents(events, 0, ""); !reflect.DeepEqual(got, want) {
@@ -324,7 +324,7 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	if !reflect.DeepEqual(updated.Controller, backend.activation) {
 		t.Fatalf("controller = %#v, want %#v", updated.Controller, backend.activation)
 	}
-	if backend.activate.Agent != "codex" || !agent.ContextTransferEmpty(backend.activate.Context) {
+	if backend.activate.Agent != "codex" || !session.ContextTransferEmpty(backend.activate.Context) {
 		t.Fatalf("activation request = %#v", backend.activate)
 	}
 	loaded, err := sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})

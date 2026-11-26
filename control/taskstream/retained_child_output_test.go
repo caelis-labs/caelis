@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/history"
 )
 
@@ -15,13 +15,13 @@ func TestRetainedChildOutputBoundsMetadataAndPreservesCoalescedFinals(t *testing
 	for n := range 100 {
 		id := fmt.Sprint(n)
 		for _, text := range []string{"hello ", "world"} {
-			window.append(recordedTaskOutput{TerminalID: "child", ActivityID: id, Event: output.Event{Event: &session.Event{
+			window.append(recordedTaskOutput{TerminalID: "child", ActivityID: id, Event: task.OutputEvent{Event: &session.Event{
 				Type: session.EventTypeAssistant, Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: "agent_message_chunk", Content: session.ProtocolTextContent(text)}},
 			}}})
 		}
 		// The terminal fact can share a frame with detail omitted in older Turns.
-		window.append(recordedTaskOutput{TerminalID: "child", ActivityID: id, Event: output.Event{State: "completed", Closed: true, Event: &session.Event{
+		window.append(recordedTaskOutput{TerminalID: "child", ActivityID: id, Event: task.OutputEvent{State: "completed", Closed: true, Event: &session.Event{
 			Type: session.EventTypeToolResult, Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{SessionUpdate: "tool_call_update"}},
 		}}})
 		if len(window.frames) != len(window.transcript.Events()) || len(window.lifecycle) > history.MaxTurns {

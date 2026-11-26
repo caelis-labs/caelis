@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/atomicfile"
+	"github.com/caelis-labs/caelis/platform/atomicfile"
 	"golang.org/x/sys/windows"
 )
 

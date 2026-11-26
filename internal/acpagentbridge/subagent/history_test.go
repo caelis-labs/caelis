@@ -3,11 +3,11 @@ package subagent
 import (
 	"encoding/json"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 
@@ -35,7 +35,7 @@ func TestLoadedAgentCommunicationPromptRestoresCanonicalParentIdentity(t *testin
 }
 
 func TestLoadedHumanInputDoesNotBecomeParentMail(t *testing.T) {
-	collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
+	collector := newHistoryCollector(&Runner{clock: time.Now}, taskapi.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
 	collector.observe(contentUpdate(t, client.UpdateUserMessage, "assignment\n\nFrom: parent"))
 	collector.observe(contentUpdate(t, client.UpdateAgentMessage, "done"))
 	collector.observe(contentUpdate(t, client.UpdateUserMessage, "human guidance"))
@@ -53,7 +53,7 @@ func TestLoadedHumanInputDoesNotBecomeParentMail(t *testing.T) {
 
 func TestLoadedMailKeepsChunkedBodySourcesAndOmitsSetup(t *testing.T) {
 	t.Parallel()
-	collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
+	collector := newHistoryCollector(&Runner{clock: time.Now}, taskapi.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
 	observe := func(kind, text string) { collector.observe(contentUpdate(t, kind, text)) }
 	observe(client.UpdateUserMessage, "initial task\n\nFrom: parent")
 	observe(client.UpdateUserMessage, collaboration.RenderPromptSlice(collaboration.PromptSlice{Handle: "helper", Role: "delegated"}))
@@ -87,7 +87,7 @@ func TestLoadedLegacyMailPreservesEachSenderInBatch(t *testing.T) {
 			name = "inline body"
 		}
 		t.Run(name, func(t *testing.T) {
-			collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
+			collector := newHistoryCollector(&Runner{clock: time.Now}, taskapi.Anchor{SessionID: "child-1", TaskID: "task-1"}, "helper")
 			observe := func(text string) { collector.observe(contentUpdate(t, client.UpdateUserMessage, text)) }
 			messages := []struct {
 				header string
@@ -136,7 +136,7 @@ func TestLoadedLegacyMailPreservesEachSenderInBatch(t *testing.T) {
 }
 
 func TestLoadedMediaMailSurvivesSpoolJSONWithoutChangingSender(t *testing.T) {
-	collector := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{TaskID: "task", SessionID: "child", AgentID: "helper"}, "helper")
+	collector := newHistoryCollector(&Runner{clock: time.Now}, taskapi.Anchor{TaskID: "task", SessionID: "child", AgentID: "helper"}, "helper")
 	for _, raw := range []string{
 		`{"type":"image","data":"aW1hZ2U=","mimeType":"image/png"}`,
 		`{"type":"text","text":"\n\nFrom: reviewer"}`,

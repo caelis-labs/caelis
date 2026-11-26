@@ -17,8 +17,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -322,7 +320,7 @@ type runtimeSpawnTool struct {
 	session      session.Session
 	sessionRef   session.SessionRef
 	tasks        *taskRuntime
-	runner       subagent.Runner
+	runner       taskapi.SubagentRunner
 	mode         string
 	approvalMode string
 	approval     approval.Requester
@@ -384,14 +382,14 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	}
 	var (
 		includeContext     bool
-		contextTransfer    agent.ContextTransfer
+		contextTransfer    session.ContextTransfer
 		contextUnsupported bool
 	)
 	if parsed := optionalBoolArg(args, "include_context"); parsed != nil && *parsed {
 		includeContext = true
 		contextTransfer, contextUnsupported = t.resolveDelegatedSpawnContext(ctx)
 	}
-	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, delegation.NormalizeTarget(target), taskapi.SubagentStartRequest{
+	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, taskapi.NormalizeTarget(target), taskapi.SubagentStartRequest{
 		SpawnID:            firstNonEmpty(toolTaskOperationID(ctx, call), strings.TrimSpace(call.ID)),
 		Prompt:             strings.TrimSpace(prompt),
 		Handle:             requestedHandle,
@@ -417,13 +415,13 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	return result, nil
 }
 
-func (t runtimeSpawnTool) resolveDelegatedSpawnContext(ctx context.Context) (agent.ContextTransfer, bool) {
+func (t runtimeSpawnTool) resolveDelegatedSpawnContext(ctx context.Context) (session.ContextTransfer, bool) {
 	if t.runtime == nil || t.runtime.controllerContextRouter == nil {
-		return agent.ContextTransfer{}, true
+		return session.ContextTransfer{}, true
 	}
 	transfer, err := t.runtime.buildParticipantPromptContext(ctx, t.sessionRef, 0)
 	if err != nil {
-		return agent.ContextTransfer{}, true
+		return session.ContextTransfer{}, true
 	}
 	return transfer, false
 }
@@ -504,7 +502,7 @@ func newSubagentApprovalRequester(
 	requester approval.Requester,
 	activeSession session.Session,
 	sessionRef session.SessionRef,
-) subagent.ApprovalRequester {
+) approval.SubagentRequester {
 	if requester == nil && runtime != nil {
 		requester = runtime.childApprovalRequester
 	}
@@ -522,8 +520,8 @@ func newSubagentApprovalRequester(
 
 func (r subagentApprovalRequester) RequestSubagentApproval(
 	ctx context.Context,
-	req subagent.ApprovalRequest,
-) (subagent.ApprovalResponse, error) {
+	req approval.SubagentRequest,
+) (approval.Response, error) {
 	options := make([]session.ProtocolApprovalOption, 0, len(req.Options))
 	for _, item := range req.Options {
 		options = append(options, session.ProtocolApprovalOption{
@@ -599,7 +597,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		}
 	}
 	if r.requester == nil {
-		return subagent.ApprovalResponse{}, nil
+		return approval.Response{}, nil
 	}
 	permission := cloneApproval(runtimeRequest.Approval)
 	var resp approval.Response
@@ -610,13 +608,13 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		resp, err = r.requester.RequestApproval(ctx, runtimeRequest)
 	}
 	if err != nil {
-		return subagent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
 	resp, err = approval.ResolveNativeResponse(permission, resp)
 	if err != nil {
-		return subagent.ApprovalResponse{}, err
+		return approval.Response{}, err
 	}
-	return subagent.ApprovalResponse{
+	return approval.Response{
 		Outcome:  strings.TrimSpace(resp.Outcome),
 		OptionID: strings.TrimSpace(resp.OptionID),
 		Approved: resp.Approved,

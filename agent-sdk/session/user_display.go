@@ -1,6 +1,4 @@
-// Package userdisplay resolves the model-visible user message and the
-// user-visible display text for one submitted prompt.
-package userdisplay
+package session
 
 import (
 	"strings"
@@ -16,7 +14,9 @@ const (
 
 const legacyMetaDisplayText = "display_text"
 
-func Resolve(input string, displayInput string, parts []model.ContentPart, meta map[string]any) (model.Message, string, map[string]any) {
+// ResolveUserDisplay resolves the canonical model-visible user message and the
+// user-visible display text for one submitted prompt.
+func ResolveUserDisplay(input string, displayInput string, parts []model.ContentPart, meta map[string]any) (model.Message, string, map[string]any) {
 	message := model.MessageFromTextAndContentParts(model.RoleUser, strings.TrimSpace(input), parts)
 	modelText := strings.TrimSpace(message.TextContent())
 	displayText := ResolveDisplayInput(displayInput, meta)
@@ -39,26 +39,19 @@ func Resolve(input string, displayInput string, parts []model.ContentPart, meta 
 	return message, displayText, outMeta
 }
 
+// ResolveDisplayInput returns the explicit user-facing display text if set on
+// the prompt or legacy metadata fields.
 func ResolveDisplayInput(displayInput string, meta map[string]any) string {
-	return firstNonEmpty(
+	return firstNonEmptyString(
 		strings.TrimSpace(displayInput),
-		stringMeta(meta, MetaDisplayInput),
-		stringMeta(meta, legacyMetaDisplayText),
+		displayStringMeta(meta, MetaDisplayInput),
+		displayStringMeta(meta, legacyMetaDisplayText),
 	)
 }
 
-func stringMeta(meta map[string]any, key string) string {
+func displayStringMeta(meta map[string]any, key string) string {
 	if value, ok := meta[key].(string); ok {
 		return strings.TrimSpace(value)
-	}
-	return ""
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
 	}
 	return ""
 }

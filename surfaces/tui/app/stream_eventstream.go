@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/display"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )

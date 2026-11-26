@@ -11,8 +11,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 // childSlot is the stable process-local execution owner for one child
@@ -284,7 +283,7 @@ func (s *childSlot) restoreActivity(checkpoint childActivityCheckpoint, run *chi
 // publishRunOutputLocked publishes one normalized event while ingressMu is held.
 // ACP update normalization and observer delivery share this lock so terminal
 // completion cannot overtake the last update.
-func (s *childSlot) publishRunOutputLocked(run *childRun, event output.Event) {
+func (s *childSlot) publishRunOutputLocked(run *childRun, event task.OutputEvent) {
 	if s == nil {
 		return
 	}
@@ -309,7 +308,7 @@ func (s *childSlot) publishRunOutputLocked(run *childRun, event output.Event) {
 	_ = observer.ObserveTaskOutput(context.Background(), event)
 }
 
-func (s *childSlot) settleInput(run *childRun, release bool, acceptedInput []*output.Event) {
+func (s *childSlot) settleInput(run *childRun, release bool, acceptedInput []*task.OutputEvent) {
 	if s == nil {
 		return
 	}
@@ -422,14 +421,14 @@ func (s *childSlot) publishRunResult(run *childRun) <-chan struct{} {
 		if at.IsZero() {
 			at = time.Now()
 		}
-		_ = observer.ObserveTaskOutput(context.Background(), output.Event{
+		_ = observer.ObserveTaskOutput(context.Background(), task.OutputEvent{
 			OccurredAt: at, State: string(result.State), Closed: true,
 		})
 	}
 	s.ingressMu.Unlock()
 	go func() {
 		if completion != nil {
-			completion.PublishSubagentCompletion(delegation.CloneResult(result))
+			completion.PublishSubagentCompletion(task.CloneDelegationResult(result))
 		}
 		close(done)
 	}()

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/modelconfig/typesafe"
 )
 
 func TestConnectJudgmentCatalogKeepsManagementAndConversationChoicesDistinct(t *testing.T) {

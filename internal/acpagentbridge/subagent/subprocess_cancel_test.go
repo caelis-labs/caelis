@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -36,7 +36,7 @@ func TestRunnerCancelNonCooperativeProcessConvergesWithoutClaimingRemoteCancella
 	})
 	events := make(chan childInputTestEvent, 16)
 	spawn := childInputSpawnContext(t, "noncooperative", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "start"})
+	anchor, _, err := runner.Spawn(ctx, spawn, task.DelegationRequest{Agent: "helper", Prompt: "start"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,14 +54,14 @@ func TestRunnerCancelNonCooperativeProcessConvergesWithoutClaimingRemoteCancella
 	}
 	select {
 	case event := <-events:
-		if event.Result == nil || event.Result.TaskID != spawn.TaskID || event.Result.State != delegation.StateUnknownOutcome || event.Result.Running {
+		if event.Result == nil || event.Result.TaskID != spawn.TaskID || event.Result.State != task.StateUnknownOutcome || event.Result.Running {
 			t.Fatalf("completion = %#v", event)
 		}
 	case <-ctx.Done():
 		t.Fatal("noncooperative producer did not converge")
 	}
 	final, err := runner.Wait(ctx, anchor, 1000)
-	if err != nil || final.Running || final.State != delegation.StateUnknownOutcome || final.TaskID != spawn.TaskID {
+	if err != nil || final.Running || final.State != task.StateUnknownOutcome || final.TaskID != spawn.TaskID {
 		t.Fatalf("terminal Wait = %#v, %v", final, err)
 	}
 }

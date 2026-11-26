@@ -1,8 +1,7 @@
-// Package task defines task runner, subagent, delegation, and lifecycle contracts
-// for the Agent SDK.
+// Package task defines asynchronous job, delegation, producer output,
+// terminal control, handle allocation, and subagent lifecycle contracts for
+// the Agent SDK.
 //
-// The root package owns task identity, state, snapshots, observers, start and
-// control requests, storage, result persistence, and management. Focused
-// Delegation, producer output, terminal control, and subagent contracts live in
-// focused subpackages. Consumer cursors, replay, retention, and fan-out do not.
+// Task output contracts expose producer-side hooks only; consumer cursors,
+// replay, retention, and fan-out belong outside the SDK.
 package task

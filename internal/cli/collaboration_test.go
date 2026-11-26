@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,7 +24,7 @@ func TestCollaborationStdioDiscoversConfiguredRolesBeforeGrantBinding(t *testing
 		http.Error(w, "grant is not bound", http.StatusUnauthorized)
 	}))
 	defer host.Close()
-	definitions := append(collaboration.Definitions(true), spawn.New([]delegation.Agent{{Name: "research", Description: "Investigate unfamiliar systems."}}).Definition())
+	definitions := append(collaboration.Definitions(true), spawn.New([]task.DelegationAgent{{Name: "research", Description: "Investigate unfamiliar systems."}}).Definition())
 	raw, err := json.Marshal(definitions)
 	if err != nil {
 		t.Fatal(err)

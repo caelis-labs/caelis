@@ -28,7 +28,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/plan"
@@ -338,7 +337,7 @@ func TestRuntimeAllowsSubagentsWithoutContextRouter(t *testing.T) {
 	runtime, err := New(Config{
 		Sessions:     sessions,
 		AgentFactory: chat.Factory{},
-		Subagents:    &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "ok"}},
+		Subagents:    &recordingSubagentRunner{spawnResult: taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "ok"}},
 		TaskStore:    newFileTaskStoreForTest(t),
 	})
 	if err != nil {
@@ -1385,7 +1384,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 	if turnReq.ContextSyncSeq != 3 {
 		t.Fatalf("ContextSyncSeq = %d, want checkpoint 3", turnReq.ContextSyncSeq)
 	}
-	if got, want := turnReq.Context, (agent.ContextTransfer{Turns: []agent.ContextTurn{{
+	if got, want := turnReq.Context, (session.ContextTransfer{Turns: []session.ContextTurn{{
 		Executor:         session.ActorRef{Kind: session.ActorKindParticipant, ID: "side-1", Name: "helper(jeff)"},
 		UserMessages:     []string{"side request"},
 		AssistantSummary: "side result",
@@ -1523,7 +1522,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 		if req.TurnID == "" {
 			t.Fatal("participant prompt TurnID is empty")
 		}
-		if !agent.ContextTransferEmpty(req.Context) {
+		if !session.ContextTransferEmpty(req.Context) {
 			t.Fatalf("participant Context = %#v, want no background for an empty offset", req.Context)
 		}
 	case <-time.After(2 * time.Second):

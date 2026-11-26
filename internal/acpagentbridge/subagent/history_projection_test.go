@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
 func TestHistoryProjectionStreamsLongReplayAndPreservesInputSources(t *testing.T) {
-	c := newHistoryCollector(&Runner{clock: time.Now}, delegation.Anchor{SessionID: "child-1", TaskID: "task"}, "helper")
+	c := newHistoryCollector(&Runner{clock: time.Now}, task.Anchor{SessionID: "child-1", TaskID: "task"}, "helper")
 	c.openProjection()
 	defer c.closeProjection()
 	// Exceeds the former event limit without needing a full disk projection copy.

@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -48,7 +47,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 		t.Fatalf("resolved target = %#v, want AgentHandle zenith backed by ACP Agent grok", target)
 	}
 	resolve := stack.composition.delegationPlacementResolver(stack.composition.activeRuntime)
-	materialized, err := resolve(t.Context(), subagent.SpawnContext{TaskID: "child-task"}, sdkdelegation.TargetRequest{Target: target})
+	materialized, err := resolve(t.Context(), taskapi.SpawnContext{TaskID: "child-task"}, taskapi.TargetRequest{Target: target})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,15 +199,15 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save(changed) error = %v", err)
 	}
-	_, err = stack.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.activeRuntime)
+	_, err = stack.composition.resolveDelegationPlacement(t.Context(), taskapi.TargetRequest{Target: targets["self"]}, stack.composition.activeRuntime)
 	if err == nil || !strings.Contains(err.Error(), "changed after placement was frozen") {
 		t.Fatalf("resolveDelegationPlacement() error = %v, want configuration drift rejection", err)
 	}
 }
 
-func assertDelegationPlacementSessionOptions(t *testing.T, stack *Stack, target sdkdelegation.Target, modelID string, effort string) {
+func assertDelegationPlacementSessionOptions(t *testing.T, stack *Stack, target taskapi.Target, modelID string, effort string) {
 	t.Helper()
-	agent, err := stack.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
+	agent, err := stack.composition.resolveDelegationPlacement(t.Context(), taskapi.TargetRequest{Target: target}, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatalf("resolveDelegationPlacement() error = %v", err)
 	}

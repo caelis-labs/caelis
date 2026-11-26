@@ -8,7 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -16,7 +16,7 @@ import (
 
 func TestTerminalServiceResolvesDisplayIDThroughTaskDirectory(t *testing.T) {
 	exitCode := 7
-	streams := &recordingTerminalStreams{snapshot: terminal.Snapshot{
+	streams := &recordingTerminalStreams{snapshot: task.TerminalSnapshot{
 		Output: "hello\n", ExitCode: &exitCode,
 	}}
 	service, err := NewTerminalService(terminalTaskDirectory{}, streams)
@@ -31,7 +31,7 @@ func TestTerminalServiceResolvesDisplayIDThroughTaskDirectory(t *testing.T) {
 	if output.Output != "hello\n" || output.ExitStatus == nil || output.ExitStatus.ExitCode == nil || *output.ExitStatus.ExitCode != 7 {
 		t.Fatalf("TerminalOutput() = %#v", output)
 	}
-	if streams.ref != (terminal.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1"}) {
+	if streams.ref != (task.TerminalRef{SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1"}) {
 		t.Fatalf("resolved ref = %#v", streams.ref)
 	}
 	if _, err := service.WaitTerminal(context.Background(), appserver.Principal{ID: "owner"}, request); err != nil {
@@ -82,12 +82,12 @@ func TestTerminalMutationUsesNativeSessionScopeAndLeaseOwner(t *testing.T) {
 		if err := mutate(t.Context(), principal, req); err != nil {
 			t.Fatal(err)
 		}
-		if streams.ref != (terminal.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1"}) {
+		if streams.ref != (task.TerminalRef{SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1"}) {
 			t.Fatalf("native target changed: %+v", streams.ref)
 		}
 		wrong := principal
 		wrong.ID = "foreign"
-		streams.ref = terminal.Ref{}
+		streams.ref = task.TerminalRef{}
 		if err := mutate(t.Context(), wrong, req); !errors.Is(err, appserver.ErrUnauthorized) || streams.ref.TaskID != "" {
 			t.Fatalf("foreign connection reached native terminal: %+v, %v", streams.ref, err)
 		}
@@ -110,7 +110,7 @@ func TestTerminalMutationUsesNativeSessionScopeAndLeaseOwner(t *testing.T) {
 		}
 	}
 	for _, mutate := range []func(context.Context, appserver.Principal, appserver.TerminalRequest) error{service.KillTerminal, service.ReleaseTerminal} {
-		streams.ref = terminal.Ref{}
+		streams.ref = task.TerminalRef{}
 		if err := mutate(t.Context(), principal, req); !errors.Is(err, appserver.ErrSessionClosed) || streams.ref.TaskID != "" {
 			t.Fatalf("revoked mutation reached terminal: %+v, %v", streams.ref, err)
 		}
@@ -136,25 +136,25 @@ func (terminalTaskDirectory) Subscribe(context.Context, taskstream.Principal, ta
 }
 
 type recordingTerminalStreams struct {
-	ref      terminal.Ref
-	snapshot terminal.Snapshot
+	ref      task.TerminalRef
+	snapshot task.TerminalSnapshot
 }
 
-func (s *recordingTerminalStreams) Read(_ context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+func (s *recordingTerminalStreams) Read(_ context.Context, ref task.TerminalRef) (task.TerminalSnapshot, error) {
 	s.ref = ref
 	return s.snapshot, nil
 }
-func (s *recordingTerminalStreams) Wait(_ context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+func (s *recordingTerminalStreams) Wait(_ context.Context, ref task.TerminalRef) (task.TerminalSnapshot, error) {
 	s.ref = ref
 	return s.snapshot, nil
 }
-func (s *recordingTerminalStreams) Kill(_ context.Context, ref terminal.Ref) error {
+func (s *recordingTerminalStreams) Kill(_ context.Context, ref task.TerminalRef) error {
 	s.ref = ref
 	return nil
 }
-func (s *recordingTerminalStreams) Release(_ context.Context, ref terminal.Ref) error {
+func (s *recordingTerminalStreams) Release(_ context.Context, ref task.TerminalRef) error {
 	s.ref = ref
 	return nil
 }
 
-var _ terminal.Controller = (*recordingTerminalStreams)(nil)
+var _ task.TerminalController = (*recordingTerminalStreams)(nil)

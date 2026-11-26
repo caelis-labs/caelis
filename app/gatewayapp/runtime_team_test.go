@@ -11,7 +11,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	sdkdelegation "github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
@@ -151,7 +151,7 @@ func TestRuntimeTeamRevisionAcrossActivatedSessions(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, handle := range handles[:3] {
-				materialized, err := current.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: targets[string(handle)]}, current.composition.activeRuntime)
+				materialized, err := current.composition.resolveDelegationPlacement(t.Context(), task.TargetRequest{Target: targets[string(handle)]}, current.composition.activeRuntime)
 				if err != nil || materialized.SessionOptions.ModelID != profile.Backend.Provider.ModelConfigID || materialized.SessionOptions.ConfigValues[acpConfigReasoningID] != effort {
 					t.Fatalf("native child materialization: %+v, %v", materialized.SessionOptions, err)
 				}

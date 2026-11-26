@@ -8,7 +8,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
@@ -18,11 +17,11 @@ func TestRecorderBatchesDiskWritesWithoutRewritingHistory(t *testing.T) {
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	defer recorder.Close(context.Background())
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "s", TaskID: "t", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "s", TaskID: "t", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	const count = 2048
 	start := time.Now()
 	for index := range count {
-		if err := observer.ObserveTaskOutput(ctx, output.Event{Text: fmt.Sprintf("delta-%04d", index), Running: true}); err != nil {
+		if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: fmt.Sprintf("delta-%04d", index), Running: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -35,7 +34,7 @@ func TestRecorderBatchesDiskWritesWithoutRewritingHistory(t *testing.T) {
 	}
 	t.Logf("%d deltas: %d file Write calls, %d bytes, elapsed %s", count, calls, bytes, time.Since(start))
 	// A second turn appends its new record only; it never serializes the old history.
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "next turn", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "next turn", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := recorder.Flush(ctx, task.Ref{SessionID: "s", TaskID: "t"}); err != nil {
@@ -60,7 +59,7 @@ func TestRecorderIdleTailBecomesVisibleWithinFlushWindow(t *testing.T) {
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	defer recorder.Close(context.Background())
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "s", TaskID: "t", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "s", TaskID: "t", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	key, _, err := spool.Resolve(ctx, streamspool.LogicalKey{Namespace: streamspool.NamespaceTask, Digest: streamspool.DigestStrings("s", "t")})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +70,7 @@ func TestRecorderIdleTailBecomesVisibleWithinFlushWindow(t *testing.T) {
 	}
 	defer reader.Close()
 	start := time.Now()
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "one delta", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "one delta", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := reader.Next(ctx); err != nil {
@@ -90,10 +89,10 @@ func TestRecorderPacedDeltasKeepWriteFrequencyBounded(t *testing.T) {
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	defer recorder.Close(context.Background())
-	observer := recorder.BindTaskOutput(ctx, output.Binding{SessionID: "s", TaskID: "paced", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{SessionID: "s", TaskID: "paced", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
 	start := time.Now()
 	for range 200 {
-		if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "delta", Running: true}); err != nil {
+		if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "delta", Running: true}); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -115,8 +114,8 @@ func TestRecorderUnencodableOutputInvalidatesCache(t *testing.T) {
 	spool := newTaskStreamTestSpool(t)
 	recorder := NewRecorder(spool, nil)
 	defer recorder.Close(context.Background())
-	observer := recorder.BindTaskOutput(t.Context(), output.Binding{SessionID: "s", TaskID: "t", Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true})
-	err := observer.ObserveTaskOutput(t.Context(), output.Event{Event: &session.Event{Meta: map[string]any{"invalid": make(chan int)}}})
+	observer := recorder.BindTaskOutput(t.Context(), task.OutputBinding{SessionID: "s", TaskID: "t", Kind: task.KindSubagent, StartsAtTaskOrigin: true})
+	err := observer.ObserveTaskOutput(t.Context(), task.OutputEvent{Event: &session.Event{Meta: map[string]any{"invalid": make(chan int)}}})
 	if err == nil {
 		t.Fatal("unsupported output was silently accepted")
 	}

@@ -6,7 +6,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 )
 
 // hostTaskStreamService routes only command-terminal fallback/control to the
@@ -17,23 +16,23 @@ type hostTaskStreamService struct {
 	lifecycle taskOutputLifecycle
 }
 
-func (s hostTaskStreamService) Read(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+func (s hostTaskStreamService) Read(ctx context.Context, ref task.TerminalRef) (task.TerminalSnapshot, error) {
 	controller, err := s.controller(ref.SessionID)
 	if err != nil {
-		return terminal.Snapshot{}, err
+		return task.TerminalSnapshot{}, err
 	}
 	return controller.Read(ctx, ref)
 }
 
-func (s hostTaskStreamService) Wait(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
+func (s hostTaskStreamService) Wait(ctx context.Context, ref task.TerminalRef) (task.TerminalSnapshot, error) {
 	controller, err := s.controller(ref.SessionID)
 	if err != nil {
-		return terminal.Snapshot{}, err
+		return task.TerminalSnapshot{}, err
 	}
 	return controller.Wait(ctx, ref)
 }
 
-func (s hostTaskStreamService) Kill(ctx context.Context, ref terminal.Ref) error {
+func (s hostTaskStreamService) Kill(ctx context.Context, ref task.TerminalRef) error {
 	controller, err := s.controller(ref.SessionID)
 	if err != nil {
 		return err
@@ -41,7 +40,7 @@ func (s hostTaskStreamService) Kill(ctx context.Context, ref terminal.Ref) error
 	return controller.Kill(ctx, ref)
 }
 
-func (s hostTaskStreamService) Release(ctx context.Context, ref terminal.Ref) error {
+func (s hostTaskStreamService) Release(ctx context.Context, ref task.TerminalRef) error {
 	controller, err := s.controller(ref.SessionID)
 	if err != nil {
 		return err
@@ -55,12 +54,12 @@ func (s hostTaskStreamService) Release(ctx context.Context, ref terminal.Ref) er
 	return nil
 }
 
-func taskRefFromTerminal(ref terminal.Ref) task.Ref {
-	ref = terminal.NormalizeRef(ref)
+func taskRefFromTerminal(ref task.TerminalRef) task.Ref {
+	ref = task.NormalizeTerminalRef(ref)
 	return task.Ref{SessionID: ref.SessionID, TaskID: ref.TaskID, TerminalID: ref.TerminalID}
 }
 
-func (s hostTaskStreamService) controller(sessionID string) (terminal.Controller, error) {
+func (s hostTaskStreamService) controller(sessionID string) (task.TerminalController, error) {
 	composition := s.host
 	if composition == nil {
 		return nil, taskStreamRuntimeUnavailable()
@@ -84,4 +83,4 @@ func taskStreamRuntimeUnavailable() error {
 	return errorcode.New(errorcode.Unavailable, "gatewayapp: Task Runtime terminal control is unavailable")
 }
 
-var _ terminal.Controller = hostTaskStreamService{}
+var _ task.TerminalController = hostTaskStreamService{}

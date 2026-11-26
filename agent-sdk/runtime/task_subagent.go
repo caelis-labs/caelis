@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
 
@@ -149,7 +148,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
 	runner := task.runner
 	running := task.running
-	anchor := delegation.CloneAnchor(task.anchor)
+	anchor := taskapi.CloneAnchor(task.anchor)
 	turnSeq := task.turnSeq
 	task.mu.Unlock()
 	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
@@ -182,7 +181,7 @@ func (tm *taskRuntime) observeSubagent(ctx context.Context, task *subagentTask) 
 	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
 	runner := task.runner
 	running := task.running
-	anchor := delegation.CloneAnchor(task.anchor)
+	anchor := taskapi.CloneAnchor(task.anchor)
 	turnSeq := task.turnSeq
 	task.mu.Unlock()
 	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
@@ -270,7 +269,7 @@ func (tm *taskRuntime) applyObservedSubagentResult(
 	ctx context.Context,
 	task *subagentTask,
 	expectedTurnSeq int64,
-	result delegation.Result,
+	result taskapi.DelegationResult,
 	persistRunning bool,
 ) (taskapi.Snapshot, error) {
 	release, claimed := tm.tryClaimSubagentOperation(task.sessionRef, task.ref.TaskID)
@@ -290,7 +289,7 @@ func (tm *taskRuntime) applyObservedSubagentResult(
 		return snapshot, nil
 	}
 	if task.running && !persistRunning &&
-		(result.Running || result.State == delegation.StateRunning) {
+		(result.Running || result.State == taskapi.StateRunning) {
 		snapshot := task.snapshotLocked()
 		if preview := result.OutputPreview; taskOutputHasNonBlankLine(preview) {
 			snapshot.Result["output_preview"] = preview
@@ -476,7 +475,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	target := taskSpecTarget(entry.Spec, "target")
 	if target.Selector == "" {
 		agent := taskSpecString(entry.Spec, "agent")
-		target = delegation.Target{
+		target = taskapi.Target{
 			Selector: agent,
 			Placement: placement.Placement{
 				Kind:  placement.KindAgent,
@@ -484,7 +483,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 			},
 		}
 	}
-	target = delegation.NormalizeTarget(target)
+	target = taskapi.NormalizeTarget(target)
 	turnSeq := taskTurnSeqFromSpec(entry.Spec)
 	if turnSeq <= 0 {
 		turnSeq = max(taskTurnSeqFromSpec(entry.Metadata), 1)
@@ -501,7 +500,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 			TerminalID: firstNonEmpty(taskSpecString(entry.Spec, "terminal_id"), subagentTerminalID(entry.TaskID)),
 		},
 		sessionRef: session.NormalizeSessionRef(entry.Session),
-		anchor: delegation.Anchor{
+		anchor: taskapi.Anchor{
 			TaskID:    strings.TrimSpace(entry.TaskID),
 			SessionID: taskSpecString(entry.Spec, "session_id"),
 			AgentID:   taskSpecString(entry.Spec, "agent_id"),
@@ -557,13 +556,13 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	return task
 }
 
-func (t *subagentTask) applyResult(result delegation.Result) {
+func (t *subagentTask) applyResult(result taskapi.DelegationResult) {
 	if t == nil {
 		return
 	}
-	result = delegation.CloneResult(result)
+	result = taskapi.CloneDelegationResult(result)
 	t.state = taskStateFromDelegation(result.State)
-	t.running = result.State == delegation.StateRunning
+	t.running = result.State == taskapi.StateRunning
 	if !t.running && t.producerContextRelease != nil {
 		t.producerContextRelease()
 		t.producerContextRelease = nil
@@ -766,7 +765,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		ContextUsage:   taskapi.CloneContextUsageRecord(t.contextUsage),
 		Spec: map[string]any{
 			"content_parts":        t.contentParts,
-			"target":               delegation.NormalizeTarget(t.target),
+			"target":               taskapi.NormalizeTarget(t.target),
 			"prompt":               t.prompt,
 			"include_context":      taskSpecBool(t.metadata, "include_context"),
 			"context_unsupported":  taskSpecBool(t.metadata, "context_unsupported"),
@@ -808,28 +807,28 @@ func taskContentParts(spec map[string]any) []model.ContentPart {
 	return parts
 }
 
-func taskSpecTarget(values map[string]any, key string) delegation.Target {
+func taskSpecTarget(values map[string]any, key string) taskapi.Target {
 	if len(values) == 0 {
-		return delegation.Target{}
+		return taskapi.Target{}
 	}
 	switch raw := values[key].(type) {
-	case delegation.Target:
-		return delegation.NormalizeTarget(raw)
-	case *delegation.Target:
+	case taskapi.Target:
+		return taskapi.NormalizeTarget(raw)
+	case *taskapi.Target:
 		if raw != nil {
-			return delegation.NormalizeTarget(*raw)
+			return taskapi.NormalizeTarget(*raw)
 		}
-		return delegation.Target{}
+		return taskapi.Target{}
 	}
 	encoded, err := json.Marshal(values[key])
 	if err != nil {
-		return delegation.Target{}
+		return taskapi.Target{}
 	}
-	var target delegation.Target
+	var target taskapi.Target
 	if err := json.Unmarshal(encoded, &target); err != nil {
-		return delegation.Target{}
+		return taskapi.Target{}
 	}
-	return delegation.NormalizeTarget(target)
+	return taskapi.NormalizeTarget(target)
 }
 
 func subagentTurnID(taskID string, seq int64) string {

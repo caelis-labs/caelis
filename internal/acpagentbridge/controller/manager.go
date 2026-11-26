@@ -15,14 +15,11 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
-	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/authentication"
@@ -89,7 +86,7 @@ type controllerRun struct {
 	authenticationMethods []controlagents.AuthenticationMethod
 	promptCapabilities    acpsdk.PromptCapabilities
 	binding               session.ControllerBinding
-	context               agent.ContextTransfer
+	context               session.ContextTransfer
 	contextPending        bool
 	contextFresh          bool
 	contextSyncSeq        uint64
@@ -201,10 +198,10 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 			return session.ControllerBinding{}, fmt.Errorf("internal/acpagentbridge/controller: configured placement resolution is unavailable")
 		}
 		var err error
-		cfg, err = m.placementResolver(ctx, tasksubagent.SpawnContext{
+		cfg, err = m.placementResolver(ctx, task.SpawnContext{
 			SessionRef: req.SessionRef,
 			Session:    req.Session,
-		}, delegation.TargetRequest{Target: delegation.Target{
+		}, task.TargetRequest{Target: task.Target{
 			Selector:  placement.Agent,
 			Placement: placement,
 		}})
@@ -241,8 +238,8 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 		cfg:             cfg,
 		cwd:             strings.TrimSpace(req.Session.CWD),
 		binding:         controllerBinding(cfg.Name, req.Source, epochID, placement, m.clock()),
-		context:         agent.CloneContextTransfer(req.Context),
-		contextPending:  !agent.ContextTransferEmpty(req.Context),
+		context:         session.CloneContextTransfer(req.Context),
+		contextPending:  !session.ContextTransferEmpty(req.Context),
 		contextSyncSeq:  req.ContextSyncSeq,
 		updatedAt:       m.clock(),
 	}
@@ -269,8 +266,8 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	if resumeRemoteSessionID != "" && strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
 		contextSyncSeq = req.Session.Controller.ContextSyncSeq
 	} else if resumeRemoteSessionID != "" {
-		run.context = agent.CloneContextTransfer(req.FreshContext)
-		run.contextPending = !agent.ContextTransferEmpty(req.FreshContext)
+		run.context = session.CloneContextTransfer(req.FreshContext)
+		run.contextPending = !session.ContextTransferEmpty(req.FreshContext)
 		run.contextFresh = run.contextPending
 		run.contextSyncSeq = req.ContextSyncSeq
 	}
@@ -593,7 +590,7 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 	if fresh {
 		contextSyncSeq = 0
 		run.mu.Lock()
-		run.context = agent.ContextTransfer{}
+		run.context = session.ContextTransfer{}
 		run.contextPending = false
 		run.contextFresh = false
 		run.contextSyncSeq = 0
@@ -1221,40 +1218,40 @@ func controllerBinding(agent string, source string, epochID string, placement sd
 	}
 }
 
-func (r *controllerRun) consumeContext() (agent.ContextTransfer, uint64, bool) {
+func (r *controllerRun) consumeContext() (session.ContextTransfer, uint64, bool) {
 	if r == nil {
-		return agent.ContextTransfer{}, 0, false
+		return session.ContextTransfer{}, 0, false
 	}
 	r.mu.Lock()
-	contextTransfer := agent.CloneContextTransfer(r.context)
+	contextTransfer := session.CloneContextTransfer(r.context)
 	contextSyncSeq := r.contextSyncSeq
 	pending := r.contextPending
 	fresh := r.contextFresh
 	if pending {
-		r.context = agent.ContextTransfer{}
+		r.context = session.ContextTransfer{}
 		r.contextPending = false
 		r.contextFresh = false
 		r.contextSyncSeq = 0
 	}
 	r.mu.Unlock()
 	if !pending {
-		return agent.ContextTransfer{}, 0, false
+		return session.ContextTransfer{}, 0, false
 	}
 	return contextTransfer, contextSyncSeq, fresh
 }
 
 func selectControllerTurnContext(
-	activation agent.ContextTransfer,
+	activation session.ContextTransfer,
 	activationSyncSeq uint64,
 	activationFresh bool,
-	turn agent.ContextTransfer,
-	freshTurn agent.ContextTransfer,
+	turn session.ContextTransfer,
+	freshTurn session.ContextTransfer,
 	turnSyncSeq uint64,
-) (agent.ContextTransfer, uint64, bool) {
-	activation = agent.CloneContextTransfer(activation)
-	turn = agent.CloneContextTransfer(turn)
-	freshTurn = agent.CloneContextTransfer(freshTurn)
-	if agent.ContextTransferEmpty(activation) {
+) (session.ContextTransfer, uint64, bool) {
+	activation = session.CloneContextTransfer(activation)
+	turn = session.CloneContextTransfer(turn)
+	freshTurn = session.CloneContextTransfer(freshTurn)
+	if session.ContextTransferEmpty(activation) {
 		return turn, turnSyncSeq, false
 	}
 	if activationFresh {
@@ -1262,22 +1259,24 @@ func selectControllerTurnContext(
 		// pending, replace it only with the Runtime's newer full route; an
 		// incremental route is relative to the old remote's checkpoint and
 		// cannot safely supersede the bootstrap.
-		if !agent.ContextTransferEmpty(freshTurn) && turnSyncSeq >= activationSyncSeq {
+		if !session.ContextTransferEmpty(freshTurn) && turnSyncSeq >= activationSyncSeq {
 			return freshTurn, turnSyncSeq, true
 		}
 		return activation, activationSyncSeq, true
 	}
-	if !agent.ContextTransferEmpty(turn) && turnSyncSeq >= activationSyncSeq {
+	if !session.ContextTransferEmpty(turn) && turnSyncSeq >= activationSyncSeq {
 		// Runtime routes the Turn from the still-durable delivered checkpoint,
 		// so this offset already contains the unsent activation offset. Prefer
 		// it instead of duplicating the same history in the first prompt.
 		return turn, turnSyncSeq, false
 	}
-	return agent.MergeContextTransfers(activation, turn), max(activationSyncSeq, turnSyncSeq), false
+	return session.MergeContextTransfers(activation, turn), max(activationSyncSeq, turnSyncSeq), false
 }
 
-func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.ContextTransfer) []json.RawMessage {
-	background := contextprompt.RenderBackground(contextTransfer)
+const currentRequestMarker = `<caelis_current_request>`
+
+func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer session.ContextTransfer) []json.RawMessage {
+	background := session.RenderContextTransferBackground(contextTransfer)
 	if background == "" || len(prompt) == 0 {
 		return prompt
 	}
@@ -1287,7 +1286,7 @@ func composeACPContextPrompt(prompt []json.RawMessage, contextTransfer agent.Con
 	})
 	currentRaw, _ := json.Marshal(client.TextContent{
 		Type: "text",
-		Text: contextprompt.CurrentRequestMarker,
+		Text: currentRequestMarker,
 	})
 	out := make([]json.RawMessage, 0, len(prompt)+2)
 	out = append(out, backgroundRaw, currentRaw)

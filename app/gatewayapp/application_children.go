@@ -14,8 +14,7 @@ import (
 	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -239,7 +238,7 @@ func (c *applicationChildren) agents(ctx context.Context) ([]assembly.AgentConfi
 	return out, nil
 }
 
-func (c *applicationChildren) resolve(ctx context.Context, parent subagent.SpawnContext, request delegation.TargetRequest) (assembly.AgentConfig, error) {
+func (c *applicationChildren) resolve(ctx context.Context, parent taskapi.SpawnContext, request taskapi.TargetRequest) (assembly.AgentConfig, error) {
 	if parent.SessionRef.SessionID != c.binding.SessionID || sessionvisibility.IsSpawnedSubagentSession(c.active) {
 		return assembly.AgentConfig{}, appserver.ErrUnauthorized
 	}
@@ -276,15 +275,15 @@ func (c *applicationChildren) tools(ctx context.Context) ([]tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	agents := make([]delegation.Agent, 0, len(handles))
-	targets := make(map[string]delegation.Target, len(handles))
+	agents := make([]taskapi.DelegationAgent, 0, len(handles))
+	targets := make(map[string]taskapi.Target, len(handles))
 	for _, handle := range handles {
 		frozen, err := c.placement(ctx, agentbinding.Handle(handle))
 		if err != nil {
 			return nil, err
 		}
-		agents = append(agents, delegation.Agent{Name: handle, Description: "Independent child using this Application profile"})
-		targets[handle] = delegation.Target{Selector: handle, Placement: frozen}
+		agents = append(agents, taskapi.DelegationAgent{Name: handle, Description: "Independent child using this Application profile"})
+		targets[handle] = taskapi.Target{Selector: handle, Placement: frozen}
 	}
 	return append(c.leaseTools(result), spawn.NewWithTargets(agents, targets).WithAdmission(func(ctx context.Context) error {
 		_, err := c.source(ctx)

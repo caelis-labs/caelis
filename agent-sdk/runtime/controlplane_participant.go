@@ -14,7 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
@@ -457,7 +456,7 @@ func (r *Runtime) executeACPParticipantTurn(
 	ref session.SessionRef,
 	req agent.PromptParticipantRequest,
 	binding session.ParticipantBinding,
-	contextTransfer agent.ContextTransfer,
+	contextTransfer session.ContextTransfer,
 	runID string,
 	turnID string,
 	handle *runner,
@@ -694,9 +693,9 @@ func participantPromptUserEvent(
 		meta["display_title"] = displayTitle
 	}
 	if displayAddress := strings.TrimSpace(displayAddress); displayAddress != "" {
-		meta[userdisplay.MetaDisplayAddress] = displayAddress
+		meta[session.MetaDisplayAddress] = displayAddress
 	}
-	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, meta)
+	message, displayText, meta := session.ResolveUserDisplay(input, displayInput, parts, meta)
 	kind := binding.Kind
 	if kind == "" {
 		kind = session.ParticipantKindACP

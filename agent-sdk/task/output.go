@@ -1,6 +1,4 @@
-// Package output defines the producer-only output hook used by asynchronous
-// Tasks. It deliberately has no read, cursor, retention, or consumer API.
-package output
+package task
 
 import (
 	"context"
@@ -9,31 +7,21 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-// TaskKind identifies the raw producer family without defining any retention
-// or consumer behavior.
-type TaskKind string
-
-const (
-	TaskKindCommand  TaskKind = "command"
-	TaskKindCodeMode TaskKind = "code_mode"
-	TaskKindSubagent TaskKind = "subagent"
-)
-
-// Binding is trusted Runtime identity supplied before an external effect can
-// emit output. Payload events never repeat these fields.
-type Binding struct {
+// OutputBinding is trusted Runtime identity supplied before an external effect
+// can emit output. Payload events never repeat these fields.
+type OutputBinding struct {
 	SessionID  string
 	TaskID     string
 	TerminalID string
 	ActivityID string
-	Kind       TaskKind
+	Kind       Kind
 	// StartsAtTaskOrigin reports that this observer was installed before the
 	// Task's first possible output. It does not define retention or replay.
 	StartsAtTaskOrigin bool
 }
 
-// Event is one identity-free producer event.
-type Event struct {
+// OutputEvent is one identity-free producer event.
+type OutputEvent struct {
 	OccurredAt time.Time `json:"occurred_at,omitempty"`
 	Text       string    `json:"text,omitempty"`
 	State      string    `json:"state,omitempty"`
@@ -49,23 +37,25 @@ type Event struct {
 	Event          *session.Event `json:"event,omitempty"`
 }
 
-// Observer accepts events in producer order. An observer failure affects only
-// the optional observation trace and must not change Task execution.
-type Observer interface {
-	ObserveTaskOutput(context.Context, Event) error
+// OutputObserver accepts events in producer order. An observer failure affects
+// only the optional observation trace and must not change Task execution.
+type OutputObserver interface {
+	ObserveTaskOutput(context.Context, OutputEvent) error
 }
 
-// Binder installs the final observer for one immutable Task/activity identity.
-type Binder interface {
-	BindTaskOutput(context.Context, Binding) Observer
+// OutputBinder installs the final observer for one immutable Task/activity
+// identity.
+type OutputBinder interface {
+	BindTaskOutput(context.Context, OutputBinding) OutputObserver
 }
 
-type nopObserver struct{}
+type nopOutputObserver struct{}
 
-func (nopObserver) ObserveTaskOutput(context.Context, Event) error { return nil }
+func (nopOutputObserver) ObserveTaskOutput(context.Context, OutputEvent) error { return nil }
 
-// Nop returns an observer suitable when the application trace is unavailable.
-func Nop() Observer { return nopObserver{} }
+// NopOutputObserver returns an observer suitable when the application trace is
+// unavailable.
+func NopOutputObserver() OutputObserver { return nopOutputObserver{} }
 
 // HistoryObserver accepts an ordered provider display snapshot before new live
 // output on the same producer connection. It replaces only observation history,

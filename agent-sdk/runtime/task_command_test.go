@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"strings"
 	"sync"
@@ -805,7 +804,7 @@ func TestStartCommandCleanupKeepsUnconfirmedExitUnknown(t *testing.T) {
 			if err != nil || again.Ref.TaskID != got.Ref.TaskID || backend.startCalls() != 1 || handle.terminateCalls() != 1 {
 				t.Fatalf("retry = %+v, %v, starts=%d, terminates=%d", again, err, backend.startCalls(), handle.terminateCalls())
 			}
-			ref := terminal.Ref{SessionID: active.SessionID, TaskID: got.Ref.TaskID, TerminalID: got.Ref.TerminalID}
+			ref := taskapi.TerminalRef{SessionID: active.SessionID, TaskID: got.Ref.TaskID, TerminalID: got.Ref.TerminalID}
 			if err := runtime.Terminals().Release(t.Context(), ref); err != nil || handle.terminateCalls() != 2 {
 				t.Fatalf("Terminal.Release() = %v, original handle Terminate calls = %d; want 2", err, handle.terminateCalls())
 			}

@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"reflect"
 	"testing"
@@ -135,7 +134,7 @@ func TestDetachedSubagentApprovalAcrossParentTurns(t *testing.T) {
 				startParent()
 				return approval.Response{Outcome: "selected", OptionID: "allow_once"}, nil
 			}), active, active.SessionRef)
-			resp, err := bridge.RequestSubagentApproval(previous, subagent.ApprovalRequest{TaskID: "child", ParentCallID: "spawn", ToolCall: subagent.ApprovalToolCall{ID: "req", Name: "lookup"}, Options: endpointApprovalTestOptions()})
+			resp, err := bridge.RequestSubagentApproval(previous, approval.SubagentRequest{TaskID: "child", ParentCallID: "spawn", ToolCall: session.ProtocolToolCall{ID: "req", Name: "lookup"}, Options: endpointApprovalTestOptions()})
 			want := session.ApprovalRecordResolved
 			if cancelApproval {
 				want = session.ApprovalRecordCancelled
@@ -162,9 +161,9 @@ func TestDangerFullAccessResolvesSubagentPermissionsBeforeApprovalRequester(t *t
 		return approval.Response{}, nil
 	})
 	bridge := newSubagentApprovalRequester(runtime, policy.ProfileDangerFullAccess, requester, activeSession, activeSession.SessionRef)
-	response, err := bridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
+	response, err := bridge.RequestSubagentApproval(context.Background(), approval.SubagentRequest{
 		Mode: policy.ProfileDangerFullAccess,
-		ToolCall: subagent.ApprovalToolCall{
+		ToolCall: session.ProtocolToolCall{
 			ID:       "call-subagent",
 			Name:     "external.custom.tool",
 			Kind:     "execute",
@@ -279,9 +278,9 @@ func TestDangerFullAccessEndpointPermissionsRequireRegisteredPolicy(t *testing.T
 	if subagentBridge == nil {
 		t.Fatal("subagent approval requester = nil, want fail-closed policy bridge")
 	}
-	_, err = subagentBridge.RequestSubagentApproval(context.Background(), subagent.ApprovalRequest{
+	_, err = subagentBridge.RequestSubagentApproval(context.Background(), approval.SubagentRequest{
 		Mode: mode,
-		ToolCall: subagent.ApprovalToolCall{
+		ToolCall: session.ProtocolToolCall{
 			ID:   "call-subagent-unregistered",
 			Name: "external.custom.tool",
 		},
@@ -375,7 +374,7 @@ func TestEndpointApprovalRequestersPreserveNamePresence(t *testing.T) {
 				if source == "controller" {
 					_, err = (controllerApprovalRequester{requester: requester}).RequestControllerApproval(t.Context(), controller.ApprovalRequest{ToolCall: call})
 				} else {
-					_, err = (subagentApprovalRequester{requester: requester}).RequestSubagentApproval(t.Context(), subagent.ApprovalRequest{ToolCall: call})
+					_, err = (subagentApprovalRequester{requester: requester}).RequestSubagentApproval(t.Context(), approval.SubagentRequest{ToolCall: call})
 				}
 				if err != nil {
 					t.Fatal(err)

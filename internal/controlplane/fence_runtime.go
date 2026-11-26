@@ -13,11 +13,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 var (
-	_ terminal.Provider             = (*FencedRuntime)(nil)
+	_ task.TerminalProvider         = (*FencedRuntime)(nil)
 	_ agent.LiveRunAttacher         = (*FencedRuntime)(nil)
 	_ approval.Resolver             = (*FencedRuntime)(nil)
 	_ agent.ParticipantControlPlane = (*FencedRuntime)(nil)

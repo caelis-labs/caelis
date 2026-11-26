@@ -24,7 +24,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
@@ -490,7 +489,7 @@ func TestCommandApprovalRevocationBeforeEffectClaim(t *testing.T) {
 				if err != nil || pending.State != taskapi.StateWaitingApproval || pending.SupportsInput {
 					t.Fatalf("pending read = %#v, %v", pending, err)
 				}
-				terminalSnapshot, err := r.Terminals().Read(owner, terminal.Ref{SessionID: active.SessionID, TaskID: id})
+				terminalSnapshot, err := r.Terminals().Read(owner, taskapi.TerminalRef{SessionID: active.SessionID, TaskID: id})
 				if err != nil || terminalSnapshot.State != "waiting_approval" || !terminalSnapshot.Running || !terminalSnapshot.StartedAt.IsZero() {
 					t.Fatalf("pending terminal fallback = %#v, %v", terminalSnapshot, err)
 				}

@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"strings"
 	"testing"
 	"time"
@@ -144,16 +144,16 @@ func TestRuntimeParticipantLifecycleMayOverlapActiveTurnFence(t *testing.T) {
 }
 
 type recordingProducerLifecycle struct {
-	binding output.Binding
-	events  []output.Event
+	binding taskapi.OutputBinding
+	events  []taskapi.OutputEvent
 }
 
-func (r *recordingProducerLifecycle) BindTaskOutput(_ context.Context, binding output.Binding) output.Observer {
+func (r *recordingProducerLifecycle) BindTaskOutput(_ context.Context, binding taskapi.OutputBinding) taskapi.OutputObserver {
 	r.binding = binding
 	return r
 }
 
-func (r *recordingProducerLifecycle) ObserveTaskOutput(_ context.Context, event output.Event) error {
+func (r *recordingProducerLifecycle) ObserveTaskOutput(_ context.Context, event taskapi.OutputEvent) error {
 	r.events = append(r.events, event)
 	return nil
 }

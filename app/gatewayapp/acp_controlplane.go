@@ -6,8 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	sdksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
@@ -17,7 +16,7 @@ import (
 
 // LoadHistory resolves the current external ACP control plane only when one
 // selected child overlay asks for provider-owned Session history.
-func (s *runtimeComposition) LoadHistory(ctx context.Context, req sdksubagent.HistoryRequest) (session.LoadedSession, error) {
+func (s *runtimeComposition) LoadHistory(ctx context.Context, req task.HistoryRequest) (session.LoadedSession, error) {
 	if s == nil {
 		return session.LoadedSession{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -31,7 +30,7 @@ func (s *runtimeComposition) LoadHistory(ctx context.Context, req sdksubagent.Hi
 }
 
 func (s *runtimeComposition) delegationPlacementResolver(runtimeCfg stackRuntimeConfig) acpsubagent.PlacementResolver {
-	return func(ctx context.Context, spawn sdksubagent.SpawnContext, req delegation.TargetRequest) (acpsubagent.AgentConfig, error) {
+	return func(ctx context.Context, spawn task.SpawnContext, req task.TargetRequest) (acpsubagent.AgentConfig, error) {
 		cfg, err := s.resolveDelegationPlacement(ctx, req, runtimeCfg)
 		if err == nil && cfg.BuiltinRuntime && !runtimeCfg.DangerouslySkipPermissions && spawn.ApprovalMode != "" {
 			// Spawn carries the effective Session mode, which may have changed

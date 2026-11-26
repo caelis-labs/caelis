@@ -9,7 +9,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 )
 
 // CancelSessionSubagents revokes current participant input admissions, removes
@@ -213,7 +212,7 @@ func (tm *taskRuntime) cancelSessionSubagent(ctx context.Context, ref session.Se
 	}
 	running := task.running || pending
 	phase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
-	runner, anchor := task.runner, delegation.CloneAnchor(task.anchor)
+	runner, anchor := task.runner, taskapi.CloneAnchor(task.anchor)
 	task.mu.Unlock()
 	if anchor.SessionID == "" {
 		release()

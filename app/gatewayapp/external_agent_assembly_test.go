@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -294,7 +294,7 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	background, err := activated.resolveDelegationPlacement(t.Context(), delegation.TargetRequest{Target: delegation.Target{Selector: "reviewer", Placement: placement}}, activated.activeRuntime)
+	background, err := activated.resolveDelegationPlacement(t.Context(), task.TargetRequest{Target: task.Target{Selector: "reviewer", Placement: placement}}, activated.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
 	}

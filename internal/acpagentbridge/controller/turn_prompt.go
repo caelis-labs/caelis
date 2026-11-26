@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 )
 
@@ -15,12 +15,12 @@ func (m *Manager) promptControllerRun(
 	ctx context.Context,
 	run *controllerRun,
 	prompt []json.RawMessage,
-	contextTransfer agent.ContextTransfer,
+	contextTransfer session.ContextTransfer,
 	contextSyncSeq uint64,
 	contextFresh bool,
 	req controller.TurnRequest,
-) (agent.ContextTransfer, uint64, bool, error) {
-	attemptedContext := agent.CloneContextTransfer(contextTransfer)
+) (session.ContextTransfer, uint64, bool, error) {
+	attemptedContext := session.CloneContextTransfer(contextTransfer)
 	attemptedContextSyncSeq := contextSyncSeq
 	attemptedContextFresh := contextFresh
 	reconnect := func() error {
@@ -28,7 +28,7 @@ func (m *Manager) promptControllerRun(
 		if fresh {
 			// Retain the bootstrap even if configuration or binding publication
 			// fails after creating the remote. The next Turn still needs it.
-			attemptedContext = agent.CloneContextTransfer(req.FreshContext)
+			attemptedContext = session.CloneContextTransfer(req.FreshContext)
 			attemptedContextSyncSeq = req.ContextSyncSeq
 			attemptedContextFresh = true
 		}

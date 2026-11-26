@@ -17,8 +17,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -32,23 +30,23 @@ type recordingAgentInputSender struct {
 
 type runtimeChildInputRunner struct {
 	mu          sync.Mutex
-	spawnResult delegation.Result
+	spawnResult taskapi.DelegationResult
 	request     agent.ChildInputRequest
 }
 
-func (r *runtimeChildInputRunner) Spawn(_ context.Context, spawn agent.SubagentSpawnContext, _ delegation.Request) (delegation.Anchor, delegation.Result, error) {
-	return delegation.Anchor{
+func (r *runtimeChildInputRunner) Spawn(_ context.Context, spawn taskapi.SpawnContext, _ taskapi.DelegationRequest) (taskapi.Anchor, taskapi.DelegationResult, error) {
+	return taskapi.Anchor{
 		TaskID:    spawn.TaskID,
 		SessionID: "child-1",
 		AgentID:   spawn.TaskID,
-	}, delegation.CloneResult(r.spawnResult), nil
+	}, taskapi.CloneDelegationResult(r.spawnResult), nil
 }
 
-func (*runtimeChildInputRunner) Wait(context.Context, delegation.Anchor, int) (delegation.Result, error) {
-	return delegation.Result{}, nil
+func (*runtimeChildInputRunner) Wait(context.Context, taskapi.Anchor, int) (taskapi.DelegationResult, error) {
+	return taskapi.DelegationResult{}, nil
 }
 
-func (*runtimeChildInputRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
+func (*runtimeChildInputRunner) Cancel(context.Context, taskapi.Anchor) error { return nil }
 
 func (r *runtimeChildInputRunner) SubmitChildInput(_ context.Context, req agent.ChildInputRequest) (agent.ChildInputResult, error) {
 	r.mu.Lock()
@@ -296,7 +294,7 @@ func TestRuntimeSendMessageToolErrorHasNoImplementationPrefix(t *testing.T) {
 
 func TestRuntimeSendMessageToolPrefersLocalSpawnTargetOverACPParent(t *testing.T) {
 	t.Parallel()
-	runner := &runtimeChildInputRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "first done"}}
+	runner := &runtimeChildInputRunner{spawnResult: taskapi.DelegationResult{State: taskapi.StateCompleted, Result: "first done"}}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
 	started, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, runner, taskapi.SubagentStartRequest{
 		Agent: "helper", Prompt: "first",
@@ -346,9 +344,9 @@ func TestSubagentApprovalRequesterPreservesCanonicalToolPayload(t *testing.T) {
 		}),
 		sessionRef: session.SessionRef{SessionID: "parent-1"},
 	}
-	_, err := requester.RequestSubagentApproval(context.Background(), tasksubagent.ApprovalRequest{
+	_, err := requester.RequestSubagentApproval(context.Background(), approval.SubagentRequest{
 		TaskID: "task-1",
-		ToolCall: tasksubagent.ApprovalToolCall{
+		ToolCall: session.ProtocolToolCall{
 			ID:        "call-1",
 			Name:      "Write",
 			RawInput:  map[string]any{"path": "a.txt"},

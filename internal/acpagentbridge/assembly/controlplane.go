@@ -8,7 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	acpcontroller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	acpsubagent "github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
@@ -20,7 +20,7 @@ import (
 // exported surfaces into agent-sdk/runtime.
 type ControlPlane struct {
 	Controllers controller.Backend
-	Subagents   subagent.Runner
+	Subagents   task.SubagentRunner
 	registry    *acpsubagent.Registry
 	manager     *acpcontroller.Manager
 	runner      *acpsubagent.Runner
@@ -94,7 +94,7 @@ func (c *ControlPlane) Quiesce(ctx context.Context) error {
 
 // LoadHistory delegates one read-only provider session/load to the shared
 // subagent runner retained by its owning Session Runtime.
-func (c *ControlPlane) LoadHistory(ctx context.Context, req subagent.HistoryRequest) (session.LoadedSession, error) {
+func (c *ControlPlane) LoadHistory(ctx context.Context, req task.HistoryRequest) (session.LoadedSession, error) {
 	if c == nil || c.runner == nil {
 		return session.LoadedSession{}, fmt.Errorf("internal/acpagentbridge/assembly: subagent history loader is unavailable")
 	}

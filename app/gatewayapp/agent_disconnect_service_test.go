@@ -15,7 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
-	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -461,11 +461,11 @@ func TestDisconnectACPDormantParticipantCommittedRemovalReleasesTaskOutput(t *te
 		_ = spool.Close()
 	})
 
-	observer := recorder.BindTaskOutput(ctx, output.Binding{
+	observer := recorder.BindTaskOutput(ctx, task.OutputBinding{
 		SessionID: active.SessionID, TaskID: "task-before-disconnect",
-		Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+		Kind: task.KindSubagent, StartsAtTaskOrigin: true,
 	})
-	if err := observer.ObserveTaskOutput(ctx, output.Event{Text: "partial", Running: true}); err != nil {
+	if err := observer.ObserveTaskOutput(ctx, task.OutputEvent{Text: "partial", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -484,9 +484,9 @@ func TestDisconnectACPDormantParticipantCommittedRemovalReleasesTaskOutput(t *te
 		t.Fatalf("committed removal retained participant: %#v", repaired.Participants)
 	}
 
-	recorder.BindTaskOutput(ctx, output.Binding{
+	recorder.BindTaskOutput(ctx, task.OutputBinding{
 		SessionID: active.SessionID, TaskID: "task-after-disconnect",
-		Kind: output.TaskKindSubagent, StartsAtTaskOrigin: true,
+		Kind: task.KindSubagent, StartsAtTaskOrigin: true,
 	})
 	logical := streamspool.LogicalKey{
 		Namespace: streamspool.NamespaceTask,
