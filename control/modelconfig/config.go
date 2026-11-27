@@ -556,9 +556,9 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 
 // ChoiceDetail returns a concise endpoint description for a configured model.
 func ChoiceDetail(cfg Config) string {
-	label := "direct"
-	if cfg.Provider == "magpie" || cfg.Provider == "ollama" || cfg.Provider == "custom" {
-		label = cfg.Provider
+	label := strings.TrimSpace(cfg.Provider)
+	if label == "" {
+		label = "direct"
 	}
 	if endpoint := strings.TrimSpace(cfg.EndpointID); endpoint != "" && endpoint != "default" && endpoint != "local" && endpoint != "judgment" {
 		if strings.HasPrefix(endpoint, "custom-") || strings.HasPrefix(endpoint, "judgment-") {

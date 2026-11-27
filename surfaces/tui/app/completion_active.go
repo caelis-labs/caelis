@@ -49,6 +49,13 @@ func (m *Model) completionSnapshotForKind(kind completionKind) (completionSnapsh
 			canLoadMore: shouldLoadMoreCompletionCandidates(total, m.mentionLimit),
 		}, true
 	case completionSlashArg:
+		if m.isModelPickerSpeedStep() {
+			return completionSnapshot{
+				kind:     kind,
+				selected: m.modelPicker.speedIndex,
+				total:    2,
+			}, true
+		}
 		candidates := m.visibleSlashArgCandidates()
 		return completionSnapshot{
 			kind:     kind,
@@ -90,6 +97,15 @@ func (m *Model) completionKeyAt(kind completionKind, index int) string {
 		}
 		return completionCandidateStableKey(m.mentionCandidates[index])
 	case completionSlashArg:
+		if m.isModelPickerSpeedStep() {
+			if index == 0 {
+				return "speed:standard"
+			}
+			if index == 1 {
+				return "speed:fast"
+			}
+			return ""
+		}
 		candidates := m.visibleSlashArgCandidates()
 		if index >= len(candidates) {
 			return ""
@@ -115,6 +131,10 @@ func (m *Model) setCompletionIndex(kind completionKind, index int) {
 	case completionMention:
 		m.mentionIndex = index
 	case completionSlashArg:
+		if m.isModelPickerSpeedStep() {
+			m.modelPicker.speedIndex = index
+			return
+		}
 		m.slashArgIndex = index
 		if m.modelPicker != nil {
 			if candidates := m.visibleSlashArgCandidates(); index >= 0 && index < len(candidates) {

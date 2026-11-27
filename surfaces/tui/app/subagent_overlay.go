@@ -17,13 +17,13 @@ type subagentOverlayPage int
 const (
 	subagentPageMain subagentOverlayPage = iota
 	subagentPageBinding
+	subagentPageClassifier
 )
 
 type subagentOverlayRow struct {
 	key         string
 	label       string
 	detail      string
-	current     bool
 	search      string
 	efforts     []string
 	effortIndex int
@@ -33,15 +33,12 @@ type subagentOverlayRow struct {
 }
 
 type subagentOverlayGeometry struct {
-	x              int
-	y              int
-	closeX         int
-	closeY         int
-	width          int
-	height         int
-	rows           []int
-	classifierRows []int
-	efforts        []subagentEffortSpan
+	x       int
+	y       int
+	width   int
+	height  int
+	rows    []int
+	efforts []pickerEffortHit
 }
 
 type subagentOverlayNav struct {
@@ -55,31 +52,28 @@ type subagentList struct {
 	rows        []subagentOverlayRow
 	query       string
 	windowStart int
-	draft       agentbinding.Binding
 }
 
 type subagentOverlayState struct {
 	subagentList
-	page              subagentOverlayPage
-	status            agentbinding.Status
-	loading           bool
-	pending           bool
-	reloadRequired    bool
-	err               string
-	request           uint64
-	geometry          subagentOverlayGeometry
-	closeButton       overlayCloseButton
-	pressedKey        string
-	pressedClassifier bool
-	pressedDelta      int
-	parent            subagentOverlayNav
-	notice            string
+	page           subagentOverlayPage
+	status         agentbinding.Status
+	loading        bool
+	pending        bool
+	reloadRequired bool
+	err            string
+	request        uint64
+	geometry       subagentOverlayGeometry
+	pressedKey     string
+	pressedDelta   int
+	parent         subagentOverlayNav
+	bindingParent  subagentOverlayNav
+	notice         string
 
 	bindingHandle           agentbinding.Handle
 	selectedEffortByProfile map[string]string
-	other                   subagentList
-	classifierFocused       bool
-	classifierAvailable     bool
+	stagedBinding           agentbinding.Binding
+	hasClassifiers          bool
 }
 
 type subagentOverlayResultMsg struct {
@@ -156,8 +150,8 @@ func (m *Model) handleSubagentOverlayResult(msg subagentOverlayResultMsg) tea.Cm
 	}
 	state.status = msg.status
 	state.err = ""
-	if wasPending && state.page == subagentPageBinding {
-		m.backSubagentOverlay()
+	if wasPending && state.page != subagentPageMain {
+		m.returnToSubagentMain()
 	} else {
 		m.refreshSubagentRows(m.currentSubagentRow().key)
 	}
@@ -185,10 +179,14 @@ func (m *Model) allSubagentRows() []subagentOverlayRow {
 	if state == nil {
 		return nil
 	}
-	if state.page == subagentPageBinding {
-		return m.subagentBindingRows(state.pickerHandle())
+	switch state.page {
+	case subagentPageBinding:
+		return m.subagentBindingRows(state.bindingHandle)
+	case subagentPageClassifier:
+		return m.subagentBindingRows(agentbinding.HandleGuardianScreen)
+	default:
+		return m.subagentMainRows()
 	}
-	return m.subagentMainRows()
 }
 
 func (m *Model) subagentMainRows() []subagentOverlayRow {
@@ -218,17 +216,13 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 func (m *Model) subagentBindingRows(handle agentbinding.Handle) []subagentOverlayRow {
 	state := m.subagentOverlay
 	current := state.currentBinding(handle)
-	resetLabel, resetDetail := "Default", ""
-	switch handle {
-	case agentbinding.HandleGuardianScreen:
-		resetLabel = "Disabled"
-	case agentbinding.HandleGuardian, agentbinding.HandleReviewer:
-		resetDetail = "Main Agent"
+	var rows []subagentOverlayRow
+	if handle == agentbinding.HandleGuardianScreen {
+		rows = append(rows, subagentOverlayRow{
+			key: "binding:reset", label: "Disabled", handle: handle, reset: true,
+			binding: agentbinding.Binding{Handle: handle},
+		})
 	}
-	rows := []subagentOverlayRow{{
-		key: "binding:reset", label: resetLabel, detail: resetDetail, handle: handle, reset: true,
-		current: current.ProfileID == "", binding: agentbinding.Binding{Handle: handle},
-	}}
 	nameCounts := subagentProfileNameCounts(handle, state.status.Targets)
 	for _, profile := range state.status.Targets {
 		if !agentbinding.SupportsProfile(handle, profile) {
@@ -253,7 +247,6 @@ func (m *Model) subagentBindingRows(handle agentbinding.Handle) []subagentOverla
 			),
 			efforts: efforts, effortIndex: effortIndex,
 			handle: handle, binding: binding,
-			current: modelprofile.NormalizeID(current.ProfileID) == modelprofile.NormalizeID(profile.ID),
 		})
 	}
 	return rows
@@ -302,7 +295,7 @@ func subagentBindingDetail(item agentbinding.HandleStatus) string {
 		return firstNonEmpty(subagentProfileDisplayName(item.Profile), strings.TrimSpace(item.Binding.ProfileID))
 	}
 	if item.Definition.Class == agentbinding.HandleClassSystem {
-		return "Main Agent default"
+		return "Session default"
 	}
 	return "Unbound"
 }
@@ -354,8 +347,7 @@ func subagentProviderSource(profile modelprofile.ModelProfile) string {
 	if profile.Backend.Provider == nil {
 		return ""
 	}
-	source, _, _ := strings.Cut(strings.TrimSpace(profile.Backend.Provider.ModelConfigID), "/")
-	return strings.TrimSuffix(strings.TrimSuffix(source, "@default"), "@local")
+	return pickerProviderFromConfigID(profile.Backend.Provider.ModelConfigID)
 }
 
 func clampInt(value, low, high int) int {
@@ -377,13 +369,22 @@ func (s *subagentOverlayState) currentBinding(handle agentbinding.Handle) agentb
 	return agentbinding.Binding{}
 }
 
-func (s *subagentOverlayState) pickerHandle() agentbinding.Handle {
-	if s.classifierFocused {
-		return agentbinding.HandleGuardianScreen
+func (s *subagentOverlayState) boundClassifierName() string {
+	for _, item := range s.status.Handles {
+		if item.Definition.Handle == agentbinding.HandleGuardianScreen && agentbinding.IsBound(item) {
+			if name := subagentProfileDisplayName(item.Profile); name != "" {
+				return name
+			}
+			id := modelprofile.NormalizeID(item.Binding.ProfileID)
+			for _, target := range s.status.Targets {
+				if modelprofile.NormalizeID(target.ID) == id {
+					if name := subagentProfileDisplayName(target); name != "" {
+						return name
+					}
+				}
+			}
+			return strings.TrimSpace(item.Binding.ProfileID)
+		}
 	}
-	return s.bindingHandle
-}
-
-func (s *subagentOverlayState) guardianPicker() bool {
-	return s.page == subagentPageBinding && s.classifierAvailable
+	return ""
 }

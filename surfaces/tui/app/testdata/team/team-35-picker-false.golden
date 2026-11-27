@@ -1,10 +1,10 @@
- /team                    [x]
-    breeze    Unbound
-    orbit     gpt-5.6… [high]
-    zenith    Unbound
-
- ›  Guardian  gpt-5.… [xhigh]
-    Reviewer  Main Agent def…
+ /team
+ ───────────────────────────
+   breeze    Unbound
+   orbit     gpt-5.6-… [high]
+   zenith    Unbound
+ › Guardian  gpt-5.6… [xhigh]
+   Reviewer  Session default
  ───────────────────────────
  Tool approvals
- ↑↓ select  enter edit  esc
+ ↑↓ select   enter edit   esc

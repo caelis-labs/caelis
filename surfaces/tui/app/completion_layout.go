@@ -58,11 +58,22 @@ func (m *Model) completionChrome() completionOverlayChrome {
 }
 
 func (m *Model) modelPickerChrome() completionOverlayChrome {
-	chrome := completionOverlayChromeFor(m.overlayUsesBorder())
-	chrome.headerRows = 1
-	chrome.detailRows = 2
-	if m.height > 0 && m.height < 20 {
-		chrome.detailRows = 1
+	chrome := completionOverlayChrome{useBorder: m.overlayUsesBorder(), footerRows: 1}
+	if chrome.useBorder {
+		chrome.topBorderRows = 1
+		chrome.bottomBorderRows = 1
+	}
+	chrome.headerRows = 2
+	if m.height > 0 && m.height < 14 {
+		chrome.headerRows = 1
+	}
+	if m.isModelPicker() && !m.isModelPickerSpeedStep() {
+		if m.slashArgRequestPending || (m.modelPicker != nil && m.modelPicker.loadFailed) || len(m.visibleSlashArgCandidates()) == 0 {
+			chrome.detailRows = 2
+			if m.height > 0 && m.height < 20 {
+				chrome.detailRows = 1
+			}
+		}
 	}
 	return chrome
 }
@@ -93,7 +104,11 @@ type completionOverlayRow struct {
 }
 
 func (m *Model) completionOverlayBodyLimit() int {
-	return m.completionOverlayBodyLimitFor(m.completionChrome(), completionOverlayVisibleItems)
+	limit := completionOverlayVisibleItems
+	if m.isModelPicker() {
+		limit = pickerDrawerVisibleItems
+	}
+	return m.completionOverlayBodyLimitFor(m.completionChrome(), limit)
 }
 
 func (m *Model) completionOverlayBodyLimitFor(chrome completionOverlayChrome, limit int) int {

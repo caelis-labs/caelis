@@ -4,12 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/uipreferences"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -46,15 +50,22 @@ func TestModelPickerStagesThenSubmitsOnce(t *testing.T) {
 	if model.slashArgIndex != 1 || model.modelPickerDraft(model.slashArgCandidates[1]).effort != "high" {
 		t.Fatal("picker did not restore Control's current model and effort")
 	}
-	for _, input := range []string{"left", "tab", "right"} {
-		model.handleSlashArgKey(keyPress(input))
-	}
+	model.handleSlashArgKey(keyPress("left"))
 	if len(*submitted) != 0 {
 		t.Fatalf("navigation submitted %v", *submitted)
 	}
 	_, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if cmd != nil || !model.isModelPickerSpeedStep() {
+		t.Fatalf("Enter on Fast-supported model did not enter Step 2: cmd=%v step=%v", cmd != nil, model.isModelPickerSpeedStep())
+	}
+	speedFrame := ansi.Strip(model.renderInputOverlay())
+	if !strings.Contains(speedFrame, "Standard") || !strings.Contains(speedFrame, "Fast") || strings.Contains(speedFrame, "(current)") {
+		t.Fatalf("unexpected Step 2 speed frame:\n%s", speedFrame)
+	}
+	model.handleSlashArgKey(keyPress("down"))
+	_, cmd = model.handleSlashArgKey(keyPress("enter"))
 	if cmd == nil {
-		t.Fatal("confirmation did not submit")
+		t.Fatal("confirmation in Step 2 did not submit")
 	}
 	findAndRunTaskResult(cmd(), model)
 	if got := strings.Join(*submitted, ","); got != "/model openai/sol medium fast" {
@@ -67,14 +78,22 @@ func TestModelPickerStagesThenSubmitsOnce(t *testing.T) {
 
 func TestModelPickerCancelDiscardsAllDrafts(t *testing.T) {
 	model, submitted := newModelPickerTestModel(t)
-	for _, input := range []string{"left", "tab", "right", "esc"} {
+	for _, input := range []string{"left", "enter", "down", "esc"} {
 		runCompletionCmd(t, model, applySlashCompletionUpdate(t, model, keyPress(input)))
 	}
+	if model.modelPicker == nil || model.isModelPickerSpeedStep() {
+		t.Fatal("Esc from Step 2 did not return to Step 1")
+	}
+	candidate, _ := model.currentSlashArgCandidate()
+	if draft := model.modelPickerDraft(candidate); draft.effort != "medium" {
+		t.Fatalf("Esc from Step 2 lost Step 1 draft: %+v", draft)
+	}
+	runCompletionCmd(t, model, applySlashCompletionUpdate(t, model, keyPress("esc")))
 	if model.modelPicker != nil || len(*submitted) != 0 {
 		t.Fatal("cancel retained draft or submitted a command")
 	}
 	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
-	candidate, _ := model.currentSlashArgCandidate()
+	candidate, _ = model.currentSlashArgCandidate()
 	if draft := model.modelPickerDraft(candidate); draft.effort != "high" || draft.fast {
 		t.Fatalf("reopened selection retained edits: %+v", draft)
 	}
@@ -109,6 +128,9 @@ func TestModelPickerNoneAndUnsupportedFast(t *testing.T) {
 		model.handleSlashArgKey(keyPress(input))
 	}
 	_, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if cmd == nil {
+		t.Fatal("Enter on non-Fast model did not submit in one step")
+	}
 	findAndRunTaskResult(cmd(), model)
 	if got := strings.Join(*submitted, ","); got != "/model custom/flash none" {
 		t.Fatalf("submitted %q", got)
@@ -185,6 +207,40 @@ func TestModelPickerRenderedGeometryAndMouse(t *testing.T) {
 	}
 }
 
+func TestModelPickerHoverAndEffortClick(t *testing.T) {
+	model, submitted := newModelPickerTestModel(t)
+	if model.View().MouseMode != tea.MouseModeAllMotion {
+		t.Fatal("model picker did not enable MouseModeAllMotion")
+	}
+	_ = model.renderInputOverlay()
+	_, geometry, ok := model.activeCompletionGeometry()
+	if !ok {
+		t.Fatal("missing geometry")
+	}
+	model.handleMouse(tea.MouseMotionMsg(tea.Mouse{X: geometry.left + 3, Y: geometry.candidateTop}))
+	if model.slashArgIndex != 0 {
+		t.Fatalf("hover did not move selection to row 0: %d", model.slashArgIndex)
+	}
+	lines := strings.Split(ansi.Strip(model.renderInputOverlay()), "\n")
+	rowLine := lines[geometry.candidateTop-geometry.top+1]
+	if !strings.Contains(rowLine, "high") {
+		rowLine = lines[geometry.candidateTop-geometry.top+1]
+	}
+	idx := strings.Index(rowLine, "high")
+	if idx < 0 {
+		t.Fatalf("missing effort text on row 1:\n%s", strings.Join(lines, "\n"))
+	}
+	effortPoint := tea.Mouse{X: geometry.left + displayColumns(rowLine[:idx]), Y: geometry.candidateTop + 1, Button: tea.MouseLeft}
+	model.handleMouse(tea.MouseClickMsg(effortPoint))
+	_, cmd := model.handleMouse(tea.MouseReleaseMsg(effortPoint))
+	if cmd != nil || len(*submitted) != 0 {
+		t.Fatal("clicking effort submitted immediately")
+	}
+	if draft := model.modelPickerDraft(model.slashArgCandidates[1]); draft.effort != "medium" {
+		t.Fatalf("clicking left side of effort = %q, want medium", draft.effort)
+	}
+}
+
 func TestModelPickerUsesMainPanePaintAndPointerOrigin(t *testing.T) {
 	for _, layout := range []uipreferences.Layout{uipreferences.Left, uipreferences.Right, uipreferences.Up, uipreferences.Down} {
 		t.Run(string(layout), func(t *testing.T) {
@@ -213,19 +269,56 @@ func TestModelPickerUsesMainPanePaintAndPointerOrigin(t *testing.T) {
 	}
 }
 
-func TestModelPickerKeepsFastColumnAligned(t *testing.T) {
+func TestModelPickerAlignsEffortStrictlyAndPaintsContinuousSelection(t *testing.T) {
 	model, _ := newModelPickerTestModel(t)
-	candidates := modelPickerCandidates()
-	candidates[0].ModelSelection.FastSupported = true
+	model.theme = tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	candidates := []SlashArgCandidate{
+		{Value: "a/short", Display: "short-model", ModelSelection: &appserver.ModelSelection{Efforts: []string{"low", "medium", "high"}, Effort: "medium"}},
+		{Value: "b/long", Display: "very-long-model-name-that-must-truncate-before-effort", Detail: "magpie", ModelSelection: &appserver.ModelSelection{Efforts: []string{"low", "medium", "high", "xhigh", "max"}, Effort: "xhigh", Current: true}},
+		{Value: "c/none", Display: "plain-model", ModelSelection: &appserver.ModelSelection{Efforts: []string{"none"}, Effort: "none"}},
+	}
+	model.modelPicker = nil
 	model.applySlashArgCandidates("model", "", candidates, nil)
-	var columns []int
-	for _, line := range strings.Split(ansi.Strip(model.renderInputOverlay()), "\n") {
-		if index := strings.Index(line, "Fast off"); index >= 0 {
-			columns = append(columns, displayColumns(line[:index]))
+	applySlashCompletionUpdate(t, model, tea.WindowSizeMsg{Width: 96, Height: 30})
+	styled := model.renderInputOverlay()
+	plain := ansi.Strip(styled)
+	for _, unwanted := range []string{"●", "models", "(current)", "Fast", "context"} {
+		if strings.Contains(plain, unwanted) {
+			t.Fatalf("Step 1 retained unwanted chrome %q:\n%s", unwanted, plain)
 		}
 	}
-	if len(columns) != 2 || columns[0] != columns[1] {
-		t.Fatalf("Fast controls are not in one column: %v\n%s", columns, ansi.Strip(model.renderInputOverlay()))
+	var gaugeCols, effortCols []int
+	for _, line := range strings.Split(plain, "\n") {
+		if idx := strings.Index(line, "■"); idx >= 0 {
+			gaugeCols = append(gaugeCols, displayColumns(line[:idx]))
+		}
+		for _, tok := range []string{"medium", "xhigh", "none"} {
+			if idx := strings.Index(line, tok); idx >= 0 {
+				effortCols = append(effortCols, displayColumns(line[:idx]))
+				break
+			}
+		}
+	}
+	if len(gaugeCols) != 2 || gaugeCols[0] != gaugeCols[1] {
+		t.Fatalf("rainbow gauges misaligned: %v\n%s", gaugeCols, plain)
+	}
+	if len(effortCols) != 3 || effortCols[0] != effortCols[1] || effortCols[1] != effortCols[2] {
+		t.Fatalf("effort labels misaligned: %v\n%s", effortCols, plain)
+	}
+
+	selectedLine := styledLineContaining(t, styled, "› very-long-model")
+	width := displayColumns(ansi.Strip(selectedLine))
+	screen := uv.NewScreenBuffer(width, 1)
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(selectedLine).Draw(screen, screen.Bounds())
+	for x := 2; x < width-2; x++ {
+		cell := screen.CellAt(x, 0)
+		if cell == nil || cell.Width == 0 {
+			continue
+		}
+		if !colorInSet(cell.Style.Bg, []color.Color{model.theme.SelectionBg}) {
+			t.Fatalf("selection bar has dark gap at x=%d in %q", x, ansi.Strip(selectedLine))
+		}
 	}
 }
 
@@ -282,5 +375,43 @@ func TestModelPickerAppliesProfileLessProviderRow(t *testing.T) {
 	findAndRunTaskResult(cmd(), model)
 	if got := strings.Join(submitted, ","); got != "/model ollama/legacy-flash none" {
 		t.Fatalf("submitted %q", got)
+	}
+}
+
+func TestModelPickerMixedEffortStepGaugeHasNoUnreachableSlots(t *testing.T) {
+	candidates := []SlashArgCandidate{
+		{
+			Value: "codex/gpt-6-mini", Display: "codex/gpt-6-mini", ModelConfigID: "openai-codex/codex/gpt-6-mini", Detail: "openai-codex",
+			ModelSelection: &appserver.ModelSelection{Efforts: []string{"low", "medium", "high"}, Effort: "high", Current: true},
+		},
+		{
+			Value: "codex/gpt-6.2-sol", Display: "codex/gpt-6.2-sol", ModelConfigID: "openai-codex/codex/gpt-6.2-sol", Detail: "openai-codex",
+			ModelSelection: &appserver.ModelSelection{Efforts: []string{"none", "low", "medium", "high", "xhigh"}, Effort: "low"},
+		},
+	}
+	model, _ := newModelPickerTestModel(t)
+	model.modelPicker = nil
+	model.applySlashArgCandidates("model", "", candidates, nil)
+	applySlashCompletionUpdate(t, model, tea.WindowSizeMsg{Width: 96, Height: 30})
+	plain := ansi.Strip(model.renderInputOverlay())
+	var miniLine, solLine string
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "codex/gpt-6-mini") {
+			miniLine = line
+		}
+		if strings.Contains(line, "codex/gpt-6.2-sol") {
+			solLine = line
+		}
+	}
+	if !strings.Contains(miniLine, "■■■") || strings.Contains(miniLine, "□") {
+		t.Fatalf("3-step model row rendered unreachable empty gauge slots: %q", miniLine)
+	}
+	if !strings.Contains(solLine, "■■□□□") {
+		t.Fatalf("5-step model row missing expected gauge: %q", solLine)
+	}
+	miniEffortCol := displayColumns(miniLine[:strings.Index(miniLine, "high")])
+	solEffortCol := displayColumns(solLine[:strings.Index(solLine, "low")])
+	if miniEffortCol != solEffortCol {
+		t.Fatalf("effort columns misaligned (%d vs %d):\n%s\n%s", miniEffortCol, solEffortCol, miniLine, solLine)
 	}
 }

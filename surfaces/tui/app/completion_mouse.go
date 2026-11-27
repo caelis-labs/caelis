@@ -113,6 +113,9 @@ func (m *Model) handleCompletionMousePress(mouse tea.Mouse) (bool, tea.Cmd) {
 		m.setCompletionIndex(snapshot.kind, target.index)
 		m.completionMouse.press = target
 		m.completionMouse.pressActive = true
+		if m.modelPicker != nil {
+			m.modelPicker.pressedEffortDelta = m.modelPickerEffortDeltaAt(target.index, geometry, mouse.X)
+		}
 	}
 	return true, nil
 }
@@ -122,6 +125,11 @@ func (m *Model) handleCompletionMouseRelease(mouse tea.Mouse) (bool, tea.Cmd) {
 		return false, nil
 	}
 	pressed := m.completionMouse.press
+	pressedDelta := 0
+	if m.modelPicker != nil {
+		pressedDelta = m.modelPicker.pressedEffortDelta
+		m.modelPicker.pressedEffortDelta = 0
+	}
 	m.cancelCompletionMousePress()
 	if mouse.Button != tea.MouseLeft && mouse.Button != tea.MouseNone {
 		return true, nil
@@ -136,6 +144,15 @@ func (m *Model) handleCompletionMouseRelease(mouse tea.Mouse) (bool, tea.Cmd) {
 	}
 	m.pinCompletionWindow(geometry)
 	m.setCompletionIndex(snapshot.kind, released.index)
+	if m.isModelPicker() && !m.isModelPickerSpeedStep() {
+		delta := m.modelPickerEffortDeltaAt(released.index, geometry, mouse.X)
+		if delta != 0 && delta == pressedDelta {
+			if candidate, ok := m.currentSlashArgCandidate(); ok {
+				m.adjustModelPickerEffort(candidate, delta)
+				return true, nil
+			}
+		}
+	}
 	return true, m.activateCompletion(snapshot.kind)
 }
 

@@ -13,77 +13,55 @@ func (m *Model) renderSubagentOverlay() string {
 	}
 	m.refreshSubagentRows("")
 	width := m.completionRowInnerWidth()
+	contentWidth := width + 2
 	chrome := m.modelPickerChrome()
+	chrome.detailRows = 0
 	detail := m.subagentOverlayDetail()
-	if state.page == subagentPageMain && detail == "" {
-		chrome.detailRows = 0
+	if detail != "" || state.loading || (state.err != "" && len(state.status.Handles) == 0) {
+		chrome.detailRows = 2
+		if m.height > 0 && m.height < 20 {
+			chrome.detailRows = 1
+		}
 	}
-	limit := completionOverlayVisibleItems
-	if state.guardianPicker() {
-		limit += 5 // Two headings, a separator, and two classifier choices.
+	budget := m.completionOverlayBodyLimitFor(chrome, pickerDrawerVisibleItems)
+
+	var rendered subagentRenderedList
+	var body []string
+	var ancestors []string
+	var title string
+
+	switch state.page {
+	case subagentPageBinding:
+		ancestors = []string{"/team"}
+		title = m.subagentRoleDisplayName(state.bindingHandle)
+	case subagentPageClassifier:
+		ancestors = []string{"/team", m.subagentRoleDisplayName(state.bindingHandle)}
+		title = "Classifier"
+	default:
+		title = "/team"
 	}
-	budget := m.completionOverlayBodyLimitFor(chrome, limit)
-	var primary, classifier subagentRenderedList
-	body := []string{""}
 
 	switch {
 	case state.loading:
-		body = append(body, " "+m.theme.HelpHintTextStyle().Render("Loading team…"))
+		body = m.pickerDrawerHeaderLines(contentWidth, ancestors, title, completionScrollAffordance{}, chrome.headerRows > 1)
+		body = append(body, " "+m.theme.HelpHintTextStyle().Render(truncateTailDisplay("Loading team…", width))+" ")
 	case state.err != "" && len(state.status.Handles) == 0:
-		body = append(body, " "+m.theme.HelpHintTextStyle().Render("Could not load team."))
-	case state.guardianPicker() && budget >= 4:
-		review, screening := &state.subagentList, &state.other
-		if state.classifierFocused {
-			review, screening = screening, review
-		}
-		gap := 0
-		if budget >= 5 {
-			gap = 1
-		}
-		rowsBudget := budget - 2 - gap
-		classifierBudget := min(max(1, len(screening.rows)), max(1, rowsBudget/3))
-		reviewBudget := min(max(1, len(review.rows)), rowsBudget-classifierBudget)
-		classifierBudget = min(max(1, len(screening.rows)), rowsBudget-reviewBudget)
-
-		body = append(body, m.subagentPaneTitle("Review model", width, !state.classifierFocused))
-		primary = m.renderSubagentList(review, !state.classifierFocused, width, len(body), reviewBudget)
-		body = append(body, primary.lines...)
-		if gap > 0 {
-			body = append(body, "")
-		}
-		body = append(body, m.subagentPaneTitle("Classifier", width, state.classifierFocused))
-		classifier = m.renderSubagentList(screening, state.classifierFocused, width, len(body), classifierBudget)
-		body = append(body, classifier.lines...)
+		body = m.pickerDrawerHeaderLines(contentWidth, ancestors, title, completionScrollAffordance{}, chrome.headerRows > 1)
+		body = append(body, " "+m.theme.HelpHintTextStyle().Render(truncateTailDisplay("Could not load team.", width))+" ")
 	default:
-		if state.guardianPicker() && budget > 1 {
-			title := "Review model"
-			if state.classifierFocused {
-				title = "Classifier"
-			}
-			body = append(body, m.subagentPaneTitle(title, width, true))
-			budget--
-		}
-		list := m.renderSubagentList(&state.subagentList, true, width, len(body), budget)
-		body = append(body, list.lines...)
-		if state.classifierFocused {
-			classifier = list
-		} else {
-			primary = list
-		}
+		rendered = m.renderSubagentList(&state.subagentList, contentWidth, chrome.headerRows, budget)
+		body = m.pickerDrawerHeaderLines(contentWidth, ancestors, title, rendered.scroll, chrome.headerRows > 1)
+		body = append(body, rendered.lines...)
 	}
-
-	scroll := primary.scroll
-	if state.classifierFocused {
-		scroll = classifier.scroll
-	}
-	body[0] = m.renderSubagentTitle(width+2, scroll)
 
 	geometry := m.completionOverlayFrameGeometry(chrome, len(body)-chrome.headerRows)
 	style := m.theme.HelpHintTextStyle()
 	if state.err != "" {
 		style = m.theme.ErrorStyle()
 	}
-	body = m.appendModelPickerDetail(body, chrome, detail, style)
+	if chrome.detailRows > 0 {
+		body = m.appendModelPickerDetail(body, chrome, detail, style)
+	}
 	frame := m.renderCompletionFrame(geometry, body)
 	firstLine, _, _ := strings.Cut(frame, "\n")
 
@@ -92,148 +70,96 @@ func (m *Model) renderSubagentOverlay() string {
 		contentX += 2
 	}
 	contentY := geometry.top + chrome.topBorderRows + chrome.topInsetRows
-	for _, list := range [][]int{primary.rows, classifier.rows} {
-		for i, offset := range list {
-			if offset >= 0 {
-				list[i] = contentY + offset
-			}
+	for i, offset := range rendered.rows {
+		if offset >= 0 {
+			rendered.rows[i] = contentY + offset
 		}
 	}
-	for i := range primary.efforts {
-		primary.efforts[i].x += contentX
-		primary.efforts[i].midpoint += contentX
+	for i := range rendered.efforts {
+		rendered.efforts[i].x += contentX
+		rendered.efforts[i].midpoint += contentX
 	}
 	state.geometry = subagentOverlayGeometry{
-		x: geometry.left, y: geometry.top, closeX: overlayCloseX(contentX, width+2),
-		closeY: contentY, width: displayColumns(firstLine), height: geometry.height,
-		rows: primary.rows, classifierRows: classifier.rows, efforts: primary.efforts,
+		x: geometry.left, y: geometry.top,
+		width: displayColumns(firstLine), height: geometry.height,
+		rows: rendered.rows, efforts: rendered.efforts,
 	}
 	return m.attachCompletionFooter(frame, m.subagentOverlayFooter())
 }
 
-func (m *Model) renderSubagentTitle(width int, scroll completionScrollAffordance) string {
+func (m *Model) subagentRoleDisplayName(handle agentbinding.Handle) string {
 	state := m.subagentOverlay
-	labelWidth := max(1, width-len(overlayCloseLabel)-2)
-	label := "/team"
-	if state.page == subagentPageBinding {
-		role := string(state.bindingHandle)
-		for _, item := range state.status.Handles {
-			if item.Definition.Handle == state.bindingHandle && item.Definition.Class == agentbinding.HandleClassSystem {
-				role = firstNonEmpty(item.Definition.Name, role)
-				break
-			}
-		}
-		count := 0
-		for _, list := range [][]subagentOverlayRow{state.rows, state.other.rows} {
-			for _, row := range list {
-				if !row.reset {
-					count++
-				}
-			}
-		}
-		path := label + " › " + role
-		label = modelPickerCountLabel(path, count, scroll)
-		if displayColumns(label) > labelWidth {
-			label = path
-			if displayColumns(label) > labelWidth {
-				label = role
-			}
+	role := string(handle)
+	if state == nil {
+		return role
+	}
+	for _, item := range state.status.Handles {
+		if item.Definition.Handle == handle && item.Definition.Class == agentbinding.HandleClassSystem {
+			return firstNonEmpty(item.Definition.Name, role)
 		}
 	}
-	close := m.overlayButtonStyle(!state.pending && !state.loading, state.closeButton.hovered || state.closeButton.pressed).Render(overlayCloseLabel)
-	return padRightDisplay(" "+m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, labelWidth)), width-len(overlayCloseLabel)) + close
+	return role
 }
 
 type subagentRenderedList struct {
 	lines   []string
 	rows    []int
-	efforts []subagentEffortSpan
+	efforts []pickerEffortHit
 	scroll  completionScrollAffordance
 }
 
-func (m *Model) renderSubagentList(list *subagentList, focused bool, width, offset, budget int) subagentRenderedList {
+func (m *Model) renderSubagentList(list *subagentList, contentWidth, offset, budget int) subagentRenderedList {
 	if len(list.rows) == 0 {
 		text := "No configurable roles."
 		if list.query != "" {
 			text = "No matches. Ctrl+W clears."
 		}
-		return subagentRenderedList{lines: []string{" " + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(text, width))}}
+		return subagentRenderedList{lines: []string{" " + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(text, max(1, contentWidth-2))) + " "}}
 	}
 	start, end, rows := subagentViewport(list, budget)
-	rendered := subagentRenderedList{rows: rows, lines: make([]string, 0, end-start),
-		scroll: completionScrollFromWindow(start, end, len(rows), list.index == len(rows)-1, false)}
-	if m.subagentOverlay.page == subagentPageMain {
-		cols := subagentOverviewColumns(width+2, list.rows)
+	rendered := subagentRenderedList{
+		rows:   rows,
+		lines:  make([]string, 0, end-start),
+		scroll: completionScrollFromWindow(start, end, len(rows), list.index == len(rows)-1, false),
+	}
+
+	switch m.subagentOverlay.page {
+	case subagentPageMain:
+		cols := subagentOverviewColumns(contentWidth, list.rows)
+		classifierName := m.subagentOverlay.boundClassifierName()
+		for i := start; i < end; i++ {
+			rows[i] = offset + len(rendered.lines)
+			rendered.lines = append(rendered.lines, m.renderSubagentOverviewRow(list.rows[i], i == list.index, contentWidth, cols, classifierName))
+		}
+		return rendered
+	case subagentPageClassifier:
 		for i := start; i < end; i++ {
 			row := list.rows[i]
-			if i > start && budget > end-start && agentbinding.IsSystem(row.handle) && !agentbinding.IsSystem(list.rows[i-1].handle) {
-				rendered.lines = append(rendered.lines, "")
-			}
 			rows[i] = offset + len(rendered.lines)
-			rendered.lines = append(rendered.lines, m.renderSubagentOverviewRow(row, i == list.index, width+2, cols))
+			rendered.lines = append(rendered.lines, m.renderPickerSimpleRow(row.label, row.detail, i == list.index, contentWidth, 0))
 		}
 		return rendered
 	}
 
-	table := make([]completionTableRow, 0, end-start)
-	for i := start; i < end; i++ {
-		row := list.rows[i]
-		selected := focused && i == list.index
-		// A fixed marker column keeps model names aligned across both sections.
-		mark := " "
-		if row.current {
-			mark = "●"
-		} else if !focused && row.binding == list.draft {
-			mark = "○"
+	specs := make([]pickerModelRowSpec, len(list.rows))
+	for i, row := range list.rows {
+		specs[i] = pickerModelRowSpec{
+			name:        row.label,
+			source:      row.detail,
+			efforts:     row.efforts,
+			effort:      row.binding.Effort,
+			effortIndex: row.effortIndex,
 		}
-		table = append(table, m.modelPickerRow(row.label, row.detail, subagentPickerEffort(row, selected, width), mark, selected))
 	}
-	identityWidth := completionTableIdentityWidth(table, width)
-	rendered.efforts = make([]subagentEffortSpan, len(list.rows))
-	for i, row := range table {
-		index := start + i
-		rows[index] = offset + len(rendered.lines)
-		rendered.lines = append(rendered.lines, m.renderTeamModelRow(row, identityWidth, width, focused, index == list.index))
-		model := list.rows[index]
-		if len(model.efforts) > 1 {
-			hintStart := identityWidth + 2
-			unfocused := subagentPickerEffort(model, false, width)
-			focusedWidth := displayColumns(subagentPickerEffort(model, true, width))
-			if available := width - hintStart; available > 0 {
-				rendered.efforts[index] = subagentEffortSpan{
-					x: hintStart + 1, width: min(available, focusedWidth),
-					midpoint: hintStart + 1 + displayColumns(unfocused) - (displayColumns(model.binding.Effort)+1)/2,
-				}
-			}
-		}
+	layout := newPickerModelTableLayout(contentWidth, specs)
+	rendered.efforts = make([]pickerEffortHit, len(list.rows))
+	for i := start; i < end; i++ {
+		rows[i] = offset + len(rendered.lines)
+		line, hit := m.renderPickerModelRow(layout, specs[i], i == list.index)
+		rendered.lines = append(rendered.lines, line)
+		rendered.efforts[i] = hit
 	}
 	return rendered
-}
-
-func (m *Model) renderTeamModelRow(row completionTableRow, identityWidth, width int, focused, selected bool) string {
-	if focused {
-		return m.renderCompletionColumnsLine(row.identity, row.hint, identityWidth, selected)
-	}
-	style := m.theme.SecondaryTextStyle()
-	if selected {
-		style = m.theme.TextStyle()
-	}
-	if row.hint == "" || width <= identityWidth+2 {
-		return m.renderCompletionUnselectedLine(width, style.Render(truncateTailDisplay(row.identity, width)))
-	}
-	identity := padRightDisplay(truncateTailDisplay(row.identity, identityWidth), identityWidth)
-	effort := m.theme.MutedTextStyle().Render(truncateTailDisplay(row.hint, width-identityWidth-2))
-	return m.renderCompletionUnselectedLine(width, style.Render(identity), "  ", effort)
-}
-
-func subagentPickerEffort(row subagentOverlayRow, selected bool, width int) string {
-	if row.reset || row.handle == agentbinding.HandleGuardianScreen {
-		return ""
-	}
-	if width >= 22 && width < 28 && selected && len(row.efforts) > 1 {
-		return "‹" + row.binding.Effort + "›"
-	}
-	return pickerEffortControl(row.efforts, row.binding.Effort, selected, width)
 }
 
 func (m *Model) subagentOverlayDetail() string {
@@ -248,41 +174,63 @@ func (m *Model) subagentOverlayDetail() string {
 		if subagentOverviewColumns(m.completionRowInnerWidth()+2, state.rows).purpose == 0 {
 			return subagentPurpose(row.handle)
 		}
-	case state.query == "" && len(state.rows) == 1 && row.reset:
+	case state.page == subagentPageBinding && len(state.rows) == 0 && state.query == "":
 		return "Use /connect to add a model."
-	case row.key == "":
-		return "Type to search models"
-	default:
-		parts := []string{row.label}
-		if row.detail != "" {
-			parts = append(parts, row.detail)
-		}
-		if row.current {
-			parts = append(parts, "current")
-		}
-		return strings.Join(parts, "  ·  ")
+	case len(state.rows) == 0 && state.query != "":
+		return "No matches. Ctrl+W clears."
 	}
 	return ""
 }
 
 func (m *Model) subagentOverlayFooter() string {
 	state := m.subagentOverlay
-	full, compact, minimal := "type search  ↑↓ select  enter edit  esc close", "↑↓ select  enter edit  esc", "↑↓  enter  esc"
-	if state.page == subagentPageBinding {
-		full, compact, minimal = "type search  ↑↓ select  ←→ effort  enter apply  esc back", "↑↓ select  ←→ effort  enter apply  esc", "↑↓  ←→  enter  esc"
-		if state.guardianPicker() {
-			full = "type search  ↑↓ select  ←→ effort  enter apply both  esc back"
-		}
-	}
+	width := m.completionOverlayInnerWidth() - m.completionOverlayFooterIndent()
 	switch {
 	case state.loading:
-		full = "esc close"
+		return m.renderPickerKeycapFooter([]pickerKeycapItem{{"esc", "close"}}, nil, nil, width)
 	case state.pending:
-		full = "Saving…"
+		return m.theme.Tokens().ListMeta.Render(truncateTailDisplay("Saving…", max(1, width)))
 	case state.reloadRequired:
-		full, compact, minimal = "enter reload  esc close", "enter reload  esc", "enter reload"
+		return m.renderPickerKeycapFooter(
+			[]pickerKeycapItem{{"enter", "reload"}, {"esc", "close"}},
+			[]pickerKeycapItem{{"enter", "reload"}, {"esc", ""}},
+			[]pickerKeycapItem{{"enter", "reload"}},
+			width,
+		)
 	case state.err != "" && len(state.status.Handles) == 0:
-		full = "enter retry  esc close"
+		return m.renderPickerKeycapFooter(
+			[]pickerKeycapItem{{"enter", "retry"}, {"esc", "close"}},
+			[]pickerKeycapItem{{"enter", "retry"}, {"esc", ""}},
+			[]pickerKeycapItem{{"enter", "retry"}},
+			width,
+		)
 	}
-	return m.renderPickerFooter(full, compact, minimal)
+
+	switch state.page {
+	case subagentPageBinding:
+		apply := "apply"
+		if state.hasClassifiers {
+			apply = "next"
+		}
+		return m.renderPickerKeycapFooter(
+			[]pickerKeycapItem{{"type", "search"}, {"↑↓", "select"}, {"←→", "effort"}, {"enter", apply}, {"esc", "back"}},
+			[]pickerKeycapItem{{"↑↓", "select"}, {"←→", "effort"}, {"enter", apply}, {"esc", ""}},
+			[]pickerKeycapItem{{"↑↓", ""}, {"←→", ""}, {"enter", ""}, {"esc", ""}},
+			width,
+		)
+	case subagentPageClassifier:
+		return m.renderPickerKeycapFooter(
+			[]pickerKeycapItem{{"type", "search"}, {"↑↓", "select"}, {"enter", "apply"}, {"esc", "back"}},
+			[]pickerKeycapItem{{"↑↓", "select"}, {"enter", "apply"}, {"esc", ""}},
+			[]pickerKeycapItem{{"↑↓", ""}, {"enter", ""}, {"esc", ""}},
+			width,
+		)
+	default:
+		return m.renderPickerKeycapFooter(
+			[]pickerKeycapItem{{"type", "search"}, {"↑↓", "select"}, {"enter", "edit"}, {"esc", "close"}},
+			[]pickerKeycapItem{{"↑↓", "select"}, {"enter", "edit"}, {"esc", ""}},
+			[]pickerKeycapItem{{"↑↓", ""}, {"enter", ""}, {"esc", ""}},
+			width,
+		)
+	}
 }

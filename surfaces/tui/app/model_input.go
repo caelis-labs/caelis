@@ -1179,6 +1179,9 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayPaste(msg)
 	}
+	if m.isModelPickerSpeedStep() {
+		return m, nil
+	}
 	if m.btwOverlay != nil {
 		return m, nil
 	}

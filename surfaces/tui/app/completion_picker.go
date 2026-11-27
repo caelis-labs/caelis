@@ -71,6 +71,9 @@ func shortModelAliasDisambiguator(raw string) string {
 			}
 			continue
 		}
+		if part == "direct" {
+			continue
+		}
 		return part
 	}
 	return fallback

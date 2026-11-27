@@ -1,15 +1,6 @@
 ╭────────────────────────────────────────────────────────────────────────────────────────╮
-│                                                                                        │
-│  /team › Guardian  ·  2 models                                                     [x] │
-│  ▎ Review model                                                                        │
-│  ·   Default  Main Agent                                                               │
-│  › ● openai-codex/gpt-5.6-sol  ‹ xhigh ›                                               │
-│                                                                                        │
-│    Classifier                                                                          │
-│  · ● Disabled                                                                          │
-│  ·   Jev                                                                               │
+│  /team › Guardian                                                                      │
 │  ────────────────────────────────────────────────────────────────────────────────────  │
-│  openai-codex/gpt-5.6-sol  ·  current                                                  │
-│                                                                                        │
+│  › openai-codex/gpt-5.6-sol  ■■■  ‹ xhigh ›                                            │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
-   type search  ↑↓ select  ←→ effort  enter apply both  esc back
+   type search   ↑↓ select   ←→ effort   enter next   esc back

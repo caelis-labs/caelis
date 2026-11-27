@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 )
 
-const subagentLabelStart = 4
+const subagentLabelStart = 3
 
 func subagentPurpose(handle agentbinding.Handle) string {
 	switch handle {
@@ -25,6 +25,14 @@ func subagentPurpose(handle agentbinding.Handle) string {
 		return "Review workspace changes"
 	}
 	return ""
+}
+
+func subagentOverviewPurpose(handle agentbinding.Handle, classifierName string) string {
+	purpose := subagentPurpose(handle)
+	if handle == agentbinding.HandleGuardian && classifierName != "" {
+		return purpose + " · +" + classifierName
+	}
+	return purpose
 }
 
 type subagentOverviewWidths struct {
@@ -60,9 +68,15 @@ func subagentEffort(row subagentOverlayRow) string {
 	return effort
 }
 
-func (m *Model) renderSubagentOverviewRow(row subagentOverlayRow, selected bool, width int, cols subagentOverviewWidths) string {
+func (m *Model) renderSubagentOverviewRow(
+	row subagentOverlayRow,
+	selected bool,
+	width int,
+	cols subagentOverviewWidths,
+	classifierName string,
+) string {
 	style, label := m.theme.TextStyle(), m.theme.TextStyle()
-	purpose, effort, accent := m.theme.MutedTextStyle(), m.theme.SecondaryTextStyle(), m.theme.Tokens().Accent
+	purpose, effort, accent := m.theme.MutedTextStyle(), m.theme.Tokens().ListMeta, m.theme.Tokens().Accent
 	if selected {
 		style = m.theme.SelectionStyle()
 		label = style.Bold(true)
@@ -70,11 +84,11 @@ func (m *Model) renderSubagentOverviewRow(row subagentOverlayRow, selected bool,
 	}
 	model, effortValue := subagentFitModel(row.detail, subagentOverviewEffort(row), cols.model)
 	modelPad := cols.model - displayColumns(model+effortValue)
-	line := subagentRowPrefix(style, accent, selected, " ") +
+	line := subagentRowPrefix(style, accent, selected) +
 		label.Render(subagentCellText(row.label, cols.name-subagentLabelStart)) +
 		style.Render("  "+model) + effort.Render(effortValue) + style.Render(strings.Repeat(" ", modelPad))
 	if cols.purpose > 0 {
-		line += style.Render("  ") + purpose.Render(subagentCellText(subagentPurpose(row.handle), cols.purpose))
+		line += style.Render("  ") + purpose.Render(subagentCellText(subagentOverviewPurpose(row.handle, classifierName), cols.purpose))
 	}
 	return subagentPadRow(line, width, style)
 }
@@ -85,10 +99,6 @@ func (m *Model) subagentSelectedDetail(detail lipgloss.Style) lipgloss.Style {
 		return style
 	}
 	return style.Foreground(m.theme.ReadableTextColor(detail.GetForeground(), style.GetBackground()))
-}
-
-type subagentEffortSpan struct {
-	x, width, midpoint int
 }
 
 func subagentFitModel(label, effort string, width int) (string, string) {
@@ -104,12 +114,12 @@ func subagentFitModel(label, effort string, width int) (string, string) {
 	return ansi.Truncate(label, budget, "…"), effort
 }
 
-func subagentRowPrefix(style, accent lipgloss.Style, focused bool, mark string) string {
-	cursor := " "
+func subagentRowPrefix(style, accent lipgloss.Style, focused bool) string {
+	cursor := "  "
 	if focused {
-		cursor = "›"
+		cursor = "› "
 	}
-	return style.Render(" ") + accent.Render(cursor+mark) + style.Render(" ")
+	return style.Render(" ") + accent.Render(cursor)
 }
 
 func subagentPadRow(line string, width int, style lipgloss.Style) string {
@@ -121,14 +131,6 @@ func subagentCellText(text string, width int) string {
 		return ""
 	}
 	return padRightDisplay(ansi.Truncate(strings.TrimSpace(text), width, "…"), width)
-}
-
-func (m *Model) subagentPaneTitle(title string, width int, focused bool) string {
-	prefix, style := "  ", m.theme.SecondaryTextStyle()
-	if focused {
-		prefix, style = "▎ ", m.theme.TextStyle().Bold(true)
-	}
-	return " " + style.Render(prefix+truncateTailDisplay(title, max(1, width-2)))
 }
 
 func subagentViewport(list *subagentList, budget int) (int, int, []int) {
