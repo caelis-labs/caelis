@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.88.0](https://github.com/caelis-labs/caelis/compare/v0.87.0...v0.88.0) (2026-11-27)
+
+
+### Features
+
+* **tui:** streamline /model and /team configuration drawers ([#303](https://github.com/caelis-labs/caelis/issues/303)) ([ac1d410](https://github.com/caelis-labs/caelis/commit/ac1d4101536c379b3dcbd73f5d1ad5bc444dff41))
+
+
+### Bug Fixes
+
+* bump built-in Desktop World to v0.6.3 ([#305](https://github.com/caelis-labs/caelis/issues/305)) ([0624c99](https://github.com/caelis-labs/caelis/commit/0624c991b2b2d988b8208d71c0f120cc9e12c0ac))
+
 ## [0.87.0](https://github.com/caelis-labs/caelis/compare/v0.86.2...v0.87.0) (2026-11-26)
 
 
