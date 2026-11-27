@@ -120,8 +120,12 @@ func TestModelPickerShowsRoutesWithoutChangingSelection(t *testing.T) {
 	screen.Method = ansi.GraphemeWidth
 	uv.NewStyledString(line).Draw(screen, screen.Bounds())
 	note := screen.CellAt(noteX, 0)
-	if note == nil || !colorInSet(note.Style.Fg, []color.Color{m.theme.HelpHintFg}) {
+	if note == nil || colorInSet(note.Style.Fg, []color.Color{m.theme.TextPrimary, m.theme.SelectionFg}) {
 		t.Fatalf("route annotation is not subdued: %#v", note)
+	}
+	wantFg := m.theme.ReadableTextColor(m.theme.Tokens().ListMeta.GetForeground(), m.theme.SelectionBg)
+	if !colorInSet(note.Style.Fg, []color.Color{wantFg}) {
+		t.Fatalf("route annotation color = %#v, want %#v", note.Style.Fg, wantFg)
 	}
 	if path := os.Getenv("CAELIS_MODEL_UI_REPORT"); path != "" {
 		if err := os.WriteFile(path, []byte(frame), 0600); err != nil {

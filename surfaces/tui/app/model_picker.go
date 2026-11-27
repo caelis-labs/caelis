@@ -1,13 +1,19 @@
 package tuiapp
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+)
+
+type modelPickerStep uint8
+
+const (
+	modelPickerStepModel modelPickerStep = iota
+	modelPickerStepSpeed
 )
 
 type modelPickerDraft struct {
@@ -18,10 +24,14 @@ type modelPickerDraft struct {
 // modelPickerState contains only unconfirmed edits. Capabilities and the
 // effective selection come from Control's completion projection.
 type modelPickerState struct {
-	drafts     map[string]modelPickerDraft
-	selected   string
-	fastFocus  bool
-	loadFailed bool
+	step           modelPickerStep
+	drafts         map[string]modelPickerDraft
+	selected       string
+	loadFailed     bool
+	speedCandidate SlashArgCandidate
+	speedIndex     int
+	hitStart       int
+	effortHits     []pickerEffortHit
 }
 
 func (m *Model) isModelPicker() bool {
@@ -31,6 +41,10 @@ func (m *Model) isModelPicker() bool {
 	// Older Hosts omit model_selection. Their candidates keep the existing
 	// argument completion flow until they supply the typed picker projection.
 	return len(m.slashArgCandidates) == 0 || m.slashArgCandidates[0].ModelSelection != nil
+}
+
+func (m *Model) isModelPickerSpeedStep() bool {
+	return m.isModelPicker() && m.modelPicker != nil && m.modelPicker.step == modelPickerStepSpeed
 }
 
 func (m *Model) updateModelPickerCandidates(candidates []SlashArgCandidate, err error) {
@@ -73,7 +87,61 @@ func (m *Model) modelPickerDraft(candidate SlashArgCandidate) modelPickerDraft {
 	return modelPickerDraft{}
 }
 
+func (m *Model) adjustModelPickerEffort(candidate SlashArgCandidate, delta int) bool {
+	selection := candidate.ModelSelection
+	if selection == nil || len(selection.Efforts) < 2 || delta == 0 {
+		return false
+	}
+	if m.modelPicker == nil {
+		m.updateModelPickerCandidates(m.slashArgCandidates, nil)
+	}
+	draft := m.modelPickerDraft(candidate)
+	index := slices.Index(selection.Efforts, draft.effort)
+	if index < 0 {
+		index = 0
+	}
+	next := min(max(index+delta, 0), len(selection.Efforts)-1)
+	draft.effort = selection.Efforts[next]
+	m.modelPicker.drafts[candidate.Value] = draft
+	return next != index
+}
+
+func (m *Model) submitModelSelection(candidate SlashArgCandidate, effort string, fast bool) tea.Cmd {
+	line := "/model " + candidate.Value + " " + effort
+	if fast && candidate.ModelSelection != nil && candidate.ModelSelection.FastSupported {
+		line += " fast"
+	}
+	m.clearSlashArg()
+	_, cmd := m.submitLine(line)
+	return cmd
+}
+
 func (m *Model) handleModelPickerKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if m.isModelPickerSpeedStep() {
+		switch {
+		case key.Matches(msg, m.keys.Back):
+			m.modelPicker.step = modelPickerStepModel
+			return true, nil
+		case key.Matches(msg, m.keys.ChoosePrev),
+			key.Matches(msg, m.keys.ChooseNext),
+			key.Matches(msg, m.keys.Complete),
+			msg.String() == "shift+tab",
+			msg.String() == "left",
+			msg.String() == "right":
+			m.modelPicker.speedIndex = 1 - m.modelPicker.speedIndex
+			return true, nil
+		case key.Matches(msg, m.keys.Accept):
+			if m.turnRunning() {
+				return true, nil
+			}
+			candidate := m.modelPicker.speedCandidate
+			draft := m.modelPickerDraft(candidate)
+			return true, m.submitModelSelection(candidate, draft.effort, m.modelPicker.speedIndex == 1)
+		default:
+			return true, nil
+		}
+	}
+
 	candidate, ok := m.currentSlashArgCandidate()
 	if !ok || candidate.ModelSelection == nil {
 		switch msg.String() {
@@ -91,173 +159,189 @@ func (m *Model) handleModelPickerKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 	switch {
 	case key.Matches(msg, m.keys.Complete), msg.String() == "shift+tab":
-		m.modelPicker.fastFocus = selection.FastSupported && !m.modelPicker.fastFocus
 		return true, nil
 	case msg.String() == "left", msg.String() == "right":
-		draft := m.modelPickerDraft(candidate)
-		if m.modelPicker.fastFocus && selection.FastSupported {
-			draft.fast = !draft.fast
-		} else if index := slices.Index(selection.Efforts, draft.effort); index >= 0 {
-			delta := 1
-			if msg.String() == "left" {
-				delta = -1
-			}
-			draft.effort = selection.Efforts[min(max(index+delta, 0), len(selection.Efforts)-1)]
+		delta := 1
+		if msg.String() == "left" {
+			delta = -1
 		}
-		m.modelPicker.drafts[candidate.Value] = draft
+		m.adjustModelPickerEffort(candidate, delta)
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
 		if m.turnRunning() || !m.slashArgCompletionSettledForCurrentTarget() {
 			return true, nil
 		}
 		draft := m.modelPickerDraft(candidate)
-		line := "/model " + candidate.Value + " " + draft.effort
-		if draft.fast && selection.FastSupported {
-			line += " fast"
+		if selection.FastSupported {
+			m.modelPicker.step = modelPickerStepSpeed
+			m.modelPicker.speedCandidate = candidate
+			m.modelPicker.speedIndex = 0
+			if draft.fast {
+				m.modelPicker.speedIndex = 1
+			}
+			return true, nil
 		}
-		m.clearSlashArg()
-		_, cmd := m.submitLine(line)
-		return true, cmd
+		return true, m.submitModelSelection(candidate, draft.effort, false)
 	}
 	return false, nil
 }
 
+func (m *Model) modelPickerEffortDeltaAt(candidateIndex int, geometry completionOverlayGeometry, mouseX int) int {
+	if m.modelPicker == nil || m.modelPicker.step != modelPickerStepModel {
+		return 0
+	}
+	offset := candidateIndex - m.modelPicker.hitStart
+	if offset < 0 || offset >= len(m.modelPicker.effortHits) {
+		return 0
+	}
+	hit := m.modelPicker.effortHits[offset]
+	if hit.width <= 0 {
+		return 0
+	}
+	contentX := geometry.left
+	if geometry.chrome.useBorder {
+		contentX += 2
+	}
+	localX := mouseX - contentX
+	if localX < hit.x || localX >= hit.x+hit.width {
+		return 0
+	}
+	if localX >= hit.midpoint {
+		return 1
+	}
+	return -1
+}
+
+func modelPickerSourceLabel(candidate SlashArgCandidate, candidates []SlashArgCandidate) string {
+	identity := slashArgCandidateIdentity(candidate)
+	if !slashArgIdentityDuplicated(identity, candidates) {
+		return ""
+	}
+	source := modelPickerShortSource(candidate)
+	detail := strings.Join(strings.Fields(candidate.Detail), " ")
+	var useDetail bool
+	for _, other := range candidates {
+		if other.Value == candidate.Value || !strings.EqualFold(identity, slashArgCandidateIdentity(other)) ||
+			!strings.EqualFold(source, modelPickerShortSource(other)) {
+			continue
+		}
+		if detail == "" || strings.EqualFold(detail, strings.Join(strings.Fields(other.Detail), " ")) {
+			// A display name and endpoint description can both collide, for
+			// example when two endpoints differ only by the URL path.
+			return candidate.Value
+		}
+		useDetail = true
+	}
+	if useDetail {
+		return detail
+	}
+	return source
+}
+
+func modelPickerShortSource(candidate SlashArgCandidate) string {
+	if source := shortModelAliasDisambiguator(candidate.Detail); source != "" {
+		return source
+	}
+	if source := pickerProviderFromConfigID(candidate.ModelConfigID); source != "" {
+		return source
+	}
+	return strings.Join(strings.Fields(strings.TrimSpace(candidate.Detail)), " ")
+}
+
 func (m *Model) renderModelPicker(geometry completionOverlayGeometry, candidates []SlashArgCandidate) string {
-	width := m.completionRowInnerWidth()
-	label := modelPickerCountLabel("/model", len(candidates), geometry.scroll)
-	lines := []string{" " + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, width))}
-	rows := make([]completionTableRow, 0, geometry.candidateCount)
+	contentWidth := m.completionRowInnerWidth() + 2
+	showRule := geometry.chrome.headerRows > 1
+	if m.isModelPickerSpeedStep() {
+		candidate := m.modelPicker.speedCandidate
+		draft := m.modelPickerDraft(candidate)
+		title := firstNonEmpty(candidate.Display, candidate.Value)
+		if effort := strings.TrimSpace(draft.effort); effort != "" && effort != "none" {
+			title += " [" + effort + "]"
+		}
+		lines := m.pickerDrawerHeaderLines(contentWidth, []string{"/model"}, title, geometry.scroll, showRule)
+		speeds := [...]struct{ label, detail string }{
+			{"Standard", "Normal priority"},
+			{"Fast", "Priority speed"},
+		}
+		for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+			speed := speeds[i]
+			lines = append(lines, m.renderPickerSimpleRow(speed.label, speed.detail, i == geometry.selected, contentWidth, 10))
+		}
+		return m.renderCompletionOverlay(geometry, lines)
+	}
+
+	lines := m.pickerDrawerHeaderLines(contentWidth, nil, "/model", geometry.scroll, showRule)
+	specs := make([]pickerModelRowSpec, len(candidates))
+	for i, candidate := range candidates {
+		draft := m.modelPickerDraft(candidate)
+		var efforts []string
+		if candidate.ModelSelection != nil {
+			efforts = candidate.ModelSelection.Efforts
+		}
+		specs[i] = pickerModelRowSpec{
+			name:        firstNonEmpty(candidate.Display, candidate.Value),
+			source:      modelPickerSourceLabel(candidate, candidates),
+			efforts:     efforts,
+			effort:      draft.effort,
+			effortIndex: slices.Index(efforts, draft.effort),
+		}
+	}
+	layout := newPickerModelTableLayout(contentWidth, specs)
+	hits := make([]pickerEffortHit, 0, max(0, geometry.windowEnd-geometry.windowStart))
 	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
-		candidate := candidates[i]
-		mark := ""
-		if candidate.ModelSelection != nil && candidate.ModelSelection.Current {
-			mark = "●"
-		}
-		identity := firstNonEmpty(candidate.Display, candidate.Value)
-		note := firstNonEmpty(candidate.Detail, slashArgPickerHint("model", candidates, i))
-		selected := i == geometry.selected
-		rows = append(rows, m.modelPickerRow(identity, note, m.modelPickerControls(candidate, selected, width), mark, selected))
+		line, hit := m.renderPickerModelRow(layout, specs[i], i == geometry.selected)
+		lines = append(lines, line)
+		hits = append(hits, hit)
 	}
-	identityWidth := completionTableIdentityWidth(rows, width)
-	for i, row := range rows {
-		lines = append(lines, m.renderCompletionColumnsLine(row.identity, row.hint, identityWidth, geometry.windowStart+i == geometry.selected))
+	if m.modelPicker != nil {
+		m.modelPicker.hitStart = geometry.windowStart
+		m.modelPicker.effortHits = hits
 	}
-	detail := "Type to search models"
-	if m.slashArgRequestPending {
-		detail = "Loading models…"
-	} else if m.modelPicker != nil && m.modelPicker.loadFailed {
-		detail = "Could not load models. Enter to retry."
-	} else if len(candidates) == 0 {
-		detail = "No matching models. Edit the search or Esc to cancel."
-	} else if geometry.selected < len(candidates) {
-		candidate := candidates[geometry.selected]
-		detail = firstNonEmpty(candidate.Display, candidate.Value)
-		if candidate.Detail != "" {
-			detail += "  ·  " + candidate.Detail
+
+	if geometry.chrome.detailRows > 0 {
+		detail := ""
+		switch {
+		case m.slashArgRequestPending:
+			detail = "Loading models…"
+		case m.modelPicker != nil && m.modelPicker.loadFailed:
+			detail = "Could not load models. Enter to retry."
+		case len(candidates) == 0:
+			detail = "No matching models. Edit the search or Esc to cancel."
 		}
-		if selection := candidate.ModelSelection; selection != nil {
-			if selection.Current {
-				detail += "  ·  current"
-			}
-			if selection.ContextWindowTokens > 0 {
-				detail += fmt.Sprintf("  ·  %gk context", float64(selection.ContextWindowTokens)/1000)
-			}
-		}
+		lines = m.appendModelPickerDetail(lines, geometry.chrome, detail, m.theme.HelpHintTextStyle())
 	}
-	lines = m.appendModelPickerDetail(lines, geometry.chrome, detail, m.theme.HelpHintTextStyle())
 	return m.renderCompletionOverlay(geometry, lines)
-}
-
-func modelPickerCountLabel(path string, count int, scroll completionScrollAffordance) string {
-	noun := "models"
-	if count == 1 {
-		noun = "model"
-	}
-	label := fmt.Sprintf("%s  ·  %d %s", path, count, noun)
-	if scroll.CanUp {
-		label += "  ↑ more"
-	}
-	if scroll.CanDown {
-		label += "  ↓ more"
-	}
-	return label
-}
-
-func (m *Model) modelPickerRow(label, note, controls, mark string, selected bool) completionTableRow {
-	marker := "· "
-	if selected {
-		marker = "› "
-	}
-	if mark != "" {
-		marker += mark + " "
-	}
-	if note != "" {
-		label += "  " + m.theme.HelpHintTextStyle().Bold(false).Render(note)
-	}
-	return completionTableRow{identity: marker + label, hint: controls}
 }
 
 func (m *Model) appendModelPickerDetail(lines []string, chrome completionOverlayChrome, detail string, style lipgloss.Style) []string {
 	width := m.completionRowInnerWidth()
 	if chrome.detailRows > 1 {
-		lines = append(lines, " "+m.theme.HelpHintTextStyle().Render(strings.Repeat("─", width)))
+		lines = append(lines, " "+m.theme.DiffPanelBorderStyle().Render(strings.Repeat("─", width))+" ")
 	}
 	if chrome.detailRows > 0 {
-		lines = append(lines, " "+style.Render(truncateTailDisplay(detail, width)))
+		lines = append(lines, " "+style.Render(truncateTailDisplay(detail, width))+" ")
 	}
 	return lines
 }
 
-func (m *Model) modelPickerControls(candidate SlashArgCandidate, selected bool, width int) string {
-	selection := candidate.ModelSelection
-	if selection == nil {
-		return ""
-	}
-	draft := m.modelPickerDraft(candidate)
-	fastFocus := selected && m.modelPicker != nil && m.modelPicker.fastFocus && selection.FastSupported
-	effort := pickerEffortControl(selection.Efforts, draft.effort, selected && !fastFocus, width)
-	if selection.FastSupported {
-		fast := "Fast off"
-		if draft.fast {
-			fast = "Fast on"
-		}
-		if fastFocus {
-			fast = "‹ " + fast + " ›"
-		}
-		effort = padRightDisplay(effort, 18) + "  " + fast
-	}
-	return effort
-}
-
 func (m *Model) renderModelPickerFooter() string {
-	label := "type search  ↑↓ select  ←→ effort  enter apply  esc cancel"
-	compact := "↑↓ select  ←→ effort  enter apply  esc"
-	if candidate, ok := m.currentSlashArgCandidate(); ok && candidate.ModelSelection != nil && candidate.ModelSelection.FastSupported {
-		label = "type search  ↑↓ select  tab field  ←→ change  enter apply  esc cancel"
-		compact = "↑↓ select  tab field  ←→ change  enter apply  esc"
-	}
-	return m.renderPickerFooter(label, compact, "↑↓  ←→  tab  enter  esc")
-}
-
-func (m *Model) renderPickerFooter(label, compact, minimal string) string {
 	width := m.completionOverlayInnerWidth() - m.completionOverlayFooterIndent()
-	if displayColumns(label) > width {
-		label = compact
+	if m.isModelPickerSpeedStep() {
+		return m.renderPickerKeycapFooter(
+			[]pickerKeycapItem{{"↑↓", "select"}, {"enter", "apply"}, {"esc", "back"}},
+			[]pickerKeycapItem{{"↑↓", "select"}, {"enter", "apply"}, {"esc", "back"}},
+			[]pickerKeycapItem{{"↑↓", ""}, {"enter", ""}, {"esc", ""}},
+			width,
+		)
 	}
-	if displayColumns(label) > width {
-		label = minimal
+	applyLabel := "apply"
+	if candidate, ok := m.currentSlashArgCandidate(); ok && candidate.ModelSelection != nil && candidate.ModelSelection.FastSupported {
+		applyLabel = "next"
 	}
-	return m.theme.HelpHintTextStyle().Render(truncateTailDisplay(label, max(1, width)))
-}
-
-func pickerEffortControl(efforts []string, effort string, focused bool, width int) string {
-	value := effort
-	if focused && len(efforts) > 1 {
-		value = "‹ " + value + " ›"
-	}
-	if width >= 90 && len(efforts) > 1 {
-		index := slices.Index(efforts, effort)
-		value = strings.Repeat("■", max(0, index+1)) + strings.Repeat("□", max(0, len(efforts)-index-1)) + "  " + value
-	}
-	return value
+	return m.renderPickerKeycapFooter(
+		[]pickerKeycapItem{{"type", "search"}, {"↑↓", "select"}, {"←→", "effort"}, {"enter", applyLabel}, {"esc", "cancel"}},
+		[]pickerKeycapItem{{"↑↓", "select"}, {"←→", "effort"}, {"enter", applyLabel}, {"esc", ""}},
+		[]pickerKeycapItem{{"↑↓", ""}, {"←→", ""}, {"enter", ""}, {"esc", ""}},
+		width,
+	)
 }

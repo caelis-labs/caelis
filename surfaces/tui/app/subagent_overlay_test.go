@@ -15,7 +15,7 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	frame := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"/team", "[x]", "breeze", "orbit", "zenith",
+		"/team", "breeze", "orbit", "zenith",
 		"openai-codex/gpt-5.6-sol", "Guardian", "Reviewer", "esc close",
 	} {
 		if !strings.Contains(frame, want) {
@@ -130,21 +130,15 @@ func TestSubagentOverlayBindingPickerUsesModelFirstLabels(t *testing.T) {
 		"openai-codex/gpt-5.6-sol",
 		"openai-codex/gpt-5.6-terra",
 		"Claude — Opus",
-		"‹ high ›",
+		"high",
 		"ACP",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("binding picker omitted %q\n%s", want, frame)
 		}
 	}
-	profileRows := 0
-	for _, row := range model.subagentOverlay.rows {
-		if row.binding.ProfileID != "" {
-			profileRows++
-		}
-	}
-	if profileRows != 3 {
-		t.Fatalf("binding picker profile rows = %d, want one row for each of 3 profiles", profileRows)
+	if len(model.subagentOverlay.rows) != 3 {
+		t.Fatalf("binding picker rows = %d, want 3 profiles without Default row", len(model.subagentOverlay.rows))
 	}
 	for _, unwanted := range []string{"provider:sol", "acp:claude:opus"} {
 		if strings.Contains(frame, unwanted) {
@@ -336,26 +330,20 @@ func modelHasBlockKind(model *Model, kind BlockKind) bool {
 	return false
 }
 
-func TestTeamCloseHoverMatchesButtonBounds(t *testing.T) {
+func TestTeamHoverTracksRowsWithoutEmptyFilterRow(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	if model.View().MouseMode != tea.MouseModeAllMotion {
 		t.Fatal("team does not receive unpressed mouse motion")
 	}
 	idle := model.renderSubagentOverlay()
 	g := model.subagentOverlay.geometry
-	if strings.Contains(ansi.Strip(idle), "Type to search") {
-		t.Fatal("empty filter occupies a row")
+	if strings.Contains(ansi.Strip(idle), "Type to search") || strings.Contains(ansi.Strip(idle), "[x]") {
+		t.Fatal("empty filter or legacy close button occupies chrome")
 	}
-	move := func(x int) { model.handleSubagentOverlayMouse(tea.MouseMotionMsg(tea.Mouse{X: x, Y: g.closeY})) }
-	for x := g.closeX; x < g.closeX+3; x++ {
-		move(x)
-		hovered := model.renderSubagentOverlay()
-		if !model.subagentOverlay.closeButton.hovered || hovered == idle || ansi.Strip(hovered) != ansi.Strip(idle) {
-			t.Fatal("close hover did not change only its style")
-		}
-	}
-	move(g.closeX - 1)
-	if model.subagentOverlay.closeButton.hovered || model.renderSubagentOverlay() != idle {
-		t.Fatal("hover leaked outside close button")
+	before := model.subagentOverlay.index
+	target := (before + 1) % len(g.rows)
+	model.handleSubagentOverlayMouse(tea.MouseMotionMsg(tea.Mouse{X: g.x + 3, Y: g.rows[target]}))
+	if model.subagentOverlay.index != target {
+		t.Fatalf("hover did not select row %d: got %d", target, model.subagentOverlay.index)
 	}
 }

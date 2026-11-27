@@ -97,7 +97,7 @@ func TestTeamPickerMouseEditsEffortAndAppliesModel(t *testing.T) {
 	if m.subagentOverlay.page != subagentPageBinding {
 		t.Fatal("single click did not open model picker")
 	}
-	clickTeamText(t, m, "openai-codex", " ›")
+	clickTeamText(t, m, "openai-codex", "›")
 	if m.currentSubagentRow().binding.Effort != "xhigh" || m.subagentOverlay.pending {
 		t.Fatal("effort click applied or missed draft")
 	}
@@ -144,7 +144,7 @@ func TestTeamCellFocusLightTheme(t *testing.T) {
 	if !strings.Contains(line, "openai-codex/gpt-5.6-sol [xhigh]") {
 		t.Fatalf("effort is separated from the model: %q", line)
 	}
-	right := g.closeX - g.x + len("[x]") - 1
+	right := g.width - 3
 	if !colorInSet(screen.CellAt(right, y).Style.Bg, []color.Color{m.theme.SelectionBg}) {
 		t.Fatal("selection stops short of the divider edge")
 	}
@@ -162,7 +162,7 @@ func TestTeamCellFocusLightTheme(t *testing.T) {
 	}
 }
 
-func TestTeamGuardianPaneFocusAndAlignment(t *testing.T) {
+func TestTeamGuardianThreeStepFlowAndContinuousHighlight(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		for _, width := range []int{35, 120} {
 			t.Run(fmt.Sprintf("dark=%t/width=%d", dark, width), func(t *testing.T) {
@@ -171,45 +171,38 @@ func TestTeamGuardianPaneFocusAndAlignment(t *testing.T) {
 				m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 				selectSubagentTestRow(t, m, "handle:guardian")
 				m.Update(subagentSpecialKey(tea.KeyEnter))
-				assertFrame := func(focused, inactive, selected, other string) {
-					t.Helper()
-					frame := m.renderSubagentOverlay()
-					g := m.subagentOverlay.geometry
-					screen := uv.NewScreenBuffer(g.width, g.height)
-					screen.Method = ansi.GraphemeWidth
-					uv.NewStyledString(frame).Draw(screen, screen.Bounds())
-					lines := strings.Split(ansi.Strip(frame), "\n")
-					cell := func(value string) (int, *uv.Cell) {
-						t.Helper()
-						for y, line := range lines {
-							if x := strings.Index(line, value); x >= 0 {
-								column := displayColumns(line[:x])
-								return column, screen.CellAt(column, y)
-							}
-						}
-						t.Fatalf("missing %q in frame:\n%s", value, ansi.Strip(frame))
-						return 0, nil
+				frame := m.renderSubagentOverlay()
+				plain := ansi.Strip(frame)
+				if strings.Contains(plain, "Classifier") || strings.Contains(plain, "Default") || strings.Contains(plain, "●") || strings.Contains(plain, "models") {
+					t.Fatalf("Guardian model step retained obsolete items:\n%s", plain)
+				}
+				g := m.subagentOverlay.geometry
+				screen := uv.NewScreenBuffer(g.width, g.height)
+				screen.Method = ansi.GraphemeWidth
+				uv.NewStyledString(frame).Draw(screen, screen.Bounds())
+				y := g.rows[m.subagentOverlay.index] - g.y
+				for x := 2; x < g.width-2; x++ {
+					cell := screen.CellAt(x, y)
+					if cell == nil || cell.Width == 0 {
+						continue
 					}
-					_, active := cell(focused)
-					_, passive := cell(inactive)
-					if colorInSet(active.Style.Fg, []color.Color{passive.Style.Fg}) {
-						t.Fatal("focused and inactive headings share a foreground")
-					}
-					for _, heading := range []*uv.Cell{active, passive} {
-						if corrected := m.theme.ReadableTextColor(heading.Style.Fg, heading.Style.Bg); !colorInSet(heading.Style.Fg, []color.Color{corrected}) {
-							t.Fatal("a section heading is not readable on the panel")
-						}
-					}
-					activeX, activeModel := cell(selected)
-					passiveX, passiveModel := cell(other)
-					if activeX != passiveX || !colorInSet(activeModel.Style.Bg, []color.Color{m.theme.CommandActiveStyle().GetBackground()}) ||
-						colorInSet(passiveModel.Style.Bg, []color.Color{m.theme.CommandActiveStyle().GetBackground()}) {
-						t.Fatalf("model alignment/highlight mismatch: active=%d inactive=%d", activeX, passiveX)
+					if !colorInSet(cell.Style.Bg, []color.Color{m.theme.SelectionBg}) {
+						t.Fatalf("dark=%t width=%d selection bar gap at (%d,%d)\n%s", dark, width, x, y, plain)
 					}
 				}
-				assertFrame("Review model", "Classifier", "openai-", "Disabled")
-				m.Update(subagentSpecialKey(tea.KeyDown))
-				assertFrame("Classifier", "Review model", "Disabled", "openai-")
+				m.Update(subagentSpecialKey(tea.KeyEnter))
+				if m.subagentOverlay.page != subagentPageClassifier {
+					t.Fatal("Enter on Guardian model did not open Classifier page")
+				}
+				cPlain := ansi.Strip(m.renderSubagentOverlay())
+				for _, want := range []string{"/team ›", "Classifier", "Disabled", "Jev"} {
+					if !strings.Contains(cPlain, want) {
+						t.Fatalf("Classifier page omitted %q:\n%s", want, cPlain)
+					}
+				}
+				if strings.Contains(cPlain, "(current)") || strings.Contains(cPlain, "●") {
+					t.Fatalf("Classifier page retained current marker:\n%s", cPlain)
+				}
 			})
 		}
 	}
@@ -242,6 +235,10 @@ func TestTeamCellFocusRenderedFrames(t *testing.T) {
 				}
 				if strings.Contains(plain, "7/12") || strings.Contains(plain, "Choose Agent model") || strings.Contains(plain, "▽") {
 					t.Fatal("obsolete menu text")
+				}
+				footer := plain[strings.LastIndex(plain, "\n")+1:]
+				if !strings.Contains(footer, "enter") || !strings.Contains(footer, "esc") {
+					t.Fatalf("footer lost key hints: %q", footer)
 				}
 				// Keep reviewable full frames for both menus at wide and narrow sizes.
 				name := fmt.Sprintf("team-%d-picker-%t", width, picker)

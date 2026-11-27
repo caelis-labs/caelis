@@ -2,24 +2,22 @@
 
 `/model` opens a picker above the fixed composer. Type in the composer to search
 configured model names and selectors, use Up/Down to select a row, and Left/Right
-to adjust its reasoning effort. For models supporting Fast mode, Tab switches
-between effort and Fast. The current model is marked with a filled dot. Enter
-or a row click applies the selection; Esc discards all unconfirmed changes.
-Model capabilities and the effective selection come from Control. Unknown
-capabilities are not inferred from model names. Explicit commands such as
-`/model <model> <effort> [fast]` remain available.
+to adjust its reasoning effort. Models that share the same display name across
+multiple providers disambiguate with their provider name. Enter or a row click
+applies the selection directly, or advances to a priority step (`Standard` /
+`Fast`) when the chosen model supports Fast mode; Esc returns to the previous step
+or discards all unconfirmed changes. Model capabilities and the effective
+selection come from Control. Unknown capabilities are not inferred from model
+names. Explicit commands such as `/model <model> <effort> [fast]` remain available.
 
-`/team` opens a centered configuration overlay. Type to search roles, models or
-binding sets. Up/Down selects a row; Enter or a row click opens or confirms it.
-The model picker starts on the role's current binding, marked with a filled dot;
-Left/Right adjusts effort without saving. Enter saves the binding and returns to
-the original role and search; Esc discards the binding draft. New roles remain
-local drafts until Create role is confirmed. Tab/Shift+Tab moves between form
-fields, and Enter advances a text field. Ctrl+N creates a role, Ctrl+P opens
-binding sets, Ctrl+S saves a set, and Delete opens deletion confirmation. Ctrl+W
-clears a list search. Saving blocks further edits until the Host responds;
-failures retain the draft for correction or retry. See
-[Participants](../../docs/participants.md) for role, system-agent and binding-set
+`/team` opens the participant and system-agent configuration drawer above the
+composer. Up/Down selects a role; Enter or a row click opens its model picker.
+Left/Right adjusts reasoning effort without saving, and Enter applies changes.
+When a judgment classifier is connected, confirming Guardian's model advances to
+`/team › Guardian › Classifier`, listing `Disabled` followed by connected
+classifier models; Esc returns to Guardian's model list with the draft intact,
+and Enter applies both changes together. Esc cancels drafts and closes the
+drawer. See [Participants](../../docs/participants.md) for role and system-agent
 semantics.
 
 `/connect` uses a multi-step overlay above the fixed composer. Search stays

@@ -434,10 +434,14 @@ func (m *Model) currentInputGhostHint() string {
 		if state.query != "" {
 			return ""
 		}
-		if state.page == subagentPageBinding {
+		switch state.page {
+		case subagentPageBinding:
 			return "Type to search models"
+		case subagentPageClassifier:
+			return "Type to search classifiers"
+		default:
+			return "Type to search roles"
 		}
-		return "Type to search roles"
 	}
 	if m.isModelPicker() {
 		if m.cursor == len(m.input) && strings.TrimSpace(m.slashArgQuery) == "" {

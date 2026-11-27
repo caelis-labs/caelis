@@ -18,7 +18,7 @@ func TestTeamPickerSearchAndCancelPreserveRoleWithoutView(t *testing.T) {
 	// selection must already be authoritative when Enter arrives.
 	_, _ = m.Update(tea.PasteMsg{Content: "orbit"})
 	_, _ = m.Update(subagentSpecialKey(tea.KeyEnter))
-	if row := m.currentSubagentRow(); row.binding.ProfileID != "provider:sol" || !row.current || row.binding.Effort != "high" {
+	if row := m.currentSubagentRow(); row.binding.ProfileID != "provider:sol" || row.binding.Effort != "high" {
 		t.Fatalf("current binding was not selected: %#v", row)
 	}
 	for range 4 {
@@ -69,8 +69,8 @@ func TestTeamPickerMutationBlocksDuplicateInputAndRetainsFailedDraft(t *testing.
 	}
 	m.renderSubagentOverlay()
 	g := m.subagentOverlay.geometry
-	_, _ = m.handleSubagentOverlayMouse(tea.MouseClickMsg(tea.Mouse{X: g.closeX, Y: g.closeY, Button: tea.MouseLeft}))
-	_, _ = m.handleSubagentOverlayMouse(tea.MouseReleaseMsg(tea.Mouse{X: g.closeX, Y: g.closeY}))
+	_, _ = m.handleSubagentOverlayMouse(tea.MouseClickMsg(tea.Mouse{X: g.x + 2, Y: g.rows[0], Button: tea.MouseLeft}))
+	_, _ = m.handleSubagentOverlayMouse(tea.MouseReleaseMsg(tea.Mouse{X: g.x + 2, Y: g.rows[0]}))
 	if m.subagentOverlay == nil || m.currentSubagentRow().binding.Effort != "xhigh" || m.subagentOverlay.query != "" {
 		t.Fatal("saving allowed the draft or overlay to change")
 	}
@@ -166,8 +166,8 @@ func TestTeamPickerLongListGeometryAndMouseStayAligned(t *testing.T) {
 				}
 				_, _ = m.handleSubagentOverlayMouse(tea.MouseMotionMsg(tea.Mouse{X: g.x + 2, Y: y}))
 				m.renderSubagentOverlay()
-				if state.index != before || state.geometry.rows[index] != y {
-					t.Fatal("hover moved the row under the pointer")
+				if state.index != index || state.geometry.rows[index] != y {
+					t.Fatal("hover moved the row under the pointer or failed to track")
 				}
 			}
 		})
@@ -182,10 +182,16 @@ func TestTeamApprovalPromptCannotClickHiddenBinding(t *testing.T) {
 			selectSubagentTestRow(t, m, "handle:orbit")
 			m.Update(subagentSpecialKey(tea.KeyEnter))
 			before := strings.Split(ansi.Strip(m.View().Content), "\n")
-			const y = 8
-			teamX := strings.Index(before[y], "Claude — Opus")
-			if teamX < 0 {
-				t.Fatalf("expected an actionable Team row at y=%d:\n%s", y, strings.Join(before, "\n"))
+			y := -1
+			teamX := -1
+			for rowY, line := range before {
+				if idx := strings.Index(line, "Claude — Opus"); idx >= 0 {
+					y, teamX = rowY, idx
+					break
+				}
+			}
+			if y < 0 || teamX < 0 {
+				t.Fatalf("expected an actionable Team row:\n%s", strings.Join(before, "\n"))
 			}
 			mouse := tea.Mouse{X: displayColumns(before[y][:teamX]), Y: y, Button: tea.MouseLeft}
 			teamGeometry := m.subagentOverlay.geometry
@@ -202,7 +208,7 @@ func TestTeamApprovalPromptCannotClickHiddenBinding(t *testing.T) {
 				Response: make(chan PromptResponse, 1),
 			})
 			approval := strings.Split(ansi.Strip(m.View().Content), "\n")
-			approvalX := strings.Index(approval[y], "Approval option 1")
+			approvalX := strings.Index(approval[y], "Approval option ")
 			if approvalX < 0 {
 				t.Fatalf("approval did not cover the previous Team row:\n%s", strings.Join(approval, "\n"))
 			}

@@ -35,25 +35,24 @@ Manual approval continues through the ACP permission bridge.
 
 In the picker, up/down selects a model and left/right adjusts its effort when
 the model supports a choice. Enter applies the selection and Esc discards the
-draft. The filled dot marks the currently applied model. For a role with a
-single picker, clicking the model applies it and clicking effort edits the draft.
-Changing effort on the current model preserves its configured speed. If another
-client saves Host configuration while the picker is open, Enter reloads the
-current Team after the save reports a conflict.
+draft. Clicking a model applies it and clicking effort edits the draft. Changing
+effort on the current model preserves its configured speed. If another client
+saves Host configuration while the picker is open, Enter reloads the current
+Team after the save reports a conflict.
 
 The same overlay includes fixed system roles; configuring a binding does not
 start a conversation:
 
 | Role | Binding behavior |
 | --- | --- |
-| Guardian | Uses a provider model, or the Main Agent model when unbound. |
+| Guardian | Uses a provider model, or the Session model when unbound. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
 
-When a judgment model is connected, Guardian's picker lists the classifier
-below the review models. Use up/down to move across both lists or click a row
-to select it. Search filters the focused list. Switching lists preserves the
-previous draft and clears its filter. Enter applies the highlighted choice
-and any selected draft in the other list. A selected classifier runs first, choosing only among the
+When a judgment model is connected, confirming Guardian's model opens
+`/team › Guardian › Classifier`, listing `Disabled` followed by connected
+classifier models. Enter applies both Guardian's model draft and classifier
+selection atomically; Esc returns to Guardian's model list with the draft
+intact. A selected classifier runs first, choosing only among the
 original approval options. Direct approval requires a decisive approve distribution and
 low probabilities of both missing decision-relevant facts and visible violations.
 Direct refusal requires a decisive deny distribution and a concrete visible

@@ -19,11 +19,12 @@ type slashOutputLine struct {
 }
 
 type slashOutputBlock struct {
-	id    string
-	lines []slashOutputLine
+	id        string
+	lines     []slashOutputLine
+	alignBody bool
 }
 
-func newSlashOutputBlock(lines []slashOutputLine) *slashOutputBlock {
+func newSlashOutputBlock(lines []slashOutputLine, alignBody bool) *slashOutputBlock {
 	out := make([]slashOutputLine, 0, len(lines))
 	for _, line := range lines {
 		out = append(out, slashOutputLine{
@@ -32,13 +33,19 @@ func newSlashOutputBlock(lines []slashOutputLine) *slashOutputBlock {
 			Plain: line.Plain,
 		})
 	}
-	return &slashOutputBlock{id: nextBlockID(), lines: out}
+	return &slashOutputBlock{id: nextBlockID(), lines: out, alignBody: alignBody}
 }
 
 func (b *slashOutputBlock) BlockID() string { return b.id }
 func (b *slashOutputBlock) Kind() BlockKind { return BlockTranscript }
 func (b *slashOutputBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	rows := make([]RenderedRow, 0, len(b.lines))
+	var inset int
+	if b.alignBody {
+		_, bodyIndent := narrativeLinePrefixes(tuikit.LineStyleAssistant)
+		inset = min(displayColumns(bodyIndent), max(0, ctx.Width-2))
+	}
+	pad := strings.Repeat(" ", inset)
 	for _, line := range b.lines {
 		if strings.TrimSpace(line.Text) == "" {
 			rows = append(rows, PlainRow(b.id, ""))
@@ -50,23 +57,32 @@ func (b *slashOutputBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		}
 		plain := line.Text
 		styled := tuikit.LineExtraGutter(style) + tuikit.ColorizeLogLine(line.Text, style, ctx.Theme)
+		if inset > 0 {
+			for _, segment := range splitStyledPhysicalLines(hardWrapDisplayLine(styled, ctx.Width-inset)) {
+				row := StyledRow(b.id, pad+segment)
+				row.PreWrapped = true
+				row.selectionIndent = inset
+				rows = append(rows, row)
+			}
+			continue
+		}
 		rows = append(rows, StyledPlainRow(b.id, plain, styled))
 	}
 	return rows
 }
 
 func (m *Model) handleSlashCommandResultMsg(msg SlashCommandResultMsg) (tea.Model, tea.Cmd) {
-	return m.appendSlashOutputLines(renderSlashCommandResultLines(msg.Result))
+	return m.appendSlashOutputLines(renderSlashCommandResultLines(msg.Result), false)
 }
 
-func (m *Model) appendSlashOutputLines(lines []slashOutputLine) (tea.Model, tea.Cmd) {
+func (m *Model) appendSlashOutputLines(lines []slashOutputLine, alignBody bool) (tea.Model, tea.Cmd) {
 	if len(lines) == 0 {
 		return m, nil
 	}
 	if m.hasCommittedLine {
 		m.appendSlashOutputSpacer()
 	}
-	block := newSlashOutputBlock(lines)
+	block := newSlashOutputBlock(lines, alignBody)
 	m.appendMainTranscriptBlock(block)
 	m.appendSlashOutputSpacer()
 	m.lastCommittedStyle = lastSlashOutputStyle(lines)

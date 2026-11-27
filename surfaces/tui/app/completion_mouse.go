@@ -12,9 +12,10 @@ import (
 const completionWheelPulseInterval = 35 * time.Millisecond
 
 type completionMouseTarget struct {
-	kind  completionKind
-	index int
-	key   string
+	kind        completionKind
+	index       int
+	key         string
+	effortDelta int
 }
 
 func (t completionMouseTarget) valid() bool {
@@ -49,6 +50,9 @@ func (m *Model) completionMouseTargetAt(
 		kind:  snapshot.kind,
 		index: index,
 		key:   m.completionKeyAt(snapshot.kind, index),
+	}
+	if snapshot.kind == completionSlashArg && m.isModelPicker() {
+		target.effortDelta = m.modelPickerEffortDeltaAt(index, geometry, mouse.X)
 	}
 	return target, target.valid()
 }
@@ -131,11 +135,17 @@ func (m *Model) handleCompletionMouseRelease(mouse tea.Mouse) (bool, tea.Cmd) {
 		return true, nil
 	}
 	released, hit := m.completionMouseTargetAt(snapshot, geometry, mouse)
-	if !hit || released.kind != pressed.kind || released.key != pressed.key {
+	if !hit || released.kind != pressed.kind || released.key != pressed.key || released.effortDelta != pressed.effortDelta {
 		return true, nil
 	}
 	m.pinCompletionWindow(geometry)
 	m.setCompletionIndex(snapshot.kind, released.index)
+	if released.effortDelta != 0 {
+		if candidate, ok := m.currentSlashArgCandidate(); ok {
+			m.adjustModelPickerEffort(candidate, released.effortDelta)
+		}
+		return true, nil
+	}
 	return true, m.activateCompletion(snapshot.kind)
 }
 

@@ -48,8 +48,12 @@ func TestTeamEntryPhysicalFrames(t *testing.T) {
 			g := model.subagentOverlay.geometry
 			rows := strings.Split(ansi.Strip(frames[2]), "\n")
 			bottom := size[1] - model.bottomSectionHeight()
+			headerY := g.y
+			if model.overlayUsesBorder() {
+				headerY++
+			}
 			if g.x != inputHorizontalInset || g.y+g.height != bottom ||
-				!strings.Contains(rows[g.closeY], "/team") ||
+				!strings.Contains(rows[headerY], "/team") ||
 				g.rows[3] < 0 || !strings.Contains(rows[g.rows[3]], "Guardian") ||
 				!strings.Contains(strings.Join(rows[bottom:], "\n"), "> /team ") {
 				t.Fatalf("team picker did not paint above the composer at its hit-test coordinates: %+v\n%s", g, strings.Join(rows, "\n"))

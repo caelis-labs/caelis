@@ -89,13 +89,23 @@ func TestRuntimeTeamHTTPStaleGuardianDraftRequiresReload(t *testing.T) {
 		t.Fatalf("no visible label %q", label)
 	}
 	click("custom/guardian-draft")
-	if !selectedTeamModel(m.View().Content, "custom/guardian-draft") {
-		t.Fatal("review draft was not explicitly selected")
+	if frame := ansi.Strip(m.View().Content); !strings.Contains(frame, "/team › Guardian › Classifier") || !selectedTeamModel(frame, "Disabled") {
+		t.Fatalf("click did not stage the review model and open the Classifier picker:\n%s", frame)
 	}
-	click("custom/jev-1.13.0")
-	frame := ansi.Strip(m.View().Content)
-	if !strings.Contains(frame, "guardian-draft") || !strings.Contains(frame, "Classifier") || !selectedTeamModel(frame, "custom/jev-1.13.0") {
-		t.Fatalf("missing Guardian pair draft:\n%s", frame)
+	key(tea.KeyEscape)
+	if !selectedTeamModel(m.View().Content, "custom/guardian-draft") {
+		t.Fatal("returning from the Classifier picker did not restore the staged review model")
+	}
+	if cmd := key(tea.KeyEnter); cmd != nil {
+		t.Fatal("reopening the Classifier picker ran a command")
+	}
+	// Selecting by keyboard keeps the pair pending until Enter. A row click
+	// on the Classifier page would confirm the pair immediately.
+	if cmd := key(tea.KeyDown); cmd != nil {
+		t.Fatal("moving to the classifier ran a command")
+	}
+	if frame := m.View().Content; !selectedTeamModel(frame, "custom/jev-1.13.0") {
+		t.Fatalf("missing selected classifier draft:\n%s", ansi.Strip(frame))
 	}
 	bindRuntimeTeamHTTP(t, ctx, host, agentbinding.HandleGuardian, "guardian-concurrent", "concurrent-reviewer")
 	if binding := savedBinding(agentbinding.HandleGuardian); !strings.HasSuffix(binding.ProfileID, "/guardian-concurrent") {

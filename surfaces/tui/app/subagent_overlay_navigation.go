@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func (m *Model) subagentRows() []subagentOverlayRow {
@@ -52,47 +53,28 @@ func (m *Model) openSubagentBinding(handle agentbinding.Handle) {
 		index: state.index, key: m.currentSubagentRow().key, query: state.query,
 	}
 	state.bindingHandle = handle
+	state.stagedBinding = agentbinding.Binding{}
+	state.hasClassifiers = handle == agentbinding.HandleGuardian && len(m.subagentBindingRows(agentbinding.HandleGuardianScreen)) > 1
 	m.restoreSubagentPage(subagentPageBinding, subagentOverlayNav{})
-	state.selectCurrent()
-	if handle == agentbinding.HandleGuardian {
-		rows := m.subagentBindingRows(agentbinding.HandleGuardianScreen)
-		if len(rows) > 1 {
-			state.classifierAvailable = true
-			state.draft = m.currentSubagentRow().binding
-			state.other = subagentList{rows: rows}
-			state.other.selectCurrent()
-			state.other.draft = state.other.rows[state.other.index].binding
-		}
-	}
+	m.selectCurrentSubagentBinding(handle)
 }
 
-func (list *subagentList) selectCurrent() {
-	for i, row := range list.rows {
-		if row.current {
-			list.index = i
+func (m *Model) selectCurrentSubagentBinding(handle agentbinding.Handle) {
+	state := m.subagentOverlay
+	if state == nil {
+		return
+	}
+	currentID := modelprofile.NormalizeID(state.currentBinding(handle).ProfileID)
+	for i, row := range state.rows {
+		if currentID == "" && row.reset {
+			state.index = i
+			return
+		}
+		if currentID != "" && modelprofile.NormalizeID(row.binding.ProfileID) == currentID {
+			state.index = i
 			return
 		}
 	}
-}
-
-func (m *Model) focusSubagentClassifier(focus bool) {
-	state := m.subagentOverlay
-	if !state.guardianPicker() || state.classifierFocused == focus {
-		return
-	}
-	// The filter belongs to the focused section. Restore the previous
-	// section's draft to view before moving focus to the other section.
-	state.query = ""
-	m.refreshSubagentRows("")
-	for i, row := range state.rows {
-		if row.binding == state.draft {
-			state.index = i
-			break
-		}
-	}
-	state.subagentList, state.other = state.other, state.subagentList
-	state.classifierFocused = focus
-	state.pressedKey = ""
 }
 
 func (m *Model) restoreSubagentPage(page subagentOverlayPage, nav subagentOverlayNav) {
@@ -103,19 +85,29 @@ func (m *Model) restoreSubagentPage(page subagentOverlayPage, nav subagentOverla
 	m.refreshSubagentRows(nav.key)
 }
 
+func (m *Model) returnToSubagentMain() {
+	state := m.subagentOverlay
+	if state == nil {
+		return
+	}
+	state.selectedEffortByProfile = nil
+	state.stagedBinding = agentbinding.Binding{}
+	state.hasClassifiers = false
+	state.bindingParent = subagentOverlayNav{}
+	m.restoreSubagentPage(subagentPageMain, state.parent)
+}
+
 func (m *Model) backSubagentOverlay() {
 	state := m.subagentOverlay
 	if state == nil || state.pending {
 		return
 	}
-	if state.page == subagentPageMain {
+	switch state.page {
+	case subagentPageMain:
 		m.subagentOverlay = nil
-		return
+	case subagentPageClassifier:
+		m.restoreSubagentPage(subagentPageBinding, state.bindingParent)
+	case subagentPageBinding:
+		m.returnToSubagentMain()
 	}
-	state.selectedEffortByProfile = nil
-	state.draft = agentbinding.Binding{}
-	state.other = subagentList{}
-	state.classifierFocused = false
-	state.classifierAvailable = false
-	m.restoreSubagentPage(subagentPageMain, state.parent)
 }
