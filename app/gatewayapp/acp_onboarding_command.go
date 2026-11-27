@@ -333,14 +333,7 @@ func (s *controlCommandBackend) ownedACPPreparation(ctx context.Context, princip
 	if s == nil {
 		return controlagents.ACPPreparation{}, errors.New("gatewayapp: ACP preparation is unavailable")
 	}
-	preparation, err := ownedACPPreparation(s.acpPreparations, ctx, principalID, ref, digest)
-	if err != nil {
-		return controlagents.ACPPreparation{}, err
-	}
-	if isRetiredAntigravityConnection(preparation.Connection) {
-		return controlagents.ACPPreparation{}, errorcode.New(errorcode.FailedPrecondition, "The standalone Antigravity ACP launcher is retired. Reconnect Google Antigravity in /connect.")
-	}
-	return preparation, nil
+	return ownedACPPreparation(s.acpPreparations, ctx, principalID, ref, digest)
 }
 
 func ownedACPPreparation(store *acpPreparationStore, ctx context.Context, principalID, ref, digest string) (controlagents.ACPPreparation, error) {
@@ -353,6 +346,11 @@ func ownedACPPreparation(store *acpPreparationStore, ctx context.Context, princi
 	}
 	if preparation.PrincipalID != strings.TrimSpace(principalID) {
 		return controlagents.ACPPreparation{}, appserver.ErrUnauthorized
+	}
+	// Historical receipts can retain a reference after its endpoint is retired.
+	if preparation.Request.AdapterID == agentregistry.RetiredAntigravityID ||
+		preparation.Connection.ID == agentregistry.RetiredAntigravityID {
+		return controlagents.ACPPreparation{}, errACPPreparationNotFound
 	}
 	if digest = strings.ToLower(strings.TrimSpace(digest)); digest != "" && preparation.ContentDigest != digest {
 		return controlagents.ACPPreparation{}, errACPPreparationConflict

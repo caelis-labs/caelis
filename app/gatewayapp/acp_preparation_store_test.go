@@ -309,8 +309,9 @@ func TestACPPreparationStoreRetainsInstallationConfirmationAfterRestart(t *testi
 	dir := t.TempDir()
 	store := newTestACPPreparationStore(t, dir)
 	planned := testPlannedACPPreparation("owner", "install-runtime", "e")
+	planned.Request.AdapterID = "fixture-acp"
 	planned.Request.Launcher = controlagents.LauncherChoiceInstalled
-	planned.Request.Install = &controlagents.RuntimeInstallation{Directory: "/tools/antigravity", ArchiveURL: "https://dl.google.com/runtime.zip"}
+	planned.Request.Install = &controlagents.RuntimeInstallation{Directory: "/tools/fixture-acp", ArchiveURL: "https://example.invalid/fixture-acp.zip"}
 	created, err := store.CreatePlanned(t.Context(), planned)
 	if err != nil {
 		t.Fatal(err)

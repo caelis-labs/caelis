@@ -16,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -78,6 +80,63 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 	prepared, getErr := stack.commandBackend.acpPreparations.Get(context.Background(), recovered.Resource.Ref)
 	if getErr != nil || prepared.State != controlagents.PreparationStateReady || prepared.ContentDigest != recovered.Resource.Digest {
 		t.Fatalf("recovered preparation = %#v, %v", prepared, getErr)
+	}
+}
+
+func TestRetiredACPPreparationCannotResumeOnboarding(t *testing.T) {
+	for _, command := range []string{"agy", "agy_acp_server.par", "agy_acp_server.exe"} {
+		t.Run(command, func(t *testing.T) {
+			stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+			ctx := t.Context()
+			principal := appserver.Principal{ID: stack.composition.authorities.userID}
+			revision := currentConfigurationRevision(t, stack)
+			store := stack.commandBackend.acpPreparations
+			planned := testPlannedACPPreparation(principal.ID, "old-prepare", "a")
+			planned.Request.AdapterID = "antigravity"
+			planned.Request.Launcher = controlagents.LauncherChoiceInstalled
+			planned.ObservedRevision = revision
+			planned, err := store.CreatePlanned(ctx, planned)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			challenge := testNeedsAuthACPPreparation(planned)
+			challenge.Connection = controlagents.Connection{ID: "antigravity", Launcher: controlagents.Launcher{Command: command}}
+			challenge, err = store.Save(ctx, planned.ContentDigest, challenge)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := stack.ACPPreparationReads().Preparation(ctx, principal.ID, challenge.Ref); errorcode.CodeOf(err) != errorcode.NotFound {
+				t.Fatalf("read cached ACP challenge error = %v, want not found", err)
+			}
+			auth, err := stack.AgentCommands().PrepareACPAuthentication(ctx, principal, appserver.PrepareACPAuthenticationRequest{
+				WriteBase:      appserver.WriteBase{OperationID: "retired-auth", ExpectedRevision: &revision},
+				PreparationRef: challenge.Ref, PreparationDigest: challenge.ContentDigest, MethodID: "login",
+			})
+			if err == nil || auth.Outcome != appserver.OutcomeRejected || auth.Resource != nil {
+				t.Fatalf("authenticate cached ACP challenge = %#v, %v; want rejected", auth, err)
+			}
+
+			ready := testReadyACPPreparation(challenge)
+			ready.Connection = challenge.Connection
+			ready.Connection.Authentication = ready.SelectedAuthentication
+			ready.Discovery.ConnectionID = ready.Connection.ID
+			ready.Discovery.LaunchFingerprint = controlagents.LaunchFingerprint(ready.Connection.Launcher)
+			ready, err = store.Save(ctx, challenge.ContentDigest, ready)
+			if err != nil {
+				t.Fatal(err)
+			}
+			connected, err := stack.AgentCommands().ConnectACP(ctx, principal, appserver.ConnectACPRequest{
+				WriteBase:      appserver.WriteBase{OperationID: "retired-connect", ExpectedRevision: &revision},
+				PreparationRef: ready.Ref, PreparationDigest: ready.ContentDigest,
+			})
+			if err == nil || connected.Outcome != appserver.OutcomeRejected || connected.Resource != nil {
+				t.Fatalf("connect cached ACP preparation = %#v, %v; want rejected", connected, err)
+			}
+			if observed := currentConfigurationRevision(t, stack); observed != revision {
+				t.Fatalf("configuration revision = %d, want %d", observed, revision)
+			}
+		})
 	}
 }
 

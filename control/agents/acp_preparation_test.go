@@ -179,11 +179,11 @@ func bytesOf(fill byte, count int) []byte {
 }
 
 func TestACPPreparationBindsDetachedInstallationConfirmation(t *testing.T) {
-	in := ACPPrepareRequest{AdapterID: "antigravity", Launcher: LauncherChoiceInstalled,
-		Install: &RuntimeInstallation{Directory: " /tools/antigravity ", ArchiveURL: " https://dl.google.com/runtime.zip ", SHA256: strings.Repeat("A", 64)}}
+	in := ACPPrepareRequest{AdapterID: "fixture-acp", Launcher: LauncherChoiceInstalled,
+		Install: &RuntimeInstallation{Directory: " /tools/fixture-acp ", ArchiveURL: " https://example.invalid/fixture-acp.zip ", SHA256: strings.Repeat("A", 64)}}
 	normalized := NormalizeACPPrepareRequest(in)
 	in.Install.Directory = "/changed"
-	if normalized.Install.Directory != "/tools/antigravity" || normalized.Install.SHA256 != strings.Repeat("a", 64) {
+	if normalized.Install.Directory != "/tools/fixture-acp" || normalized.Install.SHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("confirmation not normalized/detached: %#v", normalized.Install)
 	}
 	p := sealACPPreparationForTest(t, ACPPreparation{Ref: acpPreparationRefForTest(9), State: PreparationStatePlanned,

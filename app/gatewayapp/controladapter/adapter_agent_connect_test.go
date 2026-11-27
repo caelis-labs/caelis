@@ -2,6 +2,9 @@ package controladapter
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,7 +14,7 @@ import (
 func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testing.T) {
 	candidates := completeConnectACPAgents("", 20)
 	nativeAgents := []string{
-		"antigravity", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
 		"auggie", "cline", "factory-droid", "goose", "kilo",
 	}
 	if len(candidates) == 0 || candidates[0].Value != "codex" {
@@ -22,7 +25,7 @@ func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testi
 			t.Fatalf("ACP Agent candidates = %#v, want %q", candidates, want)
 		}
 	}
-	for _, removed := range []string{"claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+	for _, removed := range []string{"antigravity", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
 		if slashCandidatesHaveValue(candidates, removed) {
 			t.Fatalf("ACP Agent candidates = %#v, removed Registry entry %q remains", candidates, removed)
 		}
@@ -44,6 +47,28 @@ func TestCompleteConnectACPIncludesBuiltInNativeCatalogAndCustomCommand(t *testi
 	custom := completeConnectACPLaunchers("custom", "", 10)
 	if len(custom) != 1 || custom[0].Value != "command" {
 		t.Fatalf("custom launchers = %#v, want custom command only", custom)
+	}
+}
+
+func TestConnectOptionsUseSupportedACPCommandsOnPATH(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	for _, command := range []string{"agy", "gemini"} {
+		if runtime.GOOS == "windows" {
+			command += ".exe"
+		}
+		if err := os.WriteFile(filepath.Join(dir, command), nil, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	options, err := completeConnectOptions(t.Context(), nil, "acp:", 0)
+	if err != nil || len(options) != 2 ||
+		!slashCandidatesHaveValue(options, "acp:gemini:installed") ||
+		!slashCandidatesHaveValue(options, "acp:custom:command") {
+		t.Fatalf("ACP options = %#v, %v", options, err)
+	}
+	if launchers := completeConnectACPLaunchers("antigravity", "", 0); len(launchers) != 0 {
+		t.Fatalf("retired ACP launchers = %#v", launchers)
 	}
 }
 
