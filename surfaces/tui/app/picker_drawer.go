@@ -86,20 +86,21 @@ func (m *Model) renderPickerKeycapFooter(full, compact, minimal []pickerKeycapIt
 	if maxWidth <= 0 {
 		return ""
 	}
-	candidates := [][]pickerKeycapItem{full, compact, minimal}
-	for idx, items := range candidates {
+	var fallback []pickerKeycapItem
+	for _, items := range [][]pickerKeycapItem{full, compact, minimal} {
 		if len(items) == 0 {
 			continue
 		}
-		rendered := m.formatPickerKeycaps(items)
-		if displayColumns(rendered) <= maxWidth || idx == len(candidates)-1 {
-			return truncateTailDisplay(rendered, maxWidth)
+		fallback = items
+		rendered := m.formatPickerKeycaps(items, "   ")
+		if displayColumns(rendered) <= maxWidth {
+			return rendered
 		}
 	}
-	return ""
+	return ansi.Truncate(m.formatPickerKeycaps(fallback, " "), maxWidth, "…")
 }
 
-func (m *Model) formatPickerKeycaps(items []pickerKeycapItem) string {
+func (m *Model) formatPickerKeycaps(items []pickerKeycapItem, separator string) string {
 	keyStyle := m.theme.TextStyle().Bold(true)
 	hintStyle := m.theme.Tokens().ListMeta
 	parts := make([]string, 0, len(items))
@@ -113,7 +114,7 @@ func (m *Model) formatPickerKeycaps(items []pickerKeycapItem) string {
 			parts = append(parts, keyStyle.Render(item.key)+" "+hintStyle.Render(item.label))
 		}
 	}
-	return strings.Join(parts, "   ")
+	return strings.Join(parts, separator)
 }
 
 func newPickerModelTableLayout(contentWidth int, specs []pickerModelRowSpec) pickerModelTableLayout {

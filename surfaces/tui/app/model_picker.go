@@ -24,15 +24,14 @@ type modelPickerDraft struct {
 // modelPickerState contains only unconfirmed edits. Capabilities and the
 // effective selection come from Control's completion projection.
 type modelPickerState struct {
-	step               modelPickerStep
-	drafts             map[string]modelPickerDraft
-	selected           string
-	loadFailed         bool
-	speedCandidate     SlashArgCandidate
-	speedIndex         int
-	hitStart           int
-	effortHits         []pickerEffortHit
-	pressedEffortDelta int
+	step           modelPickerStep
+	drafts         map[string]modelPickerDraft
+	selected       string
+	loadFailed     bool
+	speedCandidate SlashArgCandidate
+	speedIndex     int
+	hitStart       int
+	effortHits     []pickerEffortHit
 }
 
 func (m *Model) isModelPicker() bool {
@@ -214,10 +213,32 @@ func (m *Model) modelPickerEffortDeltaAt(candidateIndex int, geometry completion
 }
 
 func modelPickerSourceLabel(candidate SlashArgCandidate, candidates []SlashArgCandidate) string {
-	identity := firstNonEmpty(candidate.Display, candidate.Value)
+	identity := slashArgCandidateIdentity(candidate)
 	if !slashArgIdentityDuplicated(identity, candidates) {
 		return ""
 	}
+	source := modelPickerShortSource(candidate)
+	detail := strings.Join(strings.Fields(candidate.Detail), " ")
+	var useDetail bool
+	for _, other := range candidates {
+		if other.Value == candidate.Value || !strings.EqualFold(identity, slashArgCandidateIdentity(other)) ||
+			!strings.EqualFold(source, modelPickerShortSource(other)) {
+			continue
+		}
+		if detail == "" || strings.EqualFold(detail, strings.Join(strings.Fields(other.Detail), " ")) {
+			// A display name and endpoint description can both collide, for
+			// example when two endpoints differ only by the URL path.
+			return candidate.Value
+		}
+		useDetail = true
+	}
+	if useDetail {
+		return detail
+	}
+	return source
+}
+
+func modelPickerShortSource(candidate SlashArgCandidate) string {
 	if source := shortModelAliasDisambiguator(candidate.Detail); source != "" {
 		return source
 	}
@@ -237,11 +258,15 @@ func (m *Model) renderModelPicker(geometry completionOverlayGeometry, candidates
 		if effort := strings.TrimSpace(draft.effort); effort != "" && effort != "none" {
 			title += " [" + effort + "]"
 		}
-		lines := m.pickerDrawerHeaderLines(contentWidth, []string{"/model"}, title, completionScrollAffordance{}, showRule)
-		lines = append(lines,
-			m.renderPickerSimpleRow("Standard", "Normal priority", m.modelPicker.speedIndex == 0, contentWidth, 10),
-			m.renderPickerSimpleRow("Fast", "Priority speed", m.modelPicker.speedIndex == 1, contentWidth, 10),
-		)
+		lines := m.pickerDrawerHeaderLines(contentWidth, []string{"/model"}, title, geometry.scroll, showRule)
+		speeds := [...]struct{ label, detail string }{
+			{"Standard", "Normal priority"},
+			{"Fast", "Priority speed"},
+		}
+		for i := geometry.windowStart; i < geometry.windowEnd; i++ {
+			speed := speeds[i]
+			lines = append(lines, m.renderPickerSimpleRow(speed.label, speed.detail, i == geometry.selected, contentWidth, 10))
+		}
 		return m.renderCompletionOverlay(geometry, lines)
 	}
 

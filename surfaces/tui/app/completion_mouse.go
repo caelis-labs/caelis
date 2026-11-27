@@ -12,9 +12,10 @@ import (
 const completionWheelPulseInterval = 35 * time.Millisecond
 
 type completionMouseTarget struct {
-	kind  completionKind
-	index int
-	key   string
+	kind        completionKind
+	index       int
+	key         string
+	effortDelta int
 }
 
 func (t completionMouseTarget) valid() bool {
@@ -49,6 +50,9 @@ func (m *Model) completionMouseTargetAt(
 		kind:  snapshot.kind,
 		index: index,
 		key:   m.completionKeyAt(snapshot.kind, index),
+	}
+	if snapshot.kind == completionSlashArg && m.isModelPicker() {
+		target.effortDelta = m.modelPickerEffortDeltaAt(index, geometry, mouse.X)
 	}
 	return target, target.valid()
 }
@@ -113,9 +117,6 @@ func (m *Model) handleCompletionMousePress(mouse tea.Mouse) (bool, tea.Cmd) {
 		m.setCompletionIndex(snapshot.kind, target.index)
 		m.completionMouse.press = target
 		m.completionMouse.pressActive = true
-		if m.modelPicker != nil {
-			m.modelPicker.pressedEffortDelta = m.modelPickerEffortDeltaAt(target.index, geometry, mouse.X)
-		}
 	}
 	return true, nil
 }
@@ -125,11 +126,6 @@ func (m *Model) handleCompletionMouseRelease(mouse tea.Mouse) (bool, tea.Cmd) {
 		return false, nil
 	}
 	pressed := m.completionMouse.press
-	pressedDelta := 0
-	if m.modelPicker != nil {
-		pressedDelta = m.modelPicker.pressedEffortDelta
-		m.modelPicker.pressedEffortDelta = 0
-	}
 	m.cancelCompletionMousePress()
 	if mouse.Button != tea.MouseLeft && mouse.Button != tea.MouseNone {
 		return true, nil
@@ -139,19 +135,16 @@ func (m *Model) handleCompletionMouseRelease(mouse tea.Mouse) (bool, tea.Cmd) {
 		return true, nil
 	}
 	released, hit := m.completionMouseTargetAt(snapshot, geometry, mouse)
-	if !hit || released.kind != pressed.kind || released.key != pressed.key {
+	if !hit || released.kind != pressed.kind || released.key != pressed.key || released.effortDelta != pressed.effortDelta {
 		return true, nil
 	}
 	m.pinCompletionWindow(geometry)
 	m.setCompletionIndex(snapshot.kind, released.index)
-	if m.isModelPicker() && !m.isModelPickerSpeedStep() {
-		delta := m.modelPickerEffortDeltaAt(released.index, geometry, mouse.X)
-		if delta != 0 && delta == pressedDelta {
-			if candidate, ok := m.currentSlashArgCandidate(); ok {
-				m.adjustModelPickerEffort(candidate, delta)
-				return true, nil
-			}
+	if released.effortDelta != 0 {
+		if candidate, ok := m.currentSlashArgCandidate(); ok {
+			m.adjustModelPickerEffort(candidate, released.effortDelta)
 		}
+		return true, nil
 	}
 	return true, m.activateCompletion(snapshot.kind)
 }

@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
@@ -223,9 +224,6 @@ func TestModelPickerHoverAndEffortClick(t *testing.T) {
 	}
 	lines := strings.Split(ansi.Strip(model.renderInputOverlay()), "\n")
 	rowLine := lines[geometry.candidateTop-geometry.top+1]
-	if !strings.Contains(rowLine, "high") {
-		rowLine = lines[geometry.candidateTop-geometry.top+1]
-	}
 	idx := strings.Index(rowLine, "high")
 	if idx < 0 {
 		t.Fatalf("missing effort text on row 1:\n%s", strings.Join(lines, "\n"))
@@ -239,6 +237,116 @@ func TestModelPickerHoverAndEffortClick(t *testing.T) {
 	if draft := model.modelPickerDraft(model.slashArgCandidates[1]); draft.effort != "medium" {
 		t.Fatalf("clicking left side of effort = %q, want medium", draft.effort)
 	}
+}
+
+func TestModelPickerShortSpeedStepOnlyClicksPaintedChoice(t *testing.T) {
+	for _, next := range []string{"Standard", "Fast"} {
+		t.Run(next, func(t *testing.T) {
+			model, submitted := newModelPickerTestModel(t)
+			model.slashArgCandidates[1].ModelSelection.Fast = next == "Standard"
+			model.Update(tea.WindowSizeMsg{Width: 100, Height: 10})
+			model.Update(keyPress("enter"))
+			frame := ansi.Strip(model.View().Content)
+			if !model.isModelPickerSpeedStep() || strings.Contains(frame, next) {
+				t.Fatalf("the other speed should be offscreen initially:\n%s", frame)
+			}
+			model.Update(keyPress("down"))
+			point := modelPickerPoint(t, model, "› "+next, next)
+			model.Update(tea.MouseClickMsg(point))
+			_, cmd := model.Update(tea.MouseReleaseMsg(point))
+			if cmd == nil {
+				t.Fatal("clicking the painted speed did not submit")
+			}
+			findAndRunTaskResult(cmd(), model)
+			want := "/model openai/sol high"
+			if next == "Fast" {
+				want += " fast"
+			}
+			if len(*submitted) != 1 || (*submitted)[0] != want {
+				t.Fatalf("submitted %q, want %q", *submitted, want)
+			}
+		})
+	}
+}
+
+func TestModelPickerCancelsCrossRegionClick(t *testing.T) {
+	for _, fast := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fast-supported=%t", fast), func(t *testing.T) {
+			model, submitted := newModelPickerTestModel(t)
+			model.slashArgCandidates[1].ModelSelection.FastSupported = fast
+			name := modelPickerPoint(t, model, "› Sol", "Sol")
+			effort := modelPickerPoint(t, model, "› Sol", "high")
+			for _, pair := range [][2]tea.Mouse{{effort, name}, {name, effort}} {
+				model.Update(tea.MouseClickMsg(pair[0]))
+				model.Update(tea.MouseMotionMsg(pair[1]))
+				_, cmd := model.Update(tea.MouseReleaseMsg(pair[1]))
+				if cmd != nil || model.isModelPickerSpeedStep() || len(*submitted) != 0 {
+					t.Fatal("cross-region drag confirmed the model")
+				}
+				if draft := model.modelPickerDraft(model.slashArgCandidates[1]); draft.effort != "high" {
+					t.Fatalf("cross-region drag adjusted effort to %q", draft.effort)
+				}
+			}
+		})
+	}
+}
+
+func TestModelPickerDisambiguatesSameProviderEndpoints(t *testing.T) {
+	for _, sameHost := range []bool{false, true} {
+		t.Run(fmt.Sprintf("same-host=%t", sameHost), func(t *testing.T) {
+			model, submitted := newModelPickerTestModel(t)
+			model.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+			eastHost, westHost := "east.example", "west.example"
+			if sameHost {
+				westHost = eastHost
+			}
+			east := modelPickerEndpointCandidate("east", eastHost)
+			west := modelPickerEndpointCandidate("west", westHost)
+			model.applySlashArgCandidates("model", "", []SlashArgCandidate{east, west}, nil)
+			eastLabel, westLabel := eastHost, westHost
+			if sameHost {
+				eastLabel, westLabel = east.Value, west.Value
+			}
+			left := modelPickerPoint(t, model, "openai/shared", eastLabel)
+			right := modelPickerPoint(t, model, "openai/shared", westLabel)
+			if left.Y == right.Y {
+				t.Fatal("distinct endpoint labels were not rendered on separate rows")
+			}
+			model.Update(tea.MouseClickMsg(right))
+			_, cmd := model.Update(tea.MouseReleaseMsg(right))
+			if cmd == nil {
+				t.Fatal("endpoint click did not submit")
+			}
+			findAndRunTaskResult(cmd(), model)
+			if want := "/model " + west.Value + " none"; len(*submitted) != 1 || (*submitted)[0] != want {
+				t.Fatalf("submitted %q, want %q", *submitted, want)
+			}
+		})
+	}
+}
+
+func modelPickerEndpointCandidate(endpoint, host string) SlashArgCandidate {
+	config := modelconfig.NormalizeConfig(modelconfig.Config{
+		Provider: "openai", Model: "shared", EndpointID: "custom-" + endpoint,
+		BaseURL: "https://" + host + "/" + endpoint,
+	})
+	return SlashArgCandidate{
+		Value: modelconfig.PublicSelector(config), Display: modelconfig.DisplayName(config),
+		Detail: modelconfig.ChoiceDetail(config), ModelConfigID: config.ID,
+		ModelSelection: &appserver.ModelSelection{Efforts: []string{"none"}, Effort: "none"},
+	}
+}
+
+func modelPickerPoint(t *testing.T, model *Model, rowLabel, target string) tea.Mouse {
+	t.Helper()
+	frame := ansi.Strip(model.View().Content)
+	for y, line := range strings.Split(frame, "\n") {
+		if x := strings.Index(line, target); x >= 0 && strings.Contains(line, rowLabel) {
+			return tea.Mouse{X: displayColumns(line[:x]), Y: y, Button: tea.MouseLeft}
+		}
+	}
+	t.Fatalf("target %q missing from row %q:\n%s", target, rowLabel, frame)
+	return tea.Mouse{}
 }
 
 func TestModelPickerUsesMainPanePaintAndPointerOrigin(t *testing.T) {

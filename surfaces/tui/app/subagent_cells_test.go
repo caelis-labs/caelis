@@ -236,6 +236,10 @@ func TestTeamCellFocusRenderedFrames(t *testing.T) {
 				if strings.Contains(plain, "7/12") || strings.Contains(plain, "Choose Agent model") || strings.Contains(plain, "▽") {
 					t.Fatal("obsolete menu text")
 				}
+				footer := plain[strings.LastIndex(plain, "\n")+1:]
+				if !strings.Contains(footer, "enter") || !strings.Contains(footer, "esc") {
+					t.Fatalf("footer lost key hints: %q", footer)
+				}
 				// Keep reviewable full frames for both menus at wide and narrow sizes.
 				name := fmt.Sprintf("team-%d-picker-%t", width, picker)
 				path := filepath.Join("testdata", "team", name+".golden")

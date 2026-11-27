@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
@@ -209,6 +211,63 @@ func TestSlashNoticeOutputUsesAlignedPlainText(t *testing.T) {
 	single := renderSlashNoticeLines(SlashNoticeMsg{Text: "Switched to openai-codex/gpt-5.6-sol"})
 	if len(single) != 1 || single[0].Text != "Switched to openai-codex/gpt-5.6-sol" || !single[0].Plain {
 		t.Fatalf("single-line notice = %#v", single)
+	}
+}
+
+func TestSlashNoticeFrameAlignsWithChatBodyWithoutChangingCopy(t *testing.T) {
+	const confirmation = "Switched to openai/模型-provider-model-with-a-long-alias"
+	const followup = "Provider changed"
+	for _, width := range []int{100, 24} {
+		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			model.Update(tea.WindowSizeMsg{Width: width, Height: 36})
+			turn := NewMainACPTurnBlock("turn")
+			turn.Events = []SubagentEvent{{Kind: SEAssistant, Text: "Chat body"}}
+			turn.Status = "completed"
+			model.appendMainTranscriptBlock(turn)
+			model.Update(SlashNoticeMsg{Text: confirmation + "\r\n\r\n" + followup})
+			model.Update(SlashCommandResultMsg{Result: controlprompt.NewTableSlashResult("team", controlprompt.SlashTableSnapshot{
+				Sections: []controlprompt.SlashTableSection{{Columns: []string{"Role", "Model"}, Rows: [][]string{{"orbit", "sol"}}}},
+			})})
+			model.syncViewportContent()
+
+			frame := ansi.Strip(model.View().Content)
+			bodyLine := styledLineContaining(t, frame, "Chat body")
+			bodyColumn := displayColumns(bodyLine[:strings.Index(bodyLine, "Chat body")])
+			for _, token := range []string{"Switched to", "Provider changed"} {
+				line := styledLineContaining(t, frame, token)
+				if got := displayColumns(line[:strings.Index(line, token)]); got != bodyColumn {
+					t.Fatalf("%q starts at %d, chat body starts at %d:\n%s", token, got, bodyColumn, frame)
+				}
+			}
+			tableLine := styledLineContaining(t, frame, "Role   Model")
+			if got, want := leadingSpaces(tableLine), model.mainColumnX()+tuikit.GutterNarrative+2; got != want {
+				t.Fatalf("table header indent = %d, want %d:\n%s", got, want, frame)
+			}
+
+			lines := model.viewportPlainLines
+			first := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, "Switched to") })
+			last := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, followup) })
+			if first < 0 || last <= first {
+				t.Fatalf("notice missing from selectable viewport rows: %q", lines)
+			}
+			inset := bodyColumn - model.mainColumnX() - tuikit.GutterNarrative
+			wrapped := normalizeWrappedPlainSegments(graphemeHardWrap(confirmation, model.viewport.Width()-inset))
+			if width == 24 && len(wrapped) < 2 {
+				t.Fatal("narrow fixture did not wrap")
+			}
+			for _, line := range lines[first : last+1] {
+				if line != "" && (leadingSpaces(line) != inset || displayColumns(line) > model.viewport.Width()) {
+					t.Fatalf("notice row is misaligned or too wide: %q", line)
+				}
+			}
+			model.selectionStart = textSelectionPoint{line: first}
+			model.selectionEnd = textSelectionPoint{line: last, col: displayColumns(lines[last])}
+			want := strings.Join(append(wrapped, "", followup), "\n")
+			if got := model.selectionText(); got != want {
+				t.Fatalf("copied %q, want %q", got, want)
+			}
+		})
 	}
 }
 

@@ -41,7 +41,7 @@ func (m *Model) handleSlashNoticeMsg(msg SlashNoticeMsg) (tea.Model, tea.Cmd) {
 			clearAfter:     systemHintDuration,
 		})
 	}
-	return m.appendSlashOutputLines(renderSlashNoticeLines(msg))
+	return m.appendSlashOutputLines(renderSlashNoticeLines(msg), true)
 }
 
 func sendNotice(send func(tea.Msg), text string, placement SlashNoticePlacement) {
