@@ -12,6 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 )
 
 type userInputTestBackend struct {
@@ -38,7 +39,8 @@ func TestUserInputWaitsAndKeepsExactTargetAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "control.sqlite")
 	backend := &userInputTestBackend{threads: []Thread{userInputTestTarget()}}
 	backend.threads[0].CanDeliver = false
-	service, err := Open(path, backend)
+	attachments := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), Attachments: true})
+	service, err := OpenWithAttachments(path, backend, attachments, attachments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +53,9 @@ func TestUserInputWaitsAndKeepsExactTargetAcrossRestart(t *testing.T) {
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("pending=%v,%v", pending, err)
 	}
+	if pending[0].ContentParts[0].Data != "" || pending[0].attachmentRefs[0].SessionID != "child" {
+		t.Fatal("admission ledger does not contain a child-owned image reference")
+	}
 	if err := service.deliverUserInput(t.Context(), backend, pending[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +65,7 @@ func TestUserInputWaitsAndKeepsExactTargetAcrossRestart(t *testing.T) {
 	if err := service.Close(); err != nil {
 		t.Fatal(err)
 	}
-	service, err = Open(path, backend)
+	service, err = OpenWithAttachments(path, backend, attachments, attachments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +81,10 @@ func TestUserInputWaitsAndKeepsExactTargetAcrossRestart(t *testing.T) {
 	if len(backend.inputs[0].ContentParts) != 1 || backend.inputs[0].ContentParts[0].Data != "aGk=" {
 		t.Fatal("restart lost queued image")
 	}
-	// Replaying the same operation after detachment returns its original receipt.
+	if _, err := attachments.PruneAttachments(t.Context(), "child", time.Now().Add(time.Hour), true); err != nil {
+		t.Fatal(err)
+	}
+	// Replaying the same operation after detachment and pruning returns its original receipt.
 	backend.threads = nil
 	status, err = service.EnqueueUserInput(t.Context(), "input", "user", "parent", "participant", "task", "guide", parts)
 	if err != nil || status.State != "sent" {

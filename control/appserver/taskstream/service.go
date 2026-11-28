@@ -7,11 +7,14 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/names"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
@@ -73,14 +76,21 @@ type Service interface {
 }
 
 type service struct {
-	control controltaskstream.Service
+	control     controltaskstream.Service
+	attachments model.AttachmentReader
 }
 
 func New(control controltaskstream.Service) Service {
+	return NewWithAttachments(control, nil)
+}
+
+// NewWithAttachments preserves the existing Task delivery vocabulary while
+// resolving Session-owned images at the authorized subscriber boundary.
+func NewWithAttachments(control controltaskstream.Service, reader model.AttachmentReader) Service {
 	if control == nil {
 		return nil
 	}
-	base := &service{control: control}
+	base := &service{control: control, attachments: reader}
 	if _, ok := control.(controltaskstream.DirectoryService); ok {
 		return &serviceWithDirectory{service: base}
 	}
@@ -96,9 +106,11 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 	if err != nil {
 		return ReadResult{}, err
 	}
-	deliveries := make([]Delivery, 0, len(result.Deliveries))
-	for _, delivery := range result.Deliveries {
-		deliveries = append(deliveries, projectDelivery(delivery))
+	// Task Events is the existing bounded JSON response. Share the image
+	// allowance across the response and leave space for the existing records.
+	deliveries, err := projectDeliveries(ctx, s.attachments, result.Deliveries, 2<<20)
+	if err != nil {
+		return ReadResult{}, err
 	}
 	return ReadResult{Deliveries: deliveries, ActivityID: result.ActivityID}, nil
 }
@@ -111,7 +123,7 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 	if result.Subscription == nil {
 		return SubscribeResult{}, errorcode.New(errorcode.Unavailable, "taskstream: control subscription is unavailable")
 	}
-	sub := newSubscription(ctx, result.Subscription)
+	sub := newSubscription(ctx, result.Subscription, s.attachments)
 	return SubscribeResult{Subscription: sub}, nil
 }
 
@@ -121,12 +133,14 @@ type subscription struct {
 	inner  controltaskstream.Subscription
 	out    chan Delivery
 
-	closeOnce sync.Once
+	closeOnce   sync.Once
+	attachments model.AttachmentReader
+	err         atomic.Pointer[error]
 }
 
-func newSubscription(parent context.Context, inner controltaskstream.Subscription) *subscription {
+func newSubscription(parent context.Context, inner controltaskstream.Subscription, reader model.AttachmentReader) *subscription {
 	ctx, cancel := context.WithCancel(parent)
-	sub := &subscription{ctx: ctx, cancel: cancel, inner: inner, out: make(chan Delivery)}
+	sub := &subscription{ctx: ctx, cancel: cancel, inner: inner, out: make(chan Delivery), attachments: reader}
 	go sub.forward()
 	return sub
 }
@@ -142,11 +156,15 @@ func (s *subscription) forward() {
 			if !open {
 				return
 			}
-			projected := projectDelivery(delivery)
+			projected, err := projectDeliveries(s.ctx, s.attachments, []controltaskstream.Delivery{delivery}, projection.AttachmentProjectionBytes)
+			if err != nil {
+				s.err.Store(&err)
+				return
+			}
 			select {
 			case <-s.ctx.Done():
 				return
-			case s.out <- projected:
+			case s.out <- projected[0]:
 			}
 		}
 	}
@@ -163,23 +181,50 @@ func (s *subscription) Close() error {
 	return err
 }
 
-func (s *subscription) Err() error { return s.inner.Err() }
+func (s *subscription) Err() error {
+	if err := s.err.Load(); err != nil {
+		return *err
+	}
+	return s.inner.Err()
+}
 
-func projectDelivery(delivery controltaskstream.Delivery) Delivery {
-	out := Delivery{
-		Kind: delivery.Kind, Source: delivery.Source, SnapshotID: delivery.SnapshotID,
-		Page: delivery.Page, NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore, ActivityID: delivery.ActivityID,
+func projectDeliveries(ctx context.Context, reader model.AttachmentReader, deliveries []controltaskstream.Delivery, imageBytes int) ([]Delivery, error) {
+	out := make([]Delivery, 0, len(deliveries))
+	owners := make([][]string, 0, len(deliveries))
+	imageCount := 0
+	for _, delivery := range deliveries {
+		projected := Delivery{
+			Kind: delivery.Kind, Source: delivery.Source, SnapshotID: delivery.SnapshotID,
+			Page: delivery.Page, NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore, ActivityID: delivery.ActivityID,
+		}
+		var scopes []string
+		for _, record := range delivery.Records {
+			for _, env := range projectRecord(record) {
+				if delivery.Source == controltaskstream.SourceReplacement {
+					env.Cursor = ""
+					env.Position = nil
+				}
+				projected.Events = append(projected.Events, env)
+				scopes = append(scopes, firstString(record.ImageSessionID, record.Task.SessionID))
+				imageCount += projection.AttachmentImageCount(env)
+			}
+		}
+		out = append(out, projected)
+		owners = append(owners, scopes)
 	}
-	for _, record := range delivery.Records {
-		out.Events = append(out.Events, projectRecord(record)...)
-	}
-	if delivery.Source == controltaskstream.SourceReplacement {
-		for index := range out.Events {
-			out.Events[index].Cursor = ""
-			out.Events[index].Position = nil
+	if imageCount != 0 {
+		perImage := imageBytes / imageCount
+		for i := range out {
+			for j, event := range out[i].Events {
+				var err error
+				out[i].Events[j], err = projection.MaterializeAttachments(ctx, reader, owners[i][j], event, perImage)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 func projectRecord(record controltaskstream.Record) []eventstream.Envelope {

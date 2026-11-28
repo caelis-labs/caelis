@@ -25,8 +25,8 @@ type persistedTransaction struct {
 	Events   []*session.Event  `json:"events"`
 }
 
-// MarshalJSON uses the same self-contained media encoding in the WAL as in
-// JSONL. Recovery never depends on a blob published outside the WAL commit.
+// MarshalJSON uses the same event encoding in the WAL and JSONL. Attachment
+// references address files published before the WAL commit.
 func (record persistedTransaction) MarshalJSON() ([]byte, error) {
 	type transactionJSON persistedTransaction
 	events := make([]json.RawMessage, len(record.Events))

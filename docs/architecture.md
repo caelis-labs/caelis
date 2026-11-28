@@ -119,6 +119,15 @@ exclusive Host ownership while the persistence owner applies the resumable
 repair, then starts the Host and validates current status. Sessions with pending
 workspace repairs cannot activate until the repair completes.
 
+`caelis doctor --session ID --prune-attachments-before RFC3339` previews removal
+of one Session's attachment instances created before the cutoff. Add
+`--apply-attachment-prune` to acquire exclusive Host ownership and remove those
+instances, including images still referenced by history. The next local launch
+starts the Host again. Events and Tasks keep
+their receipts and show an unavailable image on subsequent delivery. This
+operates on the selected Session's attachment directory. A queued child prompt
+whose image was pruned records a failed admission before sending.
+
 `control/appserver.AppServerClients` is the aggregate capability boundary used by
 product clients. Focused Control packages remain the semantic owners behind it.
 

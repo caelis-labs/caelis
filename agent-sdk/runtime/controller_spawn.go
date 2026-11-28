@@ -98,9 +98,10 @@ func (r *Runtime) CallControllerSpawn(ctx context.Context, ref session.SessionRe
 		return tool.Result{}, err
 	}
 	workCtx = toolbinding.WithPrepared(workCtx, call, synthetic, err)
-	if err := r.appendToolFact(workCtx, ref, active.turnID, call, nil, nil); err != nil {
+	if _, err := r.appendToolFact(workCtx, ref, active.turnID, call, nil, nil); err != nil {
 		return tool.Result{}, err
 	}
 	result, callErr := wrapped[0].Call(workCtx, call)
-	return result, errors.Join(callErr, r.appendToolFact(workCtx, ref, active.turnID, call, &result, callErr, toolFactTarget{definition: wrapped[0].Definition()}))
+	_, persistErr := r.appendToolFact(workCtx, ref, active.turnID, call, &result, callErr, toolFactTarget{definition: wrapped[0].Definition()})
+	return result, errors.Join(callErr, persistErr)
 }

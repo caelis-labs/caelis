@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/sdkctx"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
@@ -26,7 +27,9 @@ type Config struct {
 	// HookPurpose names this independently assembled model loop. Empty means chat.
 	HookPurpose hook.Purpose
 	// Sessions is shared across runs. Each RunRequest selects one Session by its ref.
-	Sessions       session.Service
+	Sessions session.Service
+	// ImageCache enables Run-scoped attachment preparation using the Session service.
+	ImageCache     *model.ImagePreparationCache
 	AgentFactory   agent.AgentFactory
 	RunIDGenerator func() string
 	Clock          func() time.Time
@@ -71,6 +74,7 @@ type Runtime struct {
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   approval.Requester
 	sessions                 session.Service
+	imageCache               *model.ImagePreparationCache
 	participantBindings      session.ParticipantBindingStore
 	agentFactory             agent.AgentFactory
 	runIDGenerator           func() string
@@ -134,6 +138,7 @@ func New(cfg Config) (*Runtime, error) {
 		hooks:                    cfg.Hooks.Clone(),
 		hookPurpose:              cfg.HookPurpose,
 		sessions:                 cfg.Sessions,
+		imageCache:               cfg.ImageCache,
 		agentFactory:             cfg.AgentFactory,
 		runIDGenerator:           cfg.RunIDGenerator,
 		clock:                    cfg.Clock,

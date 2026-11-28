@@ -86,7 +86,7 @@ func expandEventMedia(raw []byte) ([]byte, error) {
 		}
 	}
 	schema := gjson.GetBytes(raw, "schema").Int()
-	if media != nil && schema != 2 && schema != 3 && schema != EventSchemaVersion {
+	if media != nil && schema != 2 && schema != 3 && schema != 4 && schema != EventSchemaVersion {
 		return nil, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
 	}
 	for id, data := range media {

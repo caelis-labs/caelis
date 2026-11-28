@@ -564,7 +564,7 @@ func (h *turnHandle) allocateEventCursorLocked() string {
 	return fmt.Sprintf("%s-acp-%06d", prefix, h.acpCursorSeq)
 }
 
-func (h *turnHandle) finishRuntime(runtimeParent context.Context) {
+func (h *turnHandle) finishRuntime(runtimeParent context.Context, release func()) {
 	// A Host can cancel the producer's parent before Gateway cancellation marks
 	// this handle. Record that cancellation after draining, without calling an
 	// already closed Runner. Inspect the parent, since normal completion also
@@ -574,10 +574,14 @@ func (h *turnHandle) finishRuntime(runtimeParent context.Context) {
 		h.cancelled = true
 		h.mu.Unlock()
 	}
-	h.finish()
+	h.finishAndRelease(release)
 }
 
 func (h *turnHandle) finish() {
+	h.finishAndRelease(nil)
+}
+
+func (h *turnHandle) finishAndRelease(release func()) {
 	h.mu.Lock()
 	if h.finished || h.finishing {
 		h.mu.Unlock()
@@ -592,6 +596,11 @@ func (h *turnHandle) finish() {
 		hook()
 	}
 	h.publishFinalTerminal()
+	// A reconnect started after the active owner disappears must be able
+	// to include the terminal in its first spool boundary.
+	if release != nil {
+		release()
+	}
 	h.mu.Lock()
 	h.finishing = false
 	h.finished = true

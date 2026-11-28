@@ -190,6 +190,8 @@ func runWithProductClientOpener(
 		prompt                     = fs.String("p", "", "Single-shot prompt text")
 		format                     = fs.String("format", string(outputText), "Output format: text|json|jsonl")
 		sessionID                  = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
+		pruneAttachmentsBefore     = fs.String("prune-attachments-before", "", "Preview pruning one Session’s attachments published before an RFC3339 time (doctor)")
+		applyAttachmentPrune       = fs.Bool("apply-attachment-prune", false, "Apply the doctor attachment prune under exclusive local Store ownership")
 		storeDir                   = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
 		dangerouslySkipPermissions = fs.Bool(
 			"dangerously-skip-permissions",
@@ -384,6 +386,15 @@ func runWithProductClientOpener(
 		case "reset", "clean":
 			return runSandboxResetCommand(ctx, cfg, clientOptions, outFmt, stdout)
 		}
+	}
+	if *pruneAttachmentsBefore != "" || *applyAttachmentPrune {
+		if !doctorSubcommand || clientMode != productClientModeManaged {
+			return fmt.Errorf("attachment maintenance requires local managed doctor")
+		}
+		if err := validateManagedProductClientOptions(clientOptions); err != nil {
+			return err
+		}
+		return runDoctorAttachmentPrune(ctx, cfg, clientOptions, *sessionID, *pruneAttachmentsBefore, *applyAttachmentPrune, stdout)
 	}
 	var doctorRepairs []doctorRepairResult
 	if doctorSubcommand && clientMode == productClientModeManaged {

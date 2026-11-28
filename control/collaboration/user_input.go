@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +27,7 @@ type UserInput struct {
 	Generation     string              `json:"generation"`
 	Text           string              `json:"text"`
 	ContentParts   []model.ContentPart `json:"content_parts,omitempty"`
+	attachmentRefs map[int]model.AttachmentRef
 }
 
 // UserInputStatus distinguishes queued input from proven admission and an
@@ -97,7 +97,11 @@ func (s *Service) EnqueueUserInput(ctx context.Context, id, userID, sessionID, p
 		return UserInputStatus{}, errorcode.New(errorcode.UnknownOutcome, "Participant execution is unresolved")
 	}
 	input := UserInput{ID: id, UserID: userID, SessionID: sessionID, ParticipantID: participantID, TaskID: taskID, ChildSessionID: target.SessionID, Generation: target.Generation, Text: text, ContentParts: parts}
-	body, err := json.Marshal(input)
+	record, err := s.referenceUserImages(ctx, input)
+	if err != nil {
+		return UserInputStatus{}, err
+	}
+	body, err := json.Marshal(record)
 	if err != nil {
 		return UserInputStatus{}, err
 	}
@@ -198,8 +202,8 @@ func (s *Service) pendingUserInputs(ctx context.Context) ([]UserInput, error) {
 		if err := rows.Scan(&body, &userID); err != nil {
 			return nil, err
 		}
-		var input UserInput
-		if err := json.Unmarshal([]byte(body), &input); err != nil {
+		input, err := decodeUserInput(body)
+		if err != nil {
 			return nil, err
 		}
 		input.UserID = userID
@@ -212,6 +216,10 @@ func (s *Service) deliverUserInput(ctx context.Context, backend UserInputBackend
 	claimed, err := s.claimUserInput(ctx, input)
 	if err != nil || !claimed {
 		return err
+	}
+	input, err = s.loadUserImages(ctx, input)
+	if err != nil {
+		return errors.Join(err, s.finishUserInput(ctx, input.ID, "sending", "failed", "User image unavailable before delivery"))
 	}
 	err = backend.DeliverUserInput(ctx, input)
 	if errors.Is(err, agent.ErrChildInputNotReady) {
@@ -300,11 +308,11 @@ func (s *Service) existingUserInput(ctx context.Context, id, userID, sessionID, 
 	if err != nil {
 		return UserInputStatus{}, false, err
 	}
-	var input UserInput
-	if err = json.Unmarshal([]byte(body), &input); err != nil {
+	input, err := decodeUserInput(body)
+	if err != nil {
 		return UserInputStatus{}, true, err
 	}
-	if storedUser != userID || input.SessionID != sessionID || input.ParticipantID != participantID || input.TaskID != taskID || input.Text != text || !reflect.DeepEqual(input.ContentParts, parts) {
+	if storedUser != userID || input.SessionID != sessionID || input.ParticipantID != participantID || input.TaskID != taskID || input.Text != text || !matchesUserInputParts(input, parts) {
 		return UserInputStatus{}, true, errorcode.New(errorcode.Conflict, "Input operation was reused with different content")
 	}
 	return status, true, nil

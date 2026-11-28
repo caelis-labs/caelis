@@ -63,3 +63,18 @@ func TestMCPUnsupportedAndOversizedContentIsExplicit(t *testing.T) {
 		t.Fatal("oversized structured content accepted")
 	}
 }
+
+func TestMCPImageIngressKeepsEightMiBLimit(t *testing.T) {
+	var pngBytes bytes.Buffer
+	if err := png.Encode(&pngBytes, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, maxMCPImageBytes+1)
+	copy(data, pngBytes.Bytes())
+	if _, err := mcpImageBlock(&mcpsdk.ImageContent{Data: data, MIMEType: "image/png"}); err == nil {
+		t.Fatal("oversized MCP image bypassed existing ingress limit")
+	}
+	if _, err := mcpImageBlock(&mcpsdk.ImageContent{Data: data[:maxMCPImageBytes], MIMEType: "image/png"}); err != nil {
+		t.Fatal(err)
+	}
+}

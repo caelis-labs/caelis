@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -65,6 +66,9 @@ func (r *Runtime) Run(
 		return agent.RunResult{}, err
 	}
 	ref = activeSession.SessionRef
+	reader, _ := r.sessions.(model.AttachmentReader)
+	writer, _ := r.sessions.(model.AttachmentWriter)
+	runCtx = model.WithImageAttachments(runCtx, ref.SessionID, reader, writer, r.imageCache)
 	isACP := activeSession.Controller.Kind == session.ControllerKindACP
 	if isACP && r.controllers == nil {
 		return agent.RunResult{}, errors.New("agent-sdk/runtime: ACP controller backend is not configured")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
@@ -33,6 +34,7 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
+	imageCache              *model.ImagePreparationCache
 	productDefaults         plugin.BuiltinPackage
 	mcp                     *hostMCP
 	policyRuleCommands      appserver.PolicyRuleCommandService

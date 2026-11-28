@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -103,14 +105,31 @@ func buildSteeringInputEvents(active session.Session, turnID string, submission 
 
 // controllerInputParts projects the same effective messages passed to Session
 // persistence into content supported by the ACP bridge.
-func controllerInputParts(events []*session.Event) []model.ContentPart {
+func controllerInputParts(ctx context.Context, reader model.AttachmentReader, sessionID string, events []*session.Event) ([]model.ContentPart, error) {
 	var parts []model.ContentPart
 	for _, event := range events {
-		if event.Message != nil {
-			parts = append(parts, model.ContentPartsFromParts(event.Message.Parts)...)
+		if event.Message == nil {
+			continue
+		}
+		for _, part := range event.Message.Parts {
+			if media := part.Media; media != nil && media.Source.Kind == model.MediaSourceAttachment {
+				data, err := model.LoadAttachment(ctx, reader, sessionID, media.Source.Attachment)
+				if errors.Is(err, model.ErrAttachmentUnavailable) {
+					parts = append(parts, model.ContentPart{Type: model.ContentPartText, Text: "[Image attachment unavailable]"})
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+				parts = append(parts, model.ContentPart{Type: model.ContentPartImage, MimeType: media.MimeType, FileName: media.Name, Data: base64.StdEncoding.EncodeToString(data)})
+				continue
+			}
+			if cp, ok := model.ContentPartFromPart(part); ok {
+				parts = append(parts, cp)
+			}
 		}
 	}
-	return parts
+	return parts, nil
 }
 
 // preserveSteeringCorrelation carries Control's input receipt identity through

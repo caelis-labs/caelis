@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func clearImagePreparationCache(c *imagePreparationCache) {
+func clearImagePreparationCache(c *ImagePreparationCache) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for c.lru.Len() != 0 {

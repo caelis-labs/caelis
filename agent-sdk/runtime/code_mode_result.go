@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
@@ -18,6 +19,21 @@ type codeModeFailure struct {
 	Outcome string          `json:"outcome"`
 	Code    string          `json:"code,omitempty"`
 	Reply   *codemode.Reply `json:"reply,omitempty"`
+}
+
+// Failed replies are the only durable-result bodies held by the Host past an
+// individual call. Keep compact disposition and receipt identity at capacity.
+func (h *codeModeHost) retainFailureReply(failure *codeModeFailure, reply codemode.Reply) {
+	size := 128 + len(reply.CallID) + len(reply.BodyText) + len(reply.Value)
+	for _, part := range reply.Parts {
+		size += 64 + len(part.Text) + len(part.JSON) + len(part.Handle) + len(part.MimeType)
+	}
+	if size > h.limits.RetainedBytes-h.failureBytes-h.retained {
+		return
+	}
+	reply.Origin = ""
+	h.failureBytes += size
+	failure.Reply = &reply
 }
 
 func (h *codeModeHost) failurePayload(detailed bool) map[string]any {
@@ -43,18 +59,26 @@ func (h *codeModeHost) failurePayload(detailed bool) map[string]any {
 
 // project runs under host.mu. Check sizes before copying JSON or serializing
 // transport data; original results have already crossed the durable receipt owner.
-func (h *codeModeHost) project(id string, result tool.Result, outcome string, def tool.Definition) (codemode.Reply, error) {
+func (h *codeModeHost) project(id string, result tool.Result, outcome string, def tool.Definition, events ...*session.Event) (codemode.Reply, error) {
 	if h.codeModeResults == nil {
 		h.codeModeResults = newCodeModeResults()
 	}
-	h.codeModeResults.mu.Lock()
-	defer h.codeModeResults.mu.Unlock()
 	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: outcome != codemode.OutcomeSucceeded}
 	succeeded := outcome == codemode.OutcomeSucceeded
+	var receipt codeModeReplyReceipt
+	if len(events) > 0 && events[0] != nil {
+		receipt.id, receipt.seq = events[0].ID, events[0].Seq
+	}
 	retained, projected := 0, len(id)*6+128
 	textEntries := 0
+	if receipt.seq != 0 {
+		if len(receipt.id) > maxCodeModeReceiptID {
+			return reply, codemode.NewReplyBudgetError("code mode receipt identity exceeds transfer budget; full receipt retained")
+		}
+		projected += 32 + 6*(codeModeOriginBytes(receipt.id))
+	}
 	if projected > h.limits.ReplyBytes {
-		return reply, fmt.Errorf("code mode reply identity exceeds transfer budget")
+		return reply, codemode.NewReplyBudgetError("code mode reply identity exceeds transfer budget; full receipt retained")
 	}
 	var structured json.RawMessage
 	for _, block := range result.Content {
@@ -76,8 +100,10 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 				textEntries++
 			}
 		case tool.Image:
-			retained += len(part.Data) + len(part.MIMEType) + len(part.Name)
-			projected += 256 + len(part.MIMEType)*6
+			if receipt.seq == 0 && part.Attachment.Instance == "" {
+				retained += len(part.Data) + len(part.MIMEType) + len(part.Name)
+			}
+			projected += codeModeMediaReplyBytes(receipt, len(part.MIMEType))
 		case tool.Resource:
 			retained += len(part.URI) + len(part.Name) + len(part.MIMEType) + len(part.Title) + len(part.Description)
 			if part.Size != nil {
@@ -86,40 +112,45 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 			if part.Text != nil {
 				retained += len(*part.Text)
 			}
-			projected += 256 + len(part.MIMEType)*6
+			projected += codeModeMediaReplyBytes(receipt, len(part.MIMEType))
 		default:
 			return reply, fmt.Errorf("unsupported Code Mode result block %T", part)
 		}
-		if retained > h.limits.RetainedBytes-h.retained || projected > h.limits.ReplyBytes {
-			return reply, fmt.Errorf("code mode result exceeds projection/retention budget; full receipt retained")
+		if receipt.seq == 0 && retained > h.limits.RetainedBytes-h.retained-h.failureBytes {
+			return reply, codemode.NewReplyBudgetError("code mode result exceeds cumulative non-image retention budget; full receipt retained")
+		}
+		if projected > h.limits.ReplyBytes {
+			return reply, codemode.NewReplyBudgetError("code mode result exceeds reply transfer budget; full receipt retained")
 		}
 	}
 	projected += max(0, textEntries-1) * 6
 	if projected > h.limits.ReplyBytes {
-		return reply, fmt.Errorf("code mode text exceeds projection budget")
+		return reply, codemode.NewReplyBudgetError("code mode text exceeds reply transfer budget; full receipt retained")
 	}
 	if succeeded && structured != nil && def.OutputSchema != nil {
 		if err := tool.ValidateOutput(def.OutputSchema, structured); err != nil {
 			return reply, fmt.Errorf("structured result does not match output schema: %w", err)
 		}
 	}
-	// No fallible validation remains when invocation-owned state is committed.
-	for _, block := range result.Content {
-		var value codemode.Part
-		switch part := block.(type) {
-		case tool.Text:
-			value = codemode.Part{Kind: "text", Text: string(part)}
-		case tool.StructuredContent:
-			value = codemode.Part{Kind: "json", JSON: append(json.RawMessage(nil), part.Value...)}
+	// The bridge owns its Reply bytes. A live VM handle keeps only the original
+	// receipt position and block ordinal, including for inline legacy results.
+	if receipt.seq != 0 {
+		reply.Origin = h.sealCodeModeOrigin(receipt, 0)
+	}
+	for i, block := range result.Content {
+		value := codeModePart(block)
+		switch value.Kind {
+		case "json":
 			if succeeded {
 				reply.Value = value.JSON
 			}
-		case tool.Image:
-			value = codemode.Part{Kind: "media", Handle: uuid.NewString(), MimeType: part.MIMEType}
-			h.handles[value.Handle] = block
-		case tool.Resource:
-			value = codemode.Part{Kind: "file_ref", Handle: uuid.NewString(), MimeType: part.MIMEType}
-			h.handles[value.Handle] = block
+		case "media", "file_ref":
+			if receipt.seq != 0 {
+				value.Handle = h.sealCodeModeOrigin(receipt, i+1)
+			} else {
+				value.Handle = uuid.NewString()
+				h.handles[value.Handle] = block
+			}
 		}
 		reply.Parts = append(reply.Parts, value)
 	}
@@ -128,9 +159,22 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 	} else {
 		reply.BodyText = reply.Text()
 	}
-	h.replyParts[id] = reply.Parts
-	h.retained += retained
+	if receipt.seq == 0 {
+		receipt.inMemory = reply.Parts
+		h.retained += retained
+	}
+	// Actual call IDs support the trusted Executor contract within this script.
+	// Persistent Body objects use reply.Origin instead.
+	h.replyParts[id] = receipt
 	return reply, nil
+}
+
+func codeModeMediaReplyBytes(receipt codeModeReplyReceipt, mimeBytes int) int {
+	handleBytes := 36
+	if receipt.seq != 0 {
+		handleBytes = codeModeOriginBytes(receipt.id)
+	}
+	return 40 + 6*(handleBytes+mimeBytes)
 }
 
 // validCodeModeOutput bounds trusted adapter metadata separately from business
@@ -155,25 +199,32 @@ func validCodeModeOutput(output codemode.Output, budget int) bool {
 // JSON is never inspected for kind/parts/handle fields. Handle ownership remains
 // authoritative here, independently of the worker's object-identity tracking.
 func (h *codeModeHost) returnedParts(output codemode.Output) ([]tool.ContentBlock, error) {
-	h.codeModeResults.mu.Lock()
-	defer h.codeModeResults.mu.Unlock()
 	var parts []tool.ContentBlock
 	if output.CallID != "" {
-		original, ok := h.replyParts[output.CallID]
-		if !ok || !output.Reply || len(output.Value) != 0 || len(output.Parts) != 0 {
+		original, ordinal, ok := h.openCodeModeOrigin(output.CallID)
+		if !ok {
+			original, ok = h.replyParts[output.CallID]
+		}
+		if !ok || ordinal != 0 || !output.Reply || len(output.Value) != 0 || len(output.Parts) != 0 {
 			return nil, fmt.Errorf("returned reply does not belong to this invocation")
 		}
-		output = codemode.Output{Reply: true, Parts: original}
+		if original.seq != 0 {
+			result, err := h.readCodeModeResult(original)
+			if err != nil {
+				return nil, err
+			}
+			return h.wholeCodeModeResult(result)
+		}
+		output = codemode.Output{Reply: true, Parts: original.inMemory}
 		if !validCodeModeOutput(output, h.limits.OutputBytes) {
 			return nil, fmt.Errorf("complete original result exceeds output budget")
 		}
-		// Use the same authenticated JSON/media selection path as other returns;
-		// retaining raw tokens must not bypass attachment or output limits.
 	}
 	if !output.Reply {
 		parts = append(parts, tool.StructuredContent{Value: output.Value})
 	}
 	selected := map[string]bool{}
+	receipts := map[uint64]tool.Result{}
 	var structured bool
 	for _, part := range output.Parts {
 		switch part.Kind {
@@ -186,15 +237,29 @@ func (h *codeModeHost) returnedParts(output codemode.Output) ([]tool.ContentBloc
 			structured = true
 			parts = append(parts, tool.StructuredContent{Value: part.JSON})
 		case "media", "file_ref":
-			original := h.handles[part.Handle]
-			_, image := original.(tool.Image)
-			_, resource := original.(tool.Resource)
-			if (part.Kind == "media" && !image) || (part.Kind == "file_ref" && !resource) {
-				return nil, fmt.Errorf("returned media handle does not belong to this invocation")
-			}
 			if !selected[part.Handle] {
 				if len(selected) >= h.limits.Calls {
 					return nil, fmt.Errorf("returned media budget exceeded")
+				}
+				original := h.handles[part.Handle]
+				receipt, ordinal, authenticated := h.openCodeModeOrigin(part.Handle)
+				if authenticated && ordinal > 0 {
+					result, ok := receipts[receipt.seq]
+					if !ok {
+						var err error
+						result, err = h.readCodeModeResult(receipt)
+						if err != nil {
+							return nil, err
+						}
+						receipts[receipt.seq] = result
+					}
+					if ordinal > len(result.Content) {
+						return nil, fmt.Errorf("original media receipt block is unavailable")
+					}
+					original = result.Content[ordinal-1]
+				}
+				if codeModePart(original).Kind != part.Kind {
+					return nil, fmt.Errorf("returned media handle does not belong to this invocation")
 				}
 				selected[part.Handle] = true
 				parts = append(parts, original)

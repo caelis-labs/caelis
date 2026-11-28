@@ -31,11 +31,12 @@ type Text string
 
 func (Text) ContentType() ContentType { return ContentTypeText }
 
-// Image contains the original image bytes. The model adapter encodes them as needed.
+// Image contains original image bytes or their immutable Session attachment reference.
 type Image struct {
-	Data     []byte `json:"data"`
-	MIMEType string `json:"mime_type"`
-	Name     string `json:"name,omitempty"`
+	Data       []byte              `json:"data,omitempty"`
+	Attachment model.AttachmentRef `json:"attachment,omitzero"`
+	MIMEType   string              `json:"mime_type"`
+	Name       string              `json:"name,omitempty"`
 }
 
 func (Image) ContentType() ContentType { return ContentTypeImage }
@@ -80,7 +81,7 @@ func ValidateContent(blocks []ContentBlock) error {
 		switch b := block.(type) {
 		case Text, legacyResultBlock:
 		case Image:
-			if len(b.Data) == 0 || !strings.HasPrefix(b.MIMEType, "image/") {
+			if (len(b.Data) == 0) == (b.Attachment.Instance == "") || !strings.HasPrefix(b.MIMEType, "image/") {
 				return fmt.Errorf("result block %d has invalid image content", i)
 			}
 		case Resource:
@@ -143,9 +144,11 @@ func ModelParts(blocks []ContentBlock) []model.Part {
 		case Text:
 			parts = append(parts, model.NewTextPart(string(b)))
 		case Image:
-			parts = append(parts, model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
-				Kind: model.MediaSourceInline, Data: base64.StdEncoding.EncodeToString(b.Data),
-			}, b.MIMEType, b.Name))
+			source := model.MediaSource{Kind: model.MediaSourceInline, Data: base64.StdEncoding.EncodeToString(b.Data)}
+			if b.Attachment.Instance != "" {
+				source = model.MediaSource{Kind: model.MediaSourceAttachment, Attachment: b.Attachment}
+			}
+			parts = append(parts, model.NewMediaPart(model.MediaModalityImage, source, b.MIMEType, b.Name))
 		case Resource:
 			parts = append(parts, model.NewTextPart(resourceText(b)))
 		case StructuredContent:

@@ -116,7 +116,7 @@ func validateResult(def tool.Definition, r tool.Result, cause error) error {
 	return nil
 }
 
-func validateModelViewParts(parts []model.Part) error {
+func validateModelViewParts(ctx context.Context, parts []model.Part) error {
 	for _, p := range parts {
 		count := 0
 		for _, set := range []bool{p.Text != nil, p.JSON != nil, p.Media != nil, p.FileRef != nil, p.ToolUse != nil, p.ToolResult != nil, p.Reasoning != nil} {
@@ -151,6 +151,10 @@ func validateModelViewParts(parts []model.Part) error {
 				valid = source.LocalRef != ""
 			case model.MediaSourceProviderFile:
 				valid = source.FileID != ""
+			case model.MediaSourceAttachment:
+				valid = p.Media.Modality == model.MediaModalityImage &&
+					source.Data == "" && source.URI == "" && source.LocalRef == "" && source.FileID == "" &&
+					model.ValidateImageAttachment(ctx, source.Attachment) == nil
 			}
 			if !valid {
 				return fmt.Errorf("invalid media source")
@@ -255,7 +259,7 @@ func ModelView(ctx context.Context, def tool.Definition, call tool.Call, m model
 				if a.ToolUseID != b.ToolUseID || a.Name != b.Name || a.IsError != b.IsError {
 					err = fmt.Errorf("model view changed tool identity or error")
 				} else {
-					err = validateModelViewParts(a.Content)
+					err = validateModelViewParts(ctx, a.Content)
 				}
 			}
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -389,6 +390,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	sessionStoreConfig := sessionfile.Config{
+		Attachments: true,
 		RootDir:     filepath.Join(storeDir, "sessions"),
 		Diagnostics: runtimeDiagnostics,
 	}
@@ -541,6 +543,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		composition: runtimeComposition{
 			passiveServeRoot: cfg.LocalShell,
 			authorities: runtimeHostAuthorities{
+				imageCache:              model.NewImagePreparationCache(),
 				productDefaults:         cfg.BuiltinPackage,
 				mcp:                     newHostMCP(newAppConfigStore(storeDir), doc, runtimeDiagnostics),
 				applicationChildClients: &applicationChildClientFactory{},
@@ -786,6 +789,9 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	cancelQuiesce()
 	if quiesceErr != nil {
 		return fmt.Errorf("gatewayapp: resources retained after incomplete drain: %w", quiesceErr)
+	}
+	if cache := s.composition.authorities.imageCache; cache != nil {
+		cache.Close()
 	}
 	if s.composition.authorities.approvalRecovery != nil {
 		s.composition.authorities.approvalRecovery.Close()

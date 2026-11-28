@@ -22,12 +22,12 @@ type toolFactTarget struct {
 }
 
 // appendToolFact commits actual Host calls and their complete outcome once.
-func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, turnID string, call tool.Call, result *tool.Result, callErr error, targets ...toolFactTarget) error {
+func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, turnID string, call tool.Call, result *tool.Result, callErr error, targets ...toolFactTarget) (*session.Event, error) {
 	var input map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(call.Input))
 	decoder.UseNumber()
 	if err := decoder.Decode(&input); err != nil {
-		return err
+		return nil, err
 	}
 	kind := session.EventTypeToolCall
 	status := "pending"
@@ -48,7 +48,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 	if result != nil {
 		full, err := tool.CloneResult(*result, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		event.Tool.Result = &full
 		effectErr := hookrun.EffectError(callErr)
@@ -80,7 +80,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		event.Tool.ProcessingFailure = hookrun.ProcessingFailure(errors.Join(callErr, processingErr))
 		event.Tool.Error = errorText(callErr)
 	}
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
+	cleanup, cancel := toolbinding.ResultSettlementContext(ctx)
 	defer cancel()
 	var release func()
 	bindingIntent := result == nil && isCodeModeChild(ctx) && toolbinding.Target(ctx) != nil
@@ -88,16 +88,16 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		var err error
 		release, err = r.acquireSessionWrite(cleanup, ref)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer release()
 		if bindingIntent {
 			events, err := r.sessions.Events(cleanup, session.EventsRequest{SessionRef: ref, IncludeTransient: true})
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if err := validateRecordedCodeModeBinding(ctx, events, call); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
@@ -106,13 +106,13 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		var readErr error
 		persisted, readErr = r.reconcileEventAppend(cleanup, ref, event)
 		if persisted == nil {
-			return errors.Join(err, readErr)
+			return nil, errors.Join(err, readErr)
 		}
 	}
 	if sink, ok := ctx.Value(nestedToolEventSinkKey{}).(func(*session.Event)); ok {
 		sink(persisted)
 	}
-	return processingErr
+	return persisted, processingErr
 }
 
 func runtimeToolFact(ctx context.Context, call tool.Call, status string, input map[string]any) *session.EventTool {
