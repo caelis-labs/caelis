@@ -15,6 +15,19 @@ import (
 
 func TestMigrateV1ToV2ProducesCurrentProfilesAgentsAndBindings(t *testing.T) {
 	legacy := migrationFixture()
+	retired := controlagents.Connection{ID: "antigravity", Launcher: controlagents.Launcher{Command: "agy_acp_server.par"}}
+	legacy.AgentRoster.Connections = append(legacy.AgentRoster.Connections, retired)
+	legacy.AgentRoster.Discoveries = append(legacy.AgentRoster.Discoveries, controlagents.DiscoverySnapshot{
+		ConnectionID: retired.ID, CWD: "/workspace", SelectedModelID: "legacy-model", CurrentModelID: "legacy-model",
+		Models: []controlagents.RemoteModel{{ID: "legacy-model", Name: "Legacy model"}},
+	})
+	legacy.AgentRoster.Agents = append(legacy.AgentRoster.Agents, legacyAgent{
+		ID: "retired-model", Backing: legacyAgentBacking{ConnectionID: retired.ID},
+		Defaults: legacySessionOptions{ModelID: "legacy-model"},
+	})
+	legacy.Delegation.Bindings = append(legacy.Delegation.Bindings, legacyDelegationBinding{
+		Handle: legacyDelegationBreeze, Target: legacyDelegationTargetAgent, AgentID: "retired-model",
+	})
 	migrated, err := migrateLegacyAppConfig(legacy)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +64,7 @@ func TestMigrateV1ToV2ProducesCurrentProfilesAgentsAndBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"agent_roster", "delegation", "system_agents", "must-not-persist", "remote_session_id"} {
+	for _, forbidden := range []string{"agent_roster", "delegation", "system_agents", "must-not-persist", "remote_session_id", retired.ID, "legacy-model"} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("current JSON contains %q: %s", forbidden, raw)
 		}

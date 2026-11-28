@@ -180,6 +180,7 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.ModelProfiles = modelprofile.NormalizeConfiguration(doc.ModelProfiles)
 	refreshProviderProfiles(&doc)
 	doc.AgentBindings = agentbinding.NormalizeConfiguration(doc.AgentBindings)
+	removeRetiredACPConnection(&doc)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	// An unavailable backend saved by an older Host uses platform auto-selection.
 	// Its helper executable belongs to the retired backend.

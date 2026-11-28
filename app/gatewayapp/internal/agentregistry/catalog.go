@@ -22,6 +22,10 @@ type ConnectableAgent struct {
 	Launchers   []controlagents.LauncherChoice
 }
 
+// RetiredAntigravityID identifies the former built-in endpoint in saved Host
+// configurations and ACP preparations. Keep while those records can be read.
+const RetiredAntigravityID = "antigravity"
+
 type installedConnectableAgent struct {
 	Agent          ConnectableAgent
 	Config         assembly.AgentConfig
@@ -29,7 +33,6 @@ type installedConnectableAgent struct {
 }
 
 var installedConnectableAgents = []installedConnectableAgent{
-	nativeACPAgent("antigravity", "Google Antigravity", "Google's coding agent with a native ACP stdio command", 6, "agy", "acp"),
 	nativeACPAgent("grok", "Grok Build", "xAI's coding agent with a native ACP stdio command", 10, "grok", "agent", "stdio"),
 	nativeACPAgent("kimi", "Kimi CLI", "Kimi coding agent with a native ACP stdio command", 20, "kimi", "acp"),
 	nativeACPAgent("opencode", "OpenCode", "Open source coding agent with a native ACP stdio command", 30, "opencode", "acp"),

@@ -624,7 +624,6 @@ Custom command:
 
 | Catalog ID | Command |
 | --- | --- |
-| `antigravity` | `agy acp` |
 | `grok` | `grok agent stdio` |
 | `kimi` | `kimi acp` |
 | `opencode` | `opencode acp` |
@@ -643,19 +642,6 @@ commands and arguments. Use Custom for other ACP stdio commands.
 
 Executable discovery does not make an Agent available as a collaborator. Open
 `/team` to choose its participant profile and binding in the Team overlay.
-
-### Antigravity
-
-The preset uses the native [Antigravity CLI ACP server](https://antigravity.google/docs/cli/acp).
-Select Google Antigravity in `/connect` to discover the models advertised by
-the installed server. The model roster comes from the ACP server.
-A model selectable through the standalone CLI may be absent from that roster.
-
-The Host preserves saved standalone Antigravity profiles and Session history.
-Reconnect Google Antigravity through `/connect` to replace the standalone
-launcher. Remove obsolete profiles through `/disconnect`. The Host can retire
-this launcher guard once stores with standalone Antigravity connections are
-outside the supported upgrade window.
 
 ## Compatibility
 
@@ -683,6 +669,13 @@ tool content. Complete provider results, including `structuredContent` and
 unknown content blocks, remain in `rawOutput`. The Host-private bridge consumes
 the structured MCP display hint; it never derives a tool name from a title.
 Generic tools render standard input even without a recognized display profile.
+
+The Host omits saved connections for the retired Antigravity preset, along
+with their discovery, model profiles, and active Team bindings. Cached setup
+references expire as usual and cannot be read or used for setup. Session history
+is retained. Select an available profile in `/model` if a Session was using
+the retired controller.
+
 Older persisted connections may still use `package_exec` or `managed`
 launchers. Runtime keeps them read-compatible, but new onboarding cannot create
 or repair them. A Codex connection that points into the retired Store-owned

@@ -2,11 +2,15 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -42,60 +46,70 @@ func TestExternalAgentAssemblyDoesNotOwnModelDefaults(t *testing.T) {
 	}
 }
 
-func TestAntigravityAssemblyRequiresNativeLauncherForBuiltInConnection(t *testing.T) {
-	t.Parallel()
+func TestSavedAntigravityPresetIsOmittedByConnectionIdentity(t *testing.T) {
+	for _, command := range []string{"agy", "agy_acp_server.par", "agy_acp_server.exe"} {
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
 
-	store := newAppConfigStore(t.TempDir())
-	legacy := controlagents.Connection{ID: "antigravity", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: "agy_acp_server.par"}}
-	custom := legacy
-	custom.ID = controlagents.CustomConnectionID(custom.Launcher.Command, custom.Launcher)
-	if err := store.Save(AppConfig{ExternalAgents: controlagents.Configuration{
-		Connections: []controlagents.Connection{legacy, custom},
-		Agents:      []controlagents.Agent{{ID: legacy.ID, ConnectionID: legacy.ID}, {ID: custom.ID, ConnectionID: custom.ID}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	stack := &Stack{composition: runtimeComposition{authorities: runtimeHostAuthorities{store: store}}}
-	resolved, err := stack.composition.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
-	if err != nil || len(resolved.Agents) != 1 || resolved.Agents[0].Name != custom.ID {
-		t.Fatalf("withExternalACPAgents() = %+v, %v; want only the custom connection", resolved.Agents, err)
-	}
-	doc, err := store.LoadContext(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, connection, err := controlagents.ResolveAgent(doc.ExternalAgents, legacy.ID)
-	if err != nil || connection.Launcher.Command != legacy.Launcher.Command {
-		t.Fatalf("persisted Agent = %+v, %+v, %v", agent, connection, err)
-	}
-	if cfg, err := stack.composition.materializeExternalAgent(agent, connection); err == nil || !strings.Contains(err.Error(), "standalone Antigravity ACP launcher is retired") || cfg.Command != "" {
-		t.Fatalf("materializeExternalAgent() = %+v, %v; want retired connection rejection", cfg, err)
-	}
-
-	native := legacy
-	native.Launcher.Command = "agy"
-	native.Launcher.Args = []string{"acp"}
-	updated, reconnected, err := controlagents.UpsertExternalConnection(doc.ExternalAgents, native, controlagents.DiscoverySnapshot{}, nil)
-	if err != nil || reconnected.ID != agent.ID {
-		t.Fatalf("reconnect Agent = %+v, %v; want stable identity %q", reconnected, err, agent.ID)
-	}
-	doc.ExternalAgents = updated
-	if err := store.Save(doc); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err = stack.composition.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
-	if err != nil || len(resolved.Agents) != 2 {
-		t.Fatalf("withExternalACPAgents() = %+v, %v; want native and custom connections", resolved.Agents, err)
-	}
-	for _, cfg := range resolved.Agents {
-		if cfg.Name == agent.ID {
-			if cfg.Command != "agy" || len(cfg.Args) != 1 || cfg.Args[0] != "acp" {
-				t.Fatalf("native launcher = %s %v", cfg.Command, cfg.Args)
+			store := newAppConfigStore(t.TempDir())
+			launcher := controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command}
+			retired := controlagents.Connection{ID: "antigravity", Launcher: launcher}
+			custom := controlagents.Connection{ID: controlagents.CustomConnectionID(command, launcher), Launcher: launcher}
+			oldRoster, oldProfiles := disconnectTestCatalog(retired, "saved-agent-alias", "default", "other")
+			customRoster, customProfiles := disconnectTestCatalog(custom, "custom-peer", "default")
+			oldID, customID := oldProfiles.Profiles[0].ID, customProfiles.Profiles[0].ID
+			doc := AppConfig{
+				SchemaVersion:         configstore.SchemaVersionV2,
+				ConfigurationRevision: 7,
+				ExternalAgents: controlagents.Configuration{
+					Agents:      append(oldRoster.Agents, customRoster.Agents...),
+					Connections: append(oldRoster.Connections, customRoster.Connections...),
+					Discoveries: append(oldRoster.Discoveries, customRoster.Discoveries...),
+				},
+				ModelProfiles: modelprofile.Configuration{
+					Profiles:         append(oldProfiles.Profiles, customProfiles.Profiles...),
+					DefaultProfileID: oldID, DefaultEffort: "none",
+				},
+				AgentBindings: agentbinding.Configuration{Bindings: []agentbinding.Binding{
+					{Handle: agentbinding.HandleReviewer, ProfileID: oldID, Effort: "none"},
+					{Handle: agentbinding.HandleOrbit, ProfileID: customID, Effort: "none"},
+				}},
 			}
-			return
-		}
+			raw, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(store.path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			loaded, err := store.LoadContext(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(loaded.ExternalAgents, controlagents.NormalizeConfiguration(customRoster)) {
+				t.Fatalf("loaded roster = %#v, want only custom connection and discovery", loaded.ExternalAgents)
+			}
+			if !reflect.DeepEqual(loaded.ModelProfiles, modelprofile.NormalizeConfiguration(customProfiles)) {
+				t.Fatalf("loaded profiles = %#v, want only custom profile and no default", loaded.ModelProfiles)
+			}
+			if bindings := loaded.AgentBindings.Bindings; len(bindings) != 1 || bindings[0].ProfileID != customID {
+				t.Fatalf("loaded bindings = %#v, want only the custom binding", bindings)
+			}
+			if loaded.ConfigurationRevision != 7 {
+				t.Fatalf("loaded configuration revision = %d, want 7", loaded.ConfigurationRevision)
+			}
+			composition := &runtimeComposition{authorities: runtimeHostAuthorities{store: store}}
+			resolved, err := composition.withExternalACPAgents(assembly.ResolvedAssembly{}, stackRuntimeConfig{})
+			if err != nil || len(resolved.Agents) != 1 || resolved.Agents[0].Name != "custom-peer" || resolved.Agents[0].Command != command {
+				t.Fatalf("runtime Agents = %#v, %v; want only the explicitly configured command", resolved.Agents, err)
+			}
+			persisted, err := os.ReadFile(store.path)
+			if err != nil || string(persisted) != string(raw) {
+				t.Fatalf("reading the old configuration changed its file: %v", err)
+			}
+		})
 	}
-	t.Fatalf("native Agent %q missing from assembly", agent.ID)
 }
 
 func TestExternalAgentAssemblyRejectsParallelLegacyTargetName(t *testing.T) {

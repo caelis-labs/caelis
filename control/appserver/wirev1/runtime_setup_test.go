@@ -12,10 +12,10 @@ import (
 )
 
 func TestRuntimeSetupProjectsActionableStepsWithoutTutorialLink(t *testing.T) {
-	setup := agents.RuntimeSetup{Command: "agy_acp_server.par", Directory: "/user/tools",
-		ArchiveURL:    "https://dl.google.com/agy-extensions/releases/runtime.zip",
+	setup := agents.RuntimeSetup{Command: "fixture-acp", Directory: "/user/tools",
+		ArchiveURL:    "https://example.invalid/fixture-acp.zip",
 		InstallPrompt: "Install the official runtime into /user/tools and verify ACP initialize.",
-		ManualSteps:   []string{"Extract the entire ZIP.", "cd '/user/tools'\nchmod +x agy_acp_server.par"}}
+		ManualSteps:   []string{"Extract the entire ZIP.", "cd '/user/tools'\nchmod +x fixture-acp"}}
 	data := mustMarshalWire(t, appserver.SlashArgCandidate{Value: "confirm", RuntimeSetup: &setup})
 	var dto generated.SlashArgCandidate
 	if err := json.Unmarshal(data, &dto); err != nil {

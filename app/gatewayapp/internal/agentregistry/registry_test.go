@@ -97,7 +97,7 @@ func TestConnectableAgentsContainsBuiltInNativeACPCommandsAndCustom(t *testing.T
 		gotIDs = append(gotIDs, agent.ID)
 	}
 	wantIDs := []string{
-		"codex", "antigravity", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"codex", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
 		"auggie", "cline", "factory-droid", "goose", "kilo", "custom",
 	}
 	if !reflect.DeepEqual(gotIDs, wantIDs) {
@@ -114,7 +114,7 @@ func TestConnectableAgentsContainsBuiltInNativeACPCommandsAndCustom(t *testing.T
 			t.Fatalf("%s launchers = %#v, want one user-owned launcher", agent.ID, agent.Launchers)
 		}
 	}
-	for _, removed := range []string{"claude", "deepagents", "glm-acp-agent", "pi-acp"} {
+	for _, removed := range []string{"antigravity", "claude", "deepagents", "glm-acp-agent", "pi-acp"} {
 		if got, ok := LookupConnectableAgent(removed); ok {
 			t.Fatalf("LookupConnectableAgent(%q) = %#v, want removed from guided catalog", removed, got)
 		}
