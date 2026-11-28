@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,22 +20,60 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	surfaceacp "github.com/caelis-labs/caelis/surfaces/acp"
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 // Compile the peers in independent module graphs so this exercises actual old
 // and current SDK implementations, rather than two imports of the selected pin.
 func TestACPSDKReleaseCompatibility(t *testing.T) {
-	for _, version := range []string{"v1.5.2", "v1.6.0", "v1.7.0", "v1.8.0", "v1.9.0"} {
+	const sdkModule = "github.com/caelis-labs/acp-go-sdk"
+	rootMod, err := modfile.Parse("../go.mod", readCompatFile(t, "../go.mod"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current string
+	for _, requirement := range rootMod.Require {
+		if requirement.Mod.Path == sdkModule {
+			current = requirement.Mod.Version
+			break
+		}
+	}
+	if !semver.IsValid(current) || semver.Canonical(current) != current || semver.Prerelease(current) != "" {
+		t.Fatalf("root go.mod must pin a stable ACP SDK version, found %q", current)
+	}
+	versions := []string{"v1.5.2", "v1.6.0", "v1.7.0", "v1.8.0", "v1.9.0"}
+	if !slices.Contains(versions, current) {
+		versions = append(versions, current)
+	}
+	for _, version := range versions {
 		t.Run(version, func(t *testing.T) {
 			root := t.TempDir()
-			for _, name := range []string{"main.go", "go.mod", "go.sum"} {
-				data, err := os.ReadFile(filepath.Join("testdata", "acp-sdk-peer", name))
-				if err != nil {
+			peerDir := filepath.Join("testdata", "acp-sdk-peer")
+			peerModPath := filepath.Join(peerDir, "go.mod")
+			peerMod, err := modfile.Parse(peerModPath, readCompatFile(t, peerModPath), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := peerMod.AddRequire(sdkModule, version); err != nil {
+				t.Fatal(err)
+			}
+			sumPath := filepath.Join(peerDir, "go.sum")
+			if version == current {
+				sumPath = "../go.sum"
+				if err := peerMod.AddGoStmt(rootMod.Go.Version); err != nil {
 					t.Fatal(err)
 				}
-				if name == "go.mod" {
-					data = bytes.ReplaceAll(data, []byte("v1.5.2"), []byte(version))
-				}
+			}
+			mod, err := peerMod.Format()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, data := range map[string][]byte{
+				"main.go": readCompatFile(t, filepath.Join(peerDir, "main.go")),
+				"go.mod":  mod,
+				"go.sum":  readCompatFile(t, sumPath),
+			} {
 				if err := os.WriteFile(filepath.Join(root, name), data, 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -53,6 +92,15 @@ func TestACPSDKReleaseCompatibility(t *testing.T) {
 			t.Run("SDK-client-to-Core-surface", func(t *testing.T) { testSDKClientToCoreSurface(t, bin) })
 		})
 	}
+}
+
+func readCompatFile(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func testCoreClientToSDKAgent(t *testing.T, bin string) {

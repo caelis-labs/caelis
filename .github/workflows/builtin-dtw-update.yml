@@ -1,0 +1,45 @@
+name: Built-in Desktop World update
+
+on:
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: builtin-dtw-update-main
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'caelis-labs/caelis' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the official stable release and generate the pin
+        id: pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release="$RUNNER_TEMP/desktop-world-release.json"
+          gh api repos/caelis-labs/desktop-world/releases/latest > "$release"
+          python3 scripts/update_builtin_dtw.py "$release"
+          pin=control/plugin/builtin/desktop-world.json
+          if ! git diff --quiet -- "$pin"; then
+            echo "tag=$(jq -r .tag "$pin")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the dependency PR
+        if: steps.pin.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.DTW_UPDATE_TOKEN }}
+          DTW_TAG: ${{ steps.pin.outputs.tag }}
+        run: bash scripts/open_builtin_dtw_update_pr.sh "$DTW_TAG"

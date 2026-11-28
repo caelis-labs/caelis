@@ -142,6 +142,43 @@ in individual PRs and share that ecosystem's limit. Security updates are not
 subject to the version-update limit.
 The limit controls new PR creation, not CI reruns or already-open PRs.
 
+The root `go.mod` and `go.sum` own the ACP Go SDK pin. Weekly Go module
+version checks give its stable releases an individual Dependabot PR when the
+Go ecosystem has a free update slot. Keep the root pin on a stable Go module
+version. Dependabot uses its own identity and needs no repository Actions
+secret for its PRs. The ACP stdio gate picks up the root pin and checksums
+automatically. The peer fixture retains historical SDK versions for interop.
+
+[Built-in Desktop World update](../.github/workflows/builtin-dtw-update.yml)
+checks the latest published stable GitHub Release daily at 03:37 UTC and on
+manual dispatch from `main`. To generate the same candidate locally from the
+official assets:
+
+```bash
+gh api repos/caelis-labs/desktop-world/releases/latest > /tmp/caelis-dtw-release.json
+python3 scripts/update_builtin_dtw.py /tmp/caelis-dtw-release.json
+python3 scripts/prepare_builtin_dtw.py --all
+```
+
+The generator checks GitHub asset digests against `RELEASE.json` and verifies
+every supported package before changing the single pin. An incomplete release
+fails the check. An equal or older version leaves the pin alone. Each newer
+version uses its own `automation/desktop-world-vX.Y.Z` branch and ordinary PR.
+Reruns keep any existing PR, including one that was closed. If a prior run
+pushed the same pin and stopped before PR creation, a rerun can use that branch.
+
+Enable Actions on the default branch and provision `DTW_UPDATE_TOKEN` as an
+Actions secret. Use a dedicated fine-grained PAT scoped to `caelis-labs/caelis`
+with **Contents** and **Pull requests** set to **Read and write**. The token
+owner needs write access and any required organization approval. The workflow
+uses the job's read-only token to discover the release. It uses the dedicated
+token for the branch and PR so GitHub starts the normal `pull_request` quality
+checks automatically. Where repository settings allow `GITHUB_TOKEN` to create
+PRs, their PR workflows require maintainer approval. A missing write token fails
+when a new candidate is ready. Merging is a separate maintainer action under
+branch protection. See
+[GitHub's workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+
 ## Change-scoped checks
 
 Code Mode discovery fixtures exercise pagination, keyword filtering, exact schemas and same-execution readiness without an auxiliary model.
@@ -300,8 +337,9 @@ ACP release compatibility has a deterministic stdio gate:
 GOWORK=off go test -tags=e2e ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
 ```
 
-It independently compiles SDK v1.5.2, v1.6.0, v1.7.0, v1.8.0 and v1.9.0 peers.
-Each runs against the Core client and ACP Surface in both directions. It covers stable v1
+It independently compiles the SDK pinned by Core and the historical SDK peers
+v1.5.2, v1.6.0, v1.7.0, v1.8.0 and v1.9.0. Each runs against the Core client
+and ACP Surface in both directions. It covers stable v1
 initialization, Session creation, ordered updates, reverse permission requests
 and completion. The peers use temporary module graphs with pinned checksums;
 they need a Go module cache or network access and make no model requests.
