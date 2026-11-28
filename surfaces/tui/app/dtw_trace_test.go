@@ -535,7 +535,7 @@ func TestDesktopWorldTraceAsyncReclassificationAndReplay(t *testing.T) {
 					t.Fatalf("zero observed children should use the standard row:\n%s", text)
 				}
 			case 6, 7:
-				if len(rows) != 3 || !strings.Contains(text, "• Using computer") || !strings.Contains(text, "Click") || strings.Contains(text, " script") || strings.Count(text, "└") != 1 {
+				if len(rows) != 2 || !strings.Contains(text, "• Using computer") || !strings.Contains(text, "Click") || strings.Contains(text, " script") || strings.Count(text, "└") != 1 {
 					t.Fatalf("trusted child should extend the group:\n%s", text)
 				}
 			case 10:
@@ -610,8 +610,8 @@ func TestDesktopWorldTraceKeepsEarlierFailureVisible(t *testing.T) {
 		m, b := desktopTraceModel(t, events, 112, replay)
 		ctx := m.blockRenderContext(112)
 		text := joinRenderedPlain(b.Render(ctx))
-		if !strings.Contains(text, "  └ No apps in scope") || !strings.Contains(text, "fixture permission denied") ||
-			strings.Count(text, "└") != 1 || strings.Count(text, "Click") != 1 {
+		if strings.Contains(text, "No apps in scope") || !strings.Contains(text, "fixture permission denied") ||
+			strings.Count(text, "└") != 1 || strings.Count(text, "Click") != 2 {
 			t.Fatalf("replay=%v earlier error lost its diagnostic or displaced a recent summary:\n%s", replay, text)
 		}
 		clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("failed"))

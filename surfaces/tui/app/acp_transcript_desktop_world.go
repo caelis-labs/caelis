@@ -31,88 +31,132 @@ func computerActivityCalls(event SubagentEvent, children []SubagentEvent) ([]Sub
 
 func renderDesktopWorldGroupRows(blockID string, events []SubagentEvent, parents map[string]string, children map[string][]SubagentEvent, start, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	first := events[start]
-	calls, ok := computerActivityCalls(first, children[first.CallID])
+	group, ok := computerActivityCalls(first, children[first.CallID])
 	if !ok {
 		return nil, start, false
 	}
-	calls = slices.Clip(calls)
+	group = slices.Clip(group)
 	done := first.Done
-	end := start
+	end, confirmed := start, len(group)
+	firstReasoning := -1
 	for i := start + 1; i < len(events); i++ {
 		ev := events[i]
-		if ev.Kind == SESemanticBoundary || ev.Kind == SEToolCall && parents[ev.CallID] != "" ||
-			ev.Kind == SEApproval && approvalReviewHasTool(events, ev) {
+		switch {
+		case ev.Kind == SEToolCall && parents[ev.CallID] != "",
+			ev.Kind == SEApproval && approvalReviewHasTool(events, ev):
+			continue
+		case ev.Kind == SEReasoning:
+			if firstReasoning < 0 {
+				firstReasoning = i
+			}
+			group = append(group, ev)
 			continue
 		}
 		additional, ok := computerActivityCalls(ev, children[ev.CallID])
 		if !ok {
 			break
 		}
-		calls = append(calls, additional...)
+		group = append(group, additional...)
 		done = done && ev.Done
-		end = i
+		end, confirmed = i, len(group)
 	}
+	// Trailing reasoning stays standalone until another trusted DTW step
+	// confirms it belongs between computer calls.
+	group = group[:confirmed]
 
-	var visible, collapsed []SubagentEvent
-	var previous *desktopWorldDisplay
+	visibleCalls, reasoning := 0, 0
 	failed := false
-	for _, call := range calls {
-		done = done && call.Done
-		failed = failed || call.Err
-		display := call.desktopWorld
-		if !display.visible(call.Err) {
-			previous = nil
+	for _, ev := range group {
+		if ev.Kind == SEReasoning {
+			reasoning++
 			continue
 		}
-		visible = append(visible, call)
-		if !call.Err && call.Done {
-			if previous != nil && previous.sameObservation(display) {
-				collapsed[len(collapsed)-1] = call
-				continue
-			}
-			previous = display
-		} else {
-			previous = nil
+		done = done && ev.Done
+		failed = failed || ev.Err
+		if ev.desktopWorld.visible(ev.Err) {
+			visibleCalls++
 		}
-		collapsed = append(collapsed, call)
 	}
-	if len(visible) == 0 {
+	if visibleCalls == 0 {
+		// An unrecognized action has no summary. Leave its surrounding
+		// reasoning in the transcript if there is no group to disclose it.
+		if reasoning != 0 {
+			end = firstReasoning - 1
+		}
 		return nil, end, true
 	}
+
+	summaries := desktopWorldSummaryCalls(group)
 	key := "computer:" + first.CallID
 	token := ""
-	if len(visible) > desktopWorldVisibleCalls || len(visible) != len(collapsed) {
+	if reasoning != 0 || visibleCalls > len(summaries) {
 		token = acpStableExplorationClickToken(key)
 	}
+	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
 	rows := []RenderedRow{renderACPToolHeaderRow(blockID, ansi.Truncate("• Using computer", width, "…"), width, ctx, token, failed, done)}
-	var earlier []SubagentEvent
-	if opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key) {
-		collapsed = visible
-	} else if skip := len(collapsed) - desktopWorldVisibleCalls; skip > 0 {
-		earlier, collapsed = collapsed[:skip], collapsed[skip:]
-	}
-	for i, call := range collapsed {
-		rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(i == 0), width, ctx, opts, false)...)
-	}
-	for _, call := range earlier {
-		if !call.Err {
+	for i, ev := range group {
+		first := len(rows) == 1
+		if ev.Kind == SEReasoning {
+			if expanded {
+				rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.ReasoningStyle(), token, first)...)
+			}
 			continue
 		}
-		if opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(call.CallID) {
-			rows = append(rows, renderDesktopWorldCallRows(blockID, call, explorationChildPrefix(false), width, ctx, opts, false)...)
-		} else {
-			rows = append(rows, renderDesktopWorldFailureRow(blockID, call, width, ctx, opts))
+		if !ev.desktopWorld.visible(ev.Err) {
+			continue
+		}
+		prefix := explorationChildPrefix(first)
+		switch {
+		case expanded, slices.Contains(summaries, i), ev.Err && opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(ev.CallID):
+			rows = append(rows, renderDesktopWorldCallRows(blockID, ev, prefix, width, ctx, opts, false)...)
+		case ev.Err:
+			rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, prefix, width, ctx, opts))
 		}
 	}
 	return rows, end, true
 }
 
-func renderDesktopWorldFailureRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) RenderedRow {
+func desktopWorldSummaryCalls(group []SubagentEvent) []int {
+	var operations, observations []int
+	for i := len(group) - 1; i >= 0; i-- {
+		ev := group[i]
+		display := ev.desktopWorld
+		if display == nil || ev.Err || !display.visible(false) {
+			continue
+		}
+		if !display.observation() {
+			operations = append(operations, i)
+			if len(operations) == desktopWorldVisibleCalls {
+				break
+			}
+		} else if len(operations) == 0 && len(observations) < desktopWorldVisibleCalls {
+			duplicate := ev.Done && slices.ContainsFunc(observations, func(index int) bool {
+				return group[index].Done && display.sameObservation(group[index].desktopWorld)
+			})
+			if !duplicate {
+				observations = append(observations, i)
+			}
+		}
+	}
+	summaries := operations
+	if len(summaries) == 0 {
+		summaries = observations
+	}
+	// Failures outside the regular row budget still disclose a diagnostic.
+	for i := len(group) - 1; i >= 0 && len(summaries) < desktopWorldVisibleCalls; i-- {
+		if group[i].Err {
+			summaries = append(summaries, i)
+		}
+	}
+	return summaries
+}
+
+func renderDesktopWorldFailureRow(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) RenderedRow {
 	detail := ev.desktopWorld.failure
 	if detail == "" {
-		detail = ev.desktopWorld.label(maxInt(1, width-4), true)
+		detail = ev.desktopWorld.label(maxInt(1, width-displayColumns(prefix)), true)
 	}
-	line := ansi.Truncate("    "+detail, width, "…")
+	line := ansi.Truncate(prefix+detail, width, "…")
 	return StyledPlainClickablePreWrappedRow(blockID, line, ctx.Theme.ErrorStyle().Render(line), acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev)))
 }
 
@@ -146,7 +190,7 @@ func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string,
 	}
 	rows = append(rows, renderDesktopWorldSummaryRow(blockID, ev, prefix, header, ctx, token))
 	if ev.Err && ev.desktopWorld.failure != "" {
-		rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, width, ctx, opts))
+		rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, "    ", width, ctx, opts))
 	}
 	if token == "" || opts.ToolPanelFullOutput == nil || !opts.ToolPanelFullOutput(ev.CallID) {
 		return rows
