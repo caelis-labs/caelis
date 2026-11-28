@@ -120,7 +120,7 @@ func (cache *ImagePreparationCache) prepareRequest(ctx context.Context, req *Req
 			var prepared preparedImage
 			var err error
 			if media.Source.Kind == MediaSourceAttachment {
-				prepared, err = cache.prepareAttachment(ctx, media, false)
+				prepared, err = cache.prepareAttachment(ctx, media)
 			} else {
 				prepared, err = cache.prepare(ctx, media.Source.Data, func() preparedImage { return prepareInlineImage(media) })
 			}

@@ -55,7 +55,9 @@ type Part struct {
 
 // Reply retains tool disposition independently of its projected content.
 type Reply struct {
-	CallID  string `json:"call_id"`
+	CallID string `json:"call_id"`
+	// Origin is the Runtime locator for returning this original Body. It is private to the bridge.
+	Origin  string `json:"origin,omitempty"`
 	Outcome string `json:"outcome"`
 	Parts   []Part `json:"parts,omitempty"`
 	// BodyText joins text parts in order for successful replies. Failure diagnostics
@@ -171,7 +173,7 @@ type Output struct {
 	Value json.RawMessage `json:"value,omitempty"`
 	Parts []Part          `json:"parts,omitempty"`
 	Reply bool            `json:"reply,omitempty"`
-	// CallID selects a complete original reply retained by the invocation Host.
+	// CallID selects a complete original reply using the bridge locator.
 	// Only bridge-owned object identity can produce this adapter metadata.
 	CallID string `json:"call_id,omitempty"`
 }
@@ -206,8 +208,9 @@ type EnvironmentFactory interface {
 type Limits struct {
 	SourceBytes int `json:"source_bytes"`
 	ReplyBytes  int `json:"reply_bytes"`
-	// OutputBytes bounds executor JSON. Opaque media emitted to the model is
-	// bounded by the environment's cumulative RetainedBytes and invocation's Calls limits.
+	// OutputBytes bounds executor JSON. Calls also bounds selected media.
+	// RetainedBytes bounds in-memory reply content owned by an invocation.
+	// Durable replies use generation-scoped locators instead of retained bodies.
 	OutputBytes   int `json:"output_bytes"`
 	RetainedBytes int `json:"retained_bytes"`
 	Calls         int `json:"calls"`

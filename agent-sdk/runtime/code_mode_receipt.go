@@ -1,8 +1,14 @@
 package runtime
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -16,10 +22,60 @@ type codeModeReplyReceipt struct {
 	inMemory []codemode.Part
 }
 
-type codeModeResultHandle struct {
-	receipt   codeModeReplyReceipt
-	block     int
-	reference tool.ContentBlock
+// A generation owns one key. Tokens name durable receipts without keeping an
+// index of objects issued to the VM. The VM still checks actual object identity.
+func newCodeModeOrigins() cipher.AEAD {
+	var key [32]byte
+	_, _ = rand.Read(key[:])
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		panic(err)
+	}
+	sealer, err := cipher.NewGCMWithRandomNonce(block)
+	if err != nil {
+		panic(err)
+	}
+	return sealer
+}
+
+const codeModeOriginPrefix = "receipt."
+const maxCodeModeReceiptID = 256
+const codeModeOriginPositionBytes = 12
+const codeModeOriginOverhead = 12 + 16 // GCM nonce and tag
+
+func codeModeOriginBytes(id string) int {
+	return len(codeModeOriginPrefix) + base64.RawURLEncoding.EncodedLen(codeModeOriginPositionBytes+len(id)+codeModeOriginOverhead)
+}
+
+// The ordinal is one-based for a block. Zero selects the entire receipt.
+func (h *codeModeHost) sealCodeModeOrigin(receipt codeModeReplyReceipt, ordinal int) string {
+	if h.origins == nil {
+		h.origins = newCodeModeOrigins()
+	}
+	var position [codeModeOriginPositionBytes]byte
+	binary.BigEndian.PutUint64(position[:8], receipt.seq)
+	binary.BigEndian.PutUint32(position[8:], uint32(ordinal))
+	raw := append(position[:], receipt.id...)
+	return codeModeOriginPrefix + base64.RawURLEncoding.EncodeToString(h.origins.Seal(nil, nil, raw, nil))
+}
+
+func (h *codeModeHost) openCodeModeOrigin(token string) (codeModeReplyReceipt, int, bool) {
+	var receipt codeModeReplyReceipt
+	encoded, ok := strings.CutPrefix(token, codeModeOriginPrefix)
+	if h.origins == nil || !ok || len(encoded) > base64.RawURLEncoding.EncodedLen(codeModeOriginPositionBytes+maxCodeModeReceiptID+h.origins.Overhead()) {
+		return receipt, 0, false
+	}
+	sealed, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return receipt, 0, false
+	}
+	raw, err := h.origins.Open(nil, nil, sealed, nil)
+	if err != nil || len(raw) <= codeModeOriginPositionBytes {
+		return receipt, 0, false
+	}
+	receipt.id = string(raw[codeModeOriginPositionBytes:])
+	receipt.seq = binary.BigEndian.Uint64(raw[:8])
+	return receipt, int(binary.BigEndian.Uint32(raw[8:12])), receipt.seq != 0
 }
 
 func codeModePart(block tool.ContentBlock) codemode.Part {
@@ -62,7 +118,7 @@ func (h *codeModeHost) readCodeModeResult(receipt codeModeReplyReceipt) (tool.Re
 		}
 	}
 	for _, event := range events {
-		if event != nil && event.ID == receipt.id && event.Seq == receipt.seq && event.Tool != nil && event.Tool.Result != nil {
+		if event != nil && event.ID == receipt.id && event.Seq == receipt.seq && event.Type == session.EventTypeToolResult && event.Visibility == session.VisibilityMirror && event.Tool != nil && event.Tool.Result != nil {
 			return *event.Tool.Result, nil
 		}
 	}

@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -105,7 +106,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		targets: map[string]codeModeTarget{}, codeModeResults: newCodeModeResults(), drained: make(chan struct{})}
 	executor := t.declaration.Executor
 	if t.execution != nil {
-		host.codeModeResults = t.execution.environment.results
+		host.origins = t.execution.environment.origins
 		executor = t.execution.environment.engine
 	}
 	if err := host.prepareTargets(ctx, events); err != nil {
@@ -219,6 +220,8 @@ func codeModeDefinitionDigest(def tool.Definition) [32]byte {
 }
 
 type codeModeHost struct {
+	origins        cipher.AEAD
+	failureBytes   int
 	receiptCtx     context.Context
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -311,8 +314,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 				failure.Code = string(code)
 			}
 			if returned.CallID != "" {
-				reply := returned
-				failure.Reply = &reply
+				h.retainFailureReply(&failure, returned)
 			}
 			h.failures = append(h.failures, failure)
 			h.mu.Unlock()

@@ -81,7 +81,7 @@ func TestAttachmentCodeModeWireAndSameGenerationHandles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := agent.AgentSpec{Model: llm, Tools: []tool.Tool{picture, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}
+	spec := agent.AgentSpec{Model: llm, Tools: []tool.Tool{picture, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Limits: codemode.Limits{RetainedBytes: 6}}}}
 	cache := model.NewImagePreparationCache()
 	newRuntime := func(store *sessionfile.Store) *Runtime {
 		t.Helper()
@@ -104,6 +104,36 @@ func TestAttachmentCodeModeWireAndSameGenerationHandles(t *testing.T) {
 	}
 	rt := newRuntime(store)
 	run(rt, "three screenshots with numeric output")
+	// Put the original lookup into the file Store's bounded append index,
+	// then exceed its eight-Session capacity before returning the saved
+	// image. The language generation and the old object stay alive.
+	page, err := store.EventsPage(t.Context(), session.EventPageRequest{SessionRef: active.SessionRef, Visibility: session.EventPageAllDurable})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original string
+	for _, event := range page.Events {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "Picture" {
+			original = event.ID
+		}
+	}
+	if receipt, err := store.EventReceipt(t.Context(), active.SessionRef, original); err != nil || receipt == nil {
+		t.Fatalf("could not warm the original receipt index: %v", err)
+	}
+	for i := range 9 {
+		ff, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "user", PreferredSessionID: fmt.Sprintf("index-eviction-%d", i), Workspace: session.WorkspaceRef{CWD: t.TempDir()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg := model.NewTextMessage(model.RoleUser, "fill the receipt lookup")
+		written, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: ff.SessionRef, Event: &session.Event{Type: session.EventTypeUser, Message: &msg}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if receipt, err := store.EventReceipt(t.Context(), ff.SessionRef, written.ID); err != nil || receipt == nil {
+			t.Fatalf("append index fixture %d: %v", i, err)
+		}
+	}
 	run(rt, "return an old selected image")
 	reopened := newLogicalFileStore(t, sessionfile.Config{RootDir: root, Attachments: true})
 	run(newRuntime(reopened), "read the same history without tool effects")
@@ -144,6 +174,9 @@ func TestAttachmentCodeModeWireAndSameGenerationHandles(t *testing.T) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
+		}
+		if !bytes.Contains(raw, []byte(active.SessionID)) {
+			return nil
 		}
 		logBytes += len(raw)
 		for _, img := range images {

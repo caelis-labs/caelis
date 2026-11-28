@@ -119,8 +119,11 @@ identity on demand. `js_exec({reset:true})`, mutually exclusive with `code` and
 of the occupied VM. A new environment does not wait for the old environment's
 cleanup. Old responses stay bound to their old execution and generation; no tool
 effect is replayed. Original Task records and tool facts retain their disposition,
-including uncertain effects. Reset and environment release clear bindings,
-retained media and their cumulative retention budget.
+including uncertain effects. A returned Body or media object carries an
+authenticated locator for its original Session receipt. The Runtime keeps no
+cross-script result index or cumulative charge for persisted text and JSON.
+Reset and environment release discard the generation key and its JavaScript
+bindings.
 
 The SDK Runtime owns the environment under its existing Session execution
 activation. The product releases it through `sessionRuntimeRegistry` only after

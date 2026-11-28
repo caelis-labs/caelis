@@ -462,7 +462,7 @@ func boundedReply(r codemode.Reply, budget int) bool {
 		remaining -= n * 6
 		return remaining >= 0
 	}
-	if remaining < 0 || !consume(len(r.CallID)) || !consume(len(r.Outcome)) || !consume(len(r.BodyText)) || !consume(len(r.Value)) {
+	if remaining < 0 || !consume(len(r.CallID)) || !consume(len(r.Origin)) || !consume(len(r.Outcome)) || !consume(len(r.BodyText)) || !consume(len(r.Value)) {
 		return false
 	}
 	for _, p := range r.Parts {

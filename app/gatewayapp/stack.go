@@ -790,6 +790,9 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	if quiesceErr != nil {
 		return fmt.Errorf("gatewayapp: resources retained after incomplete drain: %w", quiesceErr)
 	}
+	if cache := s.composition.authorities.imageCache; cache != nil {
+		cache.Close()
+	}
 	if s.composition.authorities.approvalRecovery != nil {
 		s.composition.authorities.approvalRecovery.Close()
 	}

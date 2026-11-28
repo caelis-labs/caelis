@@ -106,6 +106,53 @@ func TestAcceptedTurnClassifiesParentCancellation(t *testing.T) {
 	}
 }
 
+// The HTTP reconnect caller first reads inactive state, then consumes the feed
+// only through Sync. Hold the terminal observer at the spool publication seam
+// and assert exactly which state that caller can observe at either cut.
+func TestGatewayKeepsTurnActiveUntilTerminalPublication(t *testing.T) {
+	active := session.Session{SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s", WorkspaceKey: "ws"}}
+	rt := &lifecycleCancellationRuntime{produce: func(context.Context, agent.SourceEventObserver) (agent.RunResult, error) {
+		return agent.RunResult{Session: active, Handle: &recordingRunner{}}, nil
+	}}
+	gateway, err := New(Config{Sessions: staticSessionService{session: active}, Runtime: rt, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trace []string
+	terminalEntered, terminalRelease := make(chan struct{}), make(chan struct{})
+	observer := TurnEventObserverFunc(func(_ context.Context, env eventstream.Envelope) error {
+		if eventstream.IsTurnTerminalLifecycle(env) {
+			close(terminalEntered)
+			<-terminalRelease
+		}
+		trace = append(trace, env.Lifecycle.State)
+		return nil
+	})
+	result, err := gateway.BeginTurn(t.Context(), BeginTurnRequest{SessionRef: active.SessionRef, Input: "finish", Observer: observer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Handle.Close()
+	select {
+	case <-terminalEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn did not reach terminal publication")
+	}
+	before, beginErr := gateway.ControlClientRuntimeState(t.Context(), active.SessionRef)
+	firstTrace := append([]string(nil), trace...)
+	close(terminalRelease)
+	select {
+	case <-result.Handle.(*turnHandle).done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("turn did not finish")
+	}
+	after, endErr := gateway.ControlClientRuntimeState(t.Context(), active.SessionRef)
+	t.Logf("before-append active=%v events=%v; after-append active=%v events=%v", before.Run.Active, firstTrace, after.Run.Active, trace)
+	if beginErr != nil || endErr != nil || !before.Run.Active || after.Run.Active || len(trace) != 2 || trace[0] != "running" || trace[1] != "completed" {
+		t.Fatalf("idle must follow terminal publication, state errors %v and %v", beginErr, endErr)
+	}
+}
+
 type lifecycleCancellationRuntime struct {
 	controlPlaneRuntime
 	produce func(context.Context, agent.SourceEventObserver) (agent.RunResult, error)

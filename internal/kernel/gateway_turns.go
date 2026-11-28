@@ -190,8 +190,9 @@ func (g *Gateway) runTurn(
 	resolved ResolvedTurn,
 	handle *turnHandle,
 ) {
-	defer handle.finishRuntime(runtimeParent)
-	defer g.releaseActive(session.SessionID, handle)
+	defer handle.finishRuntime(runtimeParent, func() {
+		g.releaseActive(session.SessionID, handle)
+	})
 	defer cancel()
 
 	runReq := resolved.RunRequest
@@ -272,8 +273,9 @@ func (g *Gateway) runParticipantTurn(
 	req PromptParticipantRequest,
 	handle *turnHandle,
 ) {
-	defer handle.finishRuntime(runtimeParent)
-	defer g.releaseActive(session.SessionID, handle)
+	defer handle.finishRuntime(runtimeParent, func() {
+		g.releaseActive(session.SessionID, handle)
+	})
 	defer cancel()
 
 	runReq := agent.PromptParticipantRequest{

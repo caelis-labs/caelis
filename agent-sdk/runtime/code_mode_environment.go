@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/cipher"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -13,20 +14,19 @@ import (
 )
 
 type codeModeResults struct {
-	mu         sync.Mutex
 	retained   int
-	handles    map[string]codeModeResultHandle
+	handles    map[string]tool.ContentBlock
 	replyParts map[string]codeModeReplyReceipt
 }
 
 func newCodeModeResults() *codeModeResults {
-	return &codeModeResults{handles: map[string]codeModeResultHandle{}, replyParts: map[string]codeModeReplyReceipt{}}
+	return &codeModeResults{handles: map[string]tool.ContentBlock{}, replyParts: map[string]codeModeReplyReceipt{}}
 }
 
 type codeModeEnvironment struct {
 	generation string
 	engine     codemode.Environment
-	results    *codeModeResults
+	origins    cipher.AEAD
 	cancel     context.CancelFunc
 }
 
@@ -51,7 +51,7 @@ func newCodeModeEnvironment(executor codemode.Executor) *codeModeEnvironment {
 	} else {
 		engine = scopedCodeModeExecutor{executor}
 	}
-	return &codeModeEnvironment{generation: uuid.NewString(), engine: engine, results: newCodeModeResults()}
+	return &codeModeEnvironment{generation: uuid.NewString(), engine: engine, origins: newCodeModeOrigins()}
 }
 
 func (r *Runtime) acquireCodeMode(ctx context.Context, ref session.SessionRef, executor codemode.Executor) (context.Context, *codeModeExecution, error) {

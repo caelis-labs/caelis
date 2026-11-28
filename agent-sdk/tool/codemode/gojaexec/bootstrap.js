@@ -21,11 +21,13 @@
   const origins=new WeakMapType(), replies=new WeakMapType(), toolGlobals=new SetType();
   let limits, state, preferredPaths;
   function ownReply(reply, diagnostic = false) {
-    const media=[];
+    const media=[], mediaHandles=new SetType();
+    let mediaCount=0;
     for(let i=0;i<(reply.parts||[]).length;i++) {
       const p=reply.parts[i];
       if(p.kind==="media"||p.kind==="file_ref") {
         weakSet(origins,p,{kind:p.kind,handle:p.handle});freeze(p);
+        if(!has(mediaHandles,p.handle)){add(mediaHandles,p.handle);mediaCount++;}
         define(media,media.length,{value:p,enumerable:true});
       }
     }
@@ -41,7 +43,8 @@
       const hasData = own(reply,"value");
       define(body,"data",{value:hasData ? reply.value : undefined,enumerable:hasData});
     }
-    weakSet(replies,body,reply);
+    const selector=reply.origin||reply.call_id;
+    weakSet(replies,body,{selector,mediaCount,parts:selector?undefined:reply.parts,diagnosticText:diagnostic?text:undefined});
     return freeze(body);
   }
   // Output encoding bounds bytes before appending. Argument encoding has no
@@ -91,7 +94,7 @@
       const body=inspect&&weakGet(replies,v);
       if(body && typeof v.text === "function") {
         del(seen,v);
-        return visit({text:body.body_text,media:v.media},depth,inspect,path);
+        return visit({text:body.diagnosticText,media:v.media},depth,inspect,path);
       }
       const origin=weakGet(origins,v);
       if(inspect&&origin&&(origin.kind==="media"||origin.kind==="file_ref")&&!has(selected,origin.handle)) {
@@ -119,9 +122,8 @@
       put(array?"]":"}",1);del(seen,v);
     }
     if(original) {
-      const handles=new SetType();let count=0;
-      for(let i=0;i<(original.parts||[]).length;i++){const p=original.parts[i];if((p.kind==="media"||p.kind==="file_ref")&&!has(handles,p.handle)){add(handles,p.handle);if(++count>limits.calls)throw new ErrorType("returned media budget exceeded");}}
-      if(original.call_id){put('{"reply":true,"call_id":',24);quote(original.call_id);put('}',1);}
+      if(original.mediaCount>limits.calls)throw new ErrorType("returned media budget exceeded");
+      if(original.selector){put('{"reply":true,"call_id":',24);quote(original.selector);put('}',1);}
       else {put('{"reply":true,"parts":',21);visit(original.parts||[],0,false);put('}',1);}
       return out;
     }

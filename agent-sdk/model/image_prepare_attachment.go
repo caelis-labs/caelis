@@ -1,21 +1,31 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"io"
 )
 
-func (c *ImagePreparationCache) prepareAttachment(ctx context.Context, media *MediaPart, warm bool) (preparedImage, error) {
+func attachmentPreparationKey(ref AttachmentRef) [sha256.Size]byte {
+	spec, _ := json.Marshal(struct {
+		Ref                  AttachmentRef
+		Edge, Encoded, Tiles int
+	}{ref, imageMaxDimension, imageMaxEncodedBytes, imageMaxTiles})
+	return sha256.Sum256(spec)
+}
+
+func (c *ImagePreparationCache) prepareAttachment(ctx context.Context, media *MediaPart) (preparedImage, error) {
 	access, _ := ctx.Value(imageAttachmentsKey{}).(imageAttachments)
 	if access.reader == nil || access.session != media.Source.Attachment.SessionID {
 		return unavailableImage(), nil
 	}
 	ref := media.Source.Attachment
-	// Check incarnation on every use, including cache hits. Opening the file
-	// reads the header only and pins that incarnation for an in-flight read.
+	// A hit checks the live incarnation and reads only the header.
 	original, err := access.reader.OpenAttachment(ctx, access.session, ref)
 	if errors.Is(err, ErrAttachmentUnavailable) {
 		return unavailableImage(), nil
@@ -24,13 +34,7 @@ func (c *ImagePreparationCache) prepareAttachment(ctx context.Context, media *Me
 		return preparedImage{}, err
 	}
 	defer original.Close()
-	// The preparation specification is fixed for this cache. Include both the
-	// image incarnation and specification when forming the key.
-	spec, _ := json.Marshal(struct {
-		Ref                  AttachmentRef
-		Edge, Encoded, Tiles int
-	}{ref, imageMaxDimension, imageMaxEncodedBytes, imageMaxTiles})
-	result, err := c.prepareKey(ctx, sha256.Sum256(spec), func() (preparedImage, error) {
+	result, err := c.prepareKey(ctx, attachmentPreparationKey(ref), func() (preparedImage, error) {
 		if ref.Size > imageMaxSourceBytes {
 			return preparedImage{note: "omitted: source exceeds the image processing byte limit"}, nil
 		}
@@ -38,50 +42,80 @@ func (c *ImagePreparationCache) prepareAttachment(ctx context.Context, media *Me
 		if err != nil {
 			return preparedImage{}, err
 		}
-		value := prepareImageBytes(data, base64.StdEncoding.EncodedLen(len(data)))
-		if len(value.images) == 1 && value.images[0].data == "" {
-			value.images[0].data = base64.StdEncoding.EncodeToString(data)
-		}
-		return value, nil
-	}, warm)
+		return prepareAttachmentBytes(data), nil
+	})
 	if errors.Is(err, ErrAttachmentUnavailable) {
 		return unavailableImage(), nil
 	}
 	return result, err
 }
 
+func prepareAttachmentBytes(data []byte) preparedImage {
+	value := prepareImageBytes(data, base64.StdEncoding.EncodedLen(len(data)))
+	if len(value.images) == 1 && value.images[0].data == "" {
+		value.images[0].data = base64.StdEncoding.EncodeToString(data)
+	}
+	return value
+}
+
 func unavailableImage() preparedImage {
 	return preparedImage{note: "attachment unavailable"}
 }
 
-// PrewarmImages offers one bounded, best-effort preparation job. Active
-// requests never wait for this job and unrelated callers cannot queue behind it.
+const imageWarmSourceBytes = 256 << 10
+const imageWarmEdge = 512
+
+// PrewarmImages offers the first small PNG or JPEG already selected by the
+// model message. Large or busy preparations are left to foreground demand.
 func PrewarmImages(ctx context.Context, message *Message) {
 	access, _ := ctx.Value(imageAttachmentsKey{}).(imageAttachments)
-	if access.cache == nil || message == nil || ctx.Err() != nil {
+	if access.cache == nil || access.reader == nil || message == nil || ctx.Err() != nil {
 		return
 	}
-	var images []MediaPart
+	var selected AttachmentRef
 	_ = MapImageParts(message.Parts, func(media *MediaPart) error {
-		if media.Source.Kind == MediaSourceAttachment && len(images) < 4 {
-			images = append(images, *media)
+		ref := media.Source.Attachment
+		if selected.Instance == "" && media.Source.Kind == MediaSourceAttachment && access.session == ref.SessionID &&
+			(media.MimeType == "image/png" || media.MimeType == "image/jpeg") &&
+			ref.Size > 0 && ref.Size <= imageWarmSourceBytes && warmImageDimensions(ref.Width, ref.Height) &&
+			base64.StdEncoding.EncodedLen(int(ref.Size))+384 <= access.cache.maxBytes && access.cache.limit > 0 && access.cache.ttl > 0 {
+			selected = ref
 		}
 		return nil
 	})
-	if len(images) == 0 {
+	if selected.Instance == "" {
 		return
 	}
-	select {
-	case access.cache.warming <- struct{}{}:
-		go func() {
-			defer func() { <-access.cache.warming }()
-			for i := range images {
-				if ctx.Err() != nil {
-					return
-				}
-				_, _ = access.cache.prepareAttachment(ctx, &images[i], true)
-			}
-		}()
-	default:
+	access.cache.prewarm(ctx, attachmentPreparationKey(selected), func(ctx context.Context) (preparedImage, error) {
+		f, err := access.reader.OpenAttachment(ctx, access.session, selected)
+		if err != nil {
+			return preparedImage{}, err
+		}
+		defer f.Close()
+		data, err := ReadAttachment(warmAttachmentReader{ctx, f}, selected)
+		if err != nil {
+			return preparedImage{}, err
+		}
+		cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+		if err != nil || !warmImageDimensions(cfg.Width, cfg.Height) || (format != "png" && format != "jpeg") || ctx.Err() != nil {
+			return preparedImage{}, ErrAttachmentUnavailable
+		}
+		return prepareAttachmentBytes(data), nil
+	})
+}
+
+func warmImageDimensions(width, height int) bool {
+	return width > 0 && height > 0 && width <= imageWarmEdge && height <= imageWarmEdge
+}
+
+type warmAttachmentReader struct {
+	ctx context.Context
+	src io.Reader
+}
+
+func (r warmAttachmentReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
+	return r.src.Read(p)
 }
