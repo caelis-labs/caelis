@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ -z ${GH_TOKEN:-} ]]; then
-  echo "::error::Configure the DTW_UPDATE_TOKEN Actions secret. See docs/testing.md." >&2
+  echo "::error::Configure DTW_UPDATE_TOKEN or the Core release bot token. See docs/testing.md." >&2
   exit 1
 fi
 

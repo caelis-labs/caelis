@@ -12,7 +12,7 @@ import (
 
 const (
 	// EventSchemaVersion is the current durable canonical event schema.
-	EventSchemaVersion = 4
+	EventSchemaVersion = 5
 )
 
 // SchemaKind names the durable contract that rejected a version.

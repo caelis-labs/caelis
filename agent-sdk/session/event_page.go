@@ -4,6 +4,12 @@ import "context"
 
 const defaultEventPageLimit = 200
 
+// EventReceiptReader optionally provides indexed lookup of a durable receipt by
+// immutable Event ID, including mirror receipts. A missing ID returns nil.
+type EventReceiptReader interface {
+	EventReceipt(context.Context, SessionRef, string) (*Event, error)
+}
+
 // EventPageVisibility selects the durable visibility classes returned by one
 // sequence page. Transient events have no durable Seq and are never returned.
 type EventPageVisibility string

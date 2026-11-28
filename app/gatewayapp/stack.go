@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -84,6 +85,8 @@ type Config struct {
 	// It does not create or mutate model configuration.
 	ResolveProviderHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
 	Sandbox                   SandboxConfig
+	// LocalShell registers Shell during managed loopback Host composition.
+	LocalShell bool
 	// ChildControlURL and ChildControlTokenFile let an embedding expose this
 	// same Host to built-in ACP child processes. They never construct another
 	// Host and the token itself is not placed in argv or environment.
@@ -129,6 +132,7 @@ type KernelControlPlaneReader interface {
 const DefaultControlOperationRetention = appserver.DefaultOperationTerminalRetention
 
 type Stack struct {
+	controlShell              *appserver.ShellService
 	identity                  controlHostIdentity
 	composition               runtimeComposition
 	adapterHost               *adapterhostimpl.Manager
@@ -386,6 +390,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	sessionStoreConfig := sessionfile.Config{
+		Attachments: true,
 		RootDir:     filepath.Join(storeDir, "sessions"),
 		Diagnostics: runtimeDiagnostics,
 	}
@@ -536,7 +541,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{
 		composition: runtimeComposition{
+			passiveServeRoot: cfg.LocalShell,
 			authorities: runtimeHostAuthorities{
+				imageCache:              model.NewImagePreparationCache(),
 				productDefaults:         cfg.BuiltinPackage,
 				mcp:                     newHostMCP(newAppConfigStore(storeDir), doc, runtimeDiagnostics),
 				applicationChildClients: &applicationChildClientFactory{},
@@ -609,6 +616,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err := activateHostRuntime(stack, controlAssembly); err != nil {
 		_ = stack.Close()
 		return nil, err
+	}
+	if cfg.LocalShell {
+		stack.controlShell = newControlShell(userID, storeDir, sandboxCfg.HelperPath, cfg.SandboxHostAuthorityDir)
 	}
 	return stack, nil
 }
@@ -708,6 +718,9 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 	if s.lifecycleCancel != nil {
 		s.lifecycleCancel()
 	}
+	if err := s.controlShell.Quiesce(ctx); err != nil {
+		return err
+	}
 	if done := s.composition.authorities.collaborationDone; done != nil {
 		select {
 		case <-done:
@@ -776,6 +789,9 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	cancelQuiesce()
 	if quiesceErr != nil {
 		return fmt.Errorf("gatewayapp: resources retained after incomplete drain: %w", quiesceErr)
+	}
+	if cache := s.composition.authorities.imageCache; cache != nil {
+		cache.Close()
 	}
 	if s.composition.authorities.approvalRecovery != nil {
 		s.composition.authorities.approvalRecovery.Close()

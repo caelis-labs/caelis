@@ -28,6 +28,7 @@ var localResultProjection = tool.ResultProjection{Artifacts: artifact.NewFileSto
 // each detached Session Runtime instance receives a distinct value. Keeping
 // the composition private prevents it from becoming a second product API.
 type runtimeComposition struct {
+	passiveServeRoot bool
 	// authorities are borrowed process services. The value contains references
 	// only; one Runtime composition never owns or replaces their lifecycle.
 	authorities         runtimeHostAuthorities

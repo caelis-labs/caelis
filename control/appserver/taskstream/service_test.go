@@ -166,7 +166,7 @@ func TestProjectRecordKeepsTaskScopeAndTransientCursor(t *testing.T) {
 func TestReplacementDeliveryClearsRecordResumeIdentity(t *testing.T) {
 	t.Parallel()
 
-	delivery := projectDelivery(controltaskstream.Delivery{
+	deliveries, err := projectDeliveries(t.Context(), nil, []controltaskstream.Delivery{{
 		Kind: controltaskstream.DeliveryReplacePage, Source: controltaskstream.SourceReplacement,
 		SnapshotID: "snapshot-1",
 		Records: []controltaskstream.Record{{
@@ -180,7 +180,11 @@ func TestReplacementDeliveryClearsRecordResumeIdentity(t *testing.T) {
 				TerminalID: "turn-1", State: string(task.StateCompleted), Closed: true,
 			},
 		}},
-	})
+	}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := deliveries[0]
 	if len(delivery.Events) != 1 {
 		t.Fatalf("replacement events = %#v", delivery.Events)
 	}
@@ -461,7 +465,7 @@ func TestProtocolSubscriptionClosesControlSubscriptionWhenContextEnds(t *testing
 		deliveries: make(chan controltaskstream.Delivery),
 		closed:     make(chan struct{}),
 	}
-	sub := newSubscription(ctx, inner)
+	sub := newSubscription(ctx, inner, nil)
 	cancel()
 
 	select {

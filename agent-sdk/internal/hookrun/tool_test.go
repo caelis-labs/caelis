@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/hook"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -81,4 +83,50 @@ func TestInvokeCannotSuppressProducerFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestModelViewMediaSources(t *testing.T) {
+	ref := model.AttachmentRef{SessionID: "owner", Digest: "digest", Instance: "original", Size: 70}
+	reader := testAttachmentReader(func(_ context.Context, owner string, got model.AttachmentRef) (io.ReadCloser, error) {
+		if owner != ref.SessionID || got != ref {
+			return nil, model.ErrAttachmentUnavailable
+		}
+		return io.NopCloser(strings.NewReader("")), nil
+	})
+	attachment := model.MediaSource{Kind: model.MediaSourceAttachment, Attachment: ref}
+	mixed := attachment
+	mixed.Data = "aW1n"
+	missing := attachment
+	missing.Attachment.Instance = "stale"
+	for _, tc := range []struct {
+		name, owner string
+		source      model.MediaSource
+		modality    model.MediaModality
+		ok          bool
+	}{
+		{"owned", "owner", attachment, model.MediaModalityImage, true},
+		{"foreign", "other", attachment, model.MediaModalityImage, false},
+		{"unbound", "", attachment, model.MediaModalityImage, false},
+		{"stale", "owner", missing, model.MediaModalityImage, false},
+		{"mixed", "owner", mixed, model.MediaModalityImage, false},
+		{"audio", "owner", attachment, model.MediaModalityAudio, false},
+		{"inline", "", model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"}, model.MediaModalityImage, true},
+		{"empty inline", "owner", model.MediaSource{Kind: model.MediaSourceInline}, model.MediaModalityImage, false},
+		{"empty URL", "owner", model.MediaSource{Kind: model.MediaSourceURL}, model.MediaModalityImage, false},
+		{"unknown kind", "owner", model.MediaSource{Kind: "unknown", Data: "aW1n"}, model.MediaModalityImage, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := model.WithImageAttachments(t.Context(), tc.owner, reader, nil, nil)
+			part := model.NewMediaPart(tc.modality, tc.source, "image/png", "")
+			if err := validateModelViewParts(ctx, []model.Part{part}); (err == nil) != tc.ok {
+				t.Fatalf("validateModelViewParts = %v, want success %t", err, tc.ok)
+			}
+		})
+	}
+}
+
+type testAttachmentReader func(context.Context, string, model.AttachmentRef) (io.ReadCloser, error)
+
+func (r testAttachmentReader) OpenAttachment(ctx context.Context, owner string, ref model.AttachmentRef) (io.ReadCloser, error) {
+	return r(ctx, owner, ref)
 }

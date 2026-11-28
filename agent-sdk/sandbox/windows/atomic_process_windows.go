@@ -32,13 +32,21 @@ type atomicJobWaitResult struct {
 	err  error
 }
 
-func runAtomicJobProcess(ctx context.Context, cmd *exec.Cmd, token win32.Token, stdin []byte, stdout, stderr io.Writer, releaseUse func()) (int, error, bool) {
+func runAtomicJobProcess(ctx context.Context, cmd *exec.Cmd, token win32.Token, stdin []byte, stdout, stderr io.Writer, releaseUse func(), bounded bool) (int, error, bool) {
+	if err := ctx.Err(); err != nil {
+		_ = token.Close()
+		return -1, err, false
+	}
 	process, err := winproc.StartJobProcess(winproc.JobProcessConfig{Token: uintptr(token), Application: cmd.Path, Args: append([]string(nil), cmd.Args[1:]...), Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...), Stdin: len(stdin) > 0})
 	_ = token.Close()
 	if err != nil {
 		return -1, err, false
 	}
-	return runStartedAtomicJobProcess(ctx, process, stdin, stdout, stderr, releaseUse, windowsTerminateDrain)
+	drain := windowsPreflightTimeout
+	if bounded {
+		drain = windowsTerminateDrain
+	}
+	return runStartedAtomicJobProcess(ctx, process, stdin, stdout, stderr, releaseUse, windowsTerminateDrain, drain)
 }
 
 func runStartedAtomicJobProcess(
@@ -48,16 +56,24 @@ func runStartedAtomicJobProcess(
 	stdout io.Writer,
 	stderr io.Writer,
 	releaseUse func(),
-	rootWaitTimeout time.Duration,
+	rootWaitTimeout, drainTimeout time.Duration,
 ) (int, error, bool) {
 	var closePipesOnce sync.Once
 	closePipes := func() { closePipesOnce.Do(process.ClosePipes) }
 	defer closePipes()
 
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	copyOutput := func(dst io.Writer, src io.Reader) {
+		_, err := io.Copy(dst, src)
+		if errors.Is(err, sandbox.ErrCommandOutputLimit) {
+			cancel(err)
+		}
+	}
 	var copyWG sync.WaitGroup
 	copyWG.Add(2)
-	go func() { defer copyWG.Done(); _, _ = io.Copy(stdout, process.Stdout()) }()
-	go func() { defer copyWG.Done(); _, _ = io.Copy(stderr, process.Stderr()) }()
+	go func() { defer copyWG.Done(); copyOutput(stdout, process.Stdout()) }()
+	go func() { defer copyWG.Done(); copyOutput(stderr, process.Stderr()) }()
 	// WaitRoot exclusively owns the process handle until Windows completes the
 	// pending wait. A caller timeout may close pipes and drain the Job, but it
 	// must leave this waiter to close the process handle after it is signaled.
@@ -67,7 +83,7 @@ func runStartedAtomicJobProcess(
 		waitCh <- atomicJobWaitResult{code: code, err: waitErr}
 	}()
 	handOffDrain := func() {
-		go retryAtomicJobProcessDrain(process, releaseUse)
+		go retryAtomicJobProcessDrain(process, releaseUse, drainTimeout)
 		closePipes()
 		copyWG.Wait()
 	}
@@ -82,7 +98,10 @@ func runStartedAtomicJobProcess(
 				handOffDrain()
 				return waited.code, errors.Join(writeErr, closeErr, terminateErr, rootWaitErr), true
 			}
-			drainErr, keepUse := drainAtomicJobProcess(process, releaseUse)
+			drainErr, keepUse := drainAtomicJobProcess(process, releaseUse, drainTimeout)
+			if drainErr != nil {
+				closePipes()
+			}
 			copyWG.Wait()
 			return waited.code, errors.Join(writeErr, closeErr, terminateErr, waited.err, drainErr), keepUse
 		}
@@ -94,7 +113,7 @@ func runStartedAtomicJobProcess(
 	select {
 	case waited = <-waitCh:
 	case <-ctx.Done():
-		contextErr = ctx.Err()
+		contextErr = context.Cause(ctx)
 		terminateErr = process.Terminate()
 		var rootWaitErr error
 		var timedOut bool
@@ -104,8 +123,14 @@ func runStartedAtomicJobProcess(
 			return waited.code, errors.Join(contextErr, terminateErr, rootWaitErr), true
 		}
 	}
-	drainErr, keepUse := drainAtomicJobProcess(process, releaseUse)
+	drainErr, keepUse := drainAtomicJobProcess(process, releaseUse, drainTimeout)
+	if drainErr != nil {
+		closePipes()
+	}
 	copyWG.Wait()
+	if contextErr == nil {
+		contextErr = context.Cause(ctx)
+	}
 	if contextErr == nil && terminateErr == nil && drainErr == nil && waited.code > 0 {
 		return waited.code, sandbox.MarkCommandExit(waited.err), keepUse
 	}
@@ -123,20 +148,20 @@ func waitForAtomicJobRoot(waitCh <-chan atomicJobWaitResult, timeout time.Durati
 	}
 }
 
-func drainAtomicJobProcess(process atomicJobProcess, releaseUse func()) (error, bool) {
-	drainCtx, cancel := context.WithTimeout(context.Background(), windowsPreflightTimeout)
+func drainAtomicJobProcess(process atomicJobProcess, releaseUse func(), drainTimeout time.Duration) (error, bool) {
+	drainCtx, cancel := context.WithTimeout(context.Background(), drainTimeout)
 	drainErr := process.DrainAndClose(drainCtx)
 	cancel()
 	if drainErr == nil || !process.NeedsDrainRetry() {
 		return drainErr, false
 	}
-	go retryAtomicJobProcessDrain(process, releaseUse)
+	go retryAtomicJobProcessDrain(process, releaseUse, drainTimeout)
 	return drainErr, true
 }
 
-func retryAtomicJobProcessDrain(process atomicJobProcess, releaseUse func()) {
+func retryAtomicJobProcessDrain(process atomicJobProcess, releaseUse func(), drainTimeout time.Duration) {
 	for {
-		drainCtx, cancel := context.WithTimeout(context.Background(), windowsPreflightTimeout)
+		drainCtx, cancel := context.WithTimeout(context.Background(), drainTimeout)
 		err := process.DrainAndClose(drainCtx)
 		cancel()
 		if err == nil || !process.NeedsDrainRetry() {

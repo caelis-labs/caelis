@@ -8,10 +8,10 @@ import (
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
-// AppServerPresentationDependencies is the narrow host snapshot required to
-// assemble protocol-neutral presentation providers. Runtime execution and Task
-// streams remain behind their dedicated AppServer services.
+// AppServerPresentationDependencies provides Host-owned services and inputs
+// needed by the AppServer composition root.
 type AppServerPresentationDependencies struct {
+	Shell         *appserver.ShellService
 	UIPreferences appserver.UIPreferencesStore
 	Sessions      session.ManagedService
 	Assembly      assembly.ResolvedAssembly
@@ -27,6 +27,7 @@ func (s *Stack) PresentationDependencies() (AppServerPresentationDependencies, e
 	}
 	s.composition.mu.RLock()
 	deps := AppServerPresentationDependencies{
+		Shell:         s.controlShell,
 		Sessions:      s.composition.sessions,
 		UIPreferences: s.composition.authorities.store,
 		Assembly:      assembly.CloneResolvedAssembly(s.composition.activeRuntime.Assembly),

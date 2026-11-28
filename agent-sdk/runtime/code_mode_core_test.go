@@ -935,43 +935,45 @@ func TestCodeModeResetDoesNotWaitForOldHostOrAdmitOldReply(t *testing.T) {
 
 }
 
-func TestCodeModeRetentionBudgetAccumulatesAcrossScriptsAndReset(t *testing.T) {
+func TestCodeModeReceiptOriginIsScopedToGenerationAndPosition(t *testing.T) {
 	t.Parallel()
-	r := &Runtime{}
-	def := tool.Definition{}
-	_, first, err := r.acquireCodeMode(t.Context(), session.SessionRef{SessionID: "one"}, &gojaexec.Executor{})
+	rt := &Runtime{}
+	ref := session.SessionRef{SessionID: "one"}
+	executor := &gojaexec.Executor{}
+	_, first, err := rt.acquireCodeMode(t.Context(), ref, executor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	limits := codemode.DefaultLimits()
-	limits.RetainedBytes = 6
-	h := &codeModeHost{limits: limits, codeModeResults: first.environment.results}
-	if _, err = h.project("one", tool.Result{Content: []tool.ContentBlock{tool.Text("1234")}}, codemode.OutcomeSucceeded, def); err != nil {
-		t.Fatal(err)
-	}
+	receipt := codeModeReplyReceipt{id: "original", seq: 42}
+	h := &codeModeHost{origins: first.environment.origins}
+	token := h.sealCodeModeOrigin(receipt, 3)
 	first.release()
-	_, second, err := r.acquireCodeMode(t.Context(), session.SessionRef{SessionID: "one"}, &gojaexec.Executor{})
+	_, second, err := rt.acquireCodeMode(t.Context(), ref, executor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h = &codeModeHost{limits: limits, codeModeResults: second.environment.results}
-	if _, err = h.project("two", tool.Result{Content: []tool.ContentBlock{tool.Text("12")}}, codemode.OutcomeSucceeded, def); err != nil {
-		t.Fatal(err)
+	current := &codeModeHost{origins: second.environment.origins}
+	got, ordinal, ok := current.openCodeModeOrigin(token)
+	if !ok || got.id != receipt.id || got.seq != receipt.seq || ordinal != 3 {
+		t.Fatal("the next script lost the receipt position")
 	}
-	if _, err = h.project("overflow", tool.Result{Content: []tool.ContentBlock{tool.Text("1")}}, codemode.OutcomeSucceeded, def); err == nil {
-		t.Fatal("cumulative budget bypassed")
+	modified := []byte(token)
+	modified[len(codeModeOriginPrefix)] ^= 1
+	if _, _, ok := current.openCodeModeOrigin(string(modified)); ok {
+		t.Fatal("modified receipt origin authenticated")
 	}
 	second.release()
-	r.resetCodeMode(session.SessionRef{SessionID: "one"}, &gojaexec.Executor{})
-	_, third, err := r.acquireCodeMode(t.Context(), session.SessionRef{SessionID: "one"}, &gojaexec.Executor{})
+	rt.resetCodeMode(ref, executor)
+	_, third, err := rt.acquireCodeMode(t.Context(), ref, executor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.environment.results.retained != 0 || len(third.environment.results.replyParts) != 0 {
-		t.Fatal("reset retained old result storage")
+	other := &codeModeHost{origins: third.environment.origins}
+	if _, _, ok := other.openCodeModeOrigin(token); ok {
+		t.Fatal("retired generation's receipt origin authenticated")
 	}
 	third.release()
-	_ = r.ReleaseCodeModeEnvironments()
+	_ = rt.ReleaseCodeModeEnvironments()
 }
 
 func TestCodeModeResetInterruptsUnresponsiveVM(t *testing.T) {
@@ -1047,46 +1049,39 @@ func generationOf(t *testing.T, raw string) string {
 	return ""
 }
 
-func TestCodeModeRealRetentionAcrossScriptsAndFailedProjections(t *testing.T) {
+func TestCodeModeDurableBodiesStayUsableAcrossSmallBudgetScripts(t *testing.T) {
 	t.Parallel()
 	store, active, _ := codeModeStore(t)
 	var calls int
-	bytesTool := tool.NamedTool{Def: tool.Definition{Name: "Bytes", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"size": map[string]any{"type": "integer"}}}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-		var args struct {
-			Size int `json:"size"`
-		}
-		_ = json.Unmarshal(call.Input, &args)
+	bytesTool := tool.NamedTool{Def: tool.Definition{Name: "Bytes", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		calls++
-		return tool.Result{Content: []tool.ContentBlock{tool.Text(strings.Repeat("x", args.Size))}}, nil
+		return tool.Result{Content: []tool.ContentBlock{tool.Text("durable body"), tool.StructuredContent{Value: json.RawMessage(`{"n":9223372036854775807}`)}}}, nil
 	}}
-	sources := []string{`let firstBody=await Bytes({size:4});return firstBody.text;`, `return await Bytes({size:2});`, `let rejected=0;for(let i=0;i<5;i++){try{await Bytes({size:1})}catch(e){rejected++;}}return rejected;`, `return firstBody;`, "", `return await Bytes({size:6});`}
+	sources := []string{`globalThis.firstBody=await Bytes({});return 42;`}
+	for range 12 {
+		sources = append(sources, `await Bytes({}); return 42;`)
+	}
+	sources = append(sources, `return firstBody;`)
 	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 		if i >= len(sources) {
 			return nil
 		}
 		raw, _ := json.Marshal(map[string]any{"code": sources[i]})
-		if i == 4 {
-			raw = []byte(`{"reset":true}`)
-		}
 		return []model.ToolCall{{ID: fmt.Sprintf("retention-%d", i), Name: codemode.ToolName, Args: string(raw)}}
 	}}
-	_, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{bytesTool, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Limits: codemode.Limits{RetainedBytes: 6}}}}, nil, nil)
-	for index, want := range map[int]string{0: "xxxx", 1: "xx", 2: "5", 3: "xxxx", 5: "xxxxxx"} {
+	runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{bytesTool, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Limits: codemode.Limits{RetainedBytes: 6}}}}, nil, nil)
+	for index := range sources {
 		result := errorDeliveryModelResult(t, driver.requests[index+1], fmt.Sprintf("retention-%d", index))
-		if result.IsError != (index == 2) || !strings.Contains(string(errorDeliveryJSON(t, result.Content)), want) {
-			t.Fatalf("script %d: %+v", index, result)
+		raw := string(errorDeliveryJSON(t, result.Content))
+		if result.IsError {
+			t.Fatalf("script %d failed: %s", index, raw)
+		}
+		if index == len(sources)-1 && (!strings.Contains(raw, "durable body") || !strings.Contains(raw, "9223372036854775807")) {
+			t.Fatalf("old body did not recover the original blocks: %s", raw)
 		}
 	}
-	if calls != 8 {
-		t.Fatalf("actual tool effects=%d; want 8 without replay", calls)
-	}
-	rt.codeModeMu.Lock()
-	env := rt.codeModeEnvironments[session.NormalizeSessionRef(active.SessionRef)]
-	rt.codeModeMu.Unlock()
-	env.results.mu.Lock()
-	defer env.results.mu.Unlock()
-	if env.results.retained != 6 || len(env.results.replyParts) != 1 || len(env.results.handles) != 0 {
-		t.Fatalf("reset generation retained bytes=%d replies=%d handles=%d", env.results.retained, len(env.results.replyParts), len(env.results.handles))
+	if calls != len(sources)-1 {
+		t.Fatalf("actual effects=%d; want %d without replay", calls, len(sources)-1)
 	}
 }
 

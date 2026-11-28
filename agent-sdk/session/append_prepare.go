@@ -351,7 +351,10 @@ func sameIdempotentEvent(existing *Event, retry *Event) bool {
 	left.Seq, right.Seq = 0, 0
 	left.Time, right.Time = time.Time{}, time.Time{}
 	left.Text, right.Text = "", ""
-	return reflect.DeepEqual(left, right)
+	if reflect.DeepEqual(left, right) {
+		return true
+	}
+	return sameEventAttachmentBytes(left, right)
 }
 
 // ApplyPreparedAppendToSession applies title and UpdatedAt changes implied by

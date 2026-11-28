@@ -284,17 +284,18 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	sandboxPortConfig := sandbox.Config{
-		CWD:                 s.workspace.CWD,
-		Execution:           sandbox.CloneExecutionConfig(s.executionConfig),
-		BaseEnv:             runtimeCommandEnvironment(),
-		RequestedBackend:    route.Backend,
-		BackendCandidates:   route.BackendCandidates,
-		FallbackInstallHint: route.InstallHint,
-		HelperPath:          sandboxCfg.HelperPath,
-		StateDir:            s.authorities.storeDir,
-		HostAuthorityDir:    s.authorities.sandboxHostAuthorityDir,
-		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
-		ReadOnlySubpaths:    append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
+		SkipAvailabilityProbe: s.passiveServeRoot,
+		CWD:                   s.workspace.CWD,
+		Execution:             sandbox.CloneExecutionConfig(s.executionConfig),
+		BaseEnv:               runtimeCommandEnvironment(),
+		RequestedBackend:      route.Backend,
+		BackendCandidates:     route.BackendCandidates,
+		FallbackInstallHint:   route.InstallHint,
+		HelperPath:            sandboxCfg.HelperPath,
+		StateDir:              s.authorities.storeDir,
+		HostAuthorityDir:      s.authorities.sandboxHostAuthorityDir,
+		WritableRoots:         append([]string(nil), sandboxCfg.WritableRoots...),
+		ReadOnlySubpaths:      append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
 	}
 	sandboxRuntime, err := sandbox.New(sandboxPortConfig)
 	if err != nil {

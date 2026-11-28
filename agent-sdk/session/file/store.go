@@ -31,6 +31,7 @@ func NewStoreWithPriorHostFences(
 
 func newStore(cfg Config) *Store {
 	store := &Store{
+		attachments:        cfg.Attachments,
 		rootDir:            strings.TrimSpace(cfg.RootDir),
 		sessionIDGenerator: cfg.SessionIDGenerator,
 		eventIDGenerator:   cfg.EventIDGenerator,
@@ -341,6 +342,9 @@ func (s *Store) prepareAppendTransactionForDocument(
 		UpdateState:              updateState,
 	})
 	if err != nil {
+		return persistedDocument{}, session.PreparedAppendTransaction{}, err
+	}
+	if err := s.stagePreparedEventAttachments(ctx, doc.Session.SessionID, &tx.Prepared); err != nil {
 		return persistedDocument{}, session.PreparedAppendTransaction{}, err
 	}
 	doc.Session = tx.Session

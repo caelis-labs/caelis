@@ -39,6 +39,52 @@ revision of the same Host snapshot as the bindings and targets, as a decimal
 string. This opt-in preserves the response shape for existing strict clients.
 The Team picker uses that revision for saves and requires a Host that returns it.
 
+## Shell execution
+
+Hosts with `shell-execution-v1` expose `POST /api/control/v1/shell/execute`. Use
+`ExecuteShell` in the [Go HTTP client](../control/appserver/httpclient) and
+`ShellRequest` and `ShellResult` in the generated
+[TypeScript contracts](../clients/typescript/control-v1.gen.ts).
+
+A managed loopback `caelis serve` Host advertises the capability with the
+ordinary local Control credential from the Store. This includes the managed
+launcher that passes the default token file explicitly. ACP ingress,
+custom Control credentials, remote listeners, and forwarded requests have
+no Shell grant. The grant belongs to the bearer credential. A process
+running as the Host user may read that credential under the platform's read
+policy and use it over loopback. Shell introduces no process-identity check
+or separate token.
+
+Send an existing absolute `workspace` directory and a `command` of up to
+32 KiB. The workspace must be separate from the Host Store. Each authorized
+call selects its workspace independently. On Windows the final encoded
+PowerShell command line must also fit within 32,767 UTF-16 units including
+the terminator. Exceeding either command limit returns `400`.
+
+Shell always uses the platform workspace-write sandbox. Seatbelt on macOS
+and Bubblewrap on Linux grant filesystem writes in the requested workspace,
+which also supplies temporary storage. On Windows the restricted token
+uses the native workspace ACLs and Store-managed temporary environment.
+Normal platform read access and network access are enabled, including
+loopback access. Callers should treat commands as able to read and transmit
+data the OS user can access. Shell scope does not change the default policy
+for Agent Sessions. Sandbox failure is request-local and never falls back
+to Host execution.
+
+A completed process returns `location` set to `sandbox`, along with
+`backend`, `exit_code`, `stdout`, and `stderr`. An ordinary nonzero exit is
+a completed result. The Host admits four concurrent calls and returns `429`
+for excess calls. A 20-second deadline and 64 KiB of raw output per stream
+return `504` and `413` respectively. Disconnect and Host shutdown cancel
+active calls. macOS and Linux supervise one-shot workers and their process
+groups. Windows uses a kill-on-close Job Object and retains its native ACL
+lifecycle. These bounds apply to the execution path and the process tree
+retained by the platform.
+
+Shell uses no model or Agent Session and has no durable receipt. If a worker
+exits without a result, Control reports `unknown_outcome`. After a lost
+response, reconcile external effects before issuing a new request.
+
 ## Session interrupt
 
 `session-interrupt-v1` permits `POST /sessions/{session_id}/interrupt` to interrupt

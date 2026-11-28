@@ -24,7 +24,7 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
 				root := t.TempDir()
-				store := &invalidSecondInputStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root}), fail: fail}
+				store := &invalidSecondInputStore{Store: newLogicalFileStore(t, sessionfile.Config{RootDir: root, Attachments: true}), fail: fail}
 				active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "active-batch-test"})
 				if err != nil {
 					t.Fatal(err)
@@ -53,12 +53,12 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				probe := &steerRuntimeModel{started: make(chan struct{}), releaseFirst: make(chan struct{})}
 				remoteHandle := newTestControllerTurnHandle(nil)
 				remoteStarted := make(chan struct{})
-				var remoteParts []model.ContentPart
+				var remoteParts, remoteInitialParts []model.ContentPart
 				var remoteTurn string
 				remoteCalls := 0
 				backend := steeringACPController{
 					stubACPController: stubACPController{runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnHandle, error) {
-						remoteTurn = req.TurnID
+						remoteTurn, remoteInitialParts = req.TurnID, req.ContentParts
 						close(remoteStarted)
 						return remoteHandle, nil
 					}},
@@ -76,7 +76,14 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				capture := &testSourceCapture{}
-				result, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "initial", SourceObserver: capture, AgentSpec: agent.AgentSpec{Name: "chat", Model: probe}})
+				var initialParts []model.ContentPart
+				if path == "controller" {
+					initialParts = []model.ContentPart{
+						{Type: model.ContentPartText, Text: "initial"},
+						{Type: model.ContentPartImage, MimeType: "image/png", FileName: "input", Data: "aGk="},
+					}
+				}
+				result, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "initial", ContentParts: initialParts, SourceObserver: capture, AgentSpec: agent.AgentSpec{Name: "chat", Model: probe}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -88,6 +95,9 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 				case <-started:
 				case <-ctx.Done():
 					t.Fatal("initial Turn did not start")
+				}
+				if path == "controller" && !reflect.DeepEqual(remoteInitialParts, initialParts) {
+					t.Fatal("ACP controller lost the committed user image")
 				}
 				err = result.Handle.Submit(agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
 				if path == "kernel" {

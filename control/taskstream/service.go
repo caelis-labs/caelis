@@ -442,8 +442,12 @@ func (s *service) projectSpoolRecord(entry *task.Entry, raw streamspool.Record, 
 		Event: session.CloneEvent(event.Event), UpdatedAt: event.OccurredAt,
 	}
 	frame.setScriptObservation(entry, event.ScriptCompletion)
+	imageSessionID := entry.Session.SessionID
+	if entry.Kind == task.KindSubagent && frame.Event != nil && frame.Event.SessionID == taskHistoryChildSessionID(entry) {
+		imageSessionID = frame.Event.SessionID
+	}
 	return Record{
-		Cursor: cursor, Generation: hex.EncodeToString(point.Key.Epoch[:]), Sequence: point.Sequence,
+		ImageSessionID: imageSessionID, Cursor: cursor, Generation: hex.EncodeToString(point.Key.Epoch[:]), Sequence: point.Sequence,
 		Task: descriptor, Frame: &frame,
 	}, point, nil
 }

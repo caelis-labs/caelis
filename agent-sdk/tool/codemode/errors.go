@@ -42,6 +42,17 @@ func (e *publicPermissionError) ErrorCode() errorcode.Code {
 	return tool.ErrorCodePermissionDenied
 }
 
+// NewReplyBudgetError marks a fixed Runtime diagnostic about an already
+// committed receipt whose projection exceeded a Code Mode budget.
+func NewReplyBudgetError(message string) error {
+	return &replyBudgetError{message: message}
+}
+
+type replyBudgetError struct{ message string }
+
+func (e *replyBudgetError) Error() string             { return e.message }
+func (e *replyBudgetError) ErrorCode() errorcode.Code { return errorcode.ResourceExhausted }
+
 // PublicHostError projects a Host failure for JavaScript, model and Task output.
 // Only typed input details, explicitly safe permission diagnostics and fixed
 // recovery guidance cross this boundary; transport bodies, credentials and
@@ -65,6 +76,12 @@ func PublicHostError(name string, err error) *tool.ToolError {
 	switch code {
 	case tool.ErrorCodeStaleRevision:
 		return tool.NewError(code, message+": tool schema changed; use tools.search again and revise arguments before calling.")
+	case errorcode.ResourceExhausted:
+		var detail *replyBudgetError
+		if errors.As(err, &detail) && len(detail.message) <= 192 {
+			return tool.NewError(code, message+": "+detail.message)
+		}
+		return tool.NewError(code, message+": Host resource limit reached")
 	case errorcode.UnknownOutcome:
 		return tool.NewError(code, message+": tool outcome is unknown; do not replay the effect.")
 	}

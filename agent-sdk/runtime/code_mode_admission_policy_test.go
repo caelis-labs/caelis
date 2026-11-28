@@ -495,13 +495,13 @@ func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
 	searchCtx, observed := toolbinding.Observe(searchCtx)
 	observed.Discovery = true
 	result := tool.Result{Content: []tool.ContentBlock{tool.StructuredContent{Value: raw}}}
-	if err := rt.appendToolFact(searchCtx, active.SessionRef, "turn", search, &result, nil); err != nil {
+	if _, err := rt.appendToolFact(searchCtx, active.SessionRef, "turn", search, &result, nil); err != nil {
 		t.Fatal(err)
 	}
 	prepared := tool.Call{ID: "old-intent", Name: old.Name, Input: []byte(`{}`)}
 	preparedExecution := tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "old"}
 	preparedCtx := toolbinding.WithOccurrence(ctx, preparedExecution, parent, &old)
-	if err := rt.appendToolFact(preparedCtx, active.SessionRef, "turn", prepared, nil, nil); !errorcode.Is(err, tool.ErrorCodeStaleRevision) {
+	if _, err := rt.appendToolFact(preparedCtx, active.SessionRef, "turn", prepared, nil, nil); !errorcode.Is(err, tool.ErrorCodeStaleRevision) {
 		t.Fatalf("old intent accepted after new discovery: %v", err)
 	}
 	events, err := files.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})

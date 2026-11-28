@@ -34,6 +34,9 @@ func (s *Stack) PrepareIdleShutdown(ctx context.Context) error {
 			return idleShutdownBusy()
 		}
 	}
+	if err := s.controlShell.PrepareIdleShutdown(); err != nil {
+		return err
+	}
 	r.closed = true
 	for _, runtime := range r.sessions {
 		r.cancelIdleReleaseLocked(runtime)

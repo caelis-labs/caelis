@@ -1,8 +1,9 @@
 package executil
 
 import (
-	"fmt"
 	"io"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 // BoundedWriter prevents a command from retaining unbounded output in memory.
@@ -12,12 +13,16 @@ type BoundedWriter struct {
 	Writer    io.Writer
 	Remaining int
 	Exceeded  bool
+	OnLimit   func()
 }
 
 func (w *BoundedWriter) Write(p []byte) (int, error) {
 	if len(p) > w.Remaining {
 		w.Exceeded = true
-		return 0, fmt.Errorf("sandbox command output budget exceeded")
+		if w.OnLimit != nil {
+			w.OnLimit()
+		}
+		return 0, sandbox.ErrCommandOutputLimit
 	}
 	n, err := w.Writer.Write(p)
 	w.Remaining -= n

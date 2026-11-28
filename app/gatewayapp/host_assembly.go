@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/collaboration"
@@ -161,7 +162,8 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
-	stack.taskStreams = acptaskstream.New(controlTaskStreams)
+	attachmentReader, _ := stack.composition.sessions.(model.AttachmentReader)
+	stack.taskStreams = acptaskstream.NewWithAttachments(controlTaskStreams, attachmentReader)
 	return hostControlAssembly{
 		runtimeStateReader: runtimeStateReader,
 		participantHandles: participantHandles,
@@ -173,7 +175,9 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 func activateHostRuntime(stack *Stack, assembly hostControlAssembly) error {
 	stack.composition.authorities.lifecycleCtx, stack.lifecycleCancel = context.WithCancel(context.Background())
 	inputRouter := &hostedChildInputRouter{}
-	mailboxes, mailErr := collaboration.Open(filepath.Join(stack.composition.authorities.storeDir, "control", "control.sqlite"), &collaborationBackend{sessions: stack.composition.sessions, tasks: stack.composition.authorities.taskStore, router: inputRouter})
+	attachmentReader, _ := stack.composition.sessions.(model.AttachmentReader)
+	attachmentWriter, _ := stack.composition.sessions.(model.AttachmentWriter)
+	mailboxes, mailErr := collaboration.OpenWithAttachments(filepath.Join(stack.composition.authorities.storeDir, "control", "control.sqlite"), &collaborationBackend{sessions: stack.composition.sessions, tasks: stack.composition.authorities.taskStore, router: inputRouter}, attachmentReader, attachmentWriter)
 	if mailErr != nil {
 		stack.lifecycleCancel()
 		return mailErr

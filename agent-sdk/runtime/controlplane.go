@@ -9,6 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -87,11 +88,17 @@ func (r *Runtime) executeACPControllerTurn(
 	for _, persisted := range persistedInputs {
 		handle.publishEvent(persisted)
 	}
+	reader, _ := r.sessions.(model.AttachmentReader)
+	parts, err := controllerInputParts(ctx, reader, ref.SessionID, persistedInputs)
+	if err != nil {
+		handle.publishError(err)
+		return
+	}
 	turnReq := controller.TurnRequest{
 		SessionRef:   ref,
 		Session:      activeSession,
 		TurnID:       turnID,
-		ContentParts: controllerInputParts(persistedInputs),
+		ContentParts: parts,
 
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},

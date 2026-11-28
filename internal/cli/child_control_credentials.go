@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -38,10 +39,9 @@ func controlAuthenticatorWithACPIngress(
 		return nil, errors.New("cli: ordinary Control and ACP ingress bearer credentials must be distinct")
 	}
 	acpIngressPrincipal := ordinaryPrincipal
-	acpIngressPrincipal.Roles = append(
-		append([]string(nil), acpIngressPrincipal.Roles...),
-		appserver.RoleACPIngress,
-	)
+	acpIngressPrincipal.Roles = append(slices.DeleteFunc(slices.Clone(ordinaryPrincipal.Roles), func(role string) bool {
+		return role == appserver.RoleLocalShell
+	}), appserver.RoleACPIngress)
 	acpIngressAuthenticator, err := controlserver.BearerTokenAuthenticator(acpIngressToken, acpIngressPrincipal)
 	if err != nil {
 		return nil, err
