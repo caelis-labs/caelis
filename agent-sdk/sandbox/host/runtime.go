@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -25,16 +26,23 @@ const hostTerminateDrain = 500 * time.Millisecond
 
 // Config defines one host-backed sandbox runtime.
 type Config struct {
-	CWD       string
-	Execution *sandbox.ExecutionConfig
-	BaseEnv   []string
+	// BoundedRun enables process-tree cleanup and strict output limits
+	// for non-interactive Run calls. It is independent of filesystem access.
+	BoundedRun bool
+	// InheritProcessGroup leaves process group termination to the worker supervisor.
+	InheritProcessGroup bool
+	CWD                 string
+	Execution           *sandbox.ExecutionConfig
+	BaseEnv             []string
 }
 
 // Runtime is the minimal host-backed sandbox runtime implementation.
 type Runtime struct {
-	fs        hostFS
-	env       sandbox.EnvironmentSnapshot
-	execution *sandbox.ExecutionConfig
+	fs           hostFS
+	env          sandbox.EnvironmentSnapshot
+	execution    *sandbox.ExecutionConfig
+	boundedRun   bool
+	inheritGroup bool
 
 	mu       sync.RWMutex
 	sessions map[string]*hostSession
@@ -43,6 +51,9 @@ type Runtime struct {
 
 // New returns one host-backed sandbox runtime.
 func New(cfg Config) (*Runtime, error) {
+	if cfg.BoundedRun && runtime.GOOS != "darwin" && runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		return nil, errors.New("bounded Host commands require Darwin, Linux or Windows")
+	}
 	if err := sandbox.ValidateExecutionConfig(cfg.Execution); err != nil {
 		return nil, err
 	}
@@ -59,10 +70,11 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 	return &Runtime{
-		fs:        hostFS{cwd: cwd},
-		env:       sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
-		execution: sandbox.CloneExecutionConfig(cfg.Execution),
-		sessions:  map[string]*hostSession{},
+		fs:         hostFS{cwd: cwd},
+		env:        sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
+		execution:  sandbox.CloneExecutionConfig(cfg.Execution),
+		boundedRun: cfg.BoundedRun, inheritGroup: cfg.InheritProcessGroup,
+		sessions: map[string]*hostSession{},
 		status: sandbox.Status{
 			RequestedBackend: sandbox.BackendHost,
 			ResolvedBackend:  sandbox.BackendHost,
@@ -107,6 +119,9 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		return sandbox.CommandResult{}, err
 	}
 	if req.TTY {
+		if r.boundedRun {
+			return sandbox.CommandResult{}, errors.New("bounded Host commands require non-interactive execution")
+		}
 		session, err := r.Start(ctx, req)
 		if err != nil {
 			return sandbox.CommandResult{Route: sandbox.RouteHost, Backend: sandbox.BackendHost}, err
@@ -121,6 +136,12 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		defer cancel()
 	}
 
+	stopOutput := func() {}
+	if r.boundedRun && runtime.GOOS != "windows" {
+		runCtx, stopOutput = context.WithCancel(runCtx)
+		defer stopOutput()
+	}
+
 	cmd := newShellCommand(runCtx, req.Command, len(req.Stdin) > 0, r.execution)
 	cmd.Dir = dir
 	cmd.Env = r.env.ForCommand(req)
@@ -131,16 +152,49 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	stderr := newCappedOutputBuffer(hostOutputCap)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	err := cmd.Run()
+	var stdoutLimit, stderrLimit *executil.BoundedWriter
+	if r.boundedRun {
+		if !r.inheritGroup && runtime.GOOS != "windows" {
+			executil.SetProcessGroup(cmd)
+			cmd.Cancel = func() error { return executil.KillProcess(cmd) }
+		}
+		cmd.WaitDelay = hostTerminateDrain
+		stdoutLimit = &executil.BoundedWriter{Writer: stdout, Remaining: sandbox.CommandOutputLimit, OnLimit: stopOutput}
+		stderrLimit = &executil.BoundedWriter{Writer: stderr, Remaining: sandbox.CommandOutputLimit, OnLimit: stopOutput}
+		cmd.Stdout, cmd.Stderr = stdoutLimit, stderrLimit
+	}
+	exitCode := -1
+	if !r.boundedRun {
+		exitCode = 0
+	}
+	var err error
+	if r.boundedRun && runtime.GOOS == "windows" {
+		exitCode, err = runBoundedWindowsCommand(runCtx, cmd, req.Stdin)
+	} else {
+		err = cmd.Run()
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+	}
+	if r.boundedRun {
+		if !r.inheritGroup && cmd.Process != nil {
+			_ = executil.KillProcessGroup(cmd.Process.Pid)
+		}
+		if r.inheritGroup && exitCode == 0 && errors.Is(err, exec.ErrWaitDelay) {
+			// The supervisor stops inherited descendants after this receipt.
+			err = nil
+		}
+		if stdoutLimit.Exceeded || stderrLimit.Exceeded {
+			return sandbox.CommandResult{}, sandbox.ErrCommandOutputLimit
+		}
+	}
 
 	result := sandbox.CommandResult{
-		Stdout:  stdout.String(),
-		Stderr:  stderr.String(),
-		Route:   sandbox.RouteHost,
-		Backend: sandbox.BackendHost,
-	}
-	if cmd.ProcessState != nil {
-		result.ExitCode = cmd.ProcessState.ExitCode()
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		Route:    sandbox.RouteHost,
+		Backend:  sandbox.BackendHost,
+		ExitCode: exitCode,
 	}
 	if req.OnOutput != nil {
 		if result.Stdout != "" {

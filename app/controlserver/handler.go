@@ -148,6 +148,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
 	s.experimentalRoutes()
+	s.shellRoutes()
 	s.focusedRoutes()
 	s.sessionConfigurationRoutes()
 	s.sessionResourceRoutes()
@@ -529,16 +530,24 @@ func (s *Server) requirePrincipal(w http.ResponseWriter, r *http.Request) (appse
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, target any) bool {
+	return decodeBodyLimit(w, r, target, maxJSONRequestBytes)
+}
+
+func decodeBodyLimit(w http.ResponseWriter, r *http.Request, target any, limit int64) bool {
 	contentType := strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])
 	if !strings.EqualFold(contentType, "application/json") {
 		writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
 		return false
 	}
-	limited := http.MaxBytesReader(nil, r.Body, maxJSONRequestBytes)
+	limited := http.MaxBytesReader(nil, r.Body, limit)
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		if isRequestBodyTooLarge(err) {
-			writeError(w, http.StatusRequestEntityTooLarge, jsonRequestBodyTooLargeDetail())
+			detail := jsonRequestBodyTooLargeDetail()
+			if limit != maxJSONRequestBytes {
+				detail = fmt.Sprintf("JSON request body exceeds %d bytes", limit)
+			}
+			writeError(w, http.StatusRequestEntityTooLarge, detail)
 			return false
 		}
 		writeError(w, http.StatusBadRequest, "invalid JSON request: "+err.Error())

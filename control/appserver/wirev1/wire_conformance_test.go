@@ -37,6 +37,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		{Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1n", FileName: "shot.png"},
 	}
 	requests := map[string]any{
+		"ShellRequest":            appserver.ShellRequest{Workspace: "/workspace", Command: "exit 7", Location: appserver.ShellHost},
 		"CreateSessionRequest":    appserver.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
 		"CloseSessionRequest":     appserver.CloseSessionRequest{WriteBase: base},
 		"SessionInterruptRequest": appserver.SessionInterruptRequest{WriteBase: base, Reason: "stop"},
@@ -95,6 +96,8 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		validateWireValue(t, "SessionModelRequest", appserver.SessionModelRequest{WriteBase: base, Clear: true})
 	})
 
+	validateWireValue(t, "ShellRequest", appserver.ShellRequest{Workspace: "/workspace", Command: "exit 0"})
+	validateWireValue(t, "ShellResult", appserver.ShellResult{Location: appserver.ShellSandbox, Backend: "seatbelt"})
 	for _, outcome := range []appserver.Outcome{
 		appserver.OutcomeAccepted, appserver.OutcomeCommitted, appserver.OutcomeConflicted,
 		appserver.OutcomeRejected, appserver.OutcomeUnknown,

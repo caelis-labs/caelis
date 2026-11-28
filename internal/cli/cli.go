@@ -521,6 +521,9 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	defer func() { _ = ownership.Close() }()
 	cfg.HostOwnership = ownership
 	cfg.SessionScopedMCP = true
+	rawToken := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
+	localShell := rawToken == "" && strings.TrimSpace(serverConfig.TokenFile) == "" && localShellListen(serverConfig.Address)
+	cfg.PassiveServeRoot = localShell
 	stack, err := newLocalStack(cfg)
 	if err != nil {
 		return sandboxStartupEscapeError(err)
@@ -538,7 +541,6 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Capabilities: appserver.RequiredManagedHostCapabilities(),
 	}
-	rawToken := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
 	token := rawToken
 	tokenFile := strings.TrimSpace(serverConfig.TokenFile)
 	if token != "" {
@@ -559,7 +561,11 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	if err != nil {
 		return err
 	}
-	authenticator, err := controlAuthenticatorWithACPIngress(token, serverConfig.Principal, acpIngressToken)
+	principal := serverConfig.Principal
+	if localShell && stack.EnableControlShell() {
+		principal.Roles = append(append([]string(nil), principal.Roles...), appserver.RoleLocalShell)
+	}
+	authenticator, err := controlAuthenticatorWithACPIngress(token, principal, acpIngressToken)
 	if err != nil {
 		return err
 	}

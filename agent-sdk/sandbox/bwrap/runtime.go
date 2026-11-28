@@ -71,9 +71,11 @@ func New(cfg Config) (sandbox.Runtime, error) {
 		env:            sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
-	if err := runner.probe(context.Background()); err != nil {
-		_ = runner.Close()
-		return nil, err
+	if !cfg.SkipAvailabilityProbe {
+		if err := runner.probe(context.Background()); err != nil {
+			_ = runner.Close()
+			return nil, err
+		}
 	}
 	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 	if err != nil {
@@ -159,7 +161,9 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	defer cancel()
 	cmd := b.execCommand(probeCtx, "bwrap", probeArgs...)
 	cmd.Env = []string{}
-	executil.ApplyNonInteractiveCommandDefaults(cmd)
+	if !b.cfg.InheritProcessGroup {
+		executil.ApplyNonInteractiveCommandDefaults(cmd)
+	}
 	cmd.WaitDelay = bwrapProbeWaitDelay
 	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
@@ -192,6 +196,11 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 		runCtx, cancel = context.WithTimeout(ctx, req.Timeout)
 	}
 	defer cancel()
+	stopOutput := func() {}
+	if b.cfg.InheritProcessGroup {
+		runCtx, stopOutput = context.WithCancel(runCtx)
+		defer stopOutput()
+	}
 
 	workDir, err := executil.ResolveHostWorkDir(req.Dir)
 	if err != nil {
@@ -209,7 +218,11 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 		return sandbox.CommandResult{}, err
 	}
 	defer payload.Close()
-	executil.ApplyNonInteractiveCommandDefaults(cmd)
+	if b.cfg.InheritProcessGroup {
+		cmd.WaitDelay = 500 * time.Millisecond
+	} else {
+		executil.ApplyNonInteractiveCommandDefaults(cmd)
+	}
 	if strings.TrimSpace(req.Dir) != "" {
 		cmd.Dir = req.Dir
 	}
@@ -220,18 +233,18 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 	cmd.Stdout = executil.NewActivityWriter(&stdout, &lastOutput, "stdout", emitOutput(req.OnOutput))
 	cmd.Stderr = executil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
 	if b.cfg.ResourceLimits != nil {
-		cmd.Stdout = &executil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
-		cmd.Stderr = &executil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
+		cmd.Stdout = &executil.BoundedWriter{Writer: cmd.Stdout, Remaining: sandbox.CommandOutputLimit, OnLimit: stopOutput}
+		cmd.Stderr = &executil.BoundedWriter{Writer: cmd.Stderr, Remaining: sandbox.CommandOutputLimit, OnLimit: stopOutput}
 	}
 	if err := cmd.Start(); err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: bwrap sandbox command start failed: %w", err)
 	}
 	waitErr := executil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
-	if b.cfg.ResourceLimits != nil {
+	if b.cfg.ResourceLimits != nil && !b.cfg.InheritProcessGroup {
 		_ = executil.KillProcess(cmd)
 	}
 	if b.cfg.ResourceLimits != nil && (cmd.Stdout.(*executil.BoundedWriter).Exceeded || cmd.Stderr.(*executil.BoundedWriter).Exceeded) {
-		return sandbox.CommandResult{}, fmt.Errorf("sandbox command output budget exceeded")
+		return sandbox.CommandResult{}, sandbox.ErrCommandOutputLimit
 	}
 	result := sandbox.CommandResult{
 		Stdout:  stdout.String(),
@@ -239,7 +252,7 @@ func (b *bwrapRunner) Run(ctx context.Context, req sandbox.CommandRequest) (sand
 		Route:   sandbox.RouteSandbox,
 		Backend: sandbox.BackendBwrap,
 	}
-	if waitErr == nil {
+	if waitErr == nil || (b.cfg.InheritProcessGroup && errors.Is(waitErr, exec.ErrWaitDelay) && cmd.ProcessState.Success()) {
 		return result, nil
 	}
 	result.ExitCode = resolveExitCode(waitErr)

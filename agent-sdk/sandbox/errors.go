@@ -9,6 +9,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
+// CommandOutputLimit is the per-stream byte limit for bounded command execution.
+const CommandOutputLimit = 64 << 10
+
+// ErrCommandOutputLimit reports that a bounded command exceeded its output budget.
+var ErrCommandOutputLimit = errors.New("sandbox command output budget exceeded")
+
 const SandboxPermissionDeniedMessage = "Sandbox permission denied. Narrow the path or operation first. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a justification that cites this failure. Do not escalate later similar commands by habit."
 const HostExecutionRequiresApprovalMessage = "Host execution requires approval. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a non-empty justification. Do not escalate later similar commands by habit."
 

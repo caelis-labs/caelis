@@ -39,6 +39,53 @@ revision of the same Host snapshot as the bindings and targets, as a decimal
 string. This opt-in preserves the response shape for existing strict clients.
 The Team picker uses that revision for saves and requires a Host that returns it.
 
+## Shell execution
+
+Hosts with `shell-execution-v1` expose `POST /api/control/v1/shell/execute`. Use
+`ExecuteShell` in the [Go HTTP client](../control/appserver/httpclient) and
+`ShellRequest` and `ShellResult` in the generated
+[TypeScript contracts](../clients/typescript/control-v1.gen.ts).
+
+A managed loopback `caelis serve` Host advertises the capability with its
+ordinary local Control credential from the Store. The endpoint requires a
+direct loopback connection. ACP ingress uses a distinct credential, even when
+it shares the same principal ID. Remote listeners, explicitly configured
+Control tokens or token files, forwarded requests and internal Session Runtime
+identities have no Shell grant. The ordinary credential carries the grant
+when presented directly over loopback. A tunnel that presents a copy of that
+credential as a loopback client is within the same authority boundary.
+Ordinary clients can continue negotiating the existing capabilities.
+
+Send an existing absolute `workspace` directory and a `command` of up to
+32 KiB. The workspace must be separate from the Host Store. An omitted
+`location` selects `sandbox`. Explicit `host` starts in that directory and
+executes with the Host OS user's authority. The working directory does not
+limit Host filesystem or network access.
+
+Sandbox execution uses Seatbelt on macOS, Bubblewrap on Linux, and the
+restricted-token workspace-write sandbox on Windows. macOS and Linux restrict
+writes to the workspace and backend bootstrap paths, limit reads to the
+workspace and bootstrap paths, and disable networking. Windows limits writes
+with the native workspace ACL policy and its Store-managed temporary
+environment, leaves network access enabled, and has no read ceiling.
+Sandbox setup failure returns `503` without a Host fallback. Shell
+and its sandbox initialize per request, independently of Host readiness.
+
+A completed process returns its actual `location`, `backend`, `exit_code`,
+`stdout`, and `stderr`. An ordinary nonzero process exit is a completed result.
+The Host admits four concurrent calls. Excess calls return `429`. Execution
+has a 20-second deadline and 64 KiB of raw output per stream. Deadline and
+overflow return `504` and `413`. Client disconnect and Host shutdown cancel
+active calls. Darwin and Linux use a one-shot worker and clean up its process
+group. Both Windows routes launch commands in a kill-on-close Job Object and
+retain the existing restricted-token ACL lifecycle for sandbox calls. Deliberate
+same-user attacks on the Host, machine-wide exhaustion and Unix descendants
+that deliberately leave their process group fall outside these guarantees.
+
+Shell uses no model or Agent Session and has no durable receipt. If a worker
+exits without a result, Control reports `unknown_outcome`. After a lost
+response, reconcile external effects before issuing a new request.
+
 ## Session interrupt
 
 `session-interrupt-v1` permits `POST /sessions/{session_id}/interrupt` to interrupt

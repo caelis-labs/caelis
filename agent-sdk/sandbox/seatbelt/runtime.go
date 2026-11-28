@@ -90,13 +90,15 @@ func New(cfg Config) (sandbox.Runtime, error) {
 		env:            sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
-	if err := runner.probeHelper(context.Background()); err != nil {
-		_ = runner.Close()
-		return nil, err
-	}
-	if err := runner.probe(context.Background()); err != nil {
-		_ = runner.Close()
-		return nil, err
+	if !cfg.SkipAvailabilityProbe {
+		if err := runner.probeHelper(context.Background()); err != nil {
+			_ = runner.Close()
+			return nil, err
+		}
+		if err := runner.probe(context.Background()); err != nil {
+			_ = runner.Close()
+			return nil, err
+		}
 	}
 	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 	if err != nil {
@@ -163,7 +165,9 @@ func (s *seatbeltRunner) probe(ctx context.Context) error {
 	defer cancel()
 	cmd := s.execCommand(probeCtx, "sandbox-exec", "-p", profile, seatbeltProbeExecutable)
 	cmd.Env = []string{}
-	executil.ApplyNonInteractiveCommandDefaults(cmd)
+	if !s.cfg.InheritProcessGroup {
+		executil.ApplyNonInteractiveCommandDefaults(cmd)
+	}
 	cmd.WaitDelay = seatbeltProbeWaitDelay
 	cmd.Stdout = io.Discard
 	var stderr bytes.Buffer
@@ -193,6 +197,11 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 		runCtx, cancel = context.WithTimeout(ctx, req.Timeout)
 	}
 	defer cancel()
+	stopOutput := func() {}
+	if s.cfg.InheritProcessGroup {
+		runCtx, stopOutput = context.WithCancel(runCtx)
+		defer stopOutput()
+	}
 
 	workDir, err := executil.ResolveHostWorkDir(req.Dir)
 	if err != nil {
@@ -210,7 +219,11 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 		return sandbox.CommandResult{}, err
 	}
 	defer payload.Close()
-	executil.ApplyNonInteractiveCommandDefaults(cmd)
+	if s.cfg.InheritProcessGroup {
+		cmd.WaitDelay = 500 * time.Millisecond
+	} else {
+		executil.ApplyNonInteractiveCommandDefaults(cmd)
+	}
 	if strings.TrimSpace(req.Dir) != "" {
 		cmd.Dir = req.Dir
 	}
@@ -223,19 +236,19 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 	cmd.Stderr = executil.NewActivityWriter(&stderr, &lastOutput, "stderr", emitOutput(req.OnOutput))
 
 	if s.cfg.ResourceLimits != nil {
-		cmd.Stdout = &executil.BoundedWriter{Writer: cmd.Stdout, Remaining: 64 * 1024}
-		cmd.Stderr = &executil.BoundedWriter{Writer: cmd.Stderr, Remaining: 64 * 1024}
+		cmd.Stdout = &executil.BoundedWriter{Writer: cmd.Stdout, Remaining: sandbox.CommandOutputLimit, OnLimit: stopOutput}
+		cmd.Stderr = &executil.BoundedWriter{Writer: cmd.Stderr, Remaining: sandbox.CommandOutputLimit, OnLimit: stopOutput}
 	}
 	if err := cmd.Start(); err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: seatbelt sandbox command start failed: %w", err)
 	}
 	waitErr := executil.WaitWithIdleTimeout(runCtx, cmd, req.IdleTimeout, &lastOutput)
-	if s.cfg.ResourceLimits != nil {
+	if s.cfg.ResourceLimits != nil && !s.cfg.InheritProcessGroup {
 		_ = executil.KillProcess(cmd)
 	}
 
 	if s.cfg.ResourceLimits != nil && (cmd.Stdout.(*executil.BoundedWriter).Exceeded || cmd.Stderr.(*executil.BoundedWriter).Exceeded) {
-		return sandbox.CommandResult{}, fmt.Errorf("sandbox command output budget exceeded")
+		return sandbox.CommandResult{}, sandbox.ErrCommandOutputLimit
 	}
 	result := sandbox.CommandResult{
 		Stdout:  stdout.String(),
@@ -243,7 +256,7 @@ func (s *seatbeltRunner) Run(ctx context.Context, req sandbox.CommandRequest) (s
 		Route:   sandbox.RouteSandbox,
 		Backend: sandbox.BackendSeatbelt,
 	}
-	if waitErr == nil {
+	if waitErr == nil || (s.cfg.InheritProcessGroup && errors.Is(waitErr, exec.ErrWaitDelay) && cmd.ProcessState.Success()) {
 		return result, nil
 	}
 	result.ExitCode = resolveExitCode(waitErr)

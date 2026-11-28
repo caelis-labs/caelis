@@ -140,8 +140,10 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	if err := validateHostAuthorityOutsideWriteRoots(authorityRoot, configuredWriteRoots); err != nil {
 		return nil, err
 	}
-	if err := r.ensureHostReceiptAuthority(); err != nil {
-		return nil, err
+	if !cfg.SkipAvailabilityProbe {
+		if err := r.ensureHostReceiptAuthority(); err != nil {
+			return nil, err
+		}
 	}
 	if err := r.stateCoordinator.registerRuntime(r.registeredEnvRoot); err != nil {
 		return nil, fmt.Errorf("impl/sandbox/windows: register runtime state: %w", err)
@@ -280,7 +282,9 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		result.Error = err.Error()
 		return result, err
 	}
-	defer r.startBackgroundRefresh(context.WithoutCancel(ctx), req)
+	if !r.cfg.BoundedRun {
+		defer r.startBackgroundRefresh(context.WithoutCancel(ctx), req)
+	}
 	runCtx := ctx
 	cancel := func() {}
 	if req.Timeout > 0 {
@@ -294,8 +298,14 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	}
 	stdout := consoleoutput.NewCappedBuffer(windowsOutputCap)
 	stderr := consoleoutput.NewCappedBuffer(windowsOutputCap)
+	var out, errOut io.Writer = stdout, stderr
+	bounded := r.cfg.BoundedRun
+	if bounded {
+		out = &executil.BoundedWriter{Writer: stdout, Remaining: sandbox.CommandOutputLimit}
+		errOut = &executil.BoundedWriter{Writer: stderr, Remaining: sandbox.CommandOutputLimit}
+	}
 	var exitCode int
-	exitCode, err, keepUse = runAtomicJobProcess(runCtx, cmd, token, req.Stdin, stdout, stderr, releaseUse)
+	exitCode, err, keepUse = runAtomicJobProcess(runCtx, cmd, token, req.Stdin, out, errOut, releaseUse, bounded)
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
 	result.ExitCode = exitCode

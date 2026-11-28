@@ -26,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/internal/productpaths"
+	"github.com/caelis-labs/caelis/internal/shellproc"
 	"github.com/caelis-labs/caelis/internal/testenv"
 	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
@@ -162,6 +163,7 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 		{name: "default token file", mode: "default"},
 		{name: "custom token file", mode: "custom"},
 		{name: "raw token", mode: "raw"},
+		{name: "nonloopback listener", mode: "remote"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -172,6 +174,9 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 			ordinaryTokenFile := controlserver.DefaultTokenFile(storeDir)
 			ordinaryToken := ""
 			switch test.mode {
+			case "remote":
+				arguments = append(arguments, "--listen", "0.0.0.0:7777",
+					"--control-tls-cert", "unused.crt", "--control-tls-key", "unused.key")
 			case "custom":
 				ordinaryTokenFile = filepath.Join(t.TempDir(), "custom-control.token")
 				if _, err := controlserver.LoadOrCreateBearerToken(ordinaryTokenFile); err != nil {
@@ -198,7 +203,11 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 				boundTokenFile = tokenFile
 				stack.SetBuiltInChildControl(endpoint, tokenFile)
 			}
-			runControlServerCommand = func(_ context.Context, _ controlserver.Dependencies, config controlserver.Config) error {
+			runControlServerCommand = func(_ context.Context, deps controlserver.Dependencies, config controlserver.Config) error {
+				wantShell := test.mode == "default" && shellproc.Supported()
+				if (deps.Services.Shell != nil) != wantShell {
+					t.Fatalf("Shell service exposed = %v, want %v", deps.Services.Shell != nil, wantShell)
+				}
 				captured = config
 				info := config.ServerInfo
 				info.ProtocolVersion = acpsdk.ProtocolVersionNumber
@@ -238,8 +247,14 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !principal.HasRole(appserver.RoleACPIngress) {
-				t.Fatalf("built-in child principal = %#v, want ACP ingress role", principal)
+			if !principal.HasRole(appserver.RoleACPIngress) || principal.HasRole(appserver.RoleLocalShell) {
+				t.Fatalf("built-in child principal = %#v, want ACP ingress role only", principal)
+			}
+			request.Header.Set("Authorization", "Bearer "+ordinaryToken)
+			ordinary, err := captured.Authenticator.Authenticate(request)
+			wantShell := test.mode == "default" && shellproc.Supported()
+			if err != nil || ordinary.ID != principal.ID || ordinary.HasRole(appserver.RoleLocalShell) != wantShell {
+				t.Fatalf("ordinary credential = %#v, %v, want shared principal and Shell grant %v", ordinary, err, wantShell)
 			}
 		})
 	}

@@ -61,3 +61,17 @@ func configureHiddenConsole(cmd *exec.Cmd) {
 	cmd.SysProcAttr.HideWindow = true
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
 }
+
+func runBoundedWindowsCommand(ctx context.Context, cmd *exec.Cmd, stdin []byte) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return -1, err
+	}
+	process, err := winproc.StartJobProcess(winproc.JobProcessConfig{
+		Application: cmd.Path, Args: cmd.Args[1:], Dir: cmd.Dir, Env: cmd.Env, Stdin: len(stdin) > 0,
+	})
+	if err != nil {
+		return -1, err
+	}
+	exitCode, err, _ := winproc.RunStartedJobProcess(ctx, process, stdin, cmd.Stdout, cmd.Stderr, nil, hostTerminateDrain, hostTerminateDrain, true)
+	return exitCode, err
+}

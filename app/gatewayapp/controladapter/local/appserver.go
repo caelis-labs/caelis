@@ -116,6 +116,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	}
 	server := &AppServer{
 		Services: appserver.AppServerServices{
+			Shell:           host.ControlShell(),
 			Experimental:    host.ExperimentalFeatures(),
 			Operations:      host.ControlOperations(),
 			SessionProfiles: host.SessionProfiles(),

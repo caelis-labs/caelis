@@ -179,6 +179,7 @@ func (p *JobProcess) WaitRoot() (int, error) {
 	if p == nil || p.process == 0 {
 		return -1, errors.New("jobprocess: process is unavailable")
 	}
+	defer p.closeProcess()
 	event, err := windows.WaitForSingleObject(p.process, windows.INFINITE)
 	if err != nil || event != windows.WAIT_OBJECT_0 {
 		return -1, errors.Join(err, fmt.Errorf("jobprocess: unexpected root wait result %#x", event))
@@ -187,7 +188,6 @@ func (p *JobProcess) WaitRoot() (int, error) {
 	if err := windows.GetExitCodeProcess(p.process, &exitCode); err != nil {
 		return -1, err
 	}
-	p.closeProcess()
 	if exitCode != 0 {
 		return int(exitCode), fmt.Errorf("process exited with code %d", exitCode)
 	}
@@ -259,6 +259,15 @@ func (p *JobProcess) ClosePipes() {
 		if file != nil {
 			_ = file.Close()
 		}
+	}
+}
+
+func (p *JobProcess) closeJob() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.job != nil {
+		_ = p.job.Close()
+		p.job = nil
 	}
 }
 
