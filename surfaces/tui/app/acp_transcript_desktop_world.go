@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -18,13 +20,17 @@ func computerActivityCalls(event SubagentEvent, children []SubagentEvent) ([]Sub
 	if event.desktopWorld != nil {
 		return []SubagentEvent{event}, true
 	}
-	if !isScriptToolEvent(event) || len(children) == 0 || scriptExecutionFailed(event, children) {
+	if !isScriptToolEvent(event) || len(children) == 0 {
 		return nil, false
 	}
 	for _, child := range children {
 		if child.desktopWorld == nil {
 			return nil, false
 		}
+	}
+	if scriptExecutionFailed(event, children) {
+		event.Err = true
+		return append(slices.Clip(children), event), true
 	}
 	return children, true
 }
@@ -73,7 +79,7 @@ func renderDesktopWorldGroupRows(blockID string, events []SubagentEvent, parents
 		}
 		done = done && ev.Done
 		failed = failed || ev.Err
-		if ev.desktopWorld.visible(ev.Err) {
+		if ev.desktopWorld == nil || ev.desktopWorld.visible(ev.Err) {
 			visibleCalls++
 		}
 	}
@@ -102,15 +108,24 @@ func renderDesktopWorldGroupRows(blockID string, events []SubagentEvent, parents
 			}
 			continue
 		}
+		prefix := explorationChildPrefix(first)
+		if ev.desktopWorld == nil {
+			// A failed script with trusted DTW children still owns its
+			// JavaScript error independently of those calls' outcomes.
+			detail := firstNonEmpty(structuredToolFailureMessage(ev.Output), desktopWorldReadableText(ev.Output), "Script failed")
+			rows = append(rows, renderDesktopWorldDetailRows(blockID, prefix, detail, width, ctx, ctx.Theme.ToolErrorStyle(), "")...)
+			continue
+		}
 		if !ev.desktopWorld.visible(ev.Err) {
 			continue
 		}
-		prefix := explorationChildPrefix(first)
 		switch {
 		case expanded, slices.Contains(summaries, i), ev.Err && opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(ev.CallID):
 			rows = append(rows, renderDesktopWorldCallRows(blockID, ev, prefix, width, ctx, opts, false)...)
 		case ev.Err:
-			rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, prefix, width, ctx, opts))
+			token := acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && desktopWorldCallCanExpand(ev))
+			detail := firstNonEmpty(ev.desktopWorld.failure, ev.desktopWorld.label(maxInt(1, width-displayColumns(prefix)), true))
+			rows = append(rows, renderDesktopWorldDetailRows(blockID, prefix, detail, width, ctx, ctx.Theme.ToolErrorStyle(), token)...)
 		}
 	}
 	return rows, end, true
@@ -151,13 +166,20 @@ func desktopWorldSummaryCalls(group []SubagentEvent) []int {
 	return summaries
 }
 
-func renderDesktopWorldFailureRow(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) RenderedRow {
-	detail := ev.desktopWorld.failure
-	if detail == "" {
-		detail = ev.desktopWorld.label(maxInt(1, width-displayColumns(prefix)), true)
+func desktopWorldCallCanExpand(ev SubagentEvent) bool {
+	if ev.desktopWorld.search {
+		return renderableTextHasContent(ev.FullArgs) || (!ev.OutputSynthetic && renderableTextHasContent(ev.Output))
 	}
-	line := ansi.Truncate(prefix+detail, width, "…")
-	return StyledPlainClickablePreWrappedRow(blockID, line, ctx.Theme.ErrorStyle().Render(line), acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev)))
+	return desktopWorldCallDetail(ev) != ""
+}
+
+func desktopWorldCallDetail(ev SubagentEvent) string {
+	// The first error line is already shown with the action.
+	if ev.Err {
+		_, rest, _ := strings.Cut(ev.Output, "\n")
+		return strings.TrimSpace(rest)
+	}
+	return ev.Output
 }
 
 func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions, showToolName bool) []RenderedRow {
@@ -168,7 +190,7 @@ func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string,
 	prefix = ansi.Truncate(prefix, maxInt(0, budget-1), "")
 	available := maxInt(1, budget-displayColumns(prefix))
 	header := ev.desktopWorld.label(available, ev.Err)
-	token := acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && toolPanelHasSourceOrOutput(ev))
+	token := acpToolPanelClickTokenIf(ev.CallID, opts.ToolOutputPanels && desktopWorldCallCanExpand(ev))
 	var rows []RenderedRow
 	if showToolName {
 		lead := ev.Name + " · "
@@ -189,13 +211,20 @@ func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string,
 		}
 	}
 	rows = append(rows, renderDesktopWorldSummaryRow(blockID, ev, prefix, header, ctx, token))
+	detailPrefix := strings.Repeat(" ", displayColumns(prefix))
 	if ev.Err && ev.desktopWorld.failure != "" {
-		rows = append(rows, renderDesktopWorldFailureRow(blockID, ev, "    ", width, ctx, opts))
+		rows = append(rows, renderDesktopWorldDetailRows(blockID, detailPrefix, ev.desktopWorld.failure, width, ctx, ctx.Theme.ToolErrorStyle(), token)...)
 	}
 	if token == "" || opts.ToolPanelFullOutput == nil || !opts.ToolPanelFullOutput(ev.CallID) {
 		return rows
 	}
-	const detailPrefix = "    "
+	if !ev.desktopWorld.search {
+		style := ctx.Theme.ToolOutputStyle()
+		if ev.Err {
+			style = ctx.Theme.ToolErrorStyle()
+		}
+		return append(rows, renderDesktopWorldDetailRows(blockID, detailPrefix, desktopWorldCallDetail(ev), width, ctx, style, token)...)
+	}
 	if renderableTextHasContent(ev.FullArgs) {
 		rows = append(rows, renderACPToolOutputRowsWithToken(blockID, detailPrefix, "Arguments\n"+ev.FullArgs, width, ctx, ctx.Theme.ToolArgsStyle(), token)...)
 	}
@@ -213,6 +242,12 @@ func renderDesktopWorldCallRows(blockID string, ev SubagentEvent, prefix string,
 		rows = append(rows, renderACPToolOutputRowsWithToken(blockID, detailPrefix, text, width, ctx, ctx.Theme.TranscriptMetaStyle(), token)...)
 	}
 	return rows
+}
+
+func renderDesktopWorldDetailRows(blockID, prefix, detail string, width int, ctx BlockRenderContext, style lipgloss.Style, token string) []RenderedRow {
+	bodyWidth := maxInt(1, width-displayColumns(prefix))
+	detail = ansi.Wrap(sanitizeRenderableText(detail), bodyWidth, "")
+	return renderACPToolOutputRowsWithPrefix(blockID, prefix, detail, width, ctx, style, token)
 }
 
 func renderDesktopWorldSummaryRow(blockID string, ev SubagentEvent, prefix, header string, ctx BlockRenderContext, token string) RenderedRow {

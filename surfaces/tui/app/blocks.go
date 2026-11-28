@@ -699,7 +699,7 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 			ev.ApprovalStatus = ""
 			if review, ok := reviews[ev.CallID]; ok {
 				ev.ApprovalStatus = firstNonEmpty(review.ApprovalStatus, "reviewed")
-				if ev.desktopWorld != nil {
+				if ev.desktopWorld != nil && ev.desktopWorld.search {
 					ev.ApprovalText = review.ApprovalText
 				}
 			}
