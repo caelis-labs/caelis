@@ -8,6 +8,8 @@ import tempfile
 import unittest
 import zipfile
 
+from update_builtin_dtw import update_pin
+
 spec = importlib.util.spec_from_file_location('prepare_builtin_dtw', Path(__file__).with_name('prepare_builtin_dtw.py'))
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
@@ -166,6 +168,57 @@ class PrepareBuiltinTests(unittest.TestCase):
             cache = Path(root)
             (cache / target['archive']).write_bytes(data)
             self.assertEqual(prepare.obtain(cache, target['archive'], target['archive_sha256'], 'invalid://network-must-not-be-used'), data)
+
+
+class UpdateBuiltinTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cache = Path(tmp.name)
+        self.current = {'tag': 'v0.2.2'}
+        self.release = {'tag_name': 'v0.2.3', 'draft': False, 'prerelease': False,
+                        'published_at': '2026-01-01T00:00:00Z', 'assets': []}
+        self.formal = {'schema': 1, 'version': '0.2.3', 'tag': 'v0.2.3',
+                       'tag_commit': 'a' * 40, 'platforms': []}
+        for target in prepare.TARGETS.values():
+            _, platform, data = fixture(identity='dtw', target=target)
+            self.add_asset(platform['archive'], platform['archive'], data)
+            del platform['skill_sha256'], platform['build_sha256']
+            self.formal['platforms'].append(platform)
+
+    def add_asset(self, name, cache_name, data):
+        (self.cache / cache_name).write_bytes(data)
+        self.release['assets'].append({'name': name, 'state': 'uploaded', 'digest': 'sha256:' + prepare.sha(data)})
+
+    def add_release_manifest(self):
+        self.add_asset('RELEASE.json', 'RELEASE-v0.2.3.json', json.dumps(self.formal).encode())
+
+    def test_candidate_reuses_verifier_and_repeat_skips_assets(self):
+        self.add_release_manifest()
+        pin = update_pin(self.current, self.release, self.cache)
+        self.assertEqual(pin['version'], '0.2.3')
+        self.assertEqual([p['target'] for p in pin['platforms']], list(prepare.TARGETS.values()))
+        for platform in pin['platforms']:
+            prepare.verify(pin, platform, (self.cache / platform['archive']).read_bytes())
+        release = dict(self.release, assets=[])
+        self.assertIsNone(update_pin(pin, release, self.cache))
+        self.assertIsNone(update_pin({'tag': 'v0.2.10'}, release, self.cache))
+
+    def test_draft_prerelease_or_unstable_tag_is_rejected(self):
+        for fields in ({'draft': True}, {'prerelease': True}, {'published_at': None}, {'tag_name': 'v0.2.3-rc.1'}):
+            with self.subTest(fields=fields), self.assertRaisesRegex(ValueError, 'stable'):
+                update_pin(self.current, dict(self.release, **fields), self.cache)
+
+    def test_partial_or_mismatched_release_is_rejected(self):
+        self.formal['platforms'][0]['archive_sha256'] = '0' * 64
+        self.add_release_manifest()
+        with self.assertRaisesRegex(ValueError, 'archive identity'):
+            update_pin(self.current, self.release, self.cache)
+        self.release['assets'].pop()
+        self.formal['platforms'].pop()
+        self.add_release_manifest()
+        with self.assertRaisesRegex(ValueError, 'one package per supported target'):
+            update_pin(self.current, self.release, self.cache)
 
 
 if __name__ == '__main__':

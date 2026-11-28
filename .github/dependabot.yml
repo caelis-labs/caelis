@@ -10,6 +10,8 @@ updates:
       minor-and-patch:
         applies-to: version-updates
         patterns: ['*']
+        # Keep ACP protocol changes in their own review and CI run.
+        exclude-patterns: ['github.com/caelis-labs/acp-go-sdk']
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions

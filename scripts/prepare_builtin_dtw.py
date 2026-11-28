@@ -119,7 +119,7 @@ def package_files(name, data):
     return files
 
 
-def verify(pin, platform, data):
+def inspect_package(pin, platform, data):
     if sha(data) != platform['archive_sha256']:
         raise ValueError('archive checksum mismatch')
     files = package_files(platform['archive'], data)
@@ -141,13 +141,24 @@ def verify(pin, platform, data):
     skills = {path for path in files if path.startswith('skills/') and path.endswith('/SKILL.md')}
     if skills != {skill}:
         raise ValueError('unexpected Skill location for MCP server identity')
-    if sha(files['BUILD.json']) != platform['build_sha256'] or sha(files[binary]) != platform['binary_sha256'] or sha(files[skill]) != platform['skill_sha256']:
-        raise ValueError('BUILD/binary/Skill checksum mismatch')
     verify_skill_identity(files[skill], name)
     server = servers[name]
     if server != {'command': '${CLAUDE_PLUGIN_ROOT}/' + binary, 'args': ['mcp']}:
         raise ValueError('unexpected standard MCP launch contract')
-    return {'id': 'desktop-world', 'version': pin['version'], 'target': platform['target'], 'archive_sha256': sha(data), 'skill_sha256': platform['skill_sha256'], 'files': len(files)}
+    checksums = {
+        'skill_sha256': sha(files[skill]),
+        'build_sha256': sha(files['BUILD.json']),
+        'binary_sha256': sha(files[binary]),
+    }
+    return checksums, len(files)
+
+
+def verify(pin, platform, data):
+    checksums, file_count = inspect_package(pin, platform, data)
+    if any(platform[key] != digest for key, digest in checksums.items()):
+        raise ValueError('BUILD/binary/Skill checksum mismatch')
+    return {'id': 'desktop-world', 'version': pin['version'], 'target': platform['target'],
+            'archive_sha256': platform['archive_sha256'], 'skill_sha256': platform['skill_sha256'], 'files': file_count}
 
 
 def main():
