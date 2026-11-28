@@ -211,7 +211,7 @@ func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
 	}
 	var spoolBytes int
 	if err := filepath.WalkDir(spoolRoot, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
+		if err != nil || entry.IsDir() || entry.Name() == "owner.lock" {
 			return err
 		}
 		raw, err := os.ReadFile(path)

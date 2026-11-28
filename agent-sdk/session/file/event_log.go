@@ -43,6 +43,86 @@ func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocum
 	return s.readCachedEventLogContext(ctx, path)
 }
 
+// readEventHistory captures the document and its committed log together. Large
+// logs cannot use the decoded cache, so scan their complete append-only prefix
+// after releasing the Store and root locks that metadata and Control need.
+func (s *Store) readEventHistory(ctx context.Context, ref session.SessionRef, limit int, includeTransient bool) (persistedDocument, []*session.Event, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := s.mu.LockContext(ctx); err != nil {
+		return persistedDocument{}, nil, err
+	}
+	var doc persistedDocument
+	var events []*session.Event
+	var log *os.File
+	var snapshotSize int64
+	defer func() {
+		if log != nil {
+			_ = log.Close()
+		}
+	}()
+	err := s.withRootLockContext(ctx, func() error {
+		var err error
+		doc, err = s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		documentPath, err := s.resolveWritePath(doc.Session)
+		if err != nil {
+			return err
+		}
+		path := filepath.Clean(eventLogPath(documentPath))
+		log, err = os.Open(path)
+		if errors.Is(err, os.ErrNotExist) {
+			s.removeEventLogCache(path)
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		info, err := log.Stat()
+		if err != nil {
+			return err
+		}
+		if info.Size() > s.eventLogCacheLimitBytes() {
+			complete, err := completeEventLogFile(log, info.Size())
+			if err != nil {
+				return err
+			}
+			if complete {
+				s.removeEventLogCache(path)
+				snapshotSize = info.Size()
+				return nil
+			}
+			// An append may truncate a partial tail. Read that log under
+			// the recovery barrier so no partial write enters a snapshot.
+		}
+		events, err = s.readCachedEventLog(ctx, log, path, info)
+		return err
+	})
+	s.mu.Unlock()
+	if err != nil {
+		return persistedDocument{}, nil, err
+	}
+	if snapshotSize > 0 {
+		if err := s.eventHistoryReadMu.LockContext(ctx); err != nil {
+			return persistedDocument{}, nil, err
+		}
+		defer s.eventHistoryReadMu.Unlock()
+		prefix := io.NewSectionReader(log, 0, snapshotSize)
+		var offset int64
+		events, offset, _, _, err = s.readEventLogTailContext(ctx, prefix, log.Name(), 0, 0, eventPageCheckpoint{})
+		if err != nil {
+			return persistedDocument{}, nil, err
+		}
+		if offset != snapshotSize {
+			return persistedDocument{}, nil, fmt.Errorf("agent-sdk/session/file: event log %s changed during history read", log.Name())
+		}
+	}
+	return doc, session.FilterEvents(events, limit, includeTransient), nil
+}
+
 func (s *Store) appendEventLogTransaction(documentPath string, events []*session.Event) error {
 	events = persistedEvents(events)
 	if len(events) == 0 {

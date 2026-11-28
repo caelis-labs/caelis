@@ -482,27 +482,8 @@ func (s *Store) Events(
 	ctx context.Context,
 	req session.EventsRequest,
 ) ([]*session.Event, error) {
-	if err := s.mu.LockContext(ctx); err != nil {
-		return nil, err
-	}
-	defer s.mu.Unlock()
-
-	var out []*session.Event
-	if err := s.withRootLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		events, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
-		out = session.FilterEvents(events, req.Limit, req.IncludeTransient)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return out, nil
+	_, events, err := s.readEventHistory(ctx, req.SessionRef, req.Limit, req.IncludeTransient)
+	return events, err
 }
 
 // EventsPage streams one bounded forward sequence page from the event log.
@@ -935,29 +916,13 @@ func (s *Store) LoadSession(
 	ctx context.Context,
 	req session.LoadSessionRequest,
 ) (session.LoadedSession, error) {
-	if err := s.mu.LockContext(ctx); err != nil {
+	doc, events, err := s.readEventHistory(ctx, req.SessionRef, req.Limit, req.IncludeTransient)
+	if err != nil {
 		return session.LoadedSession{}, err
 	}
-	defer s.mu.Unlock()
-
-	var out session.LoadedSession
-	if err := s.withRootLockContext(ctx, func() error {
-		doc, err := s.readDocumentForRef(req.SessionRef)
-		if err != nil {
-			return err
-		}
-		events, err := s.eventsForDocumentContext(ctx, doc)
-		if err != nil {
-			return err
-		}
-		out = session.LoadedSession{
-			Session: session.CloneSession(doc.Session),
-			Events:  session.FilterEvents(events, req.Limit, req.IncludeTransient),
-			State:   cloneState(doc.State),
-		}
-		return nil
-	}); err != nil {
-		return session.LoadedSession{}, err
-	}
-	return out, nil
+	return session.LoadedSession{
+		Session: session.CloneSession(doc.Session),
+		Events:  events,
+		State:   cloneState(doc.State),
+	}, nil
 }

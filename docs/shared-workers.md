@@ -61,6 +61,9 @@ wire clients include the same requests and receipts.
 `target` contains the exact observed `handle_id`, `run_id` and `turn_id` from the
 prompt receipt or live state. Steering admission rechecks that identity. It never
 silently starts a Turn, stops and restarts work, or queues input for a later Turn.
+The reconnected TUI sends the observed controller epoch with that target.
+Explicit clients can also supply `expected_revision` to guard against all
+Session changes, including events from the same Turn.
 
 For the native conversation runner, a successful command has
 `outcome: committed` and `input_status: accepted`: the current Turn owns that

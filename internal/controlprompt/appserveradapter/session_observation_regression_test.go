@@ -115,10 +115,14 @@ func TestSessionObservationRefreshesEpochForLaterTurn(t *testing.T) {
 	if err := adapter.InterruptSession(context.Background(), "s"); err != nil {
 		t.Fatal(err)
 	}
-	for name, base := range map[string]appserver.WriteBase{"approval": client.approval.WriteBase, "steer": client.steer.WriteBase, "interrupt": client.interrupt.WriteBase} {
+	for name, base := range map[string]appserver.WriteBase{"approval": client.approval.WriteBase, "interrupt": client.interrupt.WriteBase} {
 		if base.ExpectedControllerEpoch != "e2" || base.ExpectedRevision == nil || *base.ExpectedRevision != 20 {
 			t.Errorf("%s wrote stale controller state: %#v", name, base)
 		}
+	}
+	if steer := client.steer; steer.ExpectedControllerEpoch != "e2" || steer.ExpectedRevision != nil ||
+		steer.Target != (appserver.TurnTarget{HandleID: "h2", RunID: "r2", TurnID: "t2"}) {
+		t.Errorf("steer did not use the new Turn and controller fence: %#v", steer)
 	}
 	if r.State().Controller.EpochID != "e2" {
 		t.Error("observer did not retain the new Turn controller")

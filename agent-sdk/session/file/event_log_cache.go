@@ -59,7 +59,10 @@ func (s *Store) readCachedEventLogContext(ctx context.Context, documentPath stri
 	if err != nil {
 		return nil, err
 	}
+	return s.readCachedEventLog(ctx, file, path, info)
+}
 
+func (s *Store) readCachedEventLog(ctx context.Context, file *os.File, path string, info os.FileInfo) ([]*session.Event, error) {
 	cache, usable, err := s.usableEventLogCache(ctx, file, path, info)
 	if err != nil {
 		return nil, err
@@ -183,16 +186,16 @@ func (s *Store) usableEventLogCache(
 
 func (s *Store) readEventLogTailContext(
 	ctx context.Context,
-	file *os.File,
+	log io.ReadSeeker,
 	path string,
 	offset int64,
 	lineNo int,
 	lastCheckpoint eventPageCheckpoint,
 ) ([]*session.Event, int64, int, eventPageCheckpoint, error) {
-	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+	if _, err := log.Seek(offset, io.SeekStart); err != nil {
 		return nil, offset, lineNo, lastCheckpoint, err
 	}
-	reader := bufio.NewReaderSize(file, eventLogReadBufferSize)
+	reader := bufio.NewReaderSize(log, eventLogReadBufferSize)
 	events := make([]*session.Event, 0)
 	var overflow []byte
 	for {

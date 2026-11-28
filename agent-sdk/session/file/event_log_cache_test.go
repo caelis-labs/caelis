@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -143,6 +144,71 @@ func TestEventLogCacheFillHonorsContextCancellation(t *testing.T) {
 	}
 	if len(store.eventLogCaches) != 0 {
 		t.Fatalf("canceled fill retained %d cache entries, want 0", len(store.eventLogCaches))
+	}
+}
+
+func TestOversizedHistoryDoesNotBlockSessionReadsOrIncludeLaterEvents(t *testing.T) {
+	t.Parallel()
+
+	store, active := newEventPageIndexFixture(t, 8)
+	store.eventLogCacheMaxBytes = 512
+	original, err := store.Session(t.Context(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanning := make(chan struct{})
+	release := make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
+	defer resume()
+	var parked atomic.Bool
+	store.eventLogLineRead = func(_ string, _ int, _ int64) {
+		if parked.CompareAndSwap(false, true) {
+			close(scanning)
+			<-release
+		}
+	}
+
+	var loaded session.LoadedSession
+	readDone := make(chan error, 1)
+	go func() {
+		var readErr error
+		loaded, readErr = store.LoadSession(t.Context(), session.LoadSessionRequest{
+			SessionRef: active.SessionRef, IncludeTransient: true,
+		})
+		readDone <- readErr
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	select {
+	case <-scanning:
+	case err := <-readDone:
+		t.Fatalf("history returned before scanning: %v", err)
+	case <-ctx.Done():
+		t.Fatal("history scan did not start")
+	}
+	if current, err := store.Session(ctx, active.SessionRef); err != nil || current.Revision != original.Revision {
+		t.Fatalf("Session during history scan = revision %d, %v", current.Revision, err)
+	}
+	later, err := store.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: active.SessionRef,
+		Event: &session.Event{
+			ID: "during-scan", Type: session.EventTypeLifecycle, Visibility: session.VisibilityCanonical,
+			Lifecycle: &session.EventLifecycle{Status: "completed"},
+		},
+	})
+	if err != nil || later.Seq != 9 {
+		t.Fatalf("AppendEvent during history scan = %#v, %v", later, err)
+	}
+	resume()
+	if err := <-readDone; err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Session.Revision != original.Revision || len(loaded.Events) != 8 {
+		t.Fatalf("history snapshot = revision %d and %d events, want revision %d and 8 events", loaded.Session.Revision, len(loaded.Events), original.Revision)
+	}
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil || len(events) != 9 || events[8].ID != later.ID {
+		t.Fatalf("next history read = %d events, %v, want the new append", len(events), err)
 	}
 }
 
