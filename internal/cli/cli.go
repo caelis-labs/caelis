@@ -521,6 +521,11 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	defer func() { _ = ownership.Close() }()
 	cfg.HostOwnership = ownership
 	cfg.SessionScopedMCP = true
+	rawToken := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
+	defaultTokenFile := controlserver.DefaultTokenFile(cfg.StoreDir)
+	tokenFile := strings.TrimSpace(serverConfig.TokenFile)
+	managedToken := rawToken == "" && (tokenFile == "" || filepath.Clean(tokenFile) == filepath.Clean(defaultTokenFile))
+	cfg.LocalShell = managedToken && localShellListen(serverConfig.Address)
 	stack, err := newLocalStack(cfg)
 	if err != nil {
 		return sandboxStartupEscapeError(err)
@@ -538,9 +543,7 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Capabilities: appserver.RequiredManagedHostCapabilities(),
 	}
-	rawToken := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
 	token := rawToken
-	tokenFile := strings.TrimSpace(serverConfig.TokenFile)
 	if token != "" {
 		if tokenFile != "" {
 			return errors.New("configure either CAELIS_CONTROL_TOKEN or a Control token file, not both")
@@ -559,11 +562,18 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	if err != nil {
 		return err
 	}
-	authenticator, err := controlAuthenticatorWithACPIngress(token, serverConfig.Principal, acpIngressToken)
+	appServer, err := local.NewAppServer(stack)
 	if err != nil {
 		return err
 	}
-	defaultTokenFile := controlserver.DefaultTokenFile(cfg.StoreDir)
+	principal := serverConfig.Principal
+	if appServer.Services.Shell != nil {
+		principal.Roles = append(append([]string(nil), principal.Roles...), appserver.RoleLocalShell)
+	}
+	authenticator, err := controlAuthenticatorWithACPIngress(token, principal, acpIngressToken)
+	if err != nil {
+		return err
+	}
 	discoveryPath := controlserver.DefaultDiscoveryFile(cfg.StoreDir)
 	publishedDiscovery := false
 	existingOnListening := serverConfig.OnListening
@@ -596,10 +606,6 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 			_ = controlserver.RemoveDiscoveryRecord(discoveryPath, instanceID)
 		}
 	}()
-	appServer, err := local.NewAppServer(stack)
-	if err != nil {
-		return err
-	}
 	serverConfig.Authenticator = authenticator
 	serverConfig.TokenFile = ""
 	return runControlServerCommand(ctx, controlserver.Dependencies{

@@ -19,6 +19,7 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 		return appserver.AppServerClients{}, err
 	}
 	clients := appserver.AppServerClients{
+		Shell:          client,
 		Experimental:   client,
 		Operations:     client,
 		Sessions:       client,

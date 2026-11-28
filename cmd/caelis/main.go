@@ -14,6 +14,9 @@ import (
 )
 
 func main() {
+	if code, handled := bootstrap.RunShellWorker(os.Args[1:], os.Stdin, os.Stdout); handled {
+		os.Exit(code)
+	}
 	if len(os.Args) == 2 && os.Args[1] == gojaexec.WorkerArgument {
 		os.Exit(gojaexec.WorkerMain())
 	}

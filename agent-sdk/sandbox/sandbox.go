@@ -189,6 +189,15 @@ type ShellConfig struct {
 
 // Config configures one composed sandbox runtime.
 type Config struct {
+	// SkipAvailabilityProbe constructs the passive native backend without
+	// launching it. Work-bearing Runtime activations must probe independently.
+	SkipAvailabilityProbe bool `json:"-"`
+	// InheritProcessGroup keeps native launchers in a one-shot worker's process
+	// group. The embedding supervisor owns cancellation and group termination.
+	InheritProcessGroup bool `json:"-"`
+	// BoundedRun opts Windows non-interactive Run into request-owned output and
+	// cleanup limits, including disabling the runtime's background ACL refresh.
+	BoundedRun     bool             `json:"-"`
 	ResourceLimits *ResourceLimits  `json:"-"`
 	Execution      *ExecutionConfig `json:"execution,omitempty"`
 	// BaseEnv replaces the ambient environment at runtime creation when non-nil.

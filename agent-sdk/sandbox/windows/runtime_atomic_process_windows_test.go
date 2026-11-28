@@ -23,7 +23,7 @@ func TestAtomicJobStdinFailureBoundsFailedTerminationRootWait(t *testing.T) {
 	started := time.Now()
 	exitCode, err, keepUse := runStartedAtomicJobProcess(
 		context.Background(), process, []byte("input"), io.Discard, io.Discard,
-		func() { close(released) }, 10*time.Millisecond,
+		func() { close(released) }, 10*time.Millisecond, time.Second,
 	)
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("stdin failure returned after %s, want bounded root wait", elapsed)
@@ -54,7 +54,7 @@ func TestAtomicJobCancellationBoundsDelayedRootSignal(t *testing.T) {
 	started := time.Now()
 	exitCode, err, keepUse := runStartedAtomicJobProcess(
 		ctx, process, nil, io.Discard, io.Discard,
-		func() { close(released) }, 10*time.Millisecond,
+		func() { close(released) }, 10*time.Millisecond, time.Second,
 	)
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("cancellation returned after %s, want bounded root wait", elapsed)
