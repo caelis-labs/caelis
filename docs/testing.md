@@ -167,16 +167,21 @@ version uses its own `automation/desktop-world-vX.Y.Z` branch and ordinary PR.
 Reruns keep any existing PR, including one that was closed. If a prior run
 pushed the same pin and stopped before PR creation, a rerun can use that branch.
 
-Enable Actions on the default branch and provision `DTW_UPDATE_TOKEN` as an
-Actions secret. Use a dedicated fine-grained PAT scoped to `caelis-labs/caelis`
-with **Contents** and **Pull requests** set to **Read and write**. The token
-owner needs write access and any required organization approval. The workflow
-uses the job's read-only token to discover the release. It uses the dedicated
-token for the branch and PR so GitHub starts the normal `pull_request` quality
-checks automatically. Where repository settings allow `GITHUB_TOKEN` to create
-PRs, their PR workflows require maintainer approval. A missing write token fails
-when a new candidate is ready. Merging is a separate maintainer action under
-branch protection. See
+With Actions enabled on the default branch, the workflow prefers
+`DTW_UPDATE_TOKEN` when configured. Use a fine-grained PAT scoped to
+`caelis-labs/caelis` with **Contents** and **Pull requests** set to
+**Read and write**, repository write access, and any required organization
+approval. When the dedicated secret is unset, the workflow uses the
+[existing Core release bot token](release.md#release-bot-setup).
+
+The discovery job uses the read-only `GITHUB_TOKEN` to fetch release data and
+verify the upstream packages. It passes the generated pin as data to a fresh
+runner. That runner checks out the same Core commit and supplies the selected
+credential only to the Core script that pushes the pin branch and opens the PR.
+GitHub then starts the normal `pull_request` quality checks automatically.
+Where repository settings allow `GITHUB_TOKEN` to create PRs, their workflows
+require maintainer approval. A new candidate requires one of the write secrets.
+Merging is a separate maintainer action under branch protection. See
 [GitHub's workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
 
 ## Change-scoped checks

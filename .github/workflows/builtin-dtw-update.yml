@@ -8,20 +8,26 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: builtin-dtw-update-main
   cancel-in-progress: false
 
 jobs:
-  update:
+  prepare:
     if: github.repository == 'caelis-labs/caelis' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      pin: ${{ steps.pin.outputs.pin }}
+      tag: ${{ steps.pin.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: main
-          fetch-depth: 0
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Check the official stable release and generate the pin
@@ -34,12 +40,31 @@ jobs:
           python3 scripts/update_builtin_dtw.py "$release"
           pin=control/plugin/builtin/desktop-world.json
           if ! git diff --quiet -- "$pin"; then
-            echo "tag=$(jq -r .tag "$pin")" >> "$GITHUB_OUTPUT"
+            tag=$(jq -er .tag "$pin")
+            encoded=$(base64 < "$pin" | tr -d '\n')
+            printf 'tag=%s\npin=%s\n' "$tag" "$encoded" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open the dependency PR
-        if: steps.pin.outputs.tag != ''
+  publish:
+    needs: prepare
+    if: needs.prepare.outputs.pin != ''
+    # Use a fresh runner and the same Core commit. The handoff is pin data only.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore the candidate pin
         env:
-          GH_TOKEN: ${{ secrets.DTW_UPDATE_TOKEN }}
-          DTW_TAG: ${{ steps.pin.outputs.tag }}
+          DTW_PIN: ${{ needs.prepare.outputs.pin }}
+        run: printf '%s' "$DTW_PIN" | base64 --decode > control/plugin/builtin/desktop-world.json
+
+      - name: Open the dependency PR
+        env:
+          GH_TOKEN: ${{ secrets.DTW_UPDATE_TOKEN || secrets.RELEASE_PLEASE_TOKEN }}
+          DTW_TAG: ${{ needs.prepare.outputs.tag }}
         run: bash scripts/open_builtin_dtw_update_pr.sh "$DTW_TAG"
