@@ -23,6 +23,7 @@ func (s *runtimeComposition) buildSessionExecution(bundle *gatewayRuntimeBundle,
 		return nil, nil, err
 	}
 	config.ControllerRecovery = coordinator
+	config.ImageCache = s.authorities.imageCache
 	engine, err := runtime.New(config)
 	if err != nil {
 		return nil, nil, err

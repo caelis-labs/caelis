@@ -134,11 +134,14 @@ type Delivery struct {
 // belongs to control/appserver/taskstream; Control owns authorization, cursor
 // binding, and fan-out.
 type Record struct {
-	Cursor     string         `json:"cursor"`
-	Generation string         `json:"generation"`
-	Sequence   uint64         `json:"sequence"`
-	Task       TaskDescriptor `json:"task"`
-	Frame      *Frame         `json:"frame,omitempty"`
+	// ImageSessionID is the owner of attachments in the authorized Record.
+	// The value stays inside Control and never crosses the client protocol.
+	ImageSessionID string         `json:"-"`
+	Cursor         string         `json:"cursor"`
+	Generation     string         `json:"generation"`
+	Sequence       uint64         `json:"sequence"`
+	Task           TaskDescriptor `json:"task"`
+	Frame          *Frame         `json:"frame,omitempty"`
 }
 
 type ReadResult struct {

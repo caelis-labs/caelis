@@ -101,7 +101,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	host := &codeModeHost{ctx: workCtx, cancel: cancel, owner: t, parent: call, limits: limits,
+	host := &codeModeHost{ctx: workCtx, receiptCtx: ctx, cancel: cancel, owner: t, parent: call, limits: limits,
 		targets: map[string]codeModeTarget{}, codeModeResults: newCodeModeResults(), drained: make(chan struct{})}
 	executor := t.declaration.Executor
 	if t.execution != nil {
@@ -219,6 +219,7 @@ func codeModeDefinitionDigest(def tool.Definition) [32]byte {
 }
 
 type codeModeHost struct {
+	receiptCtx     context.Context
 	ctx            context.Context
 	cancel         context.CancelFunc
 	owner          runtimeCodeModeTool
@@ -387,7 +388,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, prepareErr
 	}
 	ctx = toolbinding.WithPrepared(ctx, call, synthetic, prepareErr)
-	if err := h.appendToolFact(ctx, call, nil, nil, target); err != nil {
+	if _, err := h.appendToolFact(ctx, call, nil, nil, target); err != nil {
 		h.fail(err)
 		return codemode.Reply{}, err
 	}
@@ -401,7 +402,12 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	result, callErr := toolbinding.Call(callCtx, target.tool, call, toolbinding.Dispatch{Model: h.owner.producingModel})
 	stopProgress()
 	outcome := codeModeOutcome(callErr)
-	persistErr := h.appendToolFact(ctx, call, &result, callErr, target)
+	result, imageErr := tool.ReferenceResultImages(context.WithoutCancel(ctx), result)
+	var receiptErr = callErr
+	if imageErr != nil {
+		receiptErr = &hookrun.ProcessingError{Cause: imageErr, EffectError: hookrun.EffectError(callErr)}
+	}
+	receipt, persistErr := h.appendToolFact(ctx, call, &result, receiptErr, target)
 	if persistErr != nil {
 		h.fail(persistErr)
 		callErr = errors.Join(callErr, persistErr)
@@ -412,11 +418,14 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	if outcome == codemode.OutcomeUnknown && callErr == nil {
 		callErr = errorcode.New(errorcode.UnknownOutcome, "tool outcome is unknown; do not replay")
 	}
+	if persistErr == nil && imageErr != nil && callErr == nil {
+		return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, tool.NewError(errorcode.Unavailable, "image attachment unavailable; original tool receipt retained")
+	}
 	if callErr != nil {
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
 		if h.ctx.Err() == nil && persistErr == nil && (settledCodeModeToolError(callErr) || discovery && errorcode.Is(callErr, errorcode.ResourceExhausted)) {
-			reply, projectErr := h.project(callID, result, outcome, target.definition)
+			reply, projectErr := h.project(callID, result, outcome, target.definition, receipt)
 			if projectErr == nil {
 				reply.IsError = true
 				if tool.HasFailedReply(callErr) && errorcode.CodeOf(callErr) == errorcode.Unknown {
@@ -432,7 +441,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.cancel()
 		return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
 	}
-	return h.project(callID, result, outcome, target.definition)
+	return h.project(callID, result, outcome, target.definition, receipt)
 }
 
 func codeModeOutcome(err error) string {
@@ -455,7 +464,7 @@ func (h *codeModeHost) fail(err error) {
 	h.mu.Unlock()
 }
 
-func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error, target codeModeTarget) error {
+func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error, target codeModeTarget) (*session.Event, error) {
 	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, tool.InvocationFromContext(h.ctx).TurnID, call, result, callErr, toolFactTarget{definition: target.definition, source: target.tool})
 }
 

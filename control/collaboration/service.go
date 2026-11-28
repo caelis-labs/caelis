@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -75,19 +76,27 @@ type Backend interface {
 
 // Service owns the persistent pending mailbox and process-bound credentials.
 type Service struct {
-	readLocks   [64]sync.Mutex
-	mailLocks   [64]sync.Mutex
-	db          *sql.DB
-	backend     Backend
-	mu          sync.Mutex
-	credentials map[string]*Grant
-	waiters     map[Identity]map[chan struct{}]struct{}
-	now         func() time.Time
+	attachments      model.AttachmentReader
+	attachmentWriter model.AttachmentWriter
+	readLocks        [64]sync.Mutex
+	mailLocks        [64]sync.Mutex
+	db               *sql.DB
+	backend          Backend
+	mu               sync.Mutex
+	credentials      map[string]*Grant
+	waiters          map[Identity]map[chan struct{}]struct{}
+	now              func() time.Time
 }
 
 // Open uses the Host-owned Control database. The Host closes the service only
 // after its Run loop and active callers have drained.
 func Open(path string, backend Backend) (*Service, error) {
+	return OpenWithAttachments(path, backend, nil, nil)
+}
+
+// OpenWithAttachments publishes queued user images in the recipient Session's
+// attachment store before writing their admission receipt.
+func OpenWithAttachments(path string, backend Backend, reader model.AttachmentReader, writer model.AttachmentWriter) (*Service, error) {
 	if backend == nil {
 		return nil, errors.New("collaboration backend is required")
 	}
@@ -111,7 +120,7 @@ func Open(path string, backend Backend) (*Service, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Service{db: db, backend: backend, credentials: map[string]*Grant{}, waiters: map[Identity]map[chan struct{}]struct{}{}, now: time.Now}, nil
+	return &Service{db: db, backend: backend, attachments: reader, attachmentWriter: writer, credentials: map[string]*Grant{}, waiters: map[Identity]map[chan struct{}]struct{}{}, now: time.Now}, nil
 }
 
 // Close releases the service's database connection.

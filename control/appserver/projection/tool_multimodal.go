@@ -21,8 +21,8 @@ func projectedMultimodalToolResultContent(message *model.Message, fact *session.
 	var hasImage, hasJSON bool
 	for _, part := range results[0].Content {
 		if part.Kind == model.PartKindMedia && part.Media != nil &&
-			part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceInline &&
-			strings.TrimSpace(part.Media.Source.Data) != "" {
+			part.Media.Modality == model.MediaModalityImage && (part.Media.Source.Kind == model.MediaSourceAttachment ||
+			(part.Media.Source.Kind == model.MediaSourceInline && strings.TrimSpace(part.Media.Source.Data) != "")) {
 			hasImage = true
 		}
 		if part.Kind == model.PartKindJSON && part.JSON != nil {
@@ -56,7 +56,9 @@ func projectedMultimodalToolResultContent(message *model.Message, fact *session.
 				content = eventstream.TextContent{Type: "text", Text: string(part.JSON.Value)}
 			}
 		case model.PartKindMedia:
-			if part.Media != nil && part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceInline {
+			if part.Media != nil && part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceAttachment {
+				content = attachmentContent{Type: attachmentContentType, Ref: part.Media.Source.Attachment, MIME: part.Media.MimeType}
+			} else if part.Media != nil && part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceInline {
 				content = map[string]any{
 					"type": "image", "mimeType": part.Media.MimeType, "data": part.Media.Source.Data,
 				}

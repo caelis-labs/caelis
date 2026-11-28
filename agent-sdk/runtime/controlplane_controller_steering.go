@@ -50,10 +50,14 @@ func (r *Runtime) controllerSteeringHandler(
 		if hookrun.FromContext(producerCtx).TakeEarly() != nil {
 			return errorcode.New(errorcode.Unsupported, "external ACP steering cannot enforce an early-response hook decision")
 		}
+		parts, err := controllerInputParts(ctx, nil, ref.SessionID, events)
+		if err != nil {
+			return err
+		}
 		return steerer.SteerController(ctx, controller.ControllerSteerRequest{
 			SessionRef: ref, ControllerID: binding.ControllerID,
 			ControllerEpoch: binding.EpochID, RemoteSessionID: binding.RemoteSessionID,
-			TurnID: turnID, ContentParts: controllerInputParts(events),
+			TurnID: turnID, ContentParts: parts,
 			Commit: func() error {
 				return r.commitControllerSteering(producerCtx, ref, events, handle)
 			},

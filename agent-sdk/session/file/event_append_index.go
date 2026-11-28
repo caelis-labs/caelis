@@ -21,6 +21,42 @@ const (
 	eventAppendRecordBytes   = 32
 )
 
+// EventReceipt reads an exact durable record using the append index. An
+// evicted index can be rebuilt from the durable log without changing Event IDs.
+func (s *Store) EventReceipt(ctx context.Context, ref session.SessionRef, id string) (*session.Event, error) {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer s.mu.Unlock()
+	var out *session.Event
+	err := s.withRootLockContext(ctx, func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		path, err := s.resolveWritePath(doc.Session)
+		if err != nil {
+			return err
+		}
+		index, err := s.readEventAppendIndexContext(ctx, path, nil)
+		if err != nil {
+			return err
+		}
+		position, ok := index.byID[id]
+		if !ok {
+			return nil
+		}
+		f, err := os.Open(eventLogPath(path))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		out, err = readIndexedEvent(f, position)
+		return err
+	})
+	return out, err
+}
+
 // eventAppendIndex retains only event identity and file locations. Large event
 // payloads therefore remain on disk while append preparation can still prove
 // idempotency and allocate the next sequence without rescanning the full log.

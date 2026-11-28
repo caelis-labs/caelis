@@ -129,6 +129,7 @@ type MediaSourceKind string
 
 const (
 	MediaSourceInline       MediaSourceKind = "inline"
+	MediaSourceAttachment   MediaSourceKind = "attachment"
 	MediaSourceURL          MediaSourceKind = "url"
 	MediaSourceProviderFile MediaSourceKind = "provider_file"
 	MediaSourceLocalRef     MediaSourceKind = "local_ref"
@@ -225,11 +226,12 @@ type ToolResultPart struct {
 }
 
 type MediaSource struct {
-	Kind     MediaSourceKind `json:"kind,omitempty"`
-	Data     string          `json:"data,omitempty"`
-	URI      string          `json:"uri,omitempty"`
-	FileID   string          `json:"file_id,omitempty"`
-	LocalRef string          `json:"local_ref,omitempty"`
+	Attachment AttachmentRef   `json:"attachment,omitzero"`
+	Kind       MediaSourceKind `json:"kind,omitempty"`
+	Data       string          `json:"data,omitempty"`
+	URI        string          `json:"uri,omitempty"`
+	FileID     string          `json:"file_id,omitempty"`
+	LocalRef   string          `json:"local_ref,omitempty"`
 }
 
 type MediaPart struct {

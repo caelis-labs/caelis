@@ -27,6 +27,8 @@ type storeRootLock struct {
 
 // Config configures a file-backed Session store rooted at RootDir.
 type Config struct {
+	// Attachments stores native images as Session-scoped references.
+	Attachments        bool
 	RootDir            string
 	SessionIDGenerator func() string
 	EventIDGenerator   func() string
@@ -38,6 +40,7 @@ type Config struct {
 
 // Store is the file-backed implementation of session.Service.
 type Store struct {
+	attachments           bool
 	mu                    contextMutex
 	rootDir               string
 	sessionIDGenerator    func() string

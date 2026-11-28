@@ -194,6 +194,7 @@ func (r *Runtime) runAttempt(
 	for _, persisted := range persistedInputs {
 		observeSequence(persisted)
 		invocation.PromptEvents = append(invocation.PromptEvents, session.CloneEvent(persisted))
+		model.PrewarmImages(ctx, persisted.Message)
 		sink.publishEvent(persisted)
 	}
 	if invocation.LiveCompact != nil {
@@ -289,6 +290,9 @@ func (r *Runtime) runAttempt(
 				}
 				if session.IsCanonicalHistoryEvent(normalized) {
 					_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
+					if normalized.Type == session.EventTypeToolResult {
+						model.PrewarmImages(runCtx, normalized.Message)
+					}
 				}
 			}
 			source.Append(normalized)

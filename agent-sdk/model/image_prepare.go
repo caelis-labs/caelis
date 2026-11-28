@@ -73,7 +73,11 @@ func prepareRequestImages(ctx context.Context, req *Request) error {
 	// Only carry forward a proof that already matches the canonical messages.
 	// This owned transformation changes wire bytes, not the covered event range.
 	bound := req.Source != nil && req.Source.MessagesHash != "" && req.Source.MessagesHash == requestMessagesHash(req.Messages)
-	if err := sharedImagePreparationCache.prepareRequest(ctx, req); err != nil {
+	cache := sharedImagePreparationCache
+	if access, _ := ctx.Value(imageAttachmentsKey{}).(imageAttachments); access.cache != nil {
+		cache = access.cache
+	}
+	if err := cache.prepareRequest(ctx, req); err != nil {
 		return err
 	}
 	if bound {
@@ -90,7 +94,7 @@ func requestMessagesHash(messages []Message) string {
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
-func (cache *imagePreparationCache) prepareRequest(ctx context.Context, req *Request) error {
+func (cache *ImagePreparationCache) prepareRequest(ctx context.Context, req *Request) error {
 	var prepare func([]Part) ([]Part, error)
 	prepare = func(parts []Part) ([]Part, error) {
 		if len(parts) == 0 {
@@ -109,11 +113,17 @@ func (cache *imagePreparationCache) prepareRequest(ctx context.Context, req *Req
 				part.ToolResult.Content = content
 			}
 			media := part.Media
-			if part.Kind != PartKindMedia || media == nil || media.Modality != MediaModalityImage || media.Source.Kind != MediaSourceInline {
+			if part.Kind != PartKindMedia || media == nil || media.Modality != MediaModalityImage || (media.Source.Kind != MediaSourceInline && media.Source.Kind != MediaSourceAttachment) {
 				out = append(out, part)
 				continue
 			}
-			prepared, err := cache.prepare(ctx, media.Source.Data, func() preparedImage { return prepareInlineImage(media) })
+			var prepared preparedImage
+			var err error
+			if media.Source.Kind == MediaSourceAttachment {
+				prepared, err = cache.prepareAttachment(ctx, media, false)
+			} else {
+				prepared, err = cache.prepare(ctx, media.Source.Data, func() preparedImage { return prepareInlineImage(media) })
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -127,7 +137,7 @@ func (cache *imagePreparationCache) prepareRequest(ctx context.Context, req *Req
 				copyMedia := *media
 				copyMedia.MimeType = derived.mimeType
 				if derived.data != "" {
-					copyMedia.Source.Data = derived.data
+					copyMedia.Source = MediaSource{Kind: MediaSourceInline, Data: derived.data}
 				}
 				part.Media = &copyMedia
 				out = append(out, part)
@@ -158,6 +168,13 @@ func prepareInlineImage(media *MediaPart) preparedImage {
 	if err != nil || len(data) > imageMaxSourceBytes {
 		return omit("invalid or oversized base64 image")
 	}
+	return prepareImageBytes(data, len(media.Source.Data))
+}
+
+func prepareImageBytes(data []byte, encodedSize int) preparedImage {
+	omit := func(reason string) preparedImage {
+		return preparedImage{note: "omitted: " + reason + "; provide a smaller valid PNG, JPEG, GIF, or WebP image"}
+	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return omit("unsupported or invalid image data")
@@ -177,7 +194,7 @@ func prepareInlineImage(media *MediaPart) preparedImage {
 	if err != nil {
 		return omit("image could not be decoded")
 	}
-	if max(cfg.Width, cfg.Height) <= imageMaxDimension && len(media.Source.Data) <= imageMaxEncodedBytes {
+	if max(cfg.Width, cfg.Height) <= imageMaxDimension && encodedSize <= imageMaxEncodedBytes {
 		return preparedImage{images: []preparedImagePart{{mimeType: mime}}}
 	}
 	// Re-encoding removes EXIF, so use the displayed orientation and dimensions
@@ -230,6 +247,24 @@ func imagePreparationRegions(bounds image.Rectangle) []image.Rectangle {
 }
 
 func encodePreparedImage(src image.Image, region image.Rectangle) (preparedImagePart, error) {
+	return encodePreparedImageWithin(src, region, imageMaxEncodedBytes)
+}
+
+// PreviewImage creates one bounded compatible image for a display transport.
+func PreviewImage(data []byte, encodedBudget int) (encoded, mimeType string, err error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > imageMaxSourcePixels/cfg.Height {
+		return "", "", ErrAttachmentUnavailable
+	}
+	source, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return "", "", ErrAttachmentUnavailable
+	}
+	preview, err := encodePreparedImageWithin(source, source.Bounds(), encodedBudget)
+	return preview.data, preview.mimeType, err
+}
+
+func encodePreparedImageWithin(src image.Image, region image.Rectangle, encodedBudget int) (preparedImagePart, error) {
 	w, h := region.Dx(), region.Dy()
 	if long := max(w, h); long > imageMaxDimension {
 		w = max(1, int(int64(w)*imageMaxDimension/int64(long)))
@@ -243,7 +278,7 @@ func encodePreparedImage(src image.Image, region image.Rectangle) (preparedImage
 			return preparedImagePart{}, err
 		}
 		mime := "image/png"
-		if base64.StdEncoding.EncodedLen(encoded.Len()) > imageMaxEncodedBytes {
+		if base64.StdEncoding.EncodedLen(encoded.Len()) > encodedBudget {
 			// Flatten alpha onto white before JPEG encoding, rather than
 			// turning transparent screenshots black.
 			opaque := image.NewRGBA(scaled.Bounds())
@@ -255,8 +290,11 @@ func encodePreparedImage(src image.Image, region image.Rectangle) (preparedImage
 			}
 			mime = "image/jpeg"
 		}
-		if base64.StdEncoding.EncodedLen(encoded.Len()) <= imageMaxEncodedBytes {
+		if base64.StdEncoding.EncodedLen(encoded.Len()) <= encodedBudget {
 			return preparedImagePart{data: base64.StdEncoding.EncodeToString(encoded.Bytes()), mimeType: mime, note: fmt.Sprintf("%dx%d", w, h)}, nil
+		}
+		if w == 1 && h == 1 {
+			return preparedImagePart{}, ErrAttachmentUnavailable
 		}
 		w, h = max(1, w*3/4), max(1, h*3/4)
 	}

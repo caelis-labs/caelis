@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
@@ -883,6 +884,10 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 				// Keep the durable position as canonical provenance, but only the
 				// matching Sync carries the boundary cursor after commit.
 				envelope.Cursor = ""
+				envelope, _, err := s.materializeAttachment(envelope)
+				if err != nil {
+					return 0, err
+				}
 				flushed, ok, err := pages.add(envelope)
 				if err != nil {
 					return pages.nextPage(), err
@@ -947,6 +952,10 @@ func (s *feedSubscription) followCanonical(after eventstream.DurableFeedPosition
 					return encodeErr
 				}
 				envelope.Cursor = cursor
+				envelope, _, err = s.materializeAttachment(envelope)
+				if err != nil {
+					return err
+				}
 				if !s.deliver(FeedDelivery{
 					Kind: FeedDeliveryAppendPage, Source: FeedSourceExact,
 					Events: []eventstream.Envelope{eventstream.CloneEnvelope(envelope)}, NextCursor: cursor,
@@ -1131,12 +1140,19 @@ func (s *feedSubscription) followSpool(offset streamspool.Offset) error {
 		if err := json.Unmarshal(record.Payload, &envelope); err != nil {
 			return fmt.Errorf("controlclient: decode Session spool record: %w", err)
 		}
+		wireEnvelope, hasImage, materializeErr := s.materializeAttachment(envelope)
+		if materializeErr != nil {
+			return materializeErr
+		}
+		if hasImage && !flush() {
+			return s.ctx.Err()
+		}
 		current++
-		page = append(page, envelope)
+		page = append(page, wireEnvelope)
 		pageBytes += len(record.Payload)
 		// Backfill reads an already captured prefix and needs no per-record
 		// delivery. Once caught up, live records retain immediate delivery.
-		if current >= s.initialHigh || len(page) >= 64 || pageBytes >= 64<<10 {
+		if hasImage || current >= s.initialHigh || len(page) >= 64 || pageBytes >= 64<<10 {
 			if !flush() {
 				return s.ctx.Err()
 			}
@@ -1202,6 +1218,16 @@ func (s *feedSubscription) rememberDeliveredTerminal(envelope eventstream.Envelo
 	s.lastTerminalRun = strings.TrimSpace(envelope.RunID)
 	s.lastTerminalTurn = strings.TrimSpace(envelope.TurnID)
 	s.mu.Unlock()
+}
+
+func (s *feedSubscription) materializeAttachment(event eventstream.Envelope) (eventstream.Envelope, bool, error) {
+	reader, _ := s.broker.reader.(model.AttachmentReader)
+	count := acpprojector.AttachmentImageCount(event)
+	if count == 0 {
+		return event, false, nil
+	}
+	out, err := acpprojector.MaterializeAttachments(s.ctx, reader, s.broker.ref.SessionID, event, acpprojector.AttachmentProjectionBytes/count)
+	return out, true, err
 }
 
 func (s *feedSubscription) deliver(delivery FeedDelivery) bool {

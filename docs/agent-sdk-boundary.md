@@ -557,14 +557,19 @@ Persistence requires revision CAS, full-payload idempotency, fenced writes,
 monotonic replay, and version checks on durable facts before replay. Persistence or replay changes require whole-object round
 trips proving rebuilt model context equals Runtime-produced context.
 
-Event schema 2 supports event-local sharing of repeated large inline media.
-The file Store uses `session.MarshalEventJSON` for JSONL and WAL records; ordinary
-JSON encoding retains expanded values. Decoding verifies content digests and
-references and restores complete model messages and execution receipts before
-validation or recovery. Media never depends on another event or a temporary
-artifact, so retaining or discarding an event also retains or discards its media.
-Readers replay supported schema-1 records in place. Downgrading to a reader that
-predates schema 2 requires a Store backup from before the newer writes.
+The Host enables Session-owned image attachments in the file Store. New event
+schema 5 writes record the Session, content digest, attachment instance and size
+metadata in JSONL, WAL and downstream Task output. One Session shares matching
+image bytes while an instance exists. Model requests and authorized Control
+deliveries resolve the references at their output boundaries. Explicit pruning
+can remove a referenced image while preserving the original event and its
+unavailable-image placeholder. A later occurrence of identical bytes creates
+a fresh instance, so it cannot restore earlier placeholders.
+
+The file Store still reads older inline records, including event-local shared
+media introduced in schema 2. Legacy records retain their original media until
+ordinary history maintenance removes the records. Restore a pre-upgrade backup
+before downgrading to a reader that cannot read the new event schema.
 
 Task producers own lifecycle state and typed failure diagnostics. Runtime-authored
 tool-result Events declare whether their wrapper may supply bounded final-result

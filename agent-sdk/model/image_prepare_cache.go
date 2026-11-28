@@ -11,18 +11,17 @@ import (
 
 var sharedImagePreparationCache = newImagePreparationCache(64*1024*1024, 128, 5*time.Minute)
 
-// This process-local cache contains disposable derivatives keyed only by source
-// content. It never owns Session history or raw decoded images. Validation-only
-// entries retain a MIME result, not source bytes. LRU eviction bounds retained
-// bytes and entry count; expiry releases inactive entries even without new work.
-// Serializing cache misses bounds concurrent decode/encode working memory.
-type imagePreparationCache struct {
+// ImagePreparationCache keeps bounded, disposable model image preparations.
+// Inline validation entries retain only their disposition. Attachment entries
+// can retain encoded provider bytes so hot requests avoid reading the source.
+type ImagePreparationCache struct {
 	mu                     sync.Mutex
 	entries                map[[sha256.Size]byte]*list.Element
 	lru                    list.List
 	bytes, maxBytes, limit int
 	ttl                    time.Duration
 	processing             chan struct{}
+	warming                chan struct{}
 }
 
 type imagePreparationEntry struct {
@@ -33,14 +32,19 @@ type imagePreparationEntry struct {
 	timer   *time.Timer
 }
 
-func newImagePreparationCache(maxBytes, limit int, ttl time.Duration) *imagePreparationCache {
-	return &imagePreparationCache{
+// NewImagePreparationCache creates a Host-local cache with production bounds.
+func NewImagePreparationCache() *ImagePreparationCache {
+	return newImagePreparationCache(64*1024*1024, 128, 5*time.Minute)
+}
+
+func newImagePreparationCache(maxBytes, limit int, ttl time.Duration) *ImagePreparationCache {
+	return &ImagePreparationCache{
 		entries: make(map[[sha256.Size]byte]*list.Element), maxBytes: maxBytes,
-		limit: limit, ttl: ttl, processing: make(chan struct{}, 1),
+		limit: limit, ttl: ttl, processing: make(chan struct{}, 1), warming: make(chan struct{}, 1),
 	}
 }
 
-func (c *imagePreparationCache) prepare(ctx context.Context, source string, load func() preparedImage) (preparedImage, error) {
+func (c *ImagePreparationCache) prepare(ctx context.Context, source string, load func() preparedImage) (preparedImage, error) {
 	if err := ctx.Err(); err != nil {
 		return preparedImage{}, err
 	}
@@ -48,15 +52,20 @@ func (c *imagePreparationCache) prepare(ctx context.Context, source string, load
 	if len(source) > base64.StdEncoding.EncodedLen(imageMaxSourceBytes) {
 		return load(), nil
 	}
-	key := imagePreparationKey(source)
+	return c.prepareKey(ctx, imagePreparationKey(source), func() (preparedImage, error) { return load(), nil }, false)
+}
+
+func (c *ImagePreparationCache) prepareKey(ctx context.Context, key [sha256.Size]byte, load func() (preparedImage, error), warm bool) (preparedImage, error) {
 	if value, ok := c.get(key); ok {
 		return value, nil
 	}
-	select {
-	case c.processing <- struct{}{}:
-		defer func() { <-c.processing }()
-	case <-ctx.Done():
-		return preparedImage{}, ctx.Err()
+	if !warm {
+		select {
+		case c.processing <- struct{}{}:
+			defer func() { <-c.processing }()
+		case <-ctx.Done():
+			return preparedImage{}, ctx.Err()
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return preparedImage{}, err
@@ -65,7 +74,10 @@ func (c *imagePreparationCache) prepare(ctx context.Context, source string, load
 	if value, ok := c.get(key); ok {
 		return value, nil
 	}
-	value := load()
+	value, err := load()
+	if err != nil {
+		return preparedImage{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return preparedImage{}, err
 	}
@@ -88,7 +100,7 @@ func imagePreparationKey(source string) [sha256.Size]byte {
 	return key
 }
 
-func (c *imagePreparationCache) get(key [sha256.Size]byte) (preparedImage, bool) {
+func (c *ImagePreparationCache) get(key [sha256.Size]byte) (preparedImage, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	element := c.entries[key]
@@ -104,7 +116,7 @@ func (c *imagePreparationCache) get(key [sha256.Size]byte) (preparedImage, bool)
 	return entry.value, true
 }
 
-func (c *imagePreparationCache) put(key [sha256.Size]byte, value preparedImage) {
+func (c *ImagePreparationCache) put(key [sha256.Size]byte, value preparedImage) {
 	size := 256 + len(value.note)
 	for _, part := range value.images {
 		size += 64 + len(part.data) + len(part.mimeType) + len(part.note)
@@ -133,7 +145,7 @@ func (c *imagePreparationCache) put(key [sha256.Size]byte, value preparedImage) 
 	})
 }
 
-func (c *imagePreparationCache) remove(element *list.Element) {
+func (c *ImagePreparationCache) remove(element *list.Element) {
 	entry := element.Value.(*imagePreparationEntry)
 	delete(c.entries, entry.key)
 	c.lru.Remove(element)

@@ -15,12 +15,12 @@ import (
 type codeModeResults struct {
 	mu         sync.Mutex
 	retained   int
-	handles    map[string]tool.ContentBlock
-	replyParts map[string][]codemode.Part
+	handles    map[string]codeModeResultHandle
+	replyParts map[string]codeModeReplyReceipt
 }
 
 func newCodeModeResults() *codeModeResults {
-	return &codeModeResults{handles: map[string]tool.ContentBlock{}, replyParts: map[string][]codemode.Part{}}
+	return &codeModeResults{handles: map[string]codeModeResultHandle{}, replyParts: map[string]codeModeReplyReceipt{}}
 }
 
 type codeModeEnvironment struct {

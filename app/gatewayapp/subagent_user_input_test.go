@@ -508,9 +508,21 @@ recovered:
 			continue
 		}
 		for _, part := range event.Message.Parts {
-			if part.Media != nil && part.Media.Source.Data == imageData && part.Media.MimeType == "image/png" {
-				canonicalImage = true
+			if part.Media == nil || part.Media.Source.Kind != model.MediaSourceAttachment || part.Media.MimeType != "image/png" {
+				continue
 			}
+			ref := part.Media.Source.Attachment
+			reader := host.composition.sessions.(model.AttachmentReader)
+			image, err := reader.OpenAttachment(ctx, child.SessionID, ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := model.ReadAttachment(image, ref)
+			_ = image.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonicalImage = part.Media.Source.Data == "" && base64.StdEncoding.EncodeToString(raw) == imageData
 		}
 	}
 	if !canonicalImage {
