@@ -3,7 +3,7 @@ module github.com/caelis-labs/caelis
 go 1.26.11
 
 require (
-	charm.land/bubbles/v2 v2.2.1
+	charm.land/bubbles/v2 v2.2.2
 	charm.land/bubbletea/v2 v2.1.2
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.1.1
@@ -25,8 +25,8 @@ require (
 	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.9.0-pre.1
-	github.com/rivo/uniseg v0.4.7
-	github.com/tidwall/gjson v1.20.5
+	github.com/rivo/uniseg v0.4.8-0.20261110175422-3a370411ca06
+	github.com/tidwall/gjson v1.20.6
 	github.com/tidwall/sjson v1.2.11
 	github.com/yuin/goldmark v1.8.7
 	golang.org/x/image v0.48.0
@@ -36,7 +36,7 @@ require (
 	golang.org/x/sys v0.50.0
 	google.golang.org/genai v1.79.1
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
@@ -77,7 +77,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
