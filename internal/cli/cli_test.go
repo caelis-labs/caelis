@@ -161,6 +161,7 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 		mode string
 	}{
 		{name: "default token file", mode: "default"},
+		{name: "managed launcher passes default file", mode: "managed"},
 		{name: "custom token file", mode: "custom"},
 		{name: "raw token", mode: "raw"},
 		{name: "nonloopback listener", mode: "remote"},
@@ -174,6 +175,8 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 			ordinaryTokenFile := controlserver.DefaultTokenFile(storeDir)
 			ordinaryToken := ""
 			switch test.mode {
+			case "managed":
+				arguments = append(arguments, "--control-token-file", ordinaryTokenFile)
 			case "remote":
 				arguments = append(arguments, "--listen", "0.0.0.0:7777",
 					"--control-tls-cert", "unused.crt", "--control-tls-key", "unused.key")
@@ -204,7 +207,7 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 				stack.SetBuiltInChildControl(endpoint, tokenFile)
 			}
 			runControlServerCommand = func(_ context.Context, deps controlserver.Dependencies, config controlserver.Config) error {
-				wantShell := test.mode == "default" && shellproc.Supported()
+				wantShell := (test.mode == "default" || test.mode == "managed") && shellproc.Supported()
 				if (deps.Services.Shell != nil) != wantShell {
 					t.Fatalf("Shell service exposed = %v, want %v", deps.Services.Shell != nil, wantShell)
 				}
@@ -252,7 +255,7 @@ func TestRunServeBindsBuiltInChildrenToDistinctACPIngressCredential(t *testing.T
 			}
 			request.Header.Set("Authorization", "Bearer "+ordinaryToken)
 			ordinary, err := captured.Authenticator.Authenticate(request)
-			wantShell := test.mode == "default" && shellproc.Supported()
+			wantShell := (test.mode == "default" || test.mode == "managed") && shellproc.Supported()
 			if err != nil || ordinary.ID != principal.ID || ordinary.HasRole(appserver.RoleLocalShell) != wantShell {
 				t.Fatalf("ordinary credential = %#v, %v, want shared principal and Shell grant %v", ordinary, err, wantShell)
 			}

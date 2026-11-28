@@ -2071,13 +2071,11 @@ type ShellLocation string
 
 const (
 	ShellLocationSandbox ShellLocation = "sandbox"
-	ShellLocationHost    ShellLocation = "host"
 )
 
 type ShellRequest struct {
-	Command   string        `json:"command"`
-	Location  ShellLocation `json:"location,omitempty"`
-	Workspace string        `json:"workspace"`
+	Command   string `json:"command"`
+	Workspace string `json:"workspace"`
 }
 
 type ShellResult struct {

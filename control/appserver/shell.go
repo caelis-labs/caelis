@@ -2,7 +2,6 @@ package appserver
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,43 +19,19 @@ const RoleLocalShell = "local-shell"
 
 const maxShellExecutions = 4
 
-// ShellLocation selects an execution boundary already granted by the Host.
-type ShellLocation string
-
-const (
-	ShellSandbox ShellLocation = "sandbox"
-	ShellHost    ShellLocation = "host"
-)
-
-// UnmarshalJSON distinguishes an omitted location from an invalid explicit value.
-func (l *ShellLocation) UnmarshalJSON(raw []byte) error {
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return err
-	}
-	location := ShellLocation(value)
-	if location != ShellSandbox && location != ShellHost {
-		return errorcode.New(errorcode.InvalidArgument, "location must be sandbox or host")
-	}
-	*l = location
-	return nil
-}
-
-// ShellRequest executes one non-interactive command in a caller-selected workspace.
-// An omitted location selects sandbox.
+// ShellRequest executes one non-interactive command in the requested workspace sandbox.
 type ShellRequest struct {
-	Workspace string        `json:"workspace"`
-	Command   string        `json:"command"`
-	Location  ShellLocation `json:"location,omitempty"`
+	Workspace string `json:"workspace"`
+	Command   string `json:"command"`
 }
 
 // ShellResult describes a completed process, including ordinary nonzero exits.
 type ShellResult struct {
-	Location ShellLocation `json:"location"`
-	Backend  string        `json:"backend"`
-	ExitCode int           `json:"exit_code"`
-	Stdout   string        `json:"stdout"`
-	Stderr   string        `json:"stderr"`
+	Location string `json:"location"`
+	Backend  string `json:"backend"`
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
 }
 
 // ShellClient executes a command with the caller's authenticated Shell grant.
@@ -86,12 +61,6 @@ func NewShellService(principalID string, run func(context.Context, ShellRequest)
 func (s *ShellService) ExecuteShell(ctx context.Context, p Principal, req ShellRequest) (ShellResult, error) {
 	if p.ID == "" || p.ID != s.principalID || !p.HasRole(RoleLocalShell) || p.HasRole(RoleACPIngress) || p.HasRole(RoleSystemSessionRuntime) {
 		return ShellResult{}, ErrUnauthorized
-	}
-	if req.Location == "" {
-		req.Location = ShellSandbox
-	}
-	if req.Location != ShellSandbox && req.Location != ShellHost {
-		return ShellResult{}, errorcode.New(errorcode.InvalidArgument, "location must be sandbox or host")
 	}
 	if !filepath.IsAbs(req.Workspace) || len(req.Workspace) > 4096 || strings.ContainsRune(req.Workspace, 0) {
 		return ShellResult{}, errorcode.New(errorcode.InvalidArgument, "workspace must be an absolute path of at most 4096 bytes")

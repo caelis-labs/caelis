@@ -84,8 +84,8 @@ type Config struct {
 	// It does not create or mutate model configuration.
 	ResolveProviderHTTPClient func(context.Context, ModelConfig) (*http.Client, error)
 	Sandbox                   SandboxConfig
-	// PassiveServeRoot skips native availability probes when this Runtime only serves Control.
-	PassiveServeRoot bool
+	// LocalShell registers Shell during managed loopback Host composition.
+	LocalShell bool
 	// ChildControlURL and ChildControlTokenFile let an embedding expose this
 	// same Host to built-in ACP child processes. They never construct another
 	// Host and the token itself is not placed in argv or environment.
@@ -539,7 +539,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{
 		composition: runtimeComposition{
-			passiveServeRoot: cfg.PassiveServeRoot,
+			passiveServeRoot: cfg.LocalShell,
 			authorities: runtimeHostAuthorities{
 				productDefaults:         cfg.BuiltinPackage,
 				mcp:                     newHostMCP(newAppConfigStore(storeDir), doc, runtimeDiagnostics),
@@ -613,6 +613,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err := activateHostRuntime(stack, controlAssembly); err != nil {
 		_ = stack.Close()
 		return nil, err
+	}
+	if cfg.LocalShell {
+		stack.controlShell = newControlShell(userID, storeDir, sandboxCfg.HelperPath, cfg.SandboxHostAuthorityDir)
 	}
 	return stack, nil
 }

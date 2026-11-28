@@ -2082,11 +2082,10 @@ export interface ShellConfig {
   [key: string]: JSONValue;
 }
 
-export type ShellLocation = "sandbox" | "host";
+export type ShellLocation = "sandbox";
 
 export interface ShellRequest {
   command: string;
-  location?: ShellLocation;
   workspace: string;
 }
 

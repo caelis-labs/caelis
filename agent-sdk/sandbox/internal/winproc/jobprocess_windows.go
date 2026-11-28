@@ -14,6 +14,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 const procThreadAttributeHandleList = 0x00020002
@@ -46,6 +48,10 @@ type JobProcess struct {
 // kill-on-close Job Object.
 func StartJobProcess(cfg JobProcessConfig) (_ *JobProcess, retErr error) {
 	application, err := resolveApplicationPath(cfg.Application, "jobprocess")
+	if err != nil {
+		return nil, err
+	}
+	commandLine, err := jobCommandLine(application, cfg.Args)
 	if err != nil {
 		return nil, err
 	}
@@ -87,11 +93,6 @@ func StartJobProcess(cfg JobProcessConfig) (_ *JobProcess, retErr error) {
 	}
 	handles := []windows.Handle{stdinRead, stdoutWrite, stderrWrite}
 	if err := attributes.Update(procThreadAttributeHandleList, unsafe.Pointer(&handles[0]), uintptr(len(handles))*unsafe.Sizeof(handles[0])); err != nil {
-		return nil, err
-	}
-	argv := append([]string{application}, cfg.Args...)
-	commandLine, err := windows.UTF16FromString(windows.ComposeCommandLine(argv))
-	if err != nil {
 		return nil, err
 	}
 	applicationPtr, err := windows.UTF16PtrFromString(application)
@@ -145,6 +146,19 @@ func StartJobProcess(cfg JobProcessConfig) (_ *JobProcess, retErr error) {
 		stderr:  fileForHandle(stderrRead, "jobprocess-stderr"),
 		pid:     processInfo.ProcessId,
 	}, nil
+}
+
+// The Win32 limit includes the complete quoted UTF-16 command line and NUL.
+func jobCommandLine(application string, args []string) ([]uint16, error) {
+	argv := append([]string{application}, args...)
+	line, err := windows.UTF16FromString(windows.ComposeCommandLine(argv))
+	if err != nil {
+		return nil, errorcode.Wrap(errorcode.InvalidArgument, "Windows command line contains invalid characters", err)
+	}
+	if len(line) > 32767 {
+		return nil, errorcode.New(errorcode.InvalidArgument, "Windows encoded command line exceeds 32767 UTF-16 units")
+	}
+	return line, nil
 }
 
 func (p *JobProcess) Input() io.WriteCloser {
@@ -259,15 +273,6 @@ func (p *JobProcess) ClosePipes() {
 		if file != nil {
 			_ = file.Close()
 		}
-	}
-}
-
-func (p *JobProcess) closeJob() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.job != nil {
-		_ = p.job.Close()
-		p.job = nil
 	}
 }
 

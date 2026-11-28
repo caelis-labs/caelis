@@ -1,6 +1,7 @@
 package gatewayapp_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,13 +54,13 @@ func TestControlShellNativeServe(t *testing.T) {
 		writeShellFile(t, probeMode, "fail")
 		helper := filepath.Join(root, "seatbelt-helper")
 		writeShellFile(t, helper, fmt.Sprintf(`#!/bin/bash
-if [ "$2" = --probe ] && [ -f %s ]; then
+if [ "$2" = --probe ] && /bin/mv %s %s 2>/dev/null; then
   : > %s
   while [ ! -f %s ]; do /bin/sleep .03; done
   exit 71
 fi
 exec %s "$@"
-`, shellQuote(probeMode), shellQuote(probeReady), shellQuote(probeRelease), shellQuote(binary)))
+`, shellQuote(probeMode), shellQuote(probeMode+".claimed"), shellQuote(probeReady), shellQuote(probeRelease), shellQuote(binary)))
 		writeShellFile(t, filepath.Join(store, "config.json"), fmt.Sprintf(`{"schema_version":2,"sandbox":{"requested_type":"seatbelt","helper_path":%s}}`, mustShellJSON(t, helper)))
 	}
 	f := launchShellFixture(t, binary, root, work, store)
@@ -77,25 +79,28 @@ exec %s "$@"
 	if err != nil || len(initial.Sessions) != 0 {
 		t.Fatalf("initial Sessions = %+v, %v", initial, err)
 	}
-	shell := func(command string, location appserver.ShellLocation) (appserver.ShellResult, error) {
-		return f.client.ExecuteShell(ctx, appserver.ShellRequest{Workspace: work, Command: command, Location: location})
+	shell := func(command string) (appserver.ShellResult, error) {
+		return f.client.ExecuteShell(ctx, appserver.ShellRequest{Workspace: work, Command: command})
 	}
-	hostOK := "printf host"
 	sandboxOK := "printf native"
 	exit7 := "printf stdout; printf stderr >&2; exit 7"
 	outside := filepath.Join(root, "outside")
 	changeOutside := "printf changed > " + shellQuote(outside)
-	backend := "seatbelt"
+	backend := map[string]string{"darwin": "seatbelt", "linux": "bwrap", "windows": "windows"}[runtime.GOOS]
 	if runtime.GOOS == "windows" {
-		hostOK, sandboxOK = "Write-Output host", "Write-Output native"
+		sandboxOK = "Write-Output native"
 		exit7 = "[Console]::Out.WriteLine('stdout'); [Console]::Error.WriteLine('stderr'); exit 7"
 		changeOutside = "$ErrorActionPreference='Stop'; Set-Content -LiteralPath " + psQuote(outside) + " -Value changed"
-		backend = "windows"
 	}
-	assertShell(t, shell, hostOK, appserver.ShellHost, "host", "host")
+	if runtime.GOOS == "darwin" {
+		if err := os.Remove(probeMode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertShell(t, shell, sandboxOK, backend, "native")
 	withoutSession, err := f.client.ListSessions(ctx, appserver.ListSessionsRequest{})
 	if err != nil || len(withoutSession.Sessions) != 0 {
-		t.Fatalf("Host Shell changed the Session directory: %+v, %v", withoutSession, err)
+		t.Fatalf("Shell changed the Session directory: %+v, %v", withoutSession, err)
 	}
 	// Create an independent ordinary Session only after establishing the
 	// Session-free path. No Turn or provider configuration is needed.
@@ -107,13 +112,14 @@ exec %s "$@"
 	}
 	sessionID := created.SessionID
 	f.checkHealth(t, sessionID)
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		t.Run("sandbox_initialization_failure", func(t *testing.T) {
-			defer os.Remove(probeMode)
-			done := asyncShell(t.Context(), f.client, work, changeOutside, "")
+			writeShellFile(t, probeMode, "fail")
+			done := asyncShell(t.Context(), f.client, work, changeOutside)
 			waitShellFile(t, probeReady)
 			f.checkHealth(t, sessionID)
-			assertShell(t, shell, hostOK, appserver.ShellHost, "host", "host")
+			assertShell(t, shell, sandboxOK, backend, "native")
 			writeShellFile(t, probeRelease, "")
 			requireShellError(t, <-done, 503, errorcode.Unavailable)
 			if _, err := os.Stat(outside); !errors.Is(err, os.ErrNotExist) {
@@ -121,7 +127,7 @@ exec %s "$@"
 			}
 			f.checkHealth(t, sessionID)
 		})
-	} else {
+	case "windows":
 		t.Run("sandbox_initialization_failure", func(t *testing.T) {
 			failedWorkspace := filepath.Join(root, "blocked-work")
 			if err := os.Mkdir(failedWorkspace, 0o700); err != nil {
@@ -140,27 +146,25 @@ exec %s "$@"
 			if _, err := os.Stat(outside); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("failed sandbox wrote outside workspace: %v", err)
 			}
-			assertShell(t, shell, hostOK, appserver.ShellHost, "host", "host")
+			assertShell(t, shell, sandboxOK, backend, "native")
 			f.checkHealth(t, sessionID)
 		})
 	}
 
-	assertShell(t, shell, sandboxOK, "", backend, "native")
-	assertShell(t, shell, sandboxOK, appserver.ShellSandbox, backend, "native")
+	assertShell(t, shell, sandboxOK, backend, "native")
 	writeShellFile(t, outside, "untouched")
-	denied, err := shell(changeOutside, "")
+	denied, err := shell(changeOutside)
 	if err != nil || denied.ExitCode == 0 || readShellFile(t, outside) != "untouched" {
 		t.Fatalf("sandbox outside write = %+v, %v", denied, err)
 	}
-	allowed, err := shell(changeOutside, appserver.ShellHost)
-	if err != nil || allowed.ExitCode != 0 || strings.TrimSpace(readShellFile(t, outside)) != "changed" {
-		t.Fatalf("Host outside write = %+v, %v", allowed, err)
+	checkShellReadWriteAndNetwork(t, shell, backend, work, outside)
+	got, err := shell(exit7)
+	if err != nil || got.ExitCode != 7 || strings.TrimSpace(got.Stdout) != "stdout" || strings.TrimSpace(got.Stderr) != "stderr" {
+		t.Fatalf("nonzero receipt = %+v, %v", got, err)
 	}
-	for _, location := range []appserver.ShellLocation{appserver.ShellSandbox, appserver.ShellHost} {
-		got, err := shell(exit7, location)
-		if err != nil || got.ExitCode != 7 || strings.TrimSpace(got.Stdout) != "stdout" || strings.TrimSpace(got.Stderr) != "stderr" {
-			t.Fatalf("%s nonzero receipt = %+v, %v", location, got, err)
-		}
+	if runtime.GOOS == "windows" {
+		_, err := shell(strings.Repeat("x", 20000))
+		requireShellError(t, err, 400, errorcode.InvalidArgument)
 	}
 
 	afterShell, err := f.client.ListSessions(ctx, appserver.ListSessionsRequest{})
@@ -171,7 +175,7 @@ exec %s "$@"
 		acpToken := strings.TrimSpace(readShellFile(t, controlserver.DefaultACPIngressTokenFile(store)))
 		for _, token := range []string{acpToken, sessionID, "invalid-token"} {
 			client := shellClient(t, f.record.Endpoint, token, nil)
-			_, err := client.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: work, Command: hostOK, Location: appserver.ShellHost})
+			_, err := client.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: work, Command: sandboxOK})
 			if token == acpToken {
 				requireShellError(t, err, 403, errorcode.PermissionDenied)
 			} else {
@@ -179,24 +183,36 @@ exec %s "$@"
 			}
 		}
 		forwarded := shellClient(t, f.record.Endpoint, f.token, &http.Client{Transport: shellForwarder{}})
-		_, err := forwarded.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: work, Command: hostOK, Location: appserver.ShellHost})
+		_, err := forwarded.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: work, Command: sandboxOK})
 		requireShellError(t, err, 403, errorcode.PermissionDenied)
-		for _, location := range []appserver.ShellLocation{"auto", "remote"} {
-			_, err := shell(hostOK, location)
-			requireShellError(t, err, 400, errorcode.InvalidArgument)
+		body := map[string]any{"workspace": work, "command": sandboxOK, "location": "host"}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
 		}
-		_, err = f.client.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: store, Command: hostOK})
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.record.Endpoint+"/api/control/v1/shell/execute", bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+f.token)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != 400 {
+			t.Fatalf("removed location accepted: HTTP %d", response.StatusCode)
+		}
+		_, err = f.client.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: store, Command: sandboxOK})
 		requireShellError(t, err, 403, errorcode.PermissionDenied)
 	})
-	for _, location := range []appserver.ShellLocation{appserver.ShellSandbox, appserver.ShellHost} {
-		t.Run(string(location), func(t *testing.T) {
-			runShellFaults(t, f, sessionID, location, hostOK)
-		})
-	}
+	runShellFaults(t, f, sessionID, sandboxOK)
+
 	if runtime.GOOS == "darwin" {
 		t.Run("worker_crash", func(t *testing.T) {
 			pids, command := shellWaitingCommand(work, "worker-crash", "wait")
-			done := asyncShell(t.Context(), f.client, work, command, appserver.ShellHost)
+			done := asyncShell(t.Context(), f.client, work, command)
 			shellPID, childPID := shellPIDs(t, pids)
 			workerPID := shellParentPID(t, shellPID)
 			if shellParentPID(t, workerPID) != f.host.Process.Pid {
@@ -207,7 +223,7 @@ exec %s "$@"
 				t.Fatalf("PID %d is not the test worker: %s, %v", workerPID, args, err)
 			}
 			f.checkHealth(t, sessionID)
-			assertShell(t, shell, hostOK, appserver.ShellHost, "host", "host")
+			assertShell(t, shell, sandboxOK, backend, "native")
 			worker, err := os.FindProcess(workerPID)
 			if err != nil {
 				t.Fatal(err)
@@ -218,11 +234,11 @@ exec %s "$@"
 			requireShellError(t, <-done, 500, errorcode.UnknownOutcome)
 			assertShellProcessesGone(t, workerPID, shellPID, childPID)
 			f.checkHealth(t, sessionID)
-			assertShell(t, shell, hostOK, appserver.ShellHost, "host", "host")
+			assertShell(t, shell, sandboxOK, backend, "native")
 		})
 	}
 	t.Run("admission_and_deadline", func(t *testing.T) {
-		checkShellAdmission(t, f, sessionID, hostOK)
+		checkShellAdmission(t, f, sessionID, sandboxOK)
 	})
 	f.checkHealth(t, sessionID)
 	t.Logf("native %s/%s serve PID %d instance %s remained ready", runtime.GOOS, runtime.GOARCH, f.host.Process.Pid, f.record.InstanceID)
@@ -230,8 +246,8 @@ exec %s "$@"
 
 func nativeShellBinary(t *testing.T) string {
 	t.Helper()
-	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		t.Skip("native acceptance covers macOS and Windows")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("native acceptance covers macOS, Linux and Windows")
 	}
 	binary := os.Getenv("CAELIS_TEST_CLI_BINARY")
 	if binary == "" {
@@ -246,7 +262,7 @@ func nativeShellBinary(t *testing.T) string {
 
 func launchShellFixture(t *testing.T, binary, root, work, store string) *shellFixture {
 	t.Helper()
-	cmd := exec.Command(binary, "serve", "--store-dir", store, "--listen", "127.0.0.1:0")
+	cmd := exec.Command(binary, "serve", "--store-dir", store, "--listen", "127.0.0.1:0", "--control-token-file", controlserver.DefaultTokenFile(store))
 	cmd.Dir = work
 	cmd.Env = slices.DeleteFunc(os.Environ(), func(value string) bool {
 		return strings.HasPrefix(strings.ToUpper(value), "CAELIS_")
@@ -317,18 +333,18 @@ func (f *shellFixture) checkHealth(t *testing.T, sessionID string) {
 	}
 }
 
-func runShellFaults(t *testing.T, f *shellFixture, sessionID string, location appserver.ShellLocation, hostOK string) {
+func runShellFaults(t *testing.T, f *shellFixture, sessionID, sandboxOK string) {
 	for _, fault := range []string{"exit-7", "abnormal", "overflow", "cancel", "completed-with-child"} {
 		t.Run(fault, func(t *testing.T) {
 			if runtime.GOOS == "windows" && fault == "abnormal" {
 				t.Skip("Windows command exits have a process exit code")
 			}
-			pids, command := shellWaitingCommand(f.work, string(location)+"-"+fault, fault)
+			pids, command := shellWaitingCommand(f.work, fault, fault)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan shellObservation, 1)
 			go func() {
-				result, err := f.client.ExecuteShell(ctx, appserver.ShellRequest{Workspace: f.work, Command: command, Location: location})
+				result, err := f.client.ExecuteShell(ctx, appserver.ShellRequest{Workspace: f.work, Command: command})
 				done <- shellObservation{result, err}
 			}()
 			waitShellBarrier(t, pids, done)
@@ -336,8 +352,8 @@ func runShellFaults(t *testing.T, f *shellFixture, sessionID string, location ap
 			f.checkHealth(t, sessionID)
 			second := func() {
 				t.Helper()
-				result, err := f.client.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: f.work, Command: hostOK, Location: appserver.ShellHost})
-				if err != nil || result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != "host" {
+				result, err := f.client.ExecuteShell(t.Context(), appserver.ShellRequest{Workspace: f.work, Command: sandboxOK})
+				if err != nil || result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != "native" {
 					t.Fatalf("independent Shell = %+v, %v", result, err)
 				}
 			}
@@ -363,6 +379,9 @@ func runShellFaults(t *testing.T, f *shellFixture, sessionID string, location ap
 					t.Fatalf("successful Shell with child = %+v", observed)
 				}
 			case "abnormal":
+				if runtime.GOOS == "linux" && observed.err == nil && observed.result.ExitCode == 143 {
+					break // Bubblewrap reports the child signal as a process status.
+				}
 				requireShellError(t, observed.err, 503, errorcode.Unavailable)
 			case "overflow":
 				requireShellError(t, observed.err, 413, errorcode.ResourceExhausted)
@@ -378,14 +397,14 @@ func runShellFaults(t *testing.T, f *shellFixture, sessionID string, location ap
 	}
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := f.client.ExecuteShell(cancelled, appserver.ShellRequest{Workspace: f.work, Command: hostOK, Location: location})
+	_, err := f.client.ExecuteShell(cancelled, appserver.ShellRequest{Workspace: f.work, Command: sandboxOK})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("already cancelled request = %v", err)
 	}
 	f.checkHealth(t, sessionID)
 }
 
-func checkShellAdmission(t *testing.T, f *shellFixture, sessionID, hostOK string) {
+func checkShellAdmission(t *testing.T, f *shellFixture, sessionID, sandboxOK string) {
 	t.Helper()
 	type running struct {
 		cancel context.CancelFunc
@@ -397,12 +416,12 @@ func checkShellAdmission(t *testing.T, f *shellFixture, sessionID, hostOK string
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		path, command := shellWaitingCommand(f.work, fmt.Sprintf("quota-%d", i), "wait")
-		done := asyncShell(ctx, f.client, f.work, command, appserver.ShellHost)
+		done := asyncShell(ctx, f.client, f.work, command)
 		rootPID, childPID := shellPIDs(t, path)
 		calls = append(calls, running{cancel, done, []int{rootPID, childPID}})
 	}
 	f.checkHealth(t, sessionID)
-	req := appserver.ShellRequest{Workspace: f.work, Command: hostOK, Location: appserver.ShellHost}
+	req := appserver.ShellRequest{Workspace: f.work, Command: sandboxOK}
 	_, err := f.client.ExecuteShell(t.Context(), req)
 	requireShellError(t, err, 429, errorcode.Overloaded)
 	select {
@@ -420,7 +439,7 @@ func checkShellAdmission(t *testing.T, f *shellFixture, sessionID, hostOK string
 	}
 	f.checkHealth(t, sessionID)
 	result, err := f.client.ExecuteShell(t.Context(), req)
-	if err != nil || result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != "host" {
+	if err != nil || result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != "native" {
 		t.Fatalf("Shell after deadline and reap = %+v, %v", result, err)
 	}
 }
@@ -446,7 +465,15 @@ func shellWaitingCommand(work, name, fault string) (string, string) {
 	}
 	action := map[string]string{"exit-7": "exit 7", "abnormal": "kill -TERM \"$$\"", "overflow": "printf '%070000d' 0; /bin/sleep 60", "completed-with-child": "exit 0"}[fault]
 	local := filepath.Base(pids)
-	return pids, fmt.Sprintf(`set -e; /bin/sleep 60 & child=$!; printf '%%s %%s\n' "$$" "$child" > %s; /bin/mv %s %s; while [ ! -f %s ]; do /bin/sleep .03; done; %s`, shellQuote(local+".tmp"), shellQuote(local+".tmp"), shellQuote(local), shellQuote(local+".release"), action)
+	child := "/bin/sleep 60"
+	marker := ""
+	if runtime.GOOS == "linux" {
+		// Bubblewrap reports namespace PIDs to the shell. Mark the fixture
+		// processes so the test can observe their actual PIDs from outside.
+		child = `/bin/bash -c 'exec -a "$1" /bin/sleep 60' shell-child ` + shellQuote(pids+".child")
+		marker = " # " + pids + ".root"
+	}
+	return pids, fmt.Sprintf(`set -e; %s & child=$!; printf '%%s %%s\n' "$$" "$child" > %s; /bin/mv %s %s; while [ ! -f %s ]; do /bin/sleep .03; done; %s`, child, shellQuote(local+".tmp"), shellQuote(local+".tmp"), shellQuote(local), shellQuote(local+".release"), action) + marker
 }
 
 func shellParentPID(t *testing.T, pid int) int {
@@ -520,9 +547,44 @@ func waitShellBarrier(t *testing.T, path string, done <-chan shellObservation) {
 func shellPIDs(t *testing.T, path string) (int, int) {
 	t.Helper()
 	waitShellFile(t, path)
+	if runtime.GOOS == "linux" {
+		return linuxShellPIDs(t, path)
+	}
 	var root, child int
 	if n, err := fmt.Sscan(readShellFile(t, path), &root, &child); n != 2 || err != nil || root < 2 || child < 2 {
 		t.Fatalf("invalid Shell fixture PIDs %d %d: %v", root, child, err)
+	}
+	return root, child
+}
+
+func linuxShellPIDs(t *testing.T, marker string) (int, int) {
+	t.Helper()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root, child int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid < 2 {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		args := strings.Split(string(raw), "\x00")
+		if args[0] == marker+".child" {
+			child = pid
+		}
+		if filepath.Base(args[0]) == "bash" && slices.ContainsFunc(args[1:], func(arg string) bool {
+			return strings.HasSuffix(arg, " # "+marker+".root")
+		}) {
+			root = pid
+		}
+	}
+	if root == 0 || child == 0 {
+		t.Fatalf("Bubblewrap test processes not found outside the namespace: shell %d, child %d", root, child)
 	}
 	return root, child
 }
@@ -541,27 +603,56 @@ func shellClient(t *testing.T, endpoint, token string, client *http.Client) *htt
 	return c
 }
 
-func assertShell(t *testing.T, run func(string, appserver.ShellLocation) (appserver.ShellResult, error), command string, location appserver.ShellLocation, backend, stdout string) {
+func assertShell(t *testing.T, run func(string) (appserver.ShellResult, error), command, backend, stdout string) {
 	t.Helper()
-	wantLocation := location
-	if wantLocation == "" {
-		wantLocation = appserver.ShellSandbox
-	}
-	got, err := run(command, location)
-	if err != nil || got.ExitCode != 0 || got.Location != wantLocation || got.Backend != backend || strings.TrimSpace(got.Stdout) != stdout {
-		t.Fatalf("Shell = %+v, %v, want %s/%s exit 0 stdout %q", got, err, wantLocation, backend, stdout)
+	got, err := run(command)
+	if err != nil || got.ExitCode != 0 || got.Location != "sandbox" || got.Backend != backend || strings.TrimSpace(got.Stdout) != stdout {
+		t.Fatalf("Shell = %+v, %v, want sandbox/%s exit 0 stdout %q", got, err, backend, stdout)
 	}
 }
 
-func asyncShell(ctx context.Context, client *httpclient.Client, work, command string, location appserver.ShellLocation) <-chan error {
+func asyncShell(ctx context.Context, client *httpclient.Client, work, command string) <-chan error {
 	done := make(chan error, 1)
 	go func() {
-		_, err := client.ExecuteShell(ctx, appserver.ShellRequest{Workspace: work, Command: command, Location: location})
+		_, err := client.ExecuteShell(ctx, appserver.ShellRequest{Workspace: work, Command: command})
 		done <- err
 	}()
 	return done
 }
 
+func checkShellReadWriteAndNetwork(t *testing.T, shell func(string) (appserver.ShellResult, error), backend, work, outside string) {
+	t.Helper()
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fixture" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, "online-fixture")
+	}))
+	t.Cleanup(fixture.Close)
+	url := fixture.URL + "/fixture"
+	read := "/bin/cat " + shellQuote(outside)
+	write := `printf written > notebook.txt; printf temp > "$TMPDIR/control-shell.tmp"`
+	query := "/usr/bin/curl --noproxy '*' --fail --silent --show-error " + shellQuote(url)
+	if runtime.GOOS == "windows" {
+		read = "Get-Content -Raw -LiteralPath " + psQuote(outside)
+		write = "$ErrorActionPreference='Stop'; Set-Content notebook.txt written; Set-Content (Join-Path $env:TEMP 'control-shell.tmp') temp; Get-Content (Join-Path $env:TEMP 'control-shell.tmp')"
+		query = "(Invoke-WebRequest -UseBasicParsing -Uri " + psQuote(url) + ").Content"
+	}
+	assertShell(t, shell, read, backend, "untouched")
+	assertShell(t, shell, query, backend, "online-fixture")
+	result, err := shell(write)
+	if err != nil || result.ExitCode != 0 || strings.TrimSpace(readShellFile(t, filepath.Join(work, "notebook.txt"))) != "written" {
+		t.Fatalf("workspace/temp write = %+v, %v", result, err)
+	}
+	if runtime.GOOS == "windows" {
+		if strings.TrimSpace(result.Stdout) != "temp" {
+			t.Fatalf("Windows sandbox temp readback = %q", result.Stdout)
+		}
+	} else if readShellFile(t, filepath.Join(work, "control-shell.tmp")) != "temp" {
+		t.Fatal("sandbox temp write did not persist")
+	}
+}
 func requireShellError(t *testing.T, err error, status int, code errorcode.Code) {
 	t.Helper()
 	var remote *httpclient.RemoteError

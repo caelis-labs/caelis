@@ -1,6 +1,6 @@
 //go:build windows
 
-package winproc
+package windows
 
 import (
 	"context"
@@ -21,9 +21,9 @@ func TestAtomicJobStdinFailureBoundsFailedTerminationRootWait(t *testing.T) {
 	released := make(chan struct{})
 
 	started := time.Now()
-	exitCode, err, keepUse := RunStartedJobProcess(
+	exitCode, err, keepUse := runStartedAtomicJobProcess(
 		context.Background(), process, []byte("input"), io.Discard, io.Discard,
-		func() { close(released) }, 10*time.Millisecond, time.Second, false,
+		func() { close(released) }, 10*time.Millisecond, time.Second,
 	)
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("stdin failure returned after %s, want bounded root wait", elapsed)
@@ -52,9 +52,9 @@ func TestAtomicJobCancellationBoundsDelayedRootSignal(t *testing.T) {
 	cancel()
 
 	started := time.Now()
-	exitCode, err, keepUse := RunStartedJobProcess(
+	exitCode, err, keepUse := runStartedAtomicJobProcess(
 		ctx, process, nil, io.Discard, io.Discard,
-		func() { close(released) }, 10*time.Millisecond, time.Second, false,
+		func() { close(released) }, 10*time.Millisecond, time.Second,
 	)
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("cancellation returned after %s, want bounded root wait", elapsed)
@@ -134,7 +134,6 @@ func (p *blockingAtomicJobProcess) DrainAndClose(context.Context) error {
 }
 
 func (p *blockingAtomicJobProcess) NeedsDrainRetry() bool { return !p.drainDone.Load() }
-func (*blockingAtomicJobProcess) closeJob()               {}
 func (*blockingAtomicJobProcess) ClosePipes()             {}
 
 func (p *blockingAtomicJobProcess) completeRootWait() {

@@ -104,11 +104,7 @@ func Run(ctx context.Context, request appserver.ShellRequest, store, helper, aut
 		return zero, errorcode.Wrap(errorcode.UnknownOutcome, "Shell worker produced an invalid result", err)
 	}
 	if response.Code != "" {
-		message := "Shell execution failed"
-		if response.Code == errorcode.InvalidArgument {
-			message = "workspace must be an existing directory"
-		}
-		return zero, errorcode.New(response.Code, message)
+		return zero, errorcode.New(response.Code, "Shell execution failed")
 	}
 	if response.Result == nil {
 		return zero, errorcode.New(errorcode.UnknownOutcome, "Shell worker did not return a result")
