@@ -94,8 +94,15 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 		}
 		if grouped {
 			if len(groupRows) > 0 {
+				// A pending script after reasoning has provisional rows until
+				// its children or result establish how it should be grouped.
+				pendingScriptAfterReasoning := computerHeader >= 0 && lastGroup == acpTranscriptGroupNarrative && !pendingSemanticGap &&
+					isScriptToolEvent(ev) && !ev.Done && !ev.Err && len(children[ev.CallID]) == 0
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
 				rows = appendACPTranscriptSemanticRows(rows, blockID, groupRows, &pendingSemanticGap)
+				if pendingScriptAfterReasoning {
+					computerEnd = len(rows)
+				}
 				closeComputerGroup(false)
 				if computer {
 					computerHeader, computerEnd = len(rows)-len(groupRows), len(rows)
@@ -142,8 +149,14 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 		case SEReasoning:
 			if reasoningRows, consumed, ok := renderFoldableReasoningSegment(blockID, visible, i, status, width, ctx, opts); ok {
 				if len(reasoningRows) > 0 {
+					// Let a live reasoning tail wait for the next step without
+					// marking the previous computer activity as finished.
+					keepComputerOpen := computerHeader >= 0 && !pendingSemanticGap && !isTerminalACPTranscriptStatus(status)
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
 					rows = appendACPTranscriptSemanticRows(rows, blockID, reasoningRows, &pendingSemanticGap)
+					if keepComputerOpen {
+						computerEnd = len(rows)
+					}
 					hasContent = true
 					lastGroup = acpTranscriptGroupNarrative
 				}
