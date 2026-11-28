@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.89.0](https://github.com/caelis-labs/caelis/compare/v0.88.0...v0.89.0) (2026-11-28)
+
+
+### Features
+
+* **control:** execute standalone shell commands on a managed local host ([#312](https://github.com/caelis-labs/caelis/issues/312)) ([8b42b6f](https://github.com/caelis-labs/caelis/commit/8b42b6fe2ca4d7b7a820183f0880d61b9805ee16))
+
+
+### Bug Fixes
+
+* **acp:** remove built-in Antigravity integration ([#306](https://github.com/caelis-labs/caelis/issues/306)) ([66e503d](https://github.com/caelis-labs/caelis/commit/66e503df7ba890f779244e315584569ec446e4f8))
+* bump built-in Desktop World and automate dependency pins ([#309](https://github.com/caelis-labs/caelis/issues/309)) ([47398f5](https://github.com/caelis-labs/caelis/commit/47398f5be563c30b4c1f315eb66f37e1e2419d40))
+* **tui:** keep reasoning within Desktop World activity groups ([#308](https://github.com/caelis-labs/caelis/issues/308)) ([5387d06](https://github.com/caelis-labs/caelis/commit/5387d06118685b05ab2f8305972b8690ff02e71b))
+
 ## [0.88.0](https://github.com/caelis-labs/caelis/compare/v0.87.0...v0.88.0) (2026-11-27)
 
 
