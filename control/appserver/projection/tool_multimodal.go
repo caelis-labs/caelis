@@ -8,8 +8,8 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-// Project selected js_exec results and mixed canonical tool content from their
-// model-visible parts, not the lossy rawOutput summary.
+// Project selected results from their bounded model-visible parts. Code Mode
+// child calls may have those parts without any rawOutput summary.
 func projectedMultimodalToolResultContent(message *model.Message, fact *session.EventTool) []eventstream.ToolCallContent {
 	if message == nil {
 		return nil
@@ -30,6 +30,9 @@ func projectedMultimodalToolResultContent(message *model.Message, fact *session.
 		}
 	}
 	showParts := results[0].Name == "js_exec" || hasImage || len(results[0].Content) > 1 && hasJSON
+	if fact != nil && (fact.Name == "dtw__exec" || fact.Name == "desktop_world__exec") && desktopWorldTitle(fact) != "" {
+		showParts = true
+	}
 	if fact != nil && fact.Result != nil && fact.ResultIncludesReceipt {
 		result := fact.Result
 		// A receipt-only result keeps the status fallback. Use the complete

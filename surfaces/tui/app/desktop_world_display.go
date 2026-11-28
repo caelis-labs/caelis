@@ -2,11 +2,13 @@ package tuiapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -97,10 +99,12 @@ func (d *desktopWorldDisplay) recordEffects(effects string) {
 
 func (d *desktopWorldDisplay) recordProjectedResult(input transcript.ToolProjectionInput, event *transcript.Event) {
 	output := transcript.RawMap(input.RawOutput)
-	if d.search {
-		apps, ok := output["apps"].([]any)
-		d.scopedEmpty = ok && len(apps) == 0 && output["next"] == nil && output["error"] == nil
+	if !d.search {
+		d.recordExecResult(input, event, output)
+		return
 	}
+	apps, ok := output["apps"].([]any)
+	d.scopedEmpty = ok && len(apps) == 0 && output["next"] == nil && output["error"] == nil
 	if output["error"] != nil {
 		event.ToolError = true
 	}
@@ -116,6 +120,79 @@ func (d *desktopWorldDisplay) recordProjectedResult(input transcript.ToolProject
 			event.ToolOutputSynthetic = false
 		}
 	}
+}
+
+// Nested native calls may carry only bounded ACP content. Read the DTW
+// response from its own result, never from the enclosing script's return.
+func (d *desktopWorldDisplay) recordExecResult(input transcript.ToolProjectionInput, event *transcript.Event, output map[string]any) {
+	if len(output) == 0 {
+		for _, content := range acpToolContentToDisplay(input.Content) {
+			text := acpprojector.FormatToolContent([]acpprojector.ToolContent{content})
+			if json.Unmarshal([]byte(text), &output) == nil && len(output) != 0 {
+				break
+			}
+			output = nil
+		}
+	}
+	var plain string
+	if len(output) == 0 && !event.ToolOutputSynthetic {
+		plain = desktopWorldReadableText(event.ToolOutput)
+	}
+
+	event.ToolError = event.ToolError || output["error"] != nil
+	if event.ToolError {
+		detail := firstNonEmpty(desktopWorldReadableText(toolFailureMessage(output["error"])), plain)
+		d.failure, _, _ = strings.Cut(detail, "\n")
+		event.ToolOutput = detail
+	} else {
+		value, _ := output["value"].(map[string]any)
+		text := firstNonEmpty(desktopWorldResultValue(output["result"]), desktopWorldResultValue(value["result"]),
+			desktopWorldResultValue(output["text"]), plain)
+		printed := firstNonEmpty(desktopWorldResultValue(output["output"]), desktopWorldResultValue(value["console"]))
+		if printed != "" && printed != text {
+			text = strings.TrimSpace(text + "\n" + printed)
+		}
+		event.ToolOutput = text
+	}
+	event.ToolOutputSynthetic = event.ToolOutput == ""
+}
+
+func desktopWorldResultValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return desktopWorldReadableText(v)
+	case bool, float64, json.Number:
+		return fmt.Sprint(v)
+	case map[string]any:
+		for _, key := range []string{"text", "message", "value"} {
+			if text, ok := v[key].(string); ok {
+				if result := desktopWorldReadableText(text); result != "" {
+					return result
+				}
+			}
+		}
+	case []any:
+		var lines []string
+		for _, item := range v {
+			if line := desktopWorldResultValue(item); line != "" {
+				lines = append(lines, line)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	return ""
+}
+
+func desktopWorldReadableText(text string) string {
+	text = strings.TrimSpace(sanitizeRenderableText(text))
+	switch strings.ToLower(text) {
+	case "completed", "failed", "interrupted", "terminated", "canceled", "cancelled", "(no output)":
+		return ""
+	}
+	if strings.HasPrefix(text, "{") || strings.HasPrefix(text, "[") && json.Valid([]byte(text)) {
+		return ""
+	}
+	return text
 }
 
 func desktopWorldFailure(output map[string]any, text string, synthetic bool) string {

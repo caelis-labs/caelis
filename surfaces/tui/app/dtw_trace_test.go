@@ -167,20 +167,17 @@ func TestDesktopWorldTraceGoldenAndDisclosure(t *testing.T) {
 					ctx := m.blockRenderContext(44)
 					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(callID))
 					details := joinRenderedPlain(b.Render(ctx))
-					squeezed := strings.Join(strings.Fields(details), "")
-					path := strings.Join(strings.Fields(desktopTraceApp), "")
-					if !strings.Contains(squeezed, path) || !strings.Contains(squeezed, "awaitapp.look()") {
-						t.Fatalf("%s lost complete app or source in disclosure:\n%s", callID, details)
+					if !strings.Contains(details, "\n    RESULT_DETAIL") {
+						t.Fatalf("%s lost its aligned result:\n%s", callID, details)
 					}
-					if !strings.Contains(details, "RESULT_DETAIL") {
-						t.Fatalf("%s lost the structured result in disclosure:\n%s", callID, details)
-					}
-					if callID == "nested" && !strings.Contains(details, "[approved]") {
-						t.Fatalf("missing nested approval record:\n%s", details)
+					for _, hidden := range []string{"Arguments", "execution_id", "await app", "Approval", "fixture review"} {
+						if strings.Contains(details, hidden) {
+							t.Fatalf("%s exposed %q in result disclosure:\n%s", callID, hidden, details)
+						}
 					}
 					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(callID))
 				}
-				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("failed"))
+				assertDesktopCallNotClickable(t, b, ctx, "failed")
 				failure := strings.Join(strings.Fields(joinRenderedPlain(b.Render(ctx))), "")
 				if !strings.Contains(failure, "fixturepermissiondenied") {
 					t.Fatalf("failed call lost error detail: %s", failure)
@@ -231,10 +228,7 @@ func TestDesktopWorldTraceGroupLimitRetainsRunningCall(t *testing.T) {
 				if !strings.Contains(got, label) {
 					t.Fatalf("missing active group label %q:\n%s", label, got)
 				}
-				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("5"))
-				if got := joinRenderedPlain(b.Render(ctx)); !strings.Contains(got, "Arguments") {
-					t.Fatalf("running invocation cannot disclose input:\n%s", got)
-				}
+				assertDesktopCallNotClickable(t, b, ctx, "5")
 				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken(key))
 				expanded := joinRenderedPlain(b.Render(ctx))
 				if !strings.Contains(expanded, "App1") || !strings.Contains(expanded, "App3") || strings.Count(expanded, "└") != 1 {
@@ -578,9 +572,9 @@ func TestDesktopWorldTracePreservesOuterFailureAfterPureChildren(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		m, b := desktopTraceModel(t, events, 112, replay)
 		text := joinRenderedPlain(b.Render(m.blockRenderContext(112)))
-		if strings.Count(text, "• Ran script") != 1 || strings.Count(text, "Click") != 1 ||
-			!strings.Contains(text, "ReferenceError") || !strings.Contains(text, "• Used computer") {
-			t.Fatalf("replay=%v lost the outer failure:\n%s", replay, text)
+		requireDesktopTraceOrder(t, text, "• Using computer", "Click", "ReferenceError")
+		if strings.Contains(text, "Ran script") || strings.Contains(text, "Used computer") {
+			t.Fatalf("replay=%v outer failure split the group:\n%s", replay, text)
 		}
 	}
 }
@@ -614,10 +608,7 @@ func TestDesktopWorldTraceKeepsEarlierFailureVisible(t *testing.T) {
 			strings.Count(text, "└") != 1 || strings.Count(text, "Click") != 2 {
 			t.Fatalf("replay=%v earlier error lost its diagnostic or displaced a recent summary:\n%s", replay, text)
 		}
-		clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("failed"))
-		if got := joinRenderedPlain(b.Render(ctx)); !strings.Contains(got, "Error details") {
-			t.Fatalf("replay=%v earlier error cannot disclose its result:\n%s", replay, got)
-		}
+		assertDesktopCallNotClickable(t, b, ctx, "failed")
 	}
 }
 
@@ -676,5 +667,18 @@ func TestDesktopWorldMixedScriptSourceAndNamedAction(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func assertDesktopCallNotClickable(t *testing.T, block Block, ctx BlockRenderContext, callID string) {
+	t.Helper()
+	token := acpToolPanelClickToken(callID)
+	for _, row := range block.Render(ctx) {
+		if row.ClickToken == token || row.ClickTokenAlt == token {
+			t.Fatalf("%s exposes a click without additional details: %q", callID, row.Plain)
+		}
+	}
+	if block.(*MainACPTurnBlock).toggleToolPanelClick(callID) {
+		t.Fatalf("%s can expand without additional details", callID)
 	}
 }

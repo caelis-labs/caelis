@@ -149,9 +149,9 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 		case SEReasoning:
 			if reasoningRows, consumed, ok := renderFoldableReasoningSegment(blockID, visible, i, status, width, ctx, opts); ok {
 				if len(reasoningRows) > 0 {
-					// Let a live reasoning tail wait for the next step without
-					// marking the previous computer activity as finished.
-					keepComputerOpen := computerHeader >= 0 && !pendingSemanticGap && !isTerminalACPTranscriptStatus(status)
+					// Reasoning alone does not close computer activity, even
+					// when the Turn settles before any independent content.
+					keepComputerOpen := computerHeader >= 0 && !pendingSemanticGap
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
 					rows = appendACPTranscriptSemanticRows(rows, blockID, reasoningRows, &pendingSemanticGap)
 					if keepComputerOpen {
@@ -1000,11 +1000,14 @@ func renderACPToolDetailRowsWithToken(blockID string, prefix string, text string
 }
 
 func renderACPToolOutputRowsWithToken(blockID string, prefix string, text string, width int, ctx BlockRenderContext, style lipgloss.Style, token string) []RenderedRow {
+	return renderACPToolOutputRowsWithPrefix(blockID, strings.TrimRight(prefix, " ")+" ", text, width, ctx, style, token)
+}
+
+func renderACPToolOutputRowsWithPrefix(blockID string, prefix string, text string, width int, ctx BlockRenderContext, style lipgloss.Style, token string) []RenderedRow {
 	text = sanitizeRenderableText(text)
 	if !renderableTextHasContent(text) {
 		return nil
 	}
-	prefix = strings.TrimRight(prefix, " ") + " "
 	available := maxInt(1, width-displayColumns(prefix))
 	rawLines := splitRenderableLines(text)
 	segments := make([]string, 0, len(rawLines))
