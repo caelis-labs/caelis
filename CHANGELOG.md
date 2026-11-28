@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.89.1](https://github.com/caelis-labs/caelis/compare/v0.89.0...v0.89.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **control:** keep Session interrupts and steering responsive ([#321](https://github.com/caelis-labs/caelis/issues/321)) ([7ec29de](https://github.com/caelis-labs/caelis/commit/7ec29de2d6554c3ba524118e23c75ced53d3b2d8))
+* **runtime:** store session images as attachments and keep Code Mode handles usable ([#316](https://github.com/caelis-labs/caelis/issues/316)) ([8f58776](https://github.com/caelis-labs/caelis/commit/8f587762e2f6daa8d51179f8be39c0c7f508c1ed))
+* **tui:** preserve Desktop World activity and readable results ([#318](https://github.com/caelis-labs/caelis/issues/318)) ([e410777](https://github.com/caelis-labs/caelis/commit/e4107772d2401dcff8a0496a098aa0fa7b0d7305))
+
 ## [0.89.0](https://github.com/caelis-labs/caelis/compare/v0.88.0...v0.89.0) (2026-11-28)
 
 
