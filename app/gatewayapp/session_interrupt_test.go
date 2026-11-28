@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -159,6 +160,33 @@ func TestSessionInterruptDormantNoopDoesNotActivateAndStaleCASRejects(t *testing
 	if loaded != nil || provider.CallCount() != 0 {
 		t.Fatal("idle interrupt activated execution")
 	}
+}
+
+func TestSessionInterruptSessionReadCancellationProvesNoDispatch(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			backend := &controlCommandBackend{composition: &runtimeComposition{
+				sessions: interruptedSessionReader{err: cause},
+			}}
+			revision := uint64(1)
+			_, err := backend.interruptSession(t.Context(), appserver.SessionInterruptRequest{
+				WriteBase: appserver.WriteBase{SessionID: "interrupted-read", ExpectedRevision: &revision},
+			})
+			var outcome *appserver.OutcomeError
+			if !errors.As(err, &outcome) || outcome.Outcome != appserver.OutcomeRejected || !errors.Is(err, cause) {
+				t.Fatalf("interrupt read error = %v, want rejected with cause %v", err, cause)
+			}
+		})
+	}
+}
+
+type interruptedSessionReader struct {
+	session.ManagedService
+	err error
+}
+
+func (s interruptedSessionReader) Session(context.Context, session.SessionRef) (session.Session, error) {
+	return session.Session{}, s.err
 }
 
 func interruptTestSession(t *testing.T, host *Stack, ref session.SessionRef, operation string) appserver.CommandResult {

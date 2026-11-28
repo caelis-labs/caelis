@@ -55,6 +55,8 @@ type Store struct {
 	eventLogCaches        map[string]*eventLogCache
 	eventLogCacheBytes    int64
 	eventLogCacheClock    uint64
+	// Serialize oversized history scans independently of the Store lock.
+	eventHistoryReadMu contextMutex
 	// eventLogCacheMaxBytes is an internal test seam for exercising the
 	// oversized-log path without allocating a production-sized fixture.
 	eventLogCacheMaxBytes   int64

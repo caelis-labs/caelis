@@ -1059,6 +1059,7 @@ func TestStoreEventsIgnoresPartialFinalEventLogRecord(t *testing.T) {
 		t.Fatalf("Close(event log) error = %v", err)
 	}
 
+	store.eventLogCacheMaxBytes = 1
 	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)

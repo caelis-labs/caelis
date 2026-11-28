@@ -288,6 +288,9 @@ func (r *clientSessionReconnect) steer(ctx context.Context, input, displayInput 
 	if err != nil {
 		return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 	}
+	// The exact Turn and controller epoch fence this input. Session revisions
+	// also advance for tool and model events within that same Turn.
+	base.ExpectedRevision = nil
 	result, err := r.client.Steer(ctx, appserver.SteerRequest{
 		WriteBase: base, Target: reconnectTarget(state), Input: input, DisplayInput: displayInput,
 		ContentParts: append([]model.ContentPart(nil), contentParts...),

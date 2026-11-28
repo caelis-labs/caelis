@@ -1103,9 +1103,9 @@ func TestAppServerAdapterReconnectsActiveTurnForSteerAndClonesState(t *testing.T
 	steer := client.steer
 	client.mu.Unlock()
 	if steer.Input != "continue resumed Turn" || steer.Target != target ||
-		steer.ExpectedRevision == nil || *steer.ExpectedRevision != 7 ||
+		steer.ExpectedRevision != nil ||
 		steer.ExpectedControllerEpoch != "epoch-resumed" {
-		t.Fatalf("reconnected steer = %#v, want exact resumed target and fence", steer)
+		t.Fatalf("reconnected steer = %#v, want exact resumed target and controller fence", steer)
 	}
 	client.mu.Lock()
 	client.steerResult = appserver.CommandResult{Outcome: appserver.OutcomeRejected, Detail: "steer rejected"}

@@ -89,6 +89,9 @@ func (s *controlCommandBackend) interruptSessionTree(ctx context.Context, ref se
 		active, err = composition.sessions.Session(ctx, ref)
 	}
 	if err != nil {
+		if expected != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return active, classifyControlPreDispatchError(err)
+		}
 		return active, classifyControlBackendError(err)
 	}
 	if gw != nil {
