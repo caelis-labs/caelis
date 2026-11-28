@@ -3,11 +3,30 @@ package toolbinding
 import (
 	"context"
 	"strings"
+	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+// ResultSettlementContext bounds receipt I/O after a tool returns. It keeps the
+// Run's attachment authority and mutation fence while allowing a late result to
+// settle after cancellation. Tool execution and view hooks keep their own context.
+func ResultSettlementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
+// StageResultAttachments publishes the original images before a complete
+// receipt can be written. The original result remains intact on failure.
+func StageResultAttachments(ctx context.Context, result tool.Result) (tool.Result, error) {
+	referenced, err := tool.ReferenceResultImages(ctx, result)
+	if err != nil {
+		return result, tool.WrapError(errorcode.Unavailable, err, "publish tool result attachments")
+	}
+	return referenced, nil
+}
 
 // ProjectResult builds the bounded view of a completed call and applies ModelView
 // once. A hook failure returns a safe message paired with the same tool call.

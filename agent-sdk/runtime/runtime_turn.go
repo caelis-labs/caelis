@@ -350,7 +350,7 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	}
 	appendCtx := ctx
 	if event.Type == session.EventTypeToolResult {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
+		cleanup, cancel := toolbinding.ResultSettlementContext(ctx)
 		defer cancel()
 		appendCtx = cleanup
 	}

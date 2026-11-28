@@ -73,12 +73,27 @@ func ReferenceImage(ctx context.Context, data []byte) (AttachmentRef, error) {
 	return access.writer.StoreAttachment(ctx, access.session, data)
 }
 
-// LoadAttachment opens and reads the exact Session-owned image.
-func LoadAttachment(ctx context.Context, reader AttachmentReader, sessionID string, ref AttachmentRef) ([]byte, error) {
-	if reader == nil || ref.SessionID != sessionID {
+// ValidateImageAttachment checks that the bound Session can open this exact
+// image incarnation. The reader verifies the reference without reading its body.
+func ValidateImageAttachment(ctx context.Context, ref AttachmentRef) error {
+	access, _ := ctx.Value(imageAttachmentsKey{}).(imageAttachments)
+	f, err := openAttachment(ctx, access.reader, access.session, ref)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func openAttachment(ctx context.Context, reader AttachmentReader, sessionID string, ref AttachmentRef) (io.ReadCloser, error) {
+	if reader == nil || sessionID == "" || ref.SessionID != sessionID || ref.Instance == "" || ref.Digest == "" || ref.Size <= 0 {
 		return nil, ErrAttachmentUnavailable
 	}
-	f, err := reader.OpenAttachment(ctx, sessionID, ref)
+	return reader.OpenAttachment(ctx, sessionID, ref)
+}
+
+// LoadAttachment opens and reads the exact Session-owned image.
+func LoadAttachment(ctx context.Context, reader AttachmentReader, sessionID string, ref AttachmentRef) ([]byte, error) {
+	f, err := openAttachment(ctx, reader, sessionID, ref)
 	if err != nil {
 		return nil, err
 	}

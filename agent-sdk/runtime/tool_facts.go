@@ -80,7 +80,7 @@ func (r *Runtime) appendToolFact(ctx context.Context, ref session.SessionRef, tu
 		event.Tool.ProcessingFailure = hookrun.ProcessingFailure(errors.Join(callErr, processingErr))
 		event.Tool.Error = errorText(callErr)
 	}
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
+	cleanup, cancel := toolbinding.ResultSettlementContext(ctx)
 	defer cancel()
 	var release func()
 	bindingIntent := result == nil && isCodeModeChild(ctx) && toolbinding.Target(ctx) != nil

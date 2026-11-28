@@ -404,12 +404,13 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	result, callErr := toolbinding.Call(callCtx, target.tool, call, toolbinding.Dispatch{Model: h.owner.producingModel})
 	stopProgress()
 	outcome := codeModeOutcome(callErr)
-	result, imageErr := tool.ReferenceResultImages(context.WithoutCancel(ctx), result)
-	var receiptErr = callErr
-	if imageErr != nil {
-		receiptErr = &hookrun.ProcessingError{Cause: imageErr, EffectError: hookrun.EffectError(callErr)}
+	settle, stopSettlement := toolbinding.ResultSettlementContext(ctx)
+	referenced, persistErr := toolbinding.StageResultAttachments(settle, result)
+	stopSettlement()
+	var receipt *session.Event
+	if persistErr == nil {
+		receipt, persistErr = h.appendToolFact(ctx, call, &referenced, callErr, target)
 	}
-	receipt, persistErr := h.appendToolFact(ctx, call, &result, receiptErr, target)
 	if persistErr != nil {
 		h.fail(persistErr)
 		callErr = errors.Join(callErr, persistErr)
@@ -420,14 +421,12 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	if outcome == codemode.OutcomeUnknown && callErr == nil {
 		callErr = errorcode.New(errorcode.UnknownOutcome, "tool outcome is unknown; do not replay")
 	}
-	if persistErr == nil && imageErr != nil && callErr == nil {
-		return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, tool.NewError(errorcode.Unavailable, "image attachment unavailable; original tool receipt retained")
-	}
+
 	if callErr != nil {
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
 		if h.ctx.Err() == nil && persistErr == nil && (settledCodeModeToolError(callErr) || discovery && errorcode.Is(callErr, errorcode.ResourceExhausted)) {
-			reply, projectErr := h.project(callID, result, outcome, target.definition, receipt)
+			reply, projectErr := h.project(callID, referenced, outcome, target.definition, receipt)
 			if projectErr == nil {
 				reply.IsError = true
 				if tool.HasFailedReply(callErr) && errorcode.CodeOf(callErr) == errorcode.Unknown {
@@ -443,7 +442,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.cancel()
 		return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
 	}
-	return h.project(callID, result, outcome, target.definition, receipt)
+	return h.project(callID, referenced, outcome, target.definition, receipt)
 }
 
 func codeModeOutcome(err error) string {

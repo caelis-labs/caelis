@@ -131,9 +131,11 @@ func (a *Agent) executeToolCallAdmitted(
 	callCtx, observation := toolbinding.Observe(callCtx)
 	result, err := toolbinding.Call(callCtx, selectedTool, invocation, toolbinding.Dispatch{Model: a.model, Step: step})
 	cancel()
-	referenced, imageErr := tool.ReferenceResultImages(ctx, result)
+	settle, stopSettlement := toolbinding.ResultSettlementContext(ctx)
+	referenced, imageErr := toolbinding.StageResultAttachments(settle, result)
+	stopSettlement()
 	if imageErr != nil {
-		err = &hookrun.ProcessingError{Cause: imageErr, EffectError: hookrun.EffectError(err)}
+		return model.Message{}, nil, errors.Join(imageErr, err)
 	}
 	result = referenced
 	complete, _ := tool.CloneResult(result, nil)
