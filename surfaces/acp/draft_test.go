@@ -126,7 +126,7 @@ func TestDraftInitializeRejectsInvalidOrIncompatibleHandshake(t *testing.T) {
 		"null info":       json.RawMessage(`{"protocolVersion":2,"info":null}`),
 		"bad info":        json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture"}}`),
 		"future schema":   json.RawMessage(`{"protocolVersion":3,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.8"}}`),
-		"previous schema": json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.17"}}`),
+		"previous schema": json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-beta.3"}}`),
 		"other schema":    json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.7"}}`),
 		"null schema":     json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":null}}`),
 		"object schema":   json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":{}}}`),
